@@ -9,6 +9,7 @@ import '../bookmarks/bookmarks_manager.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/storage_service.dart';
+import 'ws_endpoint.dart';
 
 enum XmppStatus {
   disconnected,
@@ -271,10 +272,18 @@ class XmppService extends ChangeNotifier {
     required String resource,
     String? host,
     required int port,
+    bool useWebSocket = false,
+    String? wsEndpoint,
+    List<String>? wsProtocols,
   }) async {
-    if (kIsWeb) {
-      _setError('Web builds are not supported by the current XMPP transport.');
-      return;
+    final shouldUseWebSocket = kIsWeb || useWebSocket;
+    WsEndpointConfig? wsConfig;
+    if (shouldUseWebSocket) {
+      wsConfig = parseWsEndpoint(wsEndpoint ?? '');
+      if (wsConfig == null) {
+        _setError('Enter a WebSocket endpoint like wss://host/path.');
+        return;
+      }
     }
 
     final normalized = jid.trim();
@@ -301,6 +310,15 @@ class XmppService extends ChangeNotifier {
       account.host = host?.trim().isNotEmpty == true ? host!.trim() : null;
       account.port = port;
       account.resource = resource;
+      account.useWebSocket = shouldUseWebSocket;
+      if (wsConfig != null) {
+        account.wsUrl = wsConfig.uri.toString();
+        account.wsHost = wsConfig.host;
+        account.wsPort = wsConfig.port;
+        account.wsPath = wsConfig.path;
+        final protocols = wsProtocols ?? const [];
+        account.wsProtocols = protocols.isEmpty ? null : protocols;
+      }
 
       final connection = Connection.getInstance(account);
       _connection = connection;
@@ -1259,7 +1277,11 @@ class XmppService extends ChangeNotifier {
     _vcardRequests.clear();
 
     try {
-      _connection?.close();
+      final connection = _connection;
+      if (connection != null) {
+        connection.dispose();
+        Connection.removeInstance(connection.account);
+      }
     } catch (_) {
       // Ignore close errors to keep disconnect resilient.
     } finally {

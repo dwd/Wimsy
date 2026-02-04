@@ -196,13 +196,25 @@ class Connection {
     setState(XmppConnectionState.SocketOpening);
     try {
       var socket = xmppSocket.createSocket();
+      final useWebSocket = account.useWebSocket ||
+          account.wsUrl != null ||
+          account.wsHost != null ||
+          account.wsPath != null;
+      final socketHost = useWebSocket
+          ? (account.wsHost ?? account.host ?? account.domain)
+          : (account.host ?? account.domain);
+      final socketPort =
+          useWebSocket ? (account.wsPort ?? account.port) : account.port;
+      final wsUri = account.wsUrl != null ? Uri.tryParse(account.wsUrl!) : null;
 
       return await socket
           .connect(
-        account.host ?? account.domain,
-        account.port,
+        socketHost,
+        socketPort,
         wsProtocols: account.wsProtocols,
         wsPath: account.wsPath,
+        wsUri: wsUri,
+        useWebSocket: useWebSocket,
         map: prepareStreamResponse,
       )
           .then((socket) {
@@ -457,6 +469,12 @@ class Connection {
   }
 
   bool isTlsRequired() {
+    if (account.useWebSocket ||
+        account.wsUrl != null ||
+        account.wsHost != null ||
+        account.wsPath != null) {
+      return false;
+    }
     return xmppSocket.isTlsRequired();
   }
 

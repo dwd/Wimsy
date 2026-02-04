@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../models/avatar_metadata.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
+import 'secure_store.dart';
 
 class StorageService {
   static const _secureBoxName = 'zimpy_secure';
@@ -21,7 +21,7 @@ class StorageService {
   static const _vcardAvatarStateKey = 'vcard_avatar_state';
   static const _bookmarksKey = 'bookmarks';
 
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  final SecureStore _secureStorage = createSecureStore();
   Box<dynamic>? _box;
 
   Future<void> initialize() async {

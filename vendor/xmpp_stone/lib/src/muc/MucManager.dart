@@ -80,27 +80,34 @@ class MucManager {
   }
 
   void _handleGroupMessage(MessageStanza stanza) {
-    final from = stanza.fromJid;
+    final result = stanza.children.firstWhereOrNull((child) => child.name == 'result');
+    final forwarded = result?.getChild('forwarded');
+    final forwardedMessage = forwarded?.getChild('message');
+    final from = _parseForwardedFrom(forwardedMessage) ?? stanza.fromJid;
     if (from == null) {
       return;
     }
     final roomJid = from.userAtDomain;
     final nick = from.resource;
-    final subject = stanza.subject;
-    if (subject != null && subject.isNotEmpty && (stanza.body ?? '').isEmpty) {
+    final body = _extractForwardedBody(forwardedMessage) ?? stanza.body ?? '';
+    final subject = _extractForwardedSubject(forwardedMessage) ?? stanza.subject;
+    if (subject != null && subject.isNotEmpty && body.trim().isEmpty) {
       _subjectController.add(MucSubjectUpdate(roomJid: roomJid, subject: subject));
       return;
     }
-    final body = stanza.body ?? '';
     if (body.trim().isEmpty) {
       return;
     }
+    final timestamp = _extractDelayedTimestamp(forwarded) ??
+        _extractDelayedTimestamp(forwardedMessage) ??
+        _extractDelayedTimestamp(stanza) ??
+        DateTime.now();
     _messageController.add(MucMessage(
       roomJid: roomJid,
       nick: nick ?? '',
       body: body,
       stanzaId: stanza.id,
-      timestamp: DateTime.now(),
+      timestamp: timestamp,
     ));
   }
 
@@ -134,6 +141,35 @@ class MucManager {
       unavailable: isUnavailable,
     );
     _presenceController.add(presence);
+  }
+
+  String? _extractForwardedBody(XmppElement? message) {
+    return message?.getChild('body')?.textValue;
+  }
+
+  String? _extractForwardedSubject(XmppElement? message) {
+    return message?.getChild('subject')?.textValue;
+  }
+
+  Jid? _parseForwardedFrom(XmppElement? message) {
+    final from = message?.getAttribute('from')?.value;
+    if (from == null || from.isEmpty) {
+      return null;
+    }
+    return Jid.fromFullJid(from);
+  }
+
+  DateTime? _extractDelayedTimestamp(XmppElement? element) {
+    final delayed = element?.getChild('delay');
+    final stamp = delayed?.getAttribute('stamp')?.value;
+    if (stamp == null || stamp.isEmpty) {
+      return null;
+    }
+    try {
+      return DateTime.parse(stamp);
+    } catch (_) {
+      return null;
+    }
   }
 }
 

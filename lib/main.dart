@@ -1,6 +1,5 @@
 import 'dart:async';
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -177,12 +176,16 @@ class _ZimpyHomeState extends State<ZimpyHome> {
   final TextEditingController _hostController = TextEditingController();
   final TextEditingController _portController = TextEditingController(text: '5222');
   final TextEditingController _resourceController = TextEditingController(text: 'zimpy');
+  final TextEditingController _wsEndpointController = TextEditingController();
+  final TextEditingController _wsProtocolsController = TextEditingController();
   final TextEditingController _manualContactController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _messageScrollController = ScrollController();
   bool _loadedAccount = false;
   bool _clearingCache = false;
+  bool _rememberPassword = false;
+  bool _useWebSocket = kIsWeb;
   Timer? _typingDebounce;
   Timer? _idleTimer;
   ChatState? _lastSentChatState;
@@ -234,10 +237,22 @@ class _ZimpyHomeState extends State<ZimpyHome> {
       }
       if (account != null) {
         _jidController.text = account.jid;
-        _passwordController.text = account.password;
+        _rememberPassword = account.rememberPassword;
+        if (_rememberPassword) {
+          _passwordController.text = account.password;
+        } else {
+          _passwordController.clear();
+        }
         _hostController.text = account.host;
         _portController.text = account.port.toString();
         _resourceController.text = account.resource;
+        _useWebSocket = kIsWeb ? true : account.useWebSocket;
+        _wsEndpointController.text = account.wsEndpoint;
+        if (account.wsProtocols.isNotEmpty) {
+          _wsProtocolsController.text = account.wsProtocols.join(', ');
+        } else {
+          _wsProtocolsController.clear();
+        }
       }
       _loadedAccount = true;
     });
@@ -255,6 +270,8 @@ class _ZimpyHomeState extends State<ZimpyHome> {
     _hostController.dispose();
     _portController.dispose();
     _resourceController.dispose();
+    _wsEndpointController.dispose();
+    _wsProtocolsController.dispose();
     _manualContactController.dispose();
     _messageController.dispose();
     super.dispose();
@@ -380,6 +397,62 @@ class _ZimpyHomeState extends State<ZimpyHome> {
                             labelText: 'Resource',
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text('Remember password on this device'),
+                          value: _rememberPassword,
+                          onChanged: service.isConnecting
+                              ? null
+                              : (value) {
+                                  if (value == null) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _rememberPassword = value;
+                                  });
+                                },
+                        ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text('Use WebSocket transport'),
+                          subtitle: kIsWeb
+                              ? const Text('Required for web builds.')
+                              : const Text('Useful for testing server WebSocket support.'),
+                          value: kIsWeb ? true : _useWebSocket,
+                          onChanged: service.isConnecting || kIsWeb
+                              ? null
+                              : (value) {
+                                  if (value == null) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _useWebSocket = value;
+                                  });
+                                },
+                        ),
+                        if (_useWebSocket || kIsWeb) ...[
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _wsEndpointController,
+                            enabled: !service.isConnecting,
+                            decoration: const InputDecoration(
+                              labelText: 'WebSocket endpoint',
+                              hintText: 'wss://host/xmpp-websocket',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _wsProtocolsController,
+                            enabled: !service.isConnecting,
+                            decoration: const InputDecoration(
+                              labelText: 'WebSocket subprotocols (optional)',
+                              hintText: 'xmpp, stanza',
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 20),
                         Row(
                           children: [
@@ -890,12 +963,22 @@ class _ZimpyHomeState extends State<ZimpyHome> {
 
   void _handleConnect() {
     final port = int.tryParse(_portController.text.trim()) ?? 5222;
+    final useWebSocket = kIsWeb || _useWebSocket;
+    final wsProtocols = _wsProtocolsController.text
+        .split(',')
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
     final account = AccountRecord(
       jid: _jidController.text.trim(),
-      password: _passwordController.text,
+      password: _rememberPassword ? _passwordController.text : '',
       host: _hostController.text.trim(),
       port: port,
       resource: _resourceController.text.trim().isEmpty ? 'zimpy' : _resourceController.text.trim(),
+      rememberPassword: _rememberPassword,
+      useWebSocket: useWebSocket,
+      wsEndpoint: _wsEndpointController.text.trim(),
+      wsProtocols: wsProtocols,
     );
     widget.storage.storeAccount(account.toMap());
     SharedPreferences.getInstance().then((prefs) {
@@ -903,10 +986,13 @@ class _ZimpyHomeState extends State<ZimpyHome> {
     });
     widget.service.connect(
       jid: account.jid,
-      password: account.password,
+      password: _passwordController.text,
       resource: account.resource,
       host: account.host,
       port: port,
+      useWebSocket: useWebSocket,
+      wsEndpoint: account.wsEndpoint,
+      wsProtocols: wsProtocols,
     );
   }
 
@@ -1177,9 +1263,18 @@ class _AvatarPlaceholder extends StatelessWidget {
 
 String _formatTimestamp(DateTime timestamp) {
   final local = timestamp.toLocal();
+  final now = DateTime.now();
+  final todayStart = DateTime(now.year, now.month, now.day);
+  final showDate = local.isBefore(todayStart);
   final hours = local.hour.toString().padLeft(2, '0');
   final minutes = local.minute.toString().padLeft(2, '0');
-  return '$hours:$minutes';
+  if (!showDate) {
+    return '$hours:$minutes';
+  }
+  final year = local.year.toString().padLeft(4, '0');
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  return '$year-$month-$day $hours:$minutes';
 }
 
 String _roomSubtitle(RoomEntry? entry) {

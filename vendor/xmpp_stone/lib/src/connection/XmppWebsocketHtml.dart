@@ -26,16 +26,19 @@ class XmppWebSocketHtml extends XmppWebSocket {
 
   @override
   Future<XmppWebSocket> connect<S>(String host, int port,
-      {String Function(String event)? map, List<String>? wsProtocols, String? wsPath}) {
-    _socket = WebSocketChannel.connect(
-      Uri(
-        scheme: 'wss',
-        host: host,
-        port: port,
-        path: wsPath,
-      ),
-      protocols: wsProtocols,
-    );
+      {String Function(String event)? map,
+      List<String>? wsProtocols,
+      String? wsPath,
+      Uri? wsUri,
+      bool useWebSocket = true}) {
+    final uri = wsUri ??
+        Uri(
+          scheme: 'wss',
+          host: host,
+          port: port,
+          path: wsPath,
+        );
+    _socket = WebSocketChannel.connect(uri, protocols: wsProtocols);
 
     if (map != null) {
       _map = map;

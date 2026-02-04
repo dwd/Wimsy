@@ -46,21 +46,32 @@ Options:
 Automated:
 - Unit tests for WebSocket URL parsing and configuration.
 - Smoke test for web build (no runtime errors on startup).
+- CI job that runs `flutter test` and a `flutter build web` (or equivalent) to catch regressions.
 
 Manual:
 - Connect to a server with WebSocket support.
 - Verify login, roster, message send/receive, and MAM sync.
 - Verify MUC join/leave over WebSocket.
 
+## CI / Deployment
+
+- Add a CI workflow to build/test the web target on each push/PR.
+- Optional: publish web build artifacts for preview (CI artifacts).
+- Optional: deploy `build/web` to GitHub Pages on main (or tagged) builds.
+  - Use GitHub Actions with a `flutter build web --release` step.
+  - Ensure `base-href` is set correctly if hosting under a subpath.
+  - Keep secrets-free; deployment should use standard GHA permissions.
+
 ## Risks / Open Questions
 
 - Server support varies; some servers do not expose WebSocket endpoints.
 - Security posture on web is weaker than native secure storage.
-- CORS and reverse‑proxy configuration might be required.
+- CORS and reverse-proxy configuration might be required.
 
 ## Sequencing
 
 1) Add WebSocket config + connection selection in xmpp_stone.
-2) Web‑safe storage changes (PIN‑derived key + IndexedDB).
+2) Web-safe storage changes (PIN-derived key + IndexedDB).
 3) UI support for ws endpoint and mode.
-4) Web build + manual verification.
+4) CI for web build/test + optional deploy to GitHub Pages.
+5) Web build + manual verification.

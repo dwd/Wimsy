@@ -8,6 +8,10 @@ class XmppAccountSettings {
   String password;
   String? host;
   int port;
+  bool useWebSocket = false;
+  String? wsUrl;
+  String? wsHost;
+  int? wsPort;
   String? wsPath;
   List<String>? wsProtocols;
   int totalReconnections = 3;
@@ -15,7 +19,21 @@ class XmppAccountSettings {
   bool ackEnabled = true;
   bool smResumable = true;
 
-  XmppAccountSettings(this.name, this.username, this.domain, this.password, this.port, {this.host, this.resource, this.wsPath, this.wsProtocols} );
+  XmppAccountSettings(
+    this.name,
+    this.username,
+    this.domain,
+    this.password,
+    this.port, {
+    this.host,
+    this.resource,
+    this.useWebSocket = false,
+    this.wsUrl,
+    this.wsHost,
+    this.wsPort,
+    this.wsPath,
+    this.wsProtocols,
+  });
 
   Jid get fullJid => Jid(username, domain, resource);
 
