@@ -75,7 +75,7 @@ private func srvQueryCallback(
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-  private let channelName = "zimpy/dns"
+  private let channelName = "wimsy/dns"
 
   override func application(
     _ application: UIApplication,

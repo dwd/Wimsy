@@ -10,8 +10,8 @@ import '../models/contact_entry.dart';
 import 'secure_store.dart';
 
 class StorageService {
-  static const _secureBoxName = 'zimpy_secure';
-  static const _saltKey = 'zimpy_salt';
+  static const _secureBoxName = 'wimsy_secure';
+  static const _saltKey = 'wimsy_salt';
   static const _accountKey = 'account';
   static const _rosterKey = 'roster';
   static const _messagesKey = 'messages';

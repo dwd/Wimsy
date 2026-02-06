@@ -16,17 +16,17 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   Log.logLevel = LogLevel.VERBOSE;
   Log.logXmpp = true;
-  runApp(const ZimpyApp());
+  runApp(const WimsyApp());
 }
 
-class ZimpyApp extends StatefulWidget {
-  const ZimpyApp({super.key});
+class WimsyApp extends StatefulWidget {
+  const WimsyApp({super.key});
 
   @override
-  State<ZimpyApp> createState() => _ZimpyAppState();
+  State<WimsyApp> createState() => _WimsyAppState();
 }
 
-class _ZimpyAppState extends State<ZimpyApp> {
+class _WimsyAppState extends State<WimsyApp> {
   final XmppService _service = XmppService();
   final StorageService _storage = StorageService();
   late final Future<void> _initFuture;
@@ -59,7 +59,7 @@ class _ZimpyAppState extends State<ZimpyApp> {
     );
 
     return MaterialApp(
-      title: 'Zimpy',
+      title: 'Wimsy',
       theme: ThemeData(
         colorScheme: colorScheme,
         useMaterial3: true,
@@ -156,26 +156,26 @@ class _GatekeeperState extends State<_Gatekeeper> {
         },
       );
     }
-    return ZimpyHome(service: widget.service, storage: widget.storage);
+    return WimsyHome(service: widget.service, storage: widget.storage);
   }
 }
 
-class ZimpyHome extends StatefulWidget {
-  const ZimpyHome({super.key, required this.service, required this.storage});
+class WimsyHome extends StatefulWidget {
+  const WimsyHome({super.key, required this.service, required this.storage});
 
   final XmppService service;
   final StorageService storage;
 
   @override
-  State<ZimpyHome> createState() => _ZimpyHomeState();
+  State<WimsyHome> createState() => _WimsyHomeState();
 }
 
-class _ZimpyHomeState extends State<ZimpyHome> {
+class _WimsyHomeState extends State<WimsyHome> {
   final TextEditingController _jidController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _hostController = TextEditingController();
   final TextEditingController _portController = TextEditingController(text: '5222');
-  final TextEditingController _resourceController = TextEditingController(text: 'zimpy');
+  final TextEditingController _resourceController = TextEditingController(text: 'wimsy');
   final TextEditingController _wsEndpointController = TextEditingController();
   final TextEditingController _wsProtocolsController = TextEditingController();
   final TextEditingController _manualContactController = TextEditingController();
@@ -227,7 +227,7 @@ class _ZimpyHomeState extends State<ZimpyHome> {
 
   Future<void> _loadAccount() async {
     final prefs = await SharedPreferences.getInstance();
-    final cachedJid = prefs.getString('zimpy_last_jid');
+    final cachedJid = prefs.getString('wimsy_last_jid');
     final account = AccountRecord.fromMap(widget.storage.loadAccount());
     if (!mounted) {
       return;
@@ -318,10 +318,13 @@ class _ZimpyHomeState extends State<ZimpyHome> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Zimpy',
+                    'Wimsy',
                     style: theme.textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w300,
                       letterSpacing: 1.2,
+                      color: const Color(0xFFA97BFF),
+                      fontFamily: 'SF Pro Display',
+                      fontFamilyFallback: const ['Helvetica Neue', 'Arial', 'Roboto'],
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -995,7 +998,7 @@ class _ZimpyHomeState extends State<ZimpyHome> {
       password: _rememberPassword ? _passwordController.text : '',
       host: _hostController.text.trim(),
       port: port,
-      resource: _resourceController.text.trim().isEmpty ? 'zimpy' : _resourceController.text.trim(),
+      resource: _resourceController.text.trim().isEmpty ? 'wimsy' : _resourceController.text.trim(),
       rememberPassword: _rememberPassword,
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
@@ -1004,7 +1007,7 @@ class _ZimpyHomeState extends State<ZimpyHome> {
     );
     widget.storage.storeAccount(account.toMap());
     SharedPreferences.getInstance().then((prefs) {
-      prefs.setString('zimpy_last_jid', account.jid);
+      prefs.setString('wimsy_last_jid', account.jid);
     });
     widget.service.connect(
       jid: account.jid,

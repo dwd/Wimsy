@@ -1,6 +1,6 @@
-# Zimpy
+# Wimsy
 
-Zimpy is a cross-platform XMPP client built with Flutter, focused on modern
+Wimsy is a cross-platform XMPP client built with Flutter, focused on modern
 server support and TLS-first connections.
 
 ## Features

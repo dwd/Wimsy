@@ -21,7 +21,7 @@ class XmppSrvTarget {
   final bool directTls;
 }
 
-const MethodChannel _channel = MethodChannel('zimpy/dns');
+const MethodChannel _channel = MethodChannel('wimsy/dns');
 
 Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
   debugPrint('SRV lookup: domain=$domain');

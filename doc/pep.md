@@ -1,7 +1,7 @@
 # PEP Implementation Plan
 
 ## Goal
-Add XEP-0163 (PEP) support to Zimpy, with an initial feature that benefits the roster/UI and has clear testable behavior.
+Add XEP-0163 (PEP) support to Wimsy, with an initial feature that benefits the roster/UI and has clear testable behavior.
 
 ## First Use-Case
 PEP-based avatars via XEP-0084 (User Avatar):
@@ -81,11 +81,11 @@ This gives immediate UI value (avatars) and is widely supported. It also lays th
 1) Use a server account that supports PEP + XEP-0084 (Prosody, ejabberd).
 2) Connect two clients:
    - Client A: set avatar (e.g., via another client).
-   - Client B (Zimpy): should update roster avatar within seconds.
+   - Client B (Wimsy): should update roster avatar within seconds.
 3) Verify cache:
    - Disconnect, restart, confirm avatar appears before network sync.
 4) Verify update:
-   - Change avatar again; Zimpy updates and replaces cached blob.
+   - Change avatar again; Wimsy updates and replaces cached blob.
 
 ## Follow-ups (Future PEP features)
 - XEP-0108 (User Activity)

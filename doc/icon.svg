@@ -1,0 +1,50 @@
+<svg
+        width="512"
+        height="512"
+        viewBox="0 0 512 512"
+        xmlns="http://www.w3.org/2000/svg"
+>
+    <!-- Background -->
+    <rect
+            x="0"
+            y="0"
+            width="512"
+            height="512"
+            fill="#F7F1E8"
+    />
+
+    <!-- Speech bubble -->
+    <path
+            d="M144 140
+       h224
+       a32 32 0 0 1 32 32
+       v132
+       a32 32 0 0 1 -32 32
+       h-150
+       l-46 46
+       a8 8 0 0 1 -13.7 -5.7
+       v-40.3
+       h-14.3
+       a32 32 0 0 1 -32 -32
+       v-132
+       a32 32 0 0 1 32 -32
+       z"
+            fill="none"
+            stroke="#A97BFF"
+            stroke-width="24"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+    />
+
+    <!-- Squiggle inside -->
+    <path
+            d="M176 200
+       C 210 380, 230 190, 284 250
+       S 352 100, 352 200"
+            fill="none"
+            stroke="#A97BFF"
+            stroke-width="20"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+    />
+</svg>

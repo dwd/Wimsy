@@ -32,7 +32,7 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   auto messenger = flutter_controller_->engine()->messenger();
   dns_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-      messenger, "zimpy/dns", &flutter::StandardMethodCodec::GetInstance());
+      messenger, "wimsy/dns", &flutter::StandardMethodCodec::GetInstance());
   dns_channel_->SetMethodCallHandler(
       [](const auto& call, auto result) {
         if (call.method_name() != "resolveSrv") {

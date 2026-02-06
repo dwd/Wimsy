@@ -1,6 +1,6 @@
 # MUC Implementation Plan
 
-This plan covers adding Multi‑User Chat (XEP‑0045) support to Zimpy, including code changes, automated tests, and a manual verification checklist.
+This plan covers adding Multi‑User Chat (XEP‑0045) support to Wimsy, including code changes, automated tests, and a manual verification checklist.
 
 ## Scope
 

@@ -1373,7 +1373,7 @@ class XmppService extends ChangeNotifier {
     }
     final bare = _currentUserBareJid ?? '';
     final parts = bare.split('@');
-    return parts.isNotEmpty ? parts.first : 'zimpy';
+    return parts.isNotEmpty ? parts.first : 'wimsy';
   }
 
   void _requestRoomMam(String roomJid) {

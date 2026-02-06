@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
-import 'package:zimpy/models/avatar_metadata.dart';
-import 'package:zimpy/pep/pep_caps_manager.dart';
-import 'package:zimpy/pep/pep_manager.dart';
-import 'package:zimpy/storage/storage_service.dart';
+import 'package:wimsy/models/avatar_metadata.dart';
+import 'package:wimsy/pep/pep_caps_manager.dart';
+import 'package:wimsy/pep/pep_manager.dart';
+import 'package:wimsy/storage/storage_service.dart';
 
 class TestConnection extends Connection {
   TestConnection(super.account);

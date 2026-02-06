@@ -1,6 +1,6 @@
 # Web Support Plan
 
-This document outlines what is required to make Zimpy run in the browser in addition to the existing desktop/mobile targets.
+This document outlines what is required to make Wimsy run in the browser in addition to the existing desktop/mobile targets.
 
 ## Transport
 

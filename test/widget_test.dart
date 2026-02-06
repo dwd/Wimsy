@@ -7,12 +7,12 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:zimpy/main.dart';
+import 'package:wimsy/main.dart';
 
 void main() {
   testWidgets('App launches smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const ZimpyApp());
+    await tester.pumpWidget(const WimsyApp());
 
-    expect(find.byType(ZimpyApp), findsOneWidget);
+    expect(find.byType(WimsyApp), findsOneWidget);
   });
 }

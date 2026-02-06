@@ -39,7 +39,7 @@ jobs:
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zimpy-linux
+          name: wimsy-linux
           path: build/linux/x64/release/bundle
 
   build-windows:
@@ -57,7 +57,7 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zimpy-windows
+          name: wimsy-windows
           path: build/windows/x64/runner/Release
 
   build-macos:
@@ -75,7 +75,7 @@ jobs:
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zimpy-macos
+          name: wimsy-macos
           path: build/macos/Build/Products/Release
 
   build-ios:
@@ -93,7 +93,7 @@ jobs:
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zimpy-ios
+          name: wimsy-ios
           path: build/ios/iphoneos
 
   build-android:
@@ -111,7 +111,7 @@ jobs:
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zimpy-android-debug
+          name: wimsy-android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
 
   build-web:
@@ -129,7 +129,7 @@ jobs:
       - name: Upload Web artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zimpy-web
+          name: wimsy-web
           path: build/web
 
   deploy-web:

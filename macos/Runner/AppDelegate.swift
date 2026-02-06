@@ -75,7 +75,7 @@ private func srvQueryCallback(
 
 @main
 class AppDelegate: FlutterAppDelegate {
-  private let channelName = "zimpy/dns"
+  private let channelName = "wimsy/dns"
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return true

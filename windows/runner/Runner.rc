@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "im.cridland" "\0"
-            VALUE "FileDescription", "zimpy" "\0"
+            VALUE "FileDescription", "wimsy" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "zimpy" "\0"
+            VALUE "InternalName", "wimsy" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 im.cridland. All rights reserved." "\0"
-            VALUE "OriginalFilename", "zimpy.exe" "\0"
-            VALUE "ProductName", "zimpy" "\0"
+            VALUE "OriginalFilename", "wimsy.exe" "\0"
+            VALUE "ProductName", "wimsy" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

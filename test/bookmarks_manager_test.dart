@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
-import 'package:zimpy/bookmarks/bookmarks_manager.dart';
-import 'package:zimpy/models/contact_entry.dart';
+import 'package:wimsy/bookmarks/bookmarks_manager.dart';
+import 'package:wimsy/models/contact_entry.dart';
 
 class TestConnection extends Connection {
   TestConnection(super.account);
@@ -108,7 +108,7 @@ void main() {
     final item = XmppElement()..name = 'item';
     final storage = XmppElement()..name = 'storage';
     storage.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bookmarks:1'));
-    storage.addChild(_conferencePayload(jid: 'lounge@conference.example', name: 'Lounge', nick: 'zimpy'));
+    storage.addChild(_conferencePayload(jid: 'lounge@conference.example', name: 'Lounge', nick: 'wimsy'));
     item.addChild(storage);
     items.addChild(item);
     event.addChild(items);
@@ -118,6 +118,6 @@ void main() {
 
     expect(updates, hasLength(1));
     expect(updates.first.jid, 'lounge@conference.example');
-    expect(updates.first.bookmarkNick, 'zimpy');
+    expect(updates.first.bookmarkNick, 'wimsy');
   });
 }

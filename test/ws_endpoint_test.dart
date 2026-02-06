@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zimpy/xmpp/ws_endpoint.dart';
+import 'package:wimsy/xmpp/ws_endpoint.dart';
 
 void main() {
   test('parses full wss endpoint', () {
