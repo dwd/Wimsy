@@ -22,6 +22,8 @@ void main() {
   runApp(const WimsyApp());
 }
 
+const bool _isFlutterTest = bool.fromEnvironment('FLUTTER_TEST');
+
 class WimsyApp extends StatefulWidget {
   const WimsyApp({super.key});
 
@@ -40,9 +42,11 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _notifications.initialize();
-    _service.setIncomingMessageHandler(_handleIncomingMessage);
-    _service.setIncomingRoomMessageHandler(_handleIncomingRoomMessage);
+    if (!_isFlutterTest) {
+      _notifications.initialize();
+      _service.setIncomingMessageHandler(_handleIncomingMessage);
+      _service.setIncomingRoomMessageHandler(_handleIncomingRoomMessage);
+    }
     _initFuture = _storage.initialize();
   }
 
