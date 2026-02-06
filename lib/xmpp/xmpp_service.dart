@@ -1664,6 +1664,7 @@ class XmppService extends ChangeNotifier {
     mam.queryById(
       jid: Jid.fromFullJid(normalized),
       max: 50,
+      before: '',
     );
   }
 
@@ -1686,16 +1687,17 @@ class XmppService extends ChangeNotifier {
     final latestGlobalMamId = _latestGlobalMamId(includeRooms: false);
     if (latestGlobalMamId != null) {
       mam.queryAll(after: latestGlobalMamId, max: 50);
-      mam.queryAll(max: 50);
+      mam.queryAll(before: '', max: 50);
       _startGlobalBackfill();
     } else {
-      mam.queryAll(max: 50);
+      mam.queryAll(before: '', max: 50);
     }
 
     for (final bookmark in _bookmarks) {
       mam.queryById(
         jid: Jid.fromFullJid(bookmark.jid),
         max: 25,
+        before: '',
       );
     }
   }
