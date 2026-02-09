@@ -39,7 +39,8 @@ class NotificationService {
         _initialized = true;
         return;
       }
-      rethrow;
+      // Avoid crashing app startup if notifications fail to initialize.
+      _initialized = false;
     }
   }
 
@@ -76,7 +77,7 @@ class NotificationService {
         // Ignore in tests or unsupported environments.
         return;
       }
-      rethrow;
+      // Ignore notification failures to avoid impacting core UX.
     }
   }
 

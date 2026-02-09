@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,6 +16,7 @@ import 'notifications/notification_service.dart';
 import 'storage/account_record.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/xmpp_service.dart';
+import 'background/foreground_task_handler.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +38,8 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   final XmppService _service = XmppService();
   final StorageService _storage = StorageService();
   final NotificationService _notifications = NotificationService();
+  final Connectivity _connectivity = Connectivity();
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _appIsForeground = true;
   late final Future<void> _initFuture;
 
@@ -43,9 +48,19 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (!_isFlutterTest) {
-      _notifications.initialize();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _notifications.initialize();
+      });
       _service.setIncomingMessageHandler(_handleIncomingMessage);
       _service.setIncomingRoomMessageHandler(_handleIncomingRoomMessage);
+      if (Platform.isAndroid) {
+        _startAndroidForegroundService();
+        _connectivitySubscription =
+            _connectivity.onConnectivityChanged.listen((results) {
+          final online = results.any((result) => result != ConnectivityResult.none);
+          _service.handleConnectivityChange(online);
+        });
+      }
     }
     _initFuture = _storage.initialize();
   }
@@ -53,6 +68,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _connectivitySubscription?.cancel();
     _service.dispose();
     _storage.lock();
     super.dispose();
@@ -61,6 +77,9 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appIsForeground = state == AppLifecycleState.resumed;
+    if (Platform.isAndroid) {
+      _service.setBackgroundMode(state != AppLifecycleState.resumed);
+    }
   }
 
   void _handleIncomingMessage(String bareJid, ChatMessage message) {
@@ -103,6 +122,38 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     return activeChat != bareJid;
   }
 
+  Future<void> _startAndroidForegroundService() async {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'wimsy_service',
+        channelName: 'Wimsy Background Service',
+        channelDescription: 'Keeps Wimsy connected in the background.',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(
+        showNotification: false,
+        playSound: false,
+      ),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(300000),
+        autoRunOnBoot: false,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+
+    FlutterForegroundTask.setTaskHandler(WimsyForegroundTaskHandler());
+
+    final running = await FlutterForegroundTask.isRunningService;
+    if (!running) {
+      await FlutterForegroundTask.startService(
+        notificationTitle: 'Wimsy is running',
+        notificationText: 'Keeping your XMPP session connected.',
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = const ColorScheme(
@@ -117,39 +168,41 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       onError: Color(0xFFFDFCF8),
     );
 
-    return MaterialApp(
-      title: 'Wimsy',
-      theme: ThemeData(
-        colorScheme: colorScheme,
-        useMaterial3: true,
-        scaffoldBackgroundColor: colorScheme.surface,
-        fontFamily: 'Georgia',
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFFFDFBF6),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colorScheme.outline),
+    return WithForegroundTask(
+      child: MaterialApp(
+        title: 'Wimsy',
+        theme: ThemeData(
+          colorScheme: colorScheme,
+          useMaterial3: true,
+          scaffoldBackgroundColor: colorScheme.surface,
+          fontFamily: 'Georgia',
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: const Color(0xFFFDFBF6),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.outline),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.outlineVariant),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colorScheme.outlineVariant),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
-      ),
-      home: FutureBuilder<void>(
-        future: _initFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const _SplashScreen();
-          }
-          return _Gatekeeper(service: _service, storage: _storage);
-        },
+        home: FutureBuilder<void>(
+          future: _initFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const _SplashScreen();
+            }
+            return _Gatekeeper(service: _service, storage: _storage);
+          },
+        ),
       ),
     );
   }
@@ -1154,6 +1207,7 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     if (Platform.isAndroid) {
+      FlutterForegroundTask.stopService();
       SystemNavigator.pop();
     } else {
       exit(0);
