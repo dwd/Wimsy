@@ -108,6 +108,9 @@ class XmppService extends ChangeNotifier {
   PepManager? _pepManager;
   PepCapsManager? _pepCapsManager;
   BookmarksManager? _bookmarksManager;
+  PrivacyListsManager? _privacyListsManager;
+  final Set<String> _blockedJids = {};
+  static const String _blockListName = 'wimsy-blocked';
   MucManager? _mucManager;
   final Map<String, Uint8List> _vcardAvatarBytes = {};
   final Map<String, String> _vcardAvatarState = {};
@@ -132,6 +135,7 @@ class XmppService extends ChangeNotifier {
   Duration? get lastPingLatency => _lastPingLatency;
   DateTime? get lastPingAt => _lastPingAt;
   bool get carbonsEnabled => _carbonsEnabled;
+  bool isBlocked(String bareJid) => _blockedJids.contains(_bareJid(bareJid));
 
   void attachStorage(StorageService storage) {
     _storage = storage;
@@ -456,6 +460,7 @@ class XmppService extends ChangeNotifier {
           _setupDeliveryTracking();
           _setupPep();
           _setupBookmarks();
+          _setupPrivacyLists();
           _primeMamSync();
           _sendInitialPresence();
         } else if (_isTerminalError(state)) {
@@ -548,7 +553,7 @@ class XmppService extends ChangeNotifier {
         return;
       }
       mam.queryById(
-        jid: Jid.fromFullJid(normalized),
+        toJid: Jid.fromFullJid(normalized),
         max: 25,
         before: oldest,
       );
@@ -677,21 +682,125 @@ class XmppService extends ChangeNotifier {
     if (normalized.isEmpty) {
       return;
     }
-    _ensureContact(normalized);
+    upsertRosterContact(normalized);
     selectChat(normalized);
   }
 
-  void joinRoom(String roomJid) {
+  Future<bool> upsertRosterContact(String bareJid, {String? name, List<String>? groups}) async {
+    final connection = _connection;
+    if (connection == null) {
+      return false;
+    }
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return false;
+    }
+    final buddy = Buddy(Jid.fromFullJid(normalized));
+    if (name != null && name.trim().isNotEmpty) {
+      buddy.name = name.trim();
+    }
+    if (groups != null && groups.isNotEmpty) {
+      buddy.groups = groups;
+    }
+    final rosterManager = RosterManager.getInstance(connection);
+    final result = await rosterManager.addRosterItem(buddy);
+    if (result.type == IqStanzaType.ERROR) {
+      return false;
+    }
+    final existingIndex = _contacts.indexWhere((entry) => entry.jid == normalized);
+    if (existingIndex == -1) {
+      _contacts.add(ContactEntry(
+        jid: normalized,
+        name: buddy.name,
+        groups: buddy.groups,
+        subscriptionType: null,
+      ));
+    } else {
+      final existing = _contacts[existingIndex];
+      _contacts[existingIndex] = existing.copyWith(
+        name: buddy.name ?? existing.name,
+        groups: buddy.groups.isNotEmpty ? buddy.groups : existing.groups,
+      );
+    }
+    _contacts.sort((a, b) => a.displayName.compareTo(b.displayName));
+    notifyListeners();
+    _rosterPersistor?.call(List.unmodifiable(_contacts));
+    return true;
+  }
+
+  Future<bool> removeRosterContact(String bareJid) async {
+    final connection = _connection;
+    if (connection == null) {
+      return false;
+    }
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return false;
+    }
+    final buddy = Buddy(Jid.fromFullJid(normalized));
+    final rosterManager = RosterManager.getInstance(connection);
+    final result = await rosterManager.removeRosterItem(buddy);
+    if (result.type == IqStanzaType.ERROR) {
+      return false;
+    }
+    _contacts.removeWhere((entry) => entry.jid == normalized);
+    notifyListeners();
+    _rosterPersistor?.call(List.unmodifiable(_contacts));
+    return true;
+  }
+
+  Future<bool> upsertBookmark(ContactEntry bookmark) async {
+    final manager = _bookmarksManager;
+    if (manager == null) {
+      return false;
+    }
+    await manager.upsertBookmark(bookmark);
+    return true;
+  }
+
+  Future<bool> removeBookmark(String roomJid) async {
+    final manager = _bookmarksManager;
+    if (manager == null) {
+      return false;
+    }
+    await manager.removeBookmark(_bareJid(roomJid));
+    return true;
+  }
+
+  Future<bool> blockContact(String bareJid) async {
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return false;
+    }
+    _blockedJids.add(normalized);
+    return _applyBlockList();
+  }
+
+  Future<bool> unblockContact(String bareJid) async {
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return false;
+    }
+    _blockedJids.remove(normalized);
+    return _applyBlockList();
+  }
+
+  void joinRoom(String roomJid, {String? nick, String? password}) {
     final muc = _mucManager;
     if (muc == null || _currentUserBareJid == null) {
       _setError('Not connected.');
       return;
     }
     final normalized = _bareJid(roomJid);
-    final nick = _roomNickFor(normalized);
-    muc.joinRoom(Jid.fromFullJid(normalized), nick);
+    final resolvedNick = (nick != null && nick.trim().isNotEmpty)
+        ? nick.trim()
+        : _roomNickFor(normalized);
+    final resolvedPassword = (password != null && password.trim().isNotEmpty)
+        ? password.trim()
+        : _roomPasswordFor(normalized);
+    muc.joinRoom(Jid.fromFullJid(normalized), resolvedNick, password: resolvedPassword);
     final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
-    _rooms[normalized] = existing.copyWith(joined: true, nick: nick);
+    _rooms[normalized] = existing.copyWith(joined: true, nick: resolvedNick);
     notifyListeners();
     _requestRoomMam(normalized, before: '');
   }
@@ -1080,6 +1189,70 @@ class XmppService extends ChangeNotifier {
       },
     );
     _bookmarksManager?.requestBookmarks();
+  }
+
+  void _setupPrivacyLists() {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+    _privacyListsManager = PrivacyListsManager.getInstance(connection);
+    _refreshBlockList();
+  }
+
+  Future<void> _refreshBlockList() async {
+    final manager = _privacyListsManager;
+    if (manager == null || !manager.isPrivacyListsSupported()) {
+      return;
+    }
+    try {
+      final lists = await manager.getAllLists();
+      if (lists.allPrivacyLists?.contains(_blockListName) != true) {
+        return;
+      }
+      final items = await manager.getListByName(_blockListName);
+      _blockedJids
+        ..clear()
+        ..addAll(items
+            .where((item) => item.type == PrivacyType.JID && item.action == PrivacyAction.DENY)
+            .map((item) => item.value ?? '')
+            .where((jid) => jid.isNotEmpty));
+      notifyListeners();
+    } catch (_) {
+      // Ignore privacy list failures.
+    }
+  }
+
+  Future<bool> _applyBlockList() async {
+    final manager = _privacyListsManager;
+    if (manager == null || !manager.isPrivacyListsSupported()) {
+      return false;
+    }
+    try {
+      final items = <PrivacyListItem>[];
+      var order = 1;
+      for (final jid in _blockedJids) {
+        items.add(PrivacyListItem(
+          type: PrivacyType.JID,
+          value: jid,
+          action: PrivacyAction.DENY,
+          order: order++,
+          controlStanzas: const [
+            PrivacyControlStanza.MESSAGE,
+            PrivacyControlStanza.IQ,
+            PrivacyControlStanza.PRESENCE_IN,
+            PrivacyControlStanza.PRESENCE_OUT,
+          ],
+        ));
+      }
+      final list = PrivacyList(_blockListName, items);
+      await manager.createPrivacyList(list);
+      await manager.setActiveList(_blockListName);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _setupKeepalive() {
@@ -1602,6 +1775,17 @@ class XmppService extends ChangeNotifier {
     return parts.isNotEmpty ? parts.first : 'wimsy';
   }
 
+  String? _roomPasswordFor(String roomJid) {
+    final bookmark = _bookmarks.firstWhere(
+      (entry) => entry.jid == roomJid,
+      orElse: () => ContactEntry(jid: ''),
+    );
+    if (bookmark.jid.isNotEmpty && bookmark.bookmarkPassword?.isNotEmpty == true) {
+      return bookmark.bookmarkPassword;
+    }
+    return null;
+  }
+
   void _requestRoomMam(String roomJid, {String? before}) {
     final connection = _connection;
     if (connection == null) {
@@ -1612,7 +1796,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     mam.queryById(
-      jid: Jid.fromFullJid(roomJid),
+      toJid: Jid.fromFullJid(roomJid),
       max: 25,
       before: before,
     );
@@ -1781,6 +1965,8 @@ class XmppService extends ChangeNotifier {
     _pepManager = null;
     _pepCapsManager = null;
     _bookmarksManager = null;
+    _privacyListsManager = null;
+    _blockedJids.clear();
     _vcardAvatarBytes.clear();
     _vcardRequests.clear();
 
@@ -1964,7 +2150,7 @@ class XmppService extends ChangeNotifier {
 
     for (final bookmark in _bookmarks) {
       mam.queryById(
-        jid: Jid.fromFullJid(bookmark.jid),
+        toJid: Jid.fromFullJid(bookmark.jid),
         max: 25,
         before: '',
       );

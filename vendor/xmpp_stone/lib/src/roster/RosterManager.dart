@@ -76,6 +76,17 @@ class RosterManager {
     if (rosterItem.name != null) {
       itemElement.addAttribute(XmppAttribute('name', rosterItem.name));
     }
+    if (rosterItem.groups.isNotEmpty) {
+      for (final group in rosterItem.groups) {
+        if (group.trim().isEmpty) {
+          continue;
+        }
+        final groupElement = XmppElement()
+          ..name = 'group'
+          ..textValue = group.trim();
+        itemElement.addChild(groupElement);
+      }
+    }
     _myUnrespondedIqStanzas[iqStanza.id!] = Tuple2(iqStanza, completer);
     _connection.writeStanza(iqStanza);
     return completer.future;

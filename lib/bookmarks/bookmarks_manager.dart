@@ -66,6 +66,22 @@ class BookmarksManager {
     _onUpdate(bookmarks);
   }
 
+  Future<void> upsertBookmark(ContactEntry bookmark) async {
+    final entry = bookmark.copyWith(isBookmark: true);
+    _bookmarksByJid[entry.jid] = entry;
+    _onUpdate(bookmarks);
+    await _publishBookmark(entry);
+    await _storeLegacyBookmarks();
+  }
+
+  Future<void> removeBookmark(String roomJid) async {
+    if (_bookmarksByJid.remove(roomJid) != null) {
+      _onUpdate(bookmarks);
+    }
+    await _retractBookmark(roomJid);
+    await _storeLegacyBookmarks();
+  }
+
   void _handleEventMessage(MessageStanza stanza) {
     final event = stanza.children.firstWhere(
       (child) => child.name == 'event' && child.getAttribute('xmlns')?.value == _pubsubEventNs,
@@ -213,12 +229,14 @@ class BookmarksManager {
     final autoJoinAttr = conference.getAttribute('autojoin')?.value?.trim() ?? '';
     final autoJoin = autoJoinAttr == 'true' || autoJoinAttr == '1';
     final nick = conference.getChild('nick')?.textValue?.trim();
+    final password = conference.getChild('password')?.textValue?.trim();
     return ContactEntry(
       jid: jid,
       name: name?.isNotEmpty == true ? name : null,
       groups: const [],
       isBookmark: true,
       bookmarkNick: nick?.isNotEmpty == true ? nick : null,
+      bookmarkPassword: password?.isNotEmpty == true ? password : null,
       bookmarkAutoJoin: autoJoin,
     );
   }
@@ -238,15 +256,91 @@ class BookmarksManager {
         autoJoin = autoJoinChild == 'true' || autoJoinChild == '1';
       }
       final nick = conference.getChild('nick')?.textValue?.trim();
+      final password = conference.getChild('password')?.textValue?.trim();
       result.add(ContactEntry(
         jid: jid,
         name: name?.isNotEmpty == true ? name : null,
         groups: const [],
         isBookmark: true,
         bookmarkNick: nick?.isNotEmpty == true ? nick : null,
+        bookmarkPassword: password?.isNotEmpty == true ? password : null,
         bookmarkAutoJoin: autoJoin,
       ));
     }
     return result;
+  }
+
+  Future<void> _publishBookmark(ContactEntry bookmark) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(selfBareJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', _pubsubNs));
+    final publish = XmppElement()..name = 'publish';
+    publish.addAttribute(XmppAttribute('node', _bookmarksNode));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('id', bookmark.jid));
+    item.addChild(_buildConference(bookmark));
+    publish.addChild(item);
+    pubsub.addChild(publish);
+    iqStanza.addChild(pubsub);
+    connection.writeStanza(iqStanza);
+  }
+
+  Future<void> _retractBookmark(String roomJid) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(selfBareJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', _pubsubNs));
+    final retract = XmppElement()..name = 'retract';
+    retract.addAttribute(XmppAttribute('node', _bookmarksNode));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('id', roomJid));
+    retract.addChild(item);
+    pubsub.addChild(retract);
+    iqStanza.addChild(pubsub);
+    connection.writeStanza(iqStanza);
+  }
+
+  Future<void> _storeLegacyBookmarks() async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', 'jabber:iq:private'));
+    final storage = XmppElement()..name = 'storage';
+    storage.addAttribute(XmppAttribute('xmlns', 'storage:bookmarks'));
+    for (final entry in _bookmarksByJid.values) {
+      storage.addChild(_buildConference(entry, includeXmlns: false));
+    }
+    query.addChild(storage);
+    iqStanza.addChild(query);
+    connection.writeStanza(iqStanza);
+  }
+
+  XmppElement _buildConference(ContactEntry bookmark, {bool includeXmlns = true}) {
+    final conference = XmppElement()..name = 'conference';
+    if (includeXmlns) {
+      conference.addAttribute(XmppAttribute('xmlns', _bookmarksNode));
+    }
+    conference.addAttribute(XmppAttribute('jid', bookmark.jid));
+    if (bookmark.name != null && bookmark.name!.trim().isNotEmpty) {
+      conference.addAttribute(XmppAttribute('name', bookmark.name!.trim()));
+    }
+    conference.addAttribute(
+      XmppAttribute('autojoin', bookmark.bookmarkAutoJoin ? 'true' : 'false'),
+    );
+    if (bookmark.bookmarkNick != null && bookmark.bookmarkNick!.trim().isNotEmpty) {
+      final nick = XmppElement()..name = 'nick';
+      nick.textValue = bookmark.bookmarkNick!.trim();
+      conference.addChild(nick);
+    }
+    if (bookmark.bookmarkPassword != null &&
+        bookmark.bookmarkPassword!.trim().isNotEmpty) {
+      final password = XmppElement()..name = 'password';
+      password.textValue = bookmark.bookmarkPassword!.trim();
+      conference.addChild(password);
+    }
+    return conference;
   }
 }

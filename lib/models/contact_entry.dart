@@ -6,6 +6,7 @@ class ContactEntry {
     this.subscriptionType,
     this.isBookmark = false,
     this.bookmarkNick,
+    this.bookmarkPassword,
     this.bookmarkAutoJoin = false,
   }) : groups = List.unmodifiable(groups ?? const []);
 
@@ -15,6 +16,7 @@ class ContactEntry {
   final String? subscriptionType;
   final bool isBookmark;
   final String? bookmarkNick;
+  final String? bookmarkPassword;
   final bool bookmarkAutoJoin;
 
   String get displayName => name?.isNotEmpty == true ? name! : jid;
@@ -25,6 +27,7 @@ class ContactEntry {
     String? subscriptionType,
     bool? isBookmark,
     String? bookmarkNick,
+    String? bookmarkPassword,
     bool? bookmarkAutoJoin,
   }) {
     return ContactEntry(
@@ -34,6 +37,7 @@ class ContactEntry {
       subscriptionType: subscriptionType ?? this.subscriptionType,
       isBookmark: isBookmark ?? this.isBookmark,
       bookmarkNick: bookmarkNick ?? this.bookmarkNick,
+      bookmarkPassword: bookmarkPassword ?? this.bookmarkPassword,
       bookmarkAutoJoin: bookmarkAutoJoin ?? this.bookmarkAutoJoin,
     );
   }
@@ -46,6 +50,7 @@ class ContactEntry {
       'subscriptionType': subscriptionType,
       'isBookmark': isBookmark,
       'bookmarkNick': bookmarkNick,
+      'bookmarkPassword': bookmarkPassword,
       'bookmarkAutoJoin': bookmarkAutoJoin,
     };
   }
@@ -64,6 +69,7 @@ class ContactEntry {
     final subscriptionType = map['subscriptionType']?.toString();
     final isBookmark = map['isBookmark'] == true;
     final bookmarkNick = map['bookmarkNick']?.toString();
+    final bookmarkPassword = map['bookmarkPassword']?.toString();
     final bookmarkAutoJoin = map['bookmarkAutoJoin'] == true;
     if (groupsRaw is List) {
       for (final entry in groupsRaw) {
@@ -80,6 +86,7 @@ class ContactEntry {
       subscriptionType: subscriptionType,
       isBookmark: isBookmark,
       bookmarkNick: bookmarkNick,
+      bookmarkPassword: bookmarkPassword,
       bookmarkAutoJoin: bookmarkAutoJoin,
     );
   }

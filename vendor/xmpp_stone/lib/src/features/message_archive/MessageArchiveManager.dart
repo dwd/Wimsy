@@ -37,8 +37,11 @@ class MessageArchiveManager {
 
   MessageArchiveManager(this._connection);
 
-  void queryAll({int? max, String? before, String? after}) {
+  void queryAll({int? max, String? before, String? after, Jid? toJid}) {
     var iqStanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+    if (toJid != null) {
+      iqStanza.toJid = toJid;
+    }
     var query = QueryElement();
     query.setXmlns('urn:xmpp:mam:2');
     query.setQueryId(AbstractStanza.getRandomId());
@@ -47,11 +50,22 @@ class MessageArchiveManager {
     _connection.writeStanza(iqStanza);
   }
 
-  void queryByTime({DateTime? start, DateTime? end, Jid? jid, int? max, String? before, String? after}) {
+  void queryByTime({
+    DateTime? start,
+    DateTime? end,
+    Jid? jid,
+    int? max,
+    String? before,
+    String? after,
+    Jid? toJid,
+  }) {
     if (start == null && end == null && jid == null) {
-      queryAll(max: max, before: before, after: after);
+      queryAll(max: max, before: before, after: after, toJid: toJid);
     } else {
       var iqStanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+      if (toJid != null) {
+        iqStanza.toJid = toJid;
+      }
       var query = QueryElement();
       query.setXmlns('urn:xmpp:mam:2');
       query.setQueryId(AbstractStanza.getRandomId());
@@ -79,11 +93,22 @@ class MessageArchiveManager {
     }
   }
 
-  void queryById({String? beforeId, String? afterId, Jid? jid, int? max, String? before, String? after}) {
+  void queryById({
+    String? beforeId,
+    String? afterId,
+    Jid? jid,
+    int? max,
+    String? before,
+    String? after,
+    Jid? toJid,
+  }) {
     if (beforeId == null && afterId == null && jid == null) {
-      queryAll(max: max, before: before, after: after);
+      queryAll(max: max, before: before, after: after, toJid: toJid);
     } else {
       var iqStanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+      if (toJid != null) {
+        iqStanza.toJid = toJid;
+      }
       var query = QueryElement();
       query.setXmlns('urn:xmpp:mam:2');
       query.setQueryId(AbstractStanza.getRandomId());

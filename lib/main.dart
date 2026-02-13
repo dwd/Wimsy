@@ -11,6 +11,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'models/chat_message.dart';
+import 'models/contact_entry.dart';
 import 'models/room_entry.dart';
 import 'notifications/notification_service.dart';
 import 'storage/account_record.dart';
@@ -290,7 +291,6 @@ class _WimsyHomeState extends State<WimsyHome> {
   final TextEditingController _resourceController = TextEditingController(text: 'wimsy');
   final TextEditingController _wsEndpointController = TextEditingController();
   final TextEditingController _wsProtocolsController = TextEditingController();
-  final TextEditingController _manualContactController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _messageScrollController = ScrollController();
@@ -387,7 +387,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     _resourceController.dispose();
     _wsEndpointController.dispose();
     _wsProtocolsController.dispose();
-    _manualContactController.dispose();
     _messageController.dispose();
     super.dispose();
   }
@@ -708,20 +707,19 @@ class _WimsyHomeState extends State<WimsyHome> {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _manualContactController,
-                    decoration: const InputDecoration(
-                      labelText: 'Start chat with JID',
-                    ),
+                  child: FilledButton.icon(
+                    onPressed: () => _showContactDialog(),
+                    icon: const Icon(Icons.person_add_alt_1),
+                    label: const Text('Add contact'),
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton(
-                  onPressed: () {
-                    service.addManualContact(_manualContactController.text);
-                    _manualContactController.clear();
-                  },
-                  icon: const Icon(Icons.add_circle_outline),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showJoinRoomDialog(),
+                    icon: const Icon(Icons.meeting_room_outlined),
+                    label: const Text('Join room'),
+                  ),
                 ),
               ],
             ),
@@ -881,8 +879,31 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             color: theme.colorScheme.onSurfaceVariant,
                                           ),
                                         ),
+                                        if (!isBookmark && contact.groups.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            contact.groups.map((group) => '#${group.trim()}').join(' '),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.labelSmall?.copyWith(
+                                              color: theme.colorScheme.primary,
+                                              letterSpacing: 0.2,
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _ContactActionsMenu(
+                                    isBookmark: isBookmark,
+                                    isBlocked: service.isBlocked(jid),
+                                    onEditContact: () => _showContactDialog(contact: contact),
+                                    onRemoveContact: () => _confirmRemoveContact(contact),
+                                    onBlockContact: () => _blockContact(contact),
+                                    onUnblockContact: () => _unblockContact(contact),
+                                    onEditBookmark: () => _showBookmarkDialog(contact),
+                                    onRemoveBookmark: () => _confirmRemoveBookmark(contact),
                                   ),
                                   if (latest != null) ...[
                                     const SizedBox(width: 8),
@@ -1164,6 +1185,369 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
+    }
+  }
+
+  List<String> _parseGroups(String input) {
+    final normalized = input.replaceAll('#', ' ');
+    final parts = normalized.split(RegExp(r'[,\s]+'));
+    final groups = <String>[];
+    for (final part in parts) {
+      final value = part.trim();
+      if (value.isNotEmpty) {
+        groups.add(value);
+      }
+    }
+    return groups;
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _showContactDialog({ContactEntry? contact}) async {
+    final isEdit = contact != null;
+    final jidController = TextEditingController(text: contact?.jid ?? '');
+    final nameController = TextEditingController(text: contact?.name ?? '');
+    final groupsController = TextEditingController(text: contact?.groups.join(' ') ?? '');
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(isEdit ? 'Edit contact' : 'Add contact'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: jidController,
+                  readOnly: isEdit,
+                  decoration: const InputDecoration(
+                    labelText: 'JID',
+                    hintText: 'user@example.com',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Display name',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: groupsController,
+                  decoration: const InputDecoration(
+                    labelText: 'Groups (comma or #tags)',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result != true) {
+      return;
+    }
+    final jid = jidController.text.trim();
+    if (jid.isEmpty) {
+      _showSnack('Enter a JID to save.');
+      return;
+    }
+    final name = nameController.text.trim();
+    final groups = _parseGroups(groupsController.text);
+    final ok = await widget.service.upsertRosterContact(
+      jid,
+      name: name.isNotEmpty ? name : null,
+      groups: groups,
+    );
+    if (!ok) {
+      _showSnack('Failed to save contact.');
+    }
+  }
+
+  Future<void> _showBookmarkDialog(ContactEntry bookmark) async {
+    final jidController = TextEditingController(text: bookmark.jid);
+    final nameController = TextEditingController(text: bookmark.name ?? '');
+    final nickController = TextEditingController(text: bookmark.bookmarkNick ?? '');
+    final passwordController = TextEditingController(text: bookmark.bookmarkPassword ?? '');
+    var autoJoin = bookmark.bookmarkAutoJoin;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Edit bookmark'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: jidController,
+                    readOnly: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Room JID',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Room name',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nickController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nickname',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                    ),
+                    obscureText: true,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    value: autoJoin,
+                    onChanged: (value) => setState(() => autoJoin = value),
+                    title: const Text('Auto-join'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+    if (result != true) {
+      return;
+    }
+    final updated = ContactEntry(
+      jid: bookmark.jid,
+      name: nameController.text.trim().isNotEmpty ? nameController.text.trim() : null,
+      groups: const [],
+      isBookmark: true,
+      bookmarkNick: nickController.text.trim().isNotEmpty ? nickController.text.trim() : null,
+      bookmarkPassword: passwordController.text.trim().isNotEmpty
+          ? passwordController.text.trim()
+          : null,
+      bookmarkAutoJoin: autoJoin,
+    );
+    final ok = await widget.service.upsertBookmark(updated);
+    if (!ok) {
+      _showSnack('Failed to save bookmark.');
+    }
+  }
+
+  Future<void> _showJoinRoomDialog() async {
+    final jidController = TextEditingController();
+    final nickController = TextEditingController();
+    final passwordController = TextEditingController();
+    final nameController = TextEditingController();
+    var saveBookmark = false;
+    var autoJoin = false;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Join room'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: jidController,
+                    decoration: const InputDecoration(
+                      labelText: 'Room JID',
+                      hintText: 'room@conference.example.com',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nickController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nickname (optional)',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    decoration: const InputDecoration(
+                      labelText: 'Password (optional)',
+                    ),
+                    obscureText: true,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    value: saveBookmark,
+                    onChanged: (value) => setState(() => saveBookmark = value),
+                    title: const Text('Save bookmark'),
+                  ),
+                  if (saveBookmark) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Room name (optional)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      value: autoJoin,
+                      onChanged: (value) => setState(() => autoJoin = value),
+                      title: const Text('Auto-join'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Join'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+    if (result != true) {
+      return;
+    }
+    final roomJid = jidController.text.trim();
+    if (roomJid.isEmpty) {
+      _showSnack('Enter a room JID.');
+      return;
+    }
+    widget.service.joinRoom(
+      roomJid,
+      nick: nickController.text.trim(),
+      password: passwordController.text.trim(),
+    );
+    if (saveBookmark) {
+      final bookmark = ContactEntry(
+        jid: roomJid,
+        name: nameController.text.trim().isNotEmpty ? nameController.text.trim() : null,
+        groups: const [],
+        isBookmark: true,
+        bookmarkNick: nickController.text.trim().isNotEmpty ? nickController.text.trim() : null,
+        bookmarkPassword: passwordController.text.trim().isNotEmpty
+            ? passwordController.text.trim()
+            : null,
+        bookmarkAutoJoin: autoJoin,
+      );
+      final ok = await widget.service.upsertBookmark(bookmark);
+      if (!ok) {
+        _showSnack('Failed to save bookmark.');
+      }
+    }
+  }
+
+  Future<void> _confirmRemoveContact(ContactEntry contact) async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remove contact?'),
+          content: Text('Remove ${contact.displayName} from your roster?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldRemove != true) {
+      return;
+    }
+    final ok = await widget.service.removeRosterContact(contact.jid);
+    if (!ok) {
+      _showSnack('Failed to remove contact.');
+    }
+  }
+
+  Future<void> _confirmRemoveBookmark(ContactEntry bookmark) async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remove bookmark?'),
+          content: Text('Remove ${bookmark.displayName} from bookmarks?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldRemove != true) {
+      return;
+    }
+    final ok = await widget.service.removeBookmark(bookmark.jid);
+    if (!ok) {
+      _showSnack('Failed to remove bookmark.');
+    }
+  }
+
+  Future<void> _blockContact(ContactEntry contact) async {
+    final ok = await widget.service.blockContact(contact.jid);
+    if (!ok) {
+      _showSnack('Blocking not supported by your server.');
+    }
+  }
+
+  Future<void> _unblockContact(ContactEntry contact) async {
+    final ok = await widget.service.unblockContact(contact.jid);
+    if (!ok) {
+      _showSnack('Unblocking not supported by your server.');
     }
   }
 
@@ -1454,6 +1838,85 @@ class _MessageBubble extends StatelessWidget {
       result = result.substring(0, result.length - 1);
     }
     return result;
+  }
+}
+
+class _ContactActionsMenu extends StatelessWidget {
+  const _ContactActionsMenu({
+    required this.isBookmark,
+    required this.isBlocked,
+    required this.onEditContact,
+    required this.onRemoveContact,
+    required this.onBlockContact,
+    required this.onUnblockContact,
+    required this.onEditBookmark,
+    required this.onRemoveBookmark,
+  });
+
+  final bool isBookmark;
+  final bool isBlocked;
+  final VoidCallback onEditContact;
+  final VoidCallback onRemoveContact;
+  final VoidCallback onBlockContact;
+  final VoidCallback onUnblockContact;
+  final VoidCallback onEditBookmark;
+  final VoidCallback onRemoveBookmark;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      onSelected: (value) {
+        switch (value) {
+          case 'edit_contact':
+            onEditContact();
+            break;
+          case 'remove_contact':
+            onRemoveContact();
+            break;
+          case 'block_contact':
+            onBlockContact();
+            break;
+          case 'unblock_contact':
+            onUnblockContact();
+            break;
+          case 'edit_bookmark':
+            onEditBookmark();
+            break;
+          case 'remove_bookmark':
+            onRemoveBookmark();
+            break;
+        }
+      },
+      itemBuilder: (context) {
+        if (isBookmark) {
+          return [
+            const PopupMenuItem(
+              value: 'edit_bookmark',
+              child: Text('Edit bookmark'),
+            ),
+            const PopupMenuItem(
+              value: 'remove_bookmark',
+              child: Text('Remove bookmark'),
+            ),
+          ];
+        }
+        return [
+          const PopupMenuItem(
+            value: 'edit_contact',
+            child: Text('Edit contact'),
+          ),
+          const PopupMenuItem(
+            value: 'remove_contact',
+            child: Text('Remove contact'),
+          ),
+          PopupMenuItem(
+            value: isBlocked ? 'unblock_contact' : 'block_contact',
+            child: Text(isBlocked ? 'Unblock' : 'Block'),
+          ),
+        ];
+      },
+    );
   }
 }
 
