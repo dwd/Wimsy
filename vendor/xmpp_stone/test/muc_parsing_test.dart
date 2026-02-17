@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 import 'package:xmpp_stone/src/muc/MucManager.dart';
+import 'package:xmpp_stone/src/data/Jid.dart';
 import 'package:xmpp_stone/src/elements/XmppAttribute.dart';
 import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/stanzas/MessageStanza.dart';
@@ -49,6 +50,21 @@ void main() {
       expect(parsed.message, isNull);
       expect(parsed.subject!.roomJid, 'room@example.com');
       expect(parsed.subject!.subject, 'New topic');
+    });
+
+    test('Direct history stanza uses stanza-id for de-dupe', () {
+      final stanza = MessageStanza('root', MessageStanzaType.GROUPCHAT);
+      stanza.fromJid = Jid.fromFullJid('room@example.com/alice');
+      stanza.body = 'history';
+      stanza.addChild(XmppElement()
+        ..name = 'stanza-id'
+        ..addAttribute(XmppAttribute('id', 'stanza-55')));
+
+      final parsed = parseMucGroupMessage(stanza);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.message, isNotNull);
+      expect(parsed.message!.stanzaId, 'stanza-55');
     });
   });
 }

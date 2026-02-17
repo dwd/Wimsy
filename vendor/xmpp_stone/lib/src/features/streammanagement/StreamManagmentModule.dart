@@ -34,7 +34,7 @@ class StreamManagementModule extends Negotiator {
     instance?.timer?.cancel();
     instance?.inNonzaSubscription?.cancel();
     instance?.outStanzaSubscription?.cancel();
-    instance?.inNonzaSubscription?.cancel();
+    instance?.inStanzaSubscription?.cancel();
     instance?._xmppConnectionStateSubscription.cancel();
     instances.remove(connection);
   }
@@ -95,6 +95,10 @@ class StreamManagementModule extends Negotiator {
       ;
       if (state == XmppConnectionState.Closed) {
         streamState = StreamState();
+        inStanzaSubscription?.cancel();
+        outStanzaSubscription?.cancel();
+        inStanzaSubscription = null;
+        outStanzaSubscription = null;
         //state = XmppConnectionState.Idle;
       }
     });
@@ -164,6 +168,9 @@ class StreamManagementModule extends Negotiator {
   }
 
   void parseInStanza(AbstractStanza? stanza) {
+    if (stanza == null) {
+      return;
+    }
     streamState.lastReceivedStanza++;
   }
 
@@ -180,6 +187,8 @@ class StreamManagementModule extends Negotiator {
     }
     timer = Timer.periodic(
         Duration(milliseconds: 5000), (Timer t) => sendAckRequest());
+    outStanzaSubscription?.cancel();
+    inStanzaSubscription?.cancel();
     outStanzaSubscription = _connection.outStanzasStream.listen(parseOutStanza);
     inStanzaSubscription = _connection.inStanzasStream.listen(parseInStanza);
   }

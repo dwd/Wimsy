@@ -72,8 +72,12 @@ class MucManager {
     if (stanza == null) {
       return;
     }
-    if (stanza is MessageStanza && stanza.type == MessageStanzaType.GROUPCHAT) {
-      _handleGroupMessage(stanza);
+    if (stanza is MessageStanza) {
+      final isGroupchat = stanza.type == MessageStanzaType.GROUPCHAT;
+      final isMamGroupchat = _isMamGroupchatResult(stanza);
+      if (isGroupchat || isMamGroupchat) {
+        _handleGroupMessage(stanza);
+      }
     } else if (stanza is PresenceStanza) {
       _handlePresence(stanza);
     }
@@ -125,6 +129,14 @@ class MucManager {
     _presenceController.add(presence);
   }
 
+}
+
+bool _isMamGroupchatResult(MessageStanza stanza) {
+  final result = stanza.children.firstWhereOrNull((child) => child.name == 'result');
+  final forwarded = result?.getChild('forwarded');
+  final forwardedMessage = forwarded?.getChild('message');
+  final type = forwardedMessage?.getAttribute('type')?.value;
+  return type == 'groupchat';
 }
 
 String? _extractForwardedBody(XmppElement? message) {
@@ -183,13 +195,14 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   final mamResultId = result?.getAttribute('id')?.value;
   final forwardedStanzaId =
       forwardedMessage?.getChild('stanza-id')?.getAttribute('id')?.value;
+  final directStanzaId = stanza.getChild('stanza-id')?.getAttribute('id')?.value;
   return MucParsedGroupMessage.message(
     MucMessage(
       roomJid: roomJid,
       nick: nick ?? '',
       body: body,
       mamResultId: mamResultId,
-      stanzaId: forwardedStanzaId ?? stanza.id,
+      stanzaId: forwardedStanzaId ?? directStanzaId ?? stanza.id,
       timestamp: timestamp,
     ),
   );

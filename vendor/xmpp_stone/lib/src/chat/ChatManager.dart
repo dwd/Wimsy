@@ -23,6 +23,9 @@ class ChatManager {
         .map((stanza) => stanza as MessageStanza?)
         .listen((stanza) {
       var message = Message.fromStanza(stanza!);
+      if (message.to == null || message.from == null) {
+        return;
+      }
       // find jid different from mine
       var buddyJid =
           _connection.fullJid.userAtDomain == message.to!.userAtDomain

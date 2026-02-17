@@ -748,7 +748,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                         final effectiveStatusText =
                             statusText != null && statusText.toLowerCase() == 'unavailable'
                                 ? null
-                            : statusText;
+                                : statusText;
                         final show = (statusText != null && statusText.toLowerCase() == 'unavailable')
                             ? null
                             : (presence?.showElement ?? (presence != null ? PresenceShowElement.CHAT : null));
@@ -872,7 +872,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                                         ],
                                         const SizedBox(height: 2),
                                         Text(
-                                          isBookmark ? bookmarkStatusText : (effectiveStatusText ?? ''),
+                                          isBookmark
+                                              ? bookmarkStatusText
+                                              : ((effectiveStatusText?.isNotEmpty == true)
+                                                  ? effectiveStatusText!
+                                                  : service.presenceLabelFor(jid)),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: theme.textTheme.bodySmall?.copyWith(
@@ -1246,6 +1250,58 @@ class _WimsyHomeState extends State<WimsyHome> {
                     labelText: 'Groups (comma or #tags)',
                   ),
                 ),
+                if (isEdit) ...[
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Presence: ${widget.service.presenceLabelFor(contact!.jid)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Subscription: ${contact.subscriptionType ?? 'none'}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final ok = await widget.service
+                                .requestPresenceSubscription(contact.jid);
+                            if (!ok) {
+                              _showSnack('Failed to request presence.');
+                            } else {
+                              _showSnack('Presence subscription requested.');
+                            }
+                          },
+                          child: const Text('Subscribe'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final ok = await widget.service
+                                .preauthorizePresenceSubscription(contact.jid);
+                            if (!ok) {
+                              _showSnack('Failed to preauthorize.');
+                            } else {
+                              _showSnack('Preauthorized contact.');
+                            }
+                          },
+                          child: const Text('Preauthorize'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

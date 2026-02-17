@@ -101,6 +101,8 @@ class XmppService extends ChangeNotifier {
   bool _carbonsEnabled = false;
   final Map<String, DateTime> _mamBackfillAt = {};
   final Map<String, DateTime> _mamPageRequestAt = {};
+  final Map<String, int> _mamPrependOffset = {};
+  final Map<String, Timer> _mamPrependReset = {};
   DateTime? _lastGlobalMamSyncAt;
   bool _globalBackfillInProgress = false;
   Timer? _globalBackfillTimer;
@@ -289,6 +291,34 @@ class XmppService extends ChangeNotifier {
       case PresenceShowElement.XA:
         return 'extended away';
     }
+  }
+
+  Future<bool> requestPresenceSubscription(String bareJid) async {
+    final connection = _connection;
+    if (connection == null) {
+      return false;
+    }
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return false;
+    }
+    final presenceManager = PresenceManager.getInstance(connection);
+    presenceManager.subscribe(Jid.fromFullJid(normalized));
+    return true;
+  }
+
+  Future<bool> preauthorizePresenceSubscription(String bareJid) async {
+    final connection = _connection;
+    if (connection == null) {
+      return false;
+    }
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return false;
+    }
+    final presenceManager = PresenceManager.getInstance(connection);
+    presenceManager.acceptSubscription(Jid.fromFullJid(normalized));
+    return true;
   }
 
   ChatState? chatStateFor(String bareJid) {
@@ -552,6 +582,7 @@ class XmppService extends ChangeNotifier {
         _requestRoomMam(normalized, before: '');
         return;
       }
+      _startMamPrepend(normalized);
       mam.queryById(
         toJid: Jid.fromFullJid(normalized),
         max: 25,
@@ -564,6 +595,7 @@ class XmppService extends ChangeNotifier {
       _requestMamBackfill(normalized);
       return;
     }
+    _startMamPrepend(normalized);
     mam.queryById(
       jid: Jid.fromFullJid(normalized),
       max: 50,
@@ -1456,6 +1488,30 @@ class XmppService extends ChangeNotifier {
         return;
       }
     }
+    final prependOffset = _mamPrependOffset[normalized];
+    if (mamId != null && mamId.isNotEmpty && prependOffset != null) {
+      final insertIndex = prependOffset.clamp(0, list.length);
+      list.insert(
+        insertIndex,
+        ChatMessage(
+          from: from,
+          to: to,
+          body: body,
+          outgoing: outgoing,
+          timestamp: timestamp,
+          messageId: messageId,
+          mamId: mamId,
+          stanzaId: stanzaId,
+        ),
+      );
+      _mamPrependOffset[normalized] = prependOffset + 1;
+      if (!outgoing) {
+        _lastSeenAt[normalized] ??= timestamp;
+      }
+      notifyListeners();
+      _messagePersistor?.call(normalized, List.unmodifiable(list));
+      return;
+    }
     final newMessage = ChatMessage(
       from: from,
       to: to,
@@ -1521,6 +1577,29 @@ class XmppService extends ChangeNotifier {
     if (stanzaId != null && stanzaId.isNotEmpty && list.any((message) => message.stanzaId == stanzaId)) {
       return;
     }
+    final prependOffset = _mamPrependOffset[normalized];
+    if (mamId != null && mamId.isNotEmpty && prependOffset != null) {
+      final insertIndex = prependOffset.clamp(0, list.length);
+      list.insert(
+        insertIndex,
+        ChatMessage(
+          from: from,
+          to: normalized,
+          body: body,
+          outgoing: outgoing,
+          timestamp: timestamp,
+          messageId: messageId,
+          mamId: mamId,
+          stanzaId: stanzaId,
+        ),
+      );
+      _mamPrependOffset[normalized] = prependOffset + 1;
+      notifyListeners();
+      if (!outgoing) {
+        _incomingRoomMessageHandler?.call(normalized, list[insertIndex]);
+      }
+      return;
+    }
     final newMessage = ChatMessage(
       from: from,
       to: normalized,
@@ -1562,17 +1641,13 @@ class XmppService extends ChangeNotifier {
       list.add(message);
       return;
     }
-    final first = list.first;
-    if (message.timestamp.isBefore(first.timestamp)) {
-      list.insert(0, message);
-      return;
-    }
-    // Keep MAM order intact by appending when not strictly older than the first entry.
-    if (!message.timestamp.isBefore(list.last.timestamp)) {
+    final insertIndex = list.indexWhere((existing) =>
+        message.timestamp.isBefore(existing.timestamp));
+    if (insertIndex == -1) {
       list.add(message);
-      return;
+    } else {
+      list.insert(insertIndex, message);
     }
-    list.add(message);
   }
 
   bool _updateOutgoingStatus(
@@ -1958,6 +2033,11 @@ class XmppService extends ChangeNotifier {
     _carbonsRequestId = null;
     _mamBackfillAt.clear();
     _mamPageRequestAt.clear();
+    _mamPrependOffset.clear();
+    for (final timer in _mamPrependReset.values) {
+      timer.cancel();
+    }
+    _mamPrependReset.clear();
     _lastGlobalMamSyncAt = null;
     _globalBackfillTimer?.cancel();
     _globalBackfillTimer = null;
@@ -2121,6 +2201,16 @@ class XmppService extends ChangeNotifier {
       max: 50,
       before: '',
     );
+  }
+
+  void _startMamPrepend(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    _mamPrependOffset[normalized] = 0;
+    _mamPrependReset[normalized]?.cancel();
+    _mamPrependReset[normalized] = Timer(const Duration(seconds: 2), () {
+      _mamPrependOffset.remove(normalized);
+      _mamPrependReset.remove(normalized);
+    });
   }
 
   void _primeMamSync() {
