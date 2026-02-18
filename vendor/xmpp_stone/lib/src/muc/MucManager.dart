@@ -147,6 +147,26 @@ String? _extractForwardedSubject(XmppElement? message) {
   return message?.getChild('subject')?.textValue;
 }
 
+String? _extractStanzaId(XmppElement? message, String roomJid) {
+  if (message == null) {
+    return null;
+  }
+  final stanzaId = message.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'stanza-id' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:sid:0' &&
+        child.getAttribute('by')?.value == roomJid,
+  )?.getAttribute('id')?.value;
+  if (stanzaId != null && stanzaId.isNotEmpty) {
+    return stanzaId;
+  }
+  final fallback = message.getAttribute('id')?.value;
+  if (fallback != null && fallback.isNotEmpty) {
+    return fallback;
+  }
+  return null;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -193,9 +213,8 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       _extractDelayedTimestamp(stanza) ??
       DateTime.now();
   final mamResultId = result?.getAttribute('id')?.value;
-  final forwardedStanzaId =
-      forwardedMessage?.getChild('stanza-id')?.getAttribute('id')?.value;
-  final directStanzaId = stanza.getChild('stanza-id')?.getAttribute('id')?.value;
+  final forwardedStanzaId = _extractStanzaId(forwardedMessage, roomJid);
+  final directStanzaId = _extractStanzaId(stanza, roomJid);
   return MucParsedGroupMessage.message(
     MucMessage(
       roomJid: roomJid,

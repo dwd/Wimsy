@@ -1799,8 +1799,8 @@ class _MessageBubble extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 6),
-                RichText(
-                  text: TextSpan(
+                SelectableText.rich(
+                  TextSpan(
                     style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
                     children: _linkifyText(
                       message.body,
