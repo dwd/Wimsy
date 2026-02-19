@@ -82,6 +82,8 @@ class XmppService extends ChangeNotifier {
   _ReconnectConfig? _reconnectConfig;
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<ChatMessage>> _roomMessages = {};
+  final Set<String> _seededMessageJids = {};
+  final Set<String> _seededRoomMessageJids = {};
   final List<ContactEntry> _contacts = [];
   final List<ContactEntry> _bookmarks = [];
   final Map<String, RoomEntry> _rooms = {};
@@ -98,6 +100,7 @@ class XmppService extends ChangeNotifier {
   void Function(List<ContactEntry> roster)? _rosterPersistor;
   void Function(List<ContactEntry> bookmarks)? _bookmarkPersistor;
   void Function(String bareJid, List<ChatMessage> messages)? _messagePersistor;
+  void Function(String roomJid, List<ChatMessage> messages)? _roomMessagePersistor;
   PresenceData _selfPresence = PresenceData(PresenceShowElement.CHAT, 'Online', null);
   Duration? _lastPingLatency;
   DateTime? _lastPingAt;
@@ -550,6 +553,8 @@ class XmppService extends ChangeNotifier {
     _bookmarks.clear();
     _messages.clear();
     _roomMessages.clear();
+    _seededMessageJids.clear();
+    _seededRoomMessageJids.clear();
     _rooms.clear();
     _roomOccupants.clear();
     _presenceByBareJid.clear();
@@ -561,6 +566,7 @@ class XmppService extends ChangeNotifier {
     _vcardAvatarBytes.clear();
     _vcardAvatarState.clear();
     _messagePersistor?.call('', const []);
+    _roomMessagePersistor?.call('', const []);
     _rosterPersistor?.call(const []);
     _bookmarkPersistor?.call(const []);
     notifyListeners();
@@ -601,11 +607,19 @@ class XmppService extends ChangeNotifier {
         return;
       }
       _startMamPrepend(normalized);
-      mam.queryById(
-        toJid: Jid.fromFullJid(normalized),
-        max: 25,
-        before: oldest,
-      );
+      if (_seededRoomMessageJids.contains(normalized)) {
+        mam.queryById(
+          toJid: Jid.fromFullJid(normalized),
+          max: 25,
+          beforeId: oldest,
+        );
+      } else {
+        mam.queryById(
+          toJid: Jid.fromFullJid(normalized),
+          max: 25,
+          before: oldest,
+        );
+      }
       return;
     }
     final oldest = oldestMamIdFor(normalized);
@@ -614,11 +628,19 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _startMamPrepend(normalized);
-    mam.queryById(
-      jid: Jid.fromFullJid(normalized),
-      max: 50,
-      before: oldest,
-    );
+    if (_seededMessageJids.contains(normalized)) {
+      mam.queryById(
+        jid: Jid.fromFullJid(normalized),
+        max: 50,
+        beforeId: oldest,
+      );
+    } else {
+      mam.queryById(
+        jid: Jid.fromFullJid(normalized),
+        max: 50,
+        before: oldest,
+      );
+    }
   }
 
   void setRosterPersistor(void Function(List<ContactEntry> roster)? persistor) {
@@ -642,6 +664,11 @@ class XmppService extends ChangeNotifier {
   void setMessagePersistor(
       void Function(String bareJid, List<ChatMessage> messages)? persistor) {
     _messagePersistor = persistor;
+  }
+
+  void setRoomMessagePersistor(
+      void Function(String roomJid, List<ChatMessage> messages)? persistor) {
+    _roomMessagePersistor = persistor;
   }
 
   void seedRoster(List<ContactEntry> roster) {
@@ -668,7 +695,18 @@ class XmppService extends ChangeNotifier {
     for (final entry in messages.entries) {
       final bareJid = _bareJid(entry.key);
       _messages[bareJid] = List<ChatMessage>.from(entry.value);
+      _seededMessageJids.add(bareJid);
       _ensureContact(bareJid);
+    }
+    notifyListeners();
+  }
+
+  void seedRoomMessages(Map<String, List<ChatMessage>> messages) {
+    for (final entry in messages.entries) {
+      final roomJid = _bareJid(entry.key);
+      _roomMessages[roomJid] = List<ChatMessage>.from(entry.value);
+      _seededRoomMessageJids.add(roomJid);
+      _ensureRoom(roomJid);
     }
     notifyListeners();
   }
@@ -996,7 +1034,7 @@ class XmppService extends ChangeNotifier {
         body: message.body,
         outgoing: false,
         timestamp: message.timestamp,
-        messageId: message.stanzaId,
+        messageId: message.messageId ?? message.stanzaId,
         mamId: message.mamResultId,
         stanzaId: message.stanzaId,
       );
@@ -1466,7 +1504,8 @@ class XmppService extends ChangeNotifier {
 
     final list = _messages.putIfAbsent(normalized, () => <ChatMessage>[]);
     if (messageId != null && messageId.isNotEmpty) {
-      final existingIndex = list.indexWhere((message) => message.messageId == messageId);
+      final existingIndex = list.indexWhere((message) =>
+          message.messageId == messageId && _bareJid(message.from) == _bareJid(from));
       if (existingIndex != -1) {
         final existing = list[existingIndex];
         final nextMamId = (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId;
@@ -1495,7 +1534,10 @@ class XmppService extends ChangeNotifier {
     if (mamId != null && mamId.isNotEmpty && list.any((message) => message.mamId == mamId)) {
       return;
     }
-    if (stanzaId != null && stanzaId.isNotEmpty && list.any((message) => message.stanzaId == stanzaId)) {
+    if (stanzaId != null &&
+        stanzaId.isNotEmpty &&
+        list.any((message) =>
+            message.stanzaId == stanzaId && _bareJid(message.from) == _bareJid(from))) {
       return;
     }
     final hasIncomingIds =
@@ -1576,7 +1618,8 @@ class XmppService extends ChangeNotifier {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
     if (messageId != null && messageId.isNotEmpty) {
-      final existingIndex = list.indexWhere((message) => message.messageId == messageId);
+      final existingIndex = list.indexWhere((message) =>
+          message.messageId == messageId && _bareJid(message.from) == _bareJid(from));
       if (existingIndex != -1) {
         final existing = list[existingIndex];
         final nextMamId = (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId;
@@ -1605,6 +1648,7 @@ class XmppService extends ChangeNotifier {
           list.removeAt(existingIndex);
           _insertMessageOrdered(list, updated);
           notifyListeners();
+          _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
         }
         return;
       }
@@ -1633,6 +1677,7 @@ class XmppService extends ChangeNotifier {
       );
       _mamPrependOffset[normalized] = prependOffset + 1;
       notifyListeners();
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
       if (!outgoing) {
         _incomingRoomMessageHandler?.call(normalized, list[insertIndex]);
       }
@@ -1650,6 +1695,7 @@ class XmppService extends ChangeNotifier {
     );
     _insertMessageOrdered(list, newMessage);
     notifyListeners();
+    _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
     if (!outgoing && (mamId == null || mamId.isEmpty)) {
       _incomingRoomMessageHandler?.call(normalized, newMessage);
     }
@@ -2116,6 +2162,9 @@ class XmppService extends ChangeNotifier {
       _contacts.clear();
       _bookmarks.clear();
       _messages.clear();
+      _seededMessageJids.clear();
+      _roomMessages.clear();
+      _seededRoomMessageJids.clear();
     }
     _presenceByBareJid.clear();
     _roomMessages.clear();

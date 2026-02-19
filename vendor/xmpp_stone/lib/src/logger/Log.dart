@@ -6,12 +6,17 @@ class Log {
   static bool logXmpp = true;
   static bool logToConsole = true;
 
+  static String _timestamp() {
+    return DateTime.now().toUtc().toIso8601String();
+  }
+
   static void _emit(String message) {
-    log(message);
+    final stamped = '${_timestamp()} $message';
+    log(stamped);
     if (logToConsole) {
       // Keep console output visible in Flutter run logs.
       // ignore: avoid_print
-      print(message);
+      print(stamped);
     }
   }
 

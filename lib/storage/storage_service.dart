@@ -15,6 +15,7 @@ class StorageService {
   static const _accountKey = 'account';
   static const _rosterKey = 'roster';
   static const _messagesKey = 'messages';
+  static const _roomMessagesKey = 'room_messages';
   static const _avatarMetadataKey = 'avatar_metadata';
   static const _avatarBlobsKey = 'avatar_blobs';
   static const _vcardAvatarsKey = 'vcard_avatars';
@@ -169,6 +170,37 @@ class StorageService {
     return const {};
   }
 
+  Map<String, List<ChatMessage>> loadRoomMessages() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(_roomMessagesKey, defaultValue: const <String, dynamic>{});
+    if (data is Map) {
+      final result = <String, List<ChatMessage>>{};
+      for (final entry in data.entries) {
+        final key = entry.key.toString();
+        final value = entry.value;
+        if (value is List) {
+          final messages = <ChatMessage>[];
+          for (final raw in value) {
+            if (raw is Map) {
+              final message = ChatMessage.fromMap(Map<String, dynamic>.from(raw));
+              if (message != null) {
+                messages.add(message);
+              }
+            }
+          }
+          if (messages.isNotEmpty) {
+            result[key] = messages;
+          }
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+
   Future<void> storeMessagesForJid(String bareJid, List<ChatMessage> messages) async {
     final box = _box;
     if (box == null) {
@@ -187,6 +219,24 @@ class StorageService {
     await box.put(_messagesKey, next);
   }
 
+  Future<void> storeRoomMessagesForJid(String roomJid, List<ChatMessage> messages) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (roomJid.isEmpty) {
+      await box.put(_roomMessagesKey, <String, dynamic>{});
+      return;
+    }
+    final existing = box.get(_roomMessagesKey, defaultValue: <String, dynamic>{});
+    final next = <String, dynamic>{};
+    if (existing is Map) {
+      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+    }
+    next[roomJid] = messages.map((entry) => entry.toMap()).toList();
+    await box.put(_roomMessagesKey, next);
+  }
+
   Future<void> clearRoster() async {
     final box = _box;
     if (box == null) {
@@ -201,6 +251,14 @@ class StorageService {
       return;
     }
     await box.put(_bookmarksKey, const <dynamic>[]);
+  }
+
+  Future<void> clearRoomMessages() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_roomMessagesKey, <String, dynamic>{});
   }
 
   Map<String, AvatarMetadata> loadAvatarMetadata() {

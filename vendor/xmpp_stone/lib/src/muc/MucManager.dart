@@ -167,6 +167,18 @@ String? _extractStanzaId(XmppElement? message, String roomJid) {
   return null;
 }
 
+String? _extractMessageIdAttr(XmppElement? forwardedMessage, MessageStanza stanza) {
+  final forwardedId = forwardedMessage?.getAttribute('id')?.value;
+  if (forwardedId != null && forwardedId.isNotEmpty) {
+    return forwardedId;
+  }
+  final stanzaId = stanza.id;
+  if (stanzaId != null && stanzaId.isNotEmpty) {
+    return stanzaId;
+  }
+  return null;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -215,12 +227,14 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   final mamResultId = result?.getAttribute('id')?.value;
   final forwardedStanzaId = _extractStanzaId(forwardedMessage, roomJid);
   final directStanzaId = _extractStanzaId(stanza, roomJid);
+  final messageIdAttr = _extractMessageIdAttr(forwardedMessage, stanza);
   return MucParsedGroupMessage.message(
     MucMessage(
       roomJid: roomJid,
       nick: nick ?? '',
       body: body,
       mamResultId: mamResultId,
+      messageId: messageIdAttr,
       stanzaId: forwardedStanzaId ?? directStanzaId ?? stanza.id,
       timestamp: timestamp,
     ),
@@ -242,6 +256,7 @@ class MucMessage {
     required this.body,
     required this.timestamp,
     this.mamResultId,
+    this.messageId,
     this.stanzaId,
   });
 
@@ -250,6 +265,7 @@ class MucMessage {
   final String body;
   final DateTime timestamp;
   final String? mamResultId;
+  final String? messageId;
   final String? stanzaId;
 }
 

@@ -317,9 +317,13 @@ class _WimsyHomeState extends State<WimsyHome> {
     widget.service.setMessagePersistor(
       (bareJid, messages) => widget.storage.storeMessagesForJid(bareJid, messages),
     );
+    widget.service.setRoomMessagePersistor(
+      (roomJid, messages) => widget.storage.storeRoomMessagesForJid(roomJid, messages),
+    );
     _seedRoster();
     _seedBookmarks();
     _seedMessages();
+    _seedRoomMessages();
     _loadAccount();
   }
 
@@ -331,6 +335,11 @@ class _WimsyHomeState extends State<WimsyHome> {
   Future<void> _seedMessages() async {
     final messages = widget.storage.loadMessages();
     widget.service.seedMessages(messages);
+  }
+
+  Future<void> _seedRoomMessages() async {
+    final messages = widget.storage.loadRoomMessages();
+    widget.service.seedRoomMessages(messages);
   }
 
   Future<void> _seedBookmarks() async {
