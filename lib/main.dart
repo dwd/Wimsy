@@ -892,6 +892,17 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             color: theme.colorScheme.onSurfaceVariant,
                                           ),
                                         ),
+                                        if (latest != null) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            latest.body,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.bodySmall?.copyWith(
+                                              color: theme.colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                        ],
                                         if (!isBookmark && contact.groups.isNotEmpty) ...[
                                           const SizedBox(height: 2),
                                           Text(
@@ -918,20 +929,6 @@ class _WimsyHomeState extends State<WimsyHome> {
                                     onEditBookmark: () => _showBookmarkDialog(contact),
                                     onRemoveBookmark: () => _confirmRemoveBookmark(contact),
                                   ),
-                                  if (latest != null) ...[
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        latest.body,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.right,
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: theme.colorScheme.onSurfaceVariant,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
                                 ],
                               ),
                             ),
