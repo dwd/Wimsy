@@ -389,6 +389,14 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  void simulateServerDisconnect() {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+    connection.simulateForcefulClose();
+  }
+
   Future<void> connect({
     required String jid,
     required String password,

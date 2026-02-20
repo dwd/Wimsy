@@ -496,6 +496,16 @@ class Connection {
     handleCloseState();
   }
 
+  void simulateForcefulClose() {
+    try {
+      _socketSubscription?.cancel();
+      _socket?.close();
+    } catch (_) {
+      // Ignore socket close errors during simulation.
+    }
+    handleCloseState();
+  }
+
   void handleCloseState() {
     if (state == XmppConnectionState.WouldLikeToOpen) {
       setState(XmppConnectionState.Closed);

@@ -48,6 +48,7 @@ class StreamManagementModule extends Negotiator {
 
   bool ackTurnedOn = true;
   Timer? timer;
+  int lastAckSent = 0;
 
   final StreamController<AbstractStanza> _deliveredStanzasStreamController =
       StreamController.broadcast();
@@ -95,6 +96,8 @@ class StreamManagementModule extends Negotiator {
       ;
       if (state == XmppConnectionState.Closed) {
         streamState = StreamState();
+        lastAckSent = 0;
+        Log.d(TAG, 'SM reset on Closed: recv=0 ackSent=0');
         inStanzaSubscription?.cancel();
         outStanzaSubscription?.cancel();
         inStanzaSubscription = null;
@@ -142,8 +145,9 @@ class StreamManagementModule extends Negotiator {
         resumeState(nonza);
       } else if (FailedNonza.match(nonza)) {
         if (streamState.tryingToResume) {
-          Log.d(TAG, 'Resuming failed');
+          Log.d(TAG, 'Resuming failed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
           streamState = StreamState();
+          lastAckSent = 0;
           state = NegotiatorState.DONE;
           negotiatorStateStreamController = StreamController();
           state = NegotiatorState.IDLE; //we will try again
@@ -172,6 +176,7 @@ class StreamManagementModule extends Negotiator {
       return;
     }
     streamState.lastReceivedStanza++;
+    Log.d(TAG, 'SM recv h=${streamState.lastReceivedStanza} lastAckSent=$lastAckSent stanza=${stanza.name}');
   }
 
   void handleEnabled(Nonza nonza) {
@@ -181,6 +186,8 @@ class StreamManagementModule extends Negotiator {
       streamState.streamResumeEnabled = true;
       streamState.id = nonza.getAttribute('id')!.value;
     }
+    lastAckSent = 0;
+    Log.d(TAG, 'SM enabled resume=${streamState.streamResumeEnabled} recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
     state = NegotiatorState.DONE;
     if (timer != null) {
       timer!.cancel();
@@ -202,13 +209,20 @@ class StreamManagementModule extends Negotiator {
     }
     timer = Timer.periodic(
         Duration(milliseconds: 5000), (Timer t) => sendAckRequest());
+    Log.d(TAG, 'SM resumed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
   }
 
   void sendEnableStreamManagement() =>
       _connection.writeNonza(EnableNonza(_connection.account.smResumable));
 
   void sendAckResponse() =>
-      _connection.writeNonza(ANonza(streamState.lastReceivedStanza));
+      _sendAckResponseWithLog();
+
+  void _sendAckResponseWithLog() {
+    lastAckSent = streamState.lastReceivedStanza;
+    Log.d(TAG, 'SM ack send h=$lastAckSent lastRecv=${streamState.lastReceivedStanza}');
+    _connection.writeNonza(ANonza(lastAckSent));
+  }
 
   void tryToResumeStream() {
     if (!streamState.tryingToResume) {

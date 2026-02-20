@@ -55,6 +55,13 @@ Future<void> _enableSentryAndRestart() async {
   await _startApp(sentryEnabled: true);
 }
 
+Future<void> _restartWithoutSentry() async {
+  if (!Sentry.isEnabled) {
+    return;
+  }
+  await _startApp(sentryEnabled: false);
+}
+
 class WimsyApp extends StatefulWidget {
   const WimsyApp({super.key});
 
@@ -2100,6 +2107,21 @@ class _PresenceMenu extends StatelessWidget {
   final VoidCallback? onClearCacheExit;
   final VoidCallback onExit;
 
+  Future<void> _setSentryOptIn(BuildContext context, bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_sentryOptInKey, enabled);
+    if (enabled) {
+      await _enableSentryAndRestart();
+      return;
+    }
+    await _restartWithoutSentry();
+  }
+
+  Future<bool> _getSentryOptIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_sentryOptInKey) ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -2110,14 +2132,18 @@ class _PresenceMenu extends StatelessWidget {
       theme,
       service.selfPresence.showElement ?? (service.isConnected ? PresenceShowElement.CHAT : null),
     );
-    return PopupMenuButton<_PresenceAction>(
-      tooltip: 'Set presence',
-      icon: Icon(Icons.circle, color: dotColor),
-      onSelected: (action) async {
-        switch (action) {
-          case _PresenceAction.online:
-            service.setSelfPresence(show: PresenceShowElement.CHAT, status: service.selfPresence.status);
-            break;
+    return FutureBuilder<bool>(
+      future: _getSentryOptIn(),
+      builder: (context, snapshot) {
+        final sentryEnabled = snapshot.data ?? false;
+        return PopupMenuButton<_PresenceAction>(
+          tooltip: 'Set presence',
+          icon: Icon(Icons.circle, color: dotColor),
+          onSelected: (action) async {
+            switch (action) {
+              case _PresenceAction.online:
+                service.setSelfPresence(show: PresenceShowElement.CHAT, status: service.selfPresence.status);
+                break;
           case _PresenceAction.away:
             service.setSelfPresence(show: PresenceShowElement.AWAY, status: service.selfPresence.status);
             break;
@@ -2136,40 +2162,64 @@ class _PresenceMenu extends StatelessWidget {
           case _PresenceAction.clearCacheExit:
             onClearCacheExit?.call();
             break;
-          case _PresenceAction.exit:
-            onExit();
-            break;
-        }
+              case _PresenceAction.simulateDisconnect:
+                service.simulateServerDisconnect();
+                break;
+              case _PresenceAction.toggleSentry:
+                await _setSentryOptIn(context, !sentryEnabled);
+                break;
+              case _PresenceAction.exit:
+                onExit();
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              enabled: false,
+              child: Text('Session: ${isOnline ? 'online' : 'offline'}'),
+            ),
+            PopupMenuItem(
+              enabled: false,
+              child: Text('Latency: $latencyLabel'),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: _PresenceAction.online, child: Text('Online')),
+            const PopupMenuItem(value: _PresenceAction.away, child: Text('Away')),
+            const PopupMenuItem(value: _PresenceAction.dnd, child: Text('Do not disturb')),
+            const PopupMenuItem(value: _PresenceAction.xa, child: Text('Extended away')),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: _PresenceAction.setStatus, child: Text('Set status message...')),
+            PopupMenuItem(
+              value: _PresenceAction.toggleSentry,
+              child: Text(sentryEnabled ? 'Disable crash reporting' : 'Enable crash reporting'),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: _PresenceAction.simulateDisconnect, child: Text('Simulate disconnect')),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              enabled: onClearCacheExit != null,
+              value: _PresenceAction.clearCacheExit,
+              child: const Text('Clear Cache & Exit'),
+            ),
+            const PopupMenuItem(value: _PresenceAction.exit, child: Text('Exit')),
+          ],
+        );
       },
-      itemBuilder: (context) => [
-        PopupMenuItem(
-          enabled: false,
-          child: Text('Session: ${isOnline ? 'online' : 'offline'}'),
-        ),
-        PopupMenuItem(
-          enabled: false,
-          child: Text('Latency: $latencyLabel'),
-        ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(value: _PresenceAction.online, child: Text('Online')),
-        const PopupMenuItem(value: _PresenceAction.away, child: Text('Away')),
-        const PopupMenuItem(value: _PresenceAction.dnd, child: Text('Do not disturb')),
-        const PopupMenuItem(value: _PresenceAction.xa, child: Text('Extended away')),
-        const PopupMenuDivider(),
-        const PopupMenuItem(value: _PresenceAction.setStatus, child: Text('Set status message...')),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          enabled: onClearCacheExit != null,
-          value: _PresenceAction.clearCacheExit,
-          child: const Text('Clear Cache & Exit'),
-        ),
-        const PopupMenuItem(value: _PresenceAction.exit, child: Text('Exit')),
-      ],
     );
   }
 }
 
-enum _PresenceAction { online, away, dnd, xa, setStatus, clearCacheExit, exit }
+enum _PresenceAction {
+  online,
+  away,
+  dnd,
+  xa,
+  setStatus,
+  toggleSentry,
+  simulateDisconnect,
+  clearCacheExit,
+  exit
+}
 
 Future<String?> _promptStatus(BuildContext context, String current) async {
   final controller = TextEditingController(text: current);
