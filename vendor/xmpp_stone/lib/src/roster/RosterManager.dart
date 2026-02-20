@@ -41,6 +41,7 @@ class RosterManager {
   }
 
   final Map<Jid, Buddy> _rosterMap = {};
+  String? _rosterVersion;
 
   late Connection _connection;
 
@@ -49,6 +50,9 @@ class RosterManager {
     var element = XmppElement();
     element.name = 'query';
     element.addAttribute(XmppAttribute('xmlns', 'jabber:iq:roster'));
+    if (_rosterVersion != null && _rosterVersion!.isNotEmpty) {
+      element.addAttribute(XmppAttribute('ver', _rosterVersion));
+    }
     iqStanza.addChild(element);
     _myUnrespondedIqStanzas[iqStanza.id!] = Tuple2(iqStanza, null);
     _connection.writeStanza(iqStanza);
@@ -56,6 +60,12 @@ class RosterManager {
 
   List<Buddy> getRoster() {
     return _rosterMap.values.toList();
+  }
+
+  String? get rosterVersion => _rosterVersion;
+
+  void setRosterVersion(String? version) {
+    _rosterVersion = version;
   }
 
   Future<IqStanzaResult> updateRosterItem(Buddy rosterItem) {
@@ -138,6 +148,7 @@ class RosterManager {
         } else if (stanza.type == IqStanzaType.SET) {
           //it is roster push event
           //send result
+          _applyRosterPush(stanza);
           _sendRosterPushResult(stanza);
         } else if (stanza.type == IqStanzaType.ERROR) {
           //todo handle error cases
@@ -163,6 +174,7 @@ class RosterManager {
   void _handleFullRosterResponse(IqStanza stanza) {
     var xmppElement = stanza.getChild('query');
     if (xmppElement != null && xmppElement.getNameSpace() == 'jabber:iq:roster') {
+      _rosterVersion = xmppElement.getAttribute('ver')?.value;
       _rosterMap.clear();
       xmppElement.children.forEach((child) {
         if (child.name == 'item') {
@@ -186,6 +198,51 @@ class RosterManager {
           _rosterMap[jid] = buddy;
         }
       });
+      _fireOnRosterListChanged();
+    }
+  }
+
+  void _applyRosterPush(IqStanza stanza) {
+    final query = stanza.getChild('query');
+    if (query == null || query.getNameSpace() != 'jabber:iq:roster') {
+      return;
+    }
+    _rosterVersion = query.getAttribute('ver')?.value ?? _rosterVersion;
+    var updated = false;
+    for (final child in query.children) {
+      if (child.name != 'item') {
+        continue;
+      }
+      final jidAttr = child.getAttribute('jid')?.value;
+      if (jidAttr == null || jidAttr.isEmpty) {
+        continue;
+      }
+      final jid = Jid.fromFullJid(jidAttr);
+      final subscription = child.getAttribute('subscription')?.value;
+      if (subscription == 'remove') {
+        if (_rosterMap.remove(jid) != null) {
+          updated = true;
+        }
+        continue;
+      }
+      final buddy = _rosterMap[jid] ?? Buddy(jid);
+      buddy.name = child.getAttribute('name')?.value;
+      final groups = <String>[];
+      child.children
+          .where((element) => element.name == 'group')
+          .forEach((groupElement) {
+        final groupName = groupElement.textValue?.trim();
+        if (groupName != null && groupName.isNotEmpty) {
+          groups.add(groupName);
+        }
+      });
+      buddy.groups = groups;
+      buddy.accountJid = _connection.fullJid;
+      buddy.subscriptionType = Buddy.typeFromString(subscription);
+      _rosterMap[jid] = buddy;
+      updated = true;
+    }
+    if (updated) {
       _fireOnRosterListChanged();
     }
   }

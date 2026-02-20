@@ -14,6 +14,7 @@ class StorageService {
   static const _saltKey = 'wimsy_salt';
   static const _accountKey = 'account';
   static const _rosterKey = 'roster';
+  static const _rosterVersionKey = 'roster_version';
   static const _messagesKey = 'messages';
   static const _roomMessagesKey = 'room_messages';
   static const _avatarMetadataKey = 'avatar_metadata';
@@ -100,6 +101,28 @@ class StorageService {
       return contacts;
     }
     return const [];
+  }
+
+  String? loadRosterVersion() {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final value = box.get(_rosterVersionKey);
+    final version = value?.toString();
+    return (version == null || version.isEmpty) ? null : version;
+  }
+
+  Future<void> storeRosterVersion(String? version) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (version == null || version.isEmpty) {
+      await box.delete(_rosterVersionKey);
+      return;
+    }
+    await box.put(_rosterVersionKey, version);
   }
 
   Future<void> storeRoster(List<ContactEntry> roster) async {
@@ -243,6 +266,7 @@ class StorageService {
       return;
     }
     await box.put(_rosterKey, const <dynamic>[]);
+    await box.delete(_rosterVersionKey);
   }
 
   Future<void> clearBookmarks() async {

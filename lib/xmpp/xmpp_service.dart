@@ -116,6 +116,7 @@ class XmppService extends ChangeNotifier {
   bool _globalBackfillInProgress = false;
   Timer? _globalBackfillTimer;
   StorageService? _storage;
+  String? _rosterVersion;
   PepManager? _pepManager;
   PepCapsManager? _pepCapsManager;
   BookmarksManager? _bookmarksManager;
@@ -152,6 +153,7 @@ class XmppService extends ChangeNotifier {
     _storage = storage;
     _seedVcardAvatars(storage.loadVcardAvatars());
     _seedVcardAvatarState(storage.loadVcardAvatarState());
+    _rosterVersion = storage.loadRosterVersion();
   }
 
   List<ChatMessage> messagesFor(String bareJid) {
@@ -584,6 +586,7 @@ class XmppService extends ChangeNotifier {
     _lastSeenAt.clear();
     _serverNotFound.clear();
     _chatStates.clear();
+    _rosterVersion = null;
     _pepManager?.clearCache();
     _bookmarksManager?.clearCache();
     _vcardAvatarBytes.clear();
@@ -592,6 +595,7 @@ class XmppService extends ChangeNotifier {
     _roomMessagePersistor?.call('', const []);
     _rosterPersistor?.call(const []);
     _bookmarkPersistor?.call(const []);
+    _storage?.storeRosterVersion(null);
     notifyListeners();
   }
 
@@ -958,6 +962,7 @@ class XmppService extends ChangeNotifier {
     }
 
     final rosterManager = RosterManager.getInstance(connection);
+    rosterManager.setRosterVersion(_rosterVersion);
 
     _rosterSubscription?.cancel();
     _rosterSubscription = rosterManager.rosterStream.listen((buddies) {
@@ -973,6 +978,11 @@ class XmppService extends ChangeNotifier {
           );
           _pepManager?.requestMetadataIfMissing(jid);
         }
+      }
+      final nextVersion = rosterManager.rosterVersion;
+      if (nextVersion != null && nextVersion != _rosterVersion) {
+        _rosterVersion = nextVersion;
+        _storage?.storeRosterVersion(nextVersion);
       }
     });
 
@@ -2167,6 +2177,7 @@ class XmppService extends ChangeNotifier {
       _seededMessageJids.clear();
       _roomMessages.clear();
       _seededRoomMessageJids.clear();
+      _rosterVersion = null;
     }
     _presenceByBareJid.clear();
     _roomMessages.clear();
