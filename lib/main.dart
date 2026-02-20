@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -1815,6 +1816,7 @@ class _MessageBubble extends StatelessWidget {
     final nameColor = message.outgoing
         ? textColor.withValues(alpha: 0.85)
         : xep0392ColorForLabel(senderName);
+    final oobImage = _buildOobImage(context);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -1852,19 +1854,24 @@ class _MessageBubble extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 6),
-                SelectableText.rich(
-                  TextSpan(
-                    style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
-                    children: _linkifyText(
-                      message.body,
-                      theme.textTheme.bodyMedium?.copyWith(color: textColor),
-                      theme.textTheme.bodyMedium?.copyWith(
-                        color: linkColor,
-                        decoration: TextDecoration.underline,
+                if (oobImage != null) ...[
+                  oobImage,
+                  const SizedBox(height: 8),
+                ],
+                if (_shouldShowBody(message.body, message.oobUrl))
+                  SelectableText.rich(
+                    TextSpan(
+                      style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
+                      children: _linkifyText(
+                        message.body,
+                        theme.textTheme.bodyMedium?.copyWith(color: textColor),
+                        theme.textTheme.bodyMedium?.copyWith(
+                          color: linkColor,
+                          decoration: TextDecoration.underline,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1947,6 +1954,82 @@ class _MessageBubble extends StatelessWidget {
       result = result.substring(0, result.length - 1);
     }
     return result;
+  }
+
+  bool _shouldShowBody(String body, String? oobUrl) {
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    final rawOob = oobUrl?.trim();
+    if (rawOob == null || rawOob.isEmpty) {
+      return true;
+    }
+    if (trimmed.contains(RegExp(r'\s'))) {
+      return true;
+    }
+    return _normalizeUrl(trimmed) != _normalizeUrl(rawOob);
+  }
+
+  Widget? _buildOobImage(BuildContext context) {
+    final url = _imageUrlForMessage(message.oobUrl);
+    if (url == null) {
+      return null;
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 260.0;
+        final cap = math.min(maxWidth, 280.0);
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: cap, maxHeight: cap),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () async {
+                  final uri = Uri.tryParse(url);
+                  if (uri == null) {
+                    return;
+                  }
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                },
+                child: Image.network(
+                  url,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.medium,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String? _imageUrlForMessage(String? oobUrl) {
+    final raw = oobUrl?.trim();
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    if (!_isImageUrl(raw)) {
+      return null;
+    }
+    return raw;
+  }
+
+  bool _isImageUrl(String url) {
+    final lower = url.toLowerCase();
+    final match = RegExp(r'\.(png|jpe?g|gif|webp|bmp)(\?|#|$)').hasMatch(lower);
+    if (match) {
+      return true;
+    }
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      return false;
+    }
+    final path = uri.path.toLowerCase();
+    return RegExp(r'\.(png|jpe?g|gif|webp|bmp)$').hasMatch(path);
   }
 }
 

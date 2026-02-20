@@ -147,6 +147,22 @@ String? _extractForwardedSubject(XmppElement? message) {
   return message?.getChild('subject')?.textValue;
 }
 
+String? _extractOobUrl(XmppElement? message) {
+  if (message == null) {
+    return null;
+  }
+  for (final child in message.children) {
+    if (child.name != 'x' || child.getAttribute('xmlns')?.value != 'jabber:x:oob') {
+      continue;
+    }
+    final url = child.getChild('url')?.textValue?.trim();
+    if (url != null && url.isNotEmpty) {
+      return url;
+    }
+  }
+  return null;
+}
+
 String? _extractStanzaId(XmppElement? message, String roomJid) {
   if (message == null) {
     return null;
@@ -217,13 +233,14 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   final roomJid = from.userAtDomain;
   final nick = from.resource;
   final body = _extractForwardedBody(forwardedMessage) ?? stanza.body ?? '';
+  final oobUrl = _extractOobUrl(forwardedMessage) ?? _extractOobUrl(stanza);
   final subject = _extractForwardedSubject(forwardedMessage) ?? stanza.subject;
   if (subject != null && subject.isNotEmpty && body.trim().isEmpty) {
     return MucParsedGroupMessage.subject(
       MucSubjectUpdate(roomJid: roomJid, subject: subject),
     );
   }
-  if (body.trim().isEmpty) {
+  if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
     return null;
   }
   final timestamp = _extractDelayedTimestamp(forwarded) ??
@@ -239,6 +256,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       roomJid: roomJid,
       nick: nick ?? '',
       body: body,
+      oobUrl: oobUrl,
       mamResultId: mamResultId,
       messageId: messageIdAttr,
       stanzaId: forwardedStanzaId ?? directStanzaId ?? stanza.id,
@@ -264,6 +282,7 @@ class MucMessage {
     this.mamResultId,
     this.messageId,
     this.stanzaId,
+    this.oobUrl,
   });
 
   final String roomJid;
@@ -273,6 +292,7 @@ class MucMessage {
   final String? mamResultId;
   final String? messageId;
   final String? stanzaId;
+  final String? oobUrl;
 }
 
 class MucPresenceUpdate {

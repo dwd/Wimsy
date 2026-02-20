@@ -1095,6 +1095,7 @@ class XmppService extends ChangeNotifier {
         roomJid: message.roomJid,
         from: message.nick,
         body: message.body,
+        oobUrl: message.oobUrl,
         outgoing: false,
         timestamp: message.timestamp,
         messageId: message.messageId ?? message.stanzaId,
@@ -1149,7 +1150,8 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final body = stanza.body ?? '';
-    if (body.trim().isEmpty) {
+    final oobUrl = _extractOobUrlFromStanza(stanza);
+    if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
       return;
     }
     if (_isArchivedStanza(stanza)) {
@@ -1200,6 +1202,40 @@ class XmppService extends ChangeNotifier {
     for (final child in stanza.children) {
       if (child.name == name && child.getAttribute('xmlns')?.value == xmlns) {
         return child;
+      }
+    }
+    return null;
+  }
+
+  String? _extractOobUrlFromStanza(XmppElement stanza) {
+    final candidates = <XmppElement>[stanza];
+    for (final child in stanza.children) {
+      if (child.name != 'result' && child.name != 'sent' && child.name != 'received') {
+        continue;
+      }
+      final forwarded = child.getChild('forwarded');
+      final message = forwarded?.getChild('message');
+      if (message != null) {
+        candidates.add(message);
+      }
+    }
+    final directForwarded = stanza.getChild('forwarded');
+    final forwardedMessage = directForwarded?.getChild('message');
+    if (forwardedMessage != null) {
+      candidates.add(forwardedMessage);
+    }
+    for (final candidate in candidates) {
+      for (final child in candidate.children) {
+        if (child.name != 'x') {
+          continue;
+        }
+        if (child.getAttribute('xmlns')?.value != 'jabber:x:oob') {
+          continue;
+        }
+        final url = child.getChild('url')?.textValue?.trim();
+        if (url != null && url.isNotEmpty) {
+          return url;
+        }
       }
     }
     return null;
@@ -1617,7 +1653,8 @@ class XmppService extends ChangeNotifier {
         final from = message.from?.userAtDomain ?? 'unknown';
         final to = message.to?.userAtDomain ?? '';
         final body = message.text ?? '';
-        if (body.trim().isEmpty) {
+        final oobUrl = _extractOobUrlFromStanza(message.messageStanza);
+        if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
           continue;
         }
         final outgoing = from == (_currentUserBareJid ?? '');
@@ -1626,6 +1663,7 @@ class XmppService extends ChangeNotifier {
           from: from,
           to: to,
           body: body,
+          oobUrl: oobUrl,
           outgoing: outgoing,
           timestamp: message.time,
           messageId: message.messageId,
@@ -1639,7 +1677,8 @@ class XmppService extends ChangeNotifier {
       final from = message.from?.userAtDomain ?? 'unknown';
       final to = message.to?.userAtDomain ?? '';
       final body = message.text ?? '';
-      if (body.trim().isEmpty) {
+      final oobUrl = _extractOobUrlFromStanza(message.messageStanza);
+      if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
         return;
       }
       final outgoing = from == (_currentUserBareJid ?? '');
@@ -1648,6 +1687,7 @@ class XmppService extends ChangeNotifier {
         from: from,
         to: to,
         body: body,
+        oobUrl: oobUrl,
         outgoing: outgoing,
         timestamp: message.time,
         messageId: message.messageId,
@@ -1674,6 +1714,7 @@ class XmppService extends ChangeNotifier {
     String? messageId,
     String? mamId,
     String? stanzaId,
+    String? oobUrl,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -1687,7 +1728,10 @@ class XmppService extends ChangeNotifier {
         final nextMamId = (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId;
         final nextStanzaId =
             (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId;
-        if (nextMamId != existing.mamId || nextStanzaId != existing.stanzaId) {
+        final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
+        if (nextMamId != existing.mamId ||
+            nextStanzaId != existing.stanzaId ||
+            nextOobUrl != existing.oobUrl) {
           list[existingIndex] = ChatMessage(
             from: existing.from,
             to: existing.to,
@@ -1697,6 +1741,7 @@ class XmppService extends ChangeNotifier {
             messageId: existing.messageId,
             mamId: nextMamId,
             stanzaId: nextStanzaId,
+            oobUrl: nextOobUrl,
             acked: existing.acked,
             receiptReceived: existing.receiptReceived,
             displayed: existing.displayed,
@@ -1724,6 +1769,7 @@ class XmppService extends ChangeNotifier {
         from: from,
         to: to,
         body: body,
+        oobUrl: oobUrl,
         outgoing: outgoing,
         timestamp: timestamp,
         messageId: messageId,
@@ -1750,6 +1796,7 @@ class XmppService extends ChangeNotifier {
           messageId: messageId,
           mamId: mamId,
           stanzaId: stanzaId,
+          oobUrl: oobUrl,
         ),
       );
       _mamPrependOffset[normalized] = prependOffset + 1;
@@ -1769,6 +1816,7 @@ class XmppService extends ChangeNotifier {
       messageId: messageId,
       mamId: mamId,
       stanzaId: stanzaId,
+      oobUrl: oobUrl,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
@@ -1790,6 +1838,7 @@ class XmppService extends ChangeNotifier {
     String? messageId,
     String? mamId,
     String? stanzaId,
+    String? oobUrl,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
@@ -1804,10 +1853,12 @@ class XmppService extends ChangeNotifier {
         final nextReceiptReceived =
             (!outgoing && existing.outgoing) ? true : existing.receiptReceived;
         final nextTimestamp = (!outgoing && existing.outgoing) ? timestamp : existing.timestamp;
+        final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextReceiptReceived != existing.receiptReceived ||
-            nextTimestamp != existing.timestamp) {
+            nextTimestamp != existing.timestamp ||
+            nextOobUrl != existing.oobUrl) {
           final updated = ChatMessage(
             from: existing.from,
             to: existing.to,
@@ -1817,6 +1868,7 @@ class XmppService extends ChangeNotifier {
             messageId: existing.messageId,
             mamId: nextMamId,
             stanzaId: nextStanzaId,
+            oobUrl: nextOobUrl,
             acked: existing.acked,
             receiptReceived: nextReceiptReceived,
             displayed: existing.displayed,
@@ -1849,6 +1901,7 @@ class XmppService extends ChangeNotifier {
           messageId: messageId,
           mamId: mamId,
           stanzaId: stanzaId,
+          oobUrl: oobUrl,
         ),
       );
       _mamPrependOffset[normalized] = prependOffset + 1;
@@ -1868,6 +1921,7 @@ class XmppService extends ChangeNotifier {
       messageId: messageId,
       mamId: mamId,
       stanzaId: stanzaId,
+      oobUrl: oobUrl,
     );
     _insertMessageOrdered(list, newMessage);
     notifyListeners();
@@ -1952,6 +2006,7 @@ class XmppService extends ChangeNotifier {
         messageId: existing.messageId,
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
+        oobUrl: existing.oobUrl,
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
@@ -1997,6 +2052,7 @@ class XmppService extends ChangeNotifier {
         messageId: existing.messageId,
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
+        oobUrl: existing.oobUrl,
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
@@ -2092,6 +2148,7 @@ class XmppService extends ChangeNotifier {
     required String from,
     required String to,
     required String body,
+    String? oobUrl,
     required bool outgoing,
     required DateTime timestamp,
     String? messageId,
@@ -2114,6 +2171,7 @@ class XmppService extends ChangeNotifier {
           messageId: existing.messageId,
           mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
           stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
+          oobUrl: existing.oobUrl,
           acked: existing.acked,
           receiptReceived: existing.receiptReceived,
           displayed: existing.displayed,
@@ -2121,6 +2179,7 @@ class XmppService extends ChangeNotifier {
         return true;
       }
       if (existing.body != body ||
+          (existing.oobUrl ?? '') != (oobUrl ?? '') ||
           existing.from != from ||
           existing.to != to ||
           existing.outgoing != outgoing) {
@@ -2141,6 +2200,7 @@ class XmppService extends ChangeNotifier {
         timestamp: existing.timestamp,
         mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
         stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
+        oobUrl: existing.oobUrl,
         acked: existing.acked,
         receiptReceived: existing.receiptReceived,
         displayed: existing.displayed,

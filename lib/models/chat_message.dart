@@ -8,6 +8,7 @@ class ChatMessage {
     this.messageId,
     this.mamId,
     this.stanzaId,
+    this.oobUrl,
     this.acked = false,
     this.receiptReceived = false,
     this.displayed = false,
@@ -21,6 +22,7 @@ class ChatMessage {
   final String? messageId;
   final String? mamId;
   final String? stanzaId;
+  final String? oobUrl;
   final bool acked;
   final bool receiptReceived;
   final bool displayed;
@@ -35,6 +37,7 @@ class ChatMessage {
       'messageId': messageId,
       'mamId': mamId,
       'stanzaId': stanzaId,
+      'oobUrl': oobUrl,
       'acked': acked,
       'receiptReceived': receiptReceived,
       'displayed': displayed,
@@ -53,10 +56,13 @@ class ChatMessage {
     final messageId = map['messageId']?.toString();
     final mamId = map['mamId']?.toString();
     final stanzaId = map['stanzaId']?.toString();
+    final oobUrl = map['oobUrl']?.toString();
     final acked = map['acked'] == true;
     final receiptReceived = map['receiptReceived'] == true;
     final displayed = map['displayed'] == true;
-    if (from.isEmpty || to.isEmpty || body.isEmpty || ts.isEmpty) {
+    final hasBody = body.isNotEmpty;
+    final hasOobUrl = oobUrl != null && oobUrl.isNotEmpty;
+    if (from.isEmpty || to.isEmpty || ts.isEmpty || (!hasBody && !hasOobUrl)) {
       return null;
     }
     final timestamp = DateTime.tryParse(ts);
@@ -72,6 +78,7 @@ class ChatMessage {
       messageId: messageId,
       mamId: mamId,
       stanzaId: stanzaId,
+      oobUrl: oobUrl,
       acked: acked,
       receiptReceived: receiptReceived,
       displayed: displayed,
