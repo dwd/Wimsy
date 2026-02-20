@@ -146,6 +146,23 @@ class ServiceDiscoveryNegotiator extends Negotiator {
     var query = XmppElement();
     query.name = 'query';
     query.addAttribute(XmppAttribute('xmlns', NAMESPACE_DISCO_INFO));
+    for (final identity in SERVICE_DISCOVERY_IDENTITIES) {
+      var identityElement = XmppElement();
+      identityElement.name = 'identity';
+      identityElement.addAttribute(
+          XmppAttribute('category', identity['category'] ?? ''));
+      identityElement
+          .addAttribute(XmppAttribute('type', identity['type'] ?? ''));
+      final name = identity['name'];
+      if (name != null && name.isNotEmpty) {
+        identityElement.addAttribute(XmppAttribute('name', name));
+      }
+      final lang = identity['lang'];
+      if (lang != null && lang.isNotEmpty) {
+        identityElement.addAttribute(XmppAttribute('xml:lang', lang));
+      }
+      query.addChild(identityElement);
+    }
     SERVICE_DISCOVERY_SUPPORT_LIST.forEach((featureName) {
       var featureElement = XmppElement();
       featureElement.name = 'feature';

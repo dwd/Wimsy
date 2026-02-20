@@ -20,6 +20,7 @@ export 'src/elements/nonzas/Nonza.dart';
 export 'src/extensions/ping/PingManager.dart';
 export 'src/extensions/vcard_temp/VCard.dart';
 export 'src/extensions/vcard_temp/VCardManager.dart';
+export 'src/features/servicediscovery/ServiceDiscoverySupport.dart';
 export 'src/features/message_archive/MessageArchiveManager.dart';
 export 'src/features/privacy_lists/privacy_lists_manager.dart';
 export 'src/logger/Log.dart';

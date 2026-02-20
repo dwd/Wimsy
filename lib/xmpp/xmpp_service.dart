@@ -109,11 +109,6 @@ class XmppService extends ChangeNotifier {
   bool _carbonsEnabled = false;
   static const String _capsNode = 'https://wimsy.im/caps';
   static const String _capsHash = 'sha-1';
-  static const List<String> _capsFeatures = [
-    'http://jabber.org/protocol/chatstates',
-    'urn:xmpp:avatar:metadata+notify',
-    'urn:xmpp:mds:displayed:0+notify',
-  ];
   String? _capsVer;
   bool _csiInactive = false;
   static const Duration _csiIdleDelay = Duration(minutes: 1);
@@ -2512,8 +2507,35 @@ class XmppService extends ChangeNotifier {
     if (cached != null) {
       return cached;
     }
-    final features = List<String>.from(_capsFeatures)..sort();
     final buffer = StringBuffer();
+    final identities = SERVICE_DISCOVERY_IDENTITIES.map((identity) {
+      return [
+        identity['category'] ?? '',
+        identity['type'] ?? '',
+        identity['lang'] ?? '',
+        identity['name'] ?? '',
+      ];
+    }).toList()
+      ..sort((a, b) {
+        for (var i = 0; i < 4; i += 1) {
+          final cmp = a[i].compareTo(b[i]);
+          if (cmp != 0) {
+            return cmp;
+          }
+        }
+        return 0;
+      });
+    for (final identity in identities) {
+      buffer.write(identity[0]);
+      buffer.write('/');
+      buffer.write(identity[1]);
+      buffer.write('/');
+      buffer.write(identity[2]);
+      buffer.write('/');
+      buffer.write(identity[3]);
+      buffer.write('<');
+    }
+    final features = List<String>.from(SERVICE_DISCOVERY_SUPPORT_LIST)..sort();
     for (final feature in features) {
       buffer.write(feature);
       buffer.write('<');
