@@ -257,6 +257,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       nick: nick ?? '',
       body: body,
       oobUrl: oobUrl,
+      rawXml: stanza.buildXmlString(),
       mamResultId: mamResultId,
       messageId: messageIdAttr,
       stanzaId: forwardedStanzaId ?? directStanzaId ?? stanza.id,
@@ -283,6 +284,7 @@ class MucMessage {
     this.messageId,
     this.stanzaId,
     this.oobUrl,
+    this.rawXml,
   });
 
   final String roomJid;
@@ -293,6 +295,7 @@ class MucMessage {
   final String? messageId;
   final String? stanzaId;
   final String? oobUrl;
+  final String? rawXml;
 }
 
 class MucPresenceUpdate {

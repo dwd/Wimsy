@@ -9,6 +9,7 @@ class ChatMessage {
     this.mamId,
     this.stanzaId,
     this.oobUrl,
+    this.rawXml,
     this.acked = false,
     this.receiptReceived = false,
     this.displayed = false,
@@ -23,6 +24,7 @@ class ChatMessage {
   final String? mamId;
   final String? stanzaId;
   final String? oobUrl;
+  final String? rawXml;
   final bool acked;
   final bool receiptReceived;
   final bool displayed;
@@ -38,6 +40,7 @@ class ChatMessage {
       'mamId': mamId,
       'stanzaId': stanzaId,
       'oobUrl': oobUrl,
+      'rawXml': rawXml,
       'acked': acked,
       'receiptReceived': receiptReceived,
       'displayed': displayed,
@@ -57,12 +60,14 @@ class ChatMessage {
     final mamId = map['mamId']?.toString();
     final stanzaId = map['stanzaId']?.toString();
     final oobUrl = map['oobUrl']?.toString();
+    final rawXml = map['rawXml']?.toString();
     final acked = map['acked'] == true;
     final receiptReceived = map['receiptReceived'] == true;
     final displayed = map['displayed'] == true;
     final hasBody = body.isNotEmpty;
     final hasOobUrl = oobUrl != null && oobUrl.isNotEmpty;
-    if (from.isEmpty || to.isEmpty || ts.isEmpty || (!hasBody && !hasOobUrl)) {
+    final hasRawXml = rawXml != null && rawXml.isNotEmpty;
+    if (from.isEmpty || to.isEmpty || ts.isEmpty || !hasRawXml || (!hasBody && !hasOobUrl)) {
       return null;
     }
     final timestamp = DateTime.tryParse(ts);
@@ -79,6 +84,7 @@ class ChatMessage {
       mamId: mamId,
       stanzaId: stanzaId,
       oobUrl: oobUrl,
+      rawXml: rawXml,
       acked: acked,
       receiptReceived: receiptReceived,
       displayed: displayed,

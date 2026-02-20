@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -23,6 +24,7 @@ class StorageService {
   static const _vcardAvatarStateKey = 'vcard_avatar_state';
   static const _bookmarksKey = 'bookmarks';
   static const _displayedSyncKey = 'displayed_sync';
+  static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   final SecureStore _secureStorage = createSecureStore();
   Box<dynamic>? _box;
@@ -168,30 +170,7 @@ class StorageService {
     if (box == null) {
       return const {};
     }
-    final data = box.get(_messagesKey, defaultValue: const <String, dynamic>{});
-    if (data is Map) {
-      final result = <String, List<ChatMessage>>{};
-      for (final entry in data.entries) {
-        final key = entry.key.toString();
-        final value = entry.value;
-        if (value is List) {
-          final messages = <ChatMessage>[];
-          for (final raw in value) {
-            if (raw is Map) {
-              final message = ChatMessage.fromMap(Map<String, dynamic>.from(raw));
-              if (message != null) {
-                messages.add(message);
-              }
-            }
-          }
-          if (messages.isNotEmpty) {
-            result[key] = messages;
-          }
-        }
-      }
-      return result;
-    }
-    return const {};
+    return _readMessageMap(_messagesKey);
   }
 
   Map<String, List<ChatMessage>> loadRoomMessages() {
@@ -199,30 +178,7 @@ class StorageService {
     if (box == null) {
       return const {};
     }
-    final data = box.get(_roomMessagesKey, defaultValue: const <String, dynamic>{});
-    if (data is Map) {
-      final result = <String, List<ChatMessage>>{};
-      for (final entry in data.entries) {
-        final key = entry.key.toString();
-        final value = entry.value;
-        if (value is List) {
-          final messages = <ChatMessage>[];
-          for (final raw in value) {
-            if (raw is Map) {
-              final message = ChatMessage.fromMap(Map<String, dynamic>.from(raw));
-              if (message != null) {
-                messages.add(message);
-              }
-            }
-          }
-          if (messages.isNotEmpty) {
-            result[key] = messages;
-          }
-        }
-      }
-      return result;
-    }
-    return const {};
+    return _readMessageMap(_roomMessagesKey);
   }
 
   Future<void> storeMessagesForJid(String bareJid, List<ChatMessage> messages) async {
@@ -234,13 +190,12 @@ class StorageService {
       await box.put(_messagesKey, <String, dynamic>{});
       return;
     }
-    final existing = box.get(_messagesKey, defaultValue: <String, dynamic>{});
-    final next = <String, dynamic>{};
-    if (existing is Map) {
-      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
-    }
-    next[bareJid] = messages.map((entry) => entry.toMap()).toList();
-    await box.put(_messagesKey, next);
+    final nextMessages = _readMessageMap(_messagesKey);
+    final nextRoomMessages = _readMessageMap(_roomMessagesKey);
+    nextMessages[bareJid] = List<ChatMessage>.from(messages);
+    _enforceMessageCacheLimit(nextMessages, nextRoomMessages);
+    await box.put(_messagesKey, _encodeMessageMap(nextMessages));
+    await box.put(_roomMessagesKey, _encodeMessageMap(nextRoomMessages));
   }
 
   Future<void> storeRoomMessagesForJid(String roomJid, List<ChatMessage> messages) async {
@@ -252,13 +207,120 @@ class StorageService {
       await box.put(_roomMessagesKey, <String, dynamic>{});
       return;
     }
-    final existing = box.get(_roomMessagesKey, defaultValue: <String, dynamic>{});
-    final next = <String, dynamic>{};
-    if (existing is Map) {
-      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+    final nextMessages = _readMessageMap(_messagesKey);
+    final nextRoomMessages = _readMessageMap(_roomMessagesKey);
+    nextRoomMessages[roomJid] = List<ChatMessage>.from(messages);
+    _enforceMessageCacheLimit(nextMessages, nextRoomMessages);
+    await box.put(_messagesKey, _encodeMessageMap(nextMessages));
+    await box.put(_roomMessagesKey, _encodeMessageMap(nextRoomMessages));
+  }
+
+  Map<String, List<ChatMessage>> _readMessageMap(String key) {
+    final box = _box;
+    if (box == null) {
+      return const {};
     }
-    next[roomJid] = messages.map((entry) => entry.toMap()).toList();
-    await box.put(_roomMessagesKey, next);
+    final data = box.get(key, defaultValue: const <String, dynamic>{});
+    if (data is! Map) {
+      return const {};
+    }
+    final result = <String, List<ChatMessage>>{};
+    var invalidCache = false;
+    for (final entry in data.entries) {
+      final mapKey = entry.key.toString();
+      final value = entry.value;
+      if (value is! List) {
+        continue;
+      }
+      final messages = <ChatMessage>[];
+      for (final raw in value) {
+        if (raw is! Map) {
+          continue;
+        }
+        final rawMap = Map<String, dynamic>.from(raw);
+        final rawXml = rawMap['rawXml']?.toString() ?? '';
+        if (rawXml.isEmpty) {
+          invalidCache = true;
+          continue;
+        }
+        final message = ChatMessage.fromMap(rawMap);
+        if (message != null) {
+          messages.add(message);
+        }
+      }
+      if (messages.isNotEmpty) {
+        result[mapKey] = messages;
+      }
+    }
+    if (invalidCache) {
+      _clearMessageCaches();
+      return const {};
+    }
+    return result;
+  }
+
+  Map<String, dynamic> _encodeMessageMap(Map<String, List<ChatMessage>> messages) {
+    final result = <String, dynamic>{};
+    for (final entry in messages.entries) {
+      result[entry.key] = entry.value.map((message) => message.toMap()).toList();
+    }
+    return result;
+  }
+
+  void _enforceMessageCacheLimit(
+    Map<String, List<ChatMessage>> messages,
+    Map<String, List<ChatMessage>> roomMessages,
+  ) {
+    var totalBytes = _totalMessageBytes(messages) + _totalMessageBytes(roomMessages);
+    if (totalBytes <= _maxCachedMessageBytes) {
+      return;
+    }
+    final all = <_CachedMessageRef>[];
+    for (final entry in messages.entries) {
+      for (final message in entry.value) {
+        all.add(_CachedMessageRef(entry.value, message));
+      }
+    }
+    for (final entry in roomMessages.entries) {
+      for (final message in entry.value) {
+        all.add(_CachedMessageRef(entry.value, message));
+      }
+    }
+    all.sort((a, b) => a.message.timestamp.compareTo(b.message.timestamp));
+    var index = 0;
+    while (totalBytes > _maxCachedMessageBytes && index < all.length) {
+      final ref = all[index];
+      if (ref.list.remove(ref.message)) {
+        totalBytes -= _messageBytes(ref.message);
+      }
+      index += 1;
+    }
+    messages.removeWhere((_, list) => list.isEmpty);
+    roomMessages.removeWhere((_, list) => list.isEmpty);
+  }
+
+  int _totalMessageBytes(Map<String, List<ChatMessage>> messages) {
+    var total = 0;
+    for (final list in messages.values) {
+      for (final message in list) {
+        total += _messageBytes(message);
+      }
+    }
+    return total;
+  }
+
+  int _messageBytes(ChatMessage message) {
+    final raw = message.rawXml ?? '';
+    return utf8.encode(raw).length;
+  }
+
+  void _clearMessageCaches() {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    unawaited(box.put(_messagesKey, <String, dynamic>{}));
+    unawaited(box.put(_roomMessagesKey, <String, dynamic>{}));
   }
 
   Future<void> clearRoster() async {
@@ -503,4 +565,11 @@ class StorageService {
     final random = Random.secure();
     return List<int>.generate(length, (_) => random.nextInt(256));
   }
+}
+
+class _CachedMessageRef {
+  _CachedMessageRef(this.list, this.message);
+
+  final List<ChatMessage> list;
+  final ChatMessage message;
 }
