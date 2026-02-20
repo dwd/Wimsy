@@ -117,6 +117,8 @@ class XmppService extends ChangeNotifier {
   Timer? _globalBackfillTimer;
   StorageService? _storage;
   String? _rosterVersion;
+  final Map<String, String> _displayedStanzaIdByChat = {};
+  final Map<String, DateTime> _displayedAtByChat = {};
   PepManager? _pepManager;
   PepCapsManager? _pepCapsManager;
   BookmarksManager? _bookmarksManager;
@@ -154,6 +156,9 @@ class XmppService extends ChangeNotifier {
     _seedVcardAvatars(storage.loadVcardAvatars());
     _seedVcardAvatarState(storage.loadVcardAvatarState());
     _rosterVersion = storage.loadRosterVersion();
+    _displayedStanzaIdByChat
+      ..clear()
+      ..addAll(storage.loadDisplayedSync());
   }
 
   List<ChatMessage> messagesFor(String bareJid) {
@@ -162,6 +167,22 @@ class XmppService extends ChangeNotifier {
 
   List<ChatMessage> roomMessagesFor(String roomJid) {
     return List.unmodifiable(_roomMessages[_bareJid(roomJid)] ?? const []);
+  }
+
+  DateTime? displayedAtFor(String bareJid) {
+    return _displayedAtByChat[_bareJid(bareJid)];
+  }
+
+  bool isMessageUnseen(String bareJid, ChatMessage message) {
+    if (message.outgoing) {
+      return false;
+    }
+    final normalized = _bareJid(bareJid);
+    final displayedAt = _displayedAtByChat[normalized];
+    if (displayedAt == null) {
+      return true;
+    }
+    return message.timestamp.isAfter(displayedAt);
   }
 
   String displayNameFor(String bareJid) {
@@ -536,6 +557,7 @@ class XmppService extends ChangeNotifier {
           _setupPep();
           _setupBookmarks();
           _setupPrivacyLists();
+          _setupDisplayedSync();
           _primeMamSync();
           _sendInitialPresence();
           _applyClientState();
@@ -596,6 +618,9 @@ class XmppService extends ChangeNotifier {
     _rosterPersistor?.call(const []);
     _bookmarkPersistor?.call(const []);
     _storage?.storeRosterVersion(null);
+    _displayedStanzaIdByChat.clear();
+    _displayedAtByChat.clear();
+    _storage?.clearDisplayedSync();
     notifyListeners();
   }
 
@@ -605,9 +630,11 @@ class XmppService extends ChangeNotifier {
       setMyChatState(bareJid, ChatState.ACTIVE);
       _requestMamBackfill(bareJid);
       _sendDisplayedForChat(bareJid);
+      _publishDisplayedState(bareJid);
     }
     if (bareJid != null && isBookmark(bareJid)) {
       _ensureRoom(_bareJid(bareJid));
+      _publishDisplayedState(bareJid);
     }
     notifyListeners();
   }
@@ -724,6 +751,7 @@ class XmppService extends ChangeNotifier {
       _messages[bareJid] = List<ChatMessage>.from(entry.value);
       _seededMessageJids.add(bareJid);
       _ensureContact(bareJid);
+      _applyDisplayedStateForChat(bareJid);
     }
     notifyListeners();
   }
@@ -734,6 +762,7 @@ class XmppService extends ChangeNotifier {
       _roomMessages[roomJid] = List<ChatMessage>.from(entry.value);
       _seededRoomMessageJids.add(roomJid);
       _ensureRoom(roomJid);
+      _applyDisplayedStateForChat(roomJid);
     }
     notifyListeners();
   }
@@ -1282,6 +1311,7 @@ class XmppService extends ChangeNotifier {
       if (stanza == null) {
         return;
       }
+      _handleDisplayedSyncStanza(stanza);
       _pepManager?.handleStanza(stanza);
       _pepCapsManager?.handleStanza(stanza);
       _bookmarksManager?.handleStanza(stanza);
@@ -1310,6 +1340,123 @@ class XmppService extends ChangeNotifier {
     );
     _bookmarksManager?.seedBookmarks(_bookmarks);
     _bookmarksManager?.requestBookmarks();
+  }
+
+  void _setupDisplayedSync() {
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(_currentUserBareJid!);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    final items = XmppElement()..name = 'items';
+    items.addAttribute(XmppAttribute('node', 'urn:xmpp:mds:displayed:0'));
+    pubsub.addChild(items);
+    iqStanza.addChild(pubsub);
+    connection.writeStanza(iqStanza);
+  }
+
+  void _handleDisplayedSyncStanza(AbstractStanza stanza) {
+    if (stanza is MessageStanza) {
+      _handleDisplayedSyncEvent(stanza);
+      return;
+    }
+    if (stanza is IqStanza) {
+      _handleDisplayedSyncResult(stanza);
+    }
+  }
+
+  void _handleDisplayedSyncEvent(MessageStanza stanza) {
+    final event = stanza.children.firstWhere(
+      (child) => child.name == 'event' && child.getAttribute('xmlns')?.value == 'http://jabber.org/protocol/pubsub#event',
+      orElse: () => XmppElement(),
+    );
+    if (event.name != 'event') {
+      return;
+    }
+    final items = event.getChild('items');
+    if (items == null || items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
+      return;
+    }
+    _applyDisplayedSyncItems(items);
+  }
+
+  void _handleDisplayedSyncResult(IqStanza stanza) {
+    if (stanza.type != IqStanzaType.RESULT) {
+      return;
+    }
+    final pubsub = stanza.getChild('pubsub');
+    if (pubsub == null || pubsub.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/pubsub') {
+      return;
+    }
+    final items = pubsub.getChild('items');
+    if (items == null || items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
+      return;
+    }
+    _applyDisplayedSyncItems(items);
+  }
+
+  void _applyDisplayedSyncItems(XmppElement items) {
+    var updated = false;
+    for (final item in items.children.where((child) => child.name == 'item')) {
+      final id = item.getAttribute('id')?.value?.trim() ?? '';
+      if (id.isEmpty) {
+        continue;
+      }
+      final payload = item.getChild('displayed');
+      if (payload == null ||
+          payload.getAttribute('xmlns')?.value != 'urn:xmpp:mds:displayed:0') {
+        continue;
+      }
+      final stanzaIdElement = payload.getChild('stanza-id');
+      final stanzaId = stanzaIdElement?.getAttribute('id')?.value?.trim() ?? '';
+      if (stanzaId.isEmpty) {
+        continue;
+      }
+      if (_displayedStanzaIdByChat[id] == stanzaId) {
+        continue;
+      }
+      _displayedStanzaIdByChat[id] = stanzaId;
+      if (_applyDisplayedStateForChat(id)) {
+        updated = true;
+      }
+    }
+    if (updated) {
+      _storage?.storeDisplayedSync(Map<String, String>.from(_displayedStanzaIdByChat));
+      notifyListeners();
+    }
+  }
+
+  bool _applyDisplayedStateForChat(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    final stanzaId = _displayedStanzaIdByChat[normalized];
+    if (stanzaId == null || stanzaId.isEmpty) {
+      return false;
+    }
+    final list = isBookmark(normalized)
+        ? _roomMessages[normalized]
+        : _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    ChatMessage? matched;
+    for (final message in list) {
+      if (message.stanzaId == stanzaId) {
+        matched = message;
+      }
+    }
+    if (matched == null) {
+      return false;
+    }
+    final existing = _displayedAtByChat[normalized];
+    if (existing != null && !matched.timestamp.isAfter(existing)) {
+      return false;
+    }
+    _displayedAtByChat[normalized] = matched.timestamp;
+    return true;
   }
 
   void _setupPrivacyLists() {
@@ -1880,6 +2027,62 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  void _publishDisplayedState(String bareJid) {
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    final normalized = _bareJid(bareJid);
+    final list = isBookmark(normalized)
+        ? _roomMessages[normalized]
+        : _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return;
+    }
+    ChatMessage? latest;
+    for (final message in list.reversed) {
+      if (!message.outgoing && message.stanzaId != null && message.stanzaId!.isNotEmpty) {
+        latest = message;
+        break;
+      }
+    }
+    if (latest == null) {
+      return;
+    }
+    final stanzaId = latest.stanzaId!;
+    if (_displayedStanzaIdByChat[normalized] == stanzaId) {
+      return;
+    }
+    _displayedStanzaIdByChat[normalized] = stanzaId;
+    _displayedAtByChat[normalized] = latest.timestamp;
+    _storage?.storeDisplayedSync(Map<String, String>.from(_displayedStanzaIdByChat));
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(_currentUserBareJid!);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    final publish = XmppElement()..name = 'publish';
+    publish.addAttribute(XmppAttribute('node', 'urn:xmpp:mds:displayed:0'));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('id', normalized));
+    final displayed = XmppElement()..name = 'displayed';
+    displayed.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:mds:displayed:0'));
+    final stanzaIdElement = XmppElement()..name = 'stanza-id';
+    stanzaIdElement.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sid:0'));
+    stanzaIdElement.addAttribute(XmppAttribute('id', stanzaId));
+    final byValue = isBookmark(normalized) ? normalized : (_currentUserBareJid ?? '');
+    if (byValue.isNotEmpty) {
+      stanzaIdElement.addAttribute(XmppAttribute('by', byValue));
+    }
+    displayed.addChild(stanzaIdElement);
+    item.addChild(displayed);
+    publish.addChild(item);
+    pubsub.addChild(publish);
+    iqStanza.addChild(pubsub);
+    connection.writeStanza(iqStanza);
+    notifyListeners();
+  }
+
   bool _mergeMamIdsIntoExisting(
     List<ChatMessage> list, {
     required String from,
@@ -2187,6 +2390,8 @@ class XmppService extends ChangeNotifier {
     _serverNotFound.clear();
     _chatStates.clear();
     _lastDisplayedMarkerIdByChat.clear();
+    _displayedStanzaIdByChat.clear();
+    _displayedAtByChat.clear();
     _lastPingLatency = null;
     _lastPingAt = null;
     _carbonsEnabled = false;

@@ -22,6 +22,7 @@ class StorageService {
   static const _vcardAvatarsKey = 'vcard_avatars';
   static const _vcardAvatarStateKey = 'vcard_avatar_state';
   static const _bookmarksKey = 'bookmarks';
+  static const _displayedSyncKey = 'displayed_sync';
 
   final SecureStore _secureStorage = createSecureStore();
   Box<dynamic>? _box;
@@ -277,6 +278,14 @@ class StorageService {
     await box.put(_bookmarksKey, const <dynamic>[]);
   }
 
+  Future<void> clearDisplayedSync() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_displayedSyncKey, const <String, dynamic>{});
+  }
+
   Future<void> clearRoomMessages() async {
     final box = _box;
     if (box == null) {
@@ -304,6 +313,34 @@ class StorageService {
       return result;
     }
     return const {};
+  }
+
+  Map<String, String> loadDisplayedSync() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(_displayedSyncKey, defaultValue: const <String, dynamic>{});
+    if (data is Map) {
+      final result = <String, String>{};
+      for (final entry in data.entries) {
+        final key = entry.key.toString();
+        final value = entry.value?.toString() ?? '';
+        if (key.isNotEmpty && value.isNotEmpty) {
+          result[key] = value;
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+
+  Future<void> storeDisplayedSync(Map<String, String> sync) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_displayedSyncKey, Map<String, String>.from(sync));
   }
 
   Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {

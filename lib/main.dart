@@ -121,6 +121,9 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     if (!_shouldNotifyFor(bareJid)) {
       return;
     }
+    if (!_service.isMessageUnseen(bareJid, message)) {
+      return;
+    }
     final title = _service.displayNameFor(bareJid);
     _notifications.showMessage(
       id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
@@ -132,6 +135,9 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
 
   void _handleIncomingRoomMessage(String roomJid, ChatMessage message) {
     if (!_shouldNotifyFor(roomJid)) {
+      return;
+    }
+    if (!_service.isMessageUnseen(roomJid, message)) {
       return;
     }
     final title = '$roomJid • ${message.from}';
@@ -811,7 +817,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                             break;
                           }
                         }
-                        final lastReadAt = _lastReadAtByChat[jid];
+                        final lastReadAt = service.displayedAtFor(jid) ?? _lastReadAtByChat[jid];
                         final isUnread = lastIncomingTime != null &&
                             (lastReadAt == null || lastIncomingTime.isAfter(lastReadAt));
                         final bookmarkStatusText = contact.bookmarkNick?.isNotEmpty == true
