@@ -14,7 +14,6 @@ Advanced Client: appears met (Direct TLS XEP-0368, PEP XEP-0163). No shortfalls 
 
 Client shortfalls (must also satisfy Core Client):
 - XEP-0206 (XMPP Over BOSH) — required as part of “Web Connection Mechanisms”.
-- XEP-0156 (Connection Mechanism Discovery).
 
 Advanced Client shortfalls (must also satisfy Core Advanced Client + Web Client):
 - No additional items beyond Web Client shortfalls.
@@ -24,20 +23,14 @@ Status: Web Client and Advanced Web Client are not met until the above are imple
 ## IM Suite
 
 Client shortfalls (must also satisfy Core Client):
-- XEP-0245 (/me Command).
-- XEP-0249 (Direct MUC Invitations).
-- XEP-0363 (HTTP File Upload).
+- None noted.
 
-Status: IM Client is not met until the above are implemented.
+Status: IM Client appears met.
 
 Advanced Client shortfalls (must also satisfy IM Client):
-- XEP-0191 (Blocking Command).
-- XEP-0398 + XEP-0153 (User Avatar Compatibility).
-- XEP-0410 (MUC Self-Ping / Schrödinger's Chat).
-- XEP-0223 (Persistent Storage of Private Data via PubSub).
-- XEP-0049 (Private XML Storage).
+- XEP-0398 + XEP-0153 (User Avatar Compatibility) — partial (server-side injection depends on server support; client sends vcard-temp:x:update but does not compute hashes itself).
+- XEP-0410 (MUC Self-Ping / Schrödinger's Chat) — partial (idle self-ping only, no explicit handling of server error semantics).
 - XEP-0308 (Last Message Correction).
 - XEP-0234 + XEP-0261 (Jingle File Transfer + Jingle IBB transport).
-- XEP-0048 (Bookmark Storage) if legacy bookmark storage is not fully supported.
 
 Status: IM Advanced Client is not met until the above are implemented.
