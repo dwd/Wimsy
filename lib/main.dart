@@ -1872,7 +1872,10 @@ class _MessageBubble extends StatelessWidget {
                             tickIcon,
                           ],
                           const SizedBox(width: 6),
-                          _MessageMenuButton(message: message),
+                          _MessageMenuButton(
+                            message: message,
+                            onReact: onReact,
+                          ),
                         ],
                       ),
                     ],
@@ -2099,15 +2102,18 @@ class _MessageBubble extends StatelessWidget {
       runSpacing: 6,
       children: [
         for (final entry in entries)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '${entry.key} ${entry.value.length}',
-              style: theme.textTheme.labelSmall,
+          Tooltip(
+            message: entry.value.join(', '),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${entry.key} ${entry.value.length}',
+                style: theme.textTheme.labelSmall,
+              ),
             ),
           ),
       ],
@@ -2225,28 +2231,116 @@ class _AvatarPlaceholder extends StatelessWidget {
 }
 
 class _MessageMenuButton extends StatelessWidget {
-  const _MessageMenuButton({required this.message});
+  const _MessageMenuButton({
+    required this.message,
+    required this.onReact,
+  });
 
   final ChatMessage message;
+  final void Function(String emoji)? onReact;
 
   @override
   Widget build(BuildContext context) {
+    final reactions = message.reactions ?? const {};
     return PopupMenuButton<String>(
       padding: EdgeInsets.zero,
       icon: const Icon(Icons.more_horiz, size: 16),
       onSelected: (value) {
         switch (value) {
+          case 'add_reaction':
+            _showReactionSheet(context);
+            break;
+          case 'view_reactions':
+            _showReactions(context);
+            break;
           case 'view_xml':
             _showXml(context);
             break;
         }
       },
-      itemBuilder: (context) => const [
-        PopupMenuItem(
+      itemBuilder: (context) => [
+        if (onReact != null)
+          const PopupMenuItem(
+            value: 'add_reaction',
+            child: Text('Add reaction'),
+          ),
+        if (reactions.isNotEmpty)
+          const PopupMenuItem(
+            value: 'view_reactions',
+            child: Text('View reactions'),
+          ),
+        const PopupMenuItem(
           value: 'view_xml',
           child: Text('View XML'),
         ),
       ],
+    );
+  }
+
+  void _showReactionSheet(BuildContext context) {
+    if (onReact == null) {
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final emoji in _MessageBubble._reactionOptions)
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onReact?.call(emoji);
+                    },
+                    child: Text(emoji, style: const TextStyle(fontSize: 20)),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showReactions(BuildContext context) {
+    final reactions = message.reactions ?? const {};
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Reactions'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final entry in reactions.entries.toList()
+                    ..sort((a, b) => a.key.compareTo(b.key)))
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        '${entry.key} ${entry.value.join(', ')}',
+                      ),
+                    ),
+                  if (reactions.isEmpty)
+                    const Text('No reactions yet.'),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
     );
   }
 
