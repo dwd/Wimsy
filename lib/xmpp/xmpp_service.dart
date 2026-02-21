@@ -1004,7 +1004,7 @@ class XmppService extends ChangeNotifier {
     if (trimmed.isEmpty) {
       return;
     }
-    final targetId = message.stanzaId ?? message.messageId;
+    final targetId = message.messageId;
     if (targetId == null || targetId.isEmpty) {
       return;
     }
@@ -1402,8 +1402,7 @@ class XmppService extends ChangeNotifier {
     }
     for (var i = list.length - 1; i >= 0; i--) {
       final existing = list[i];
-      if (existing.stanzaId != update.targetId &&
-          existing.messageId != update.targetId) {
+      if (existing.messageId != update.targetId) {
         continue;
       }
     final nextReactions =
