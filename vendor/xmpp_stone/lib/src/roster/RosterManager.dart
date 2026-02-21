@@ -160,6 +160,15 @@ class RosterManager {
     if (stanza.type != IqStanzaType.SET) {
       return null;
     }
+    final query = stanza.getChild('query');
+    if (query == null ||
+        query.getAttribute('xmlns')?.value != 'jabber:iq:roster') {
+      return null;
+    }
+    final hasItems = query.children.any((element) => element.name == 'item');
+    if (!hasItems) {
+      return null;
+    }
     _applyRosterPush(stanza);
     return _buildRosterPushResult(stanza);
   }

@@ -10,6 +10,9 @@ import 'package:xmpp_stone/src/elements/stanzas/IqStanza.dart';
 import 'package:xmpp_stone/src/extensions/iq_router/IqRouter.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/ServiceDiscoveryNegotiator.dart';
 import 'package:xmpp_stone/src/features/privacy_lists/privacy_lists_manager.dart';
+import 'package:xmpp_stone/src/roster/Buddy.dart';
+import 'package:xmpp_stone/src/data/Jid.dart';
+import 'package:xmpp_stone/src/roster/RosterManager.dart';
 
 void main() {
   test('IQ router sends service-unavailable when no handler', () async {
@@ -188,6 +191,64 @@ void main() {
     expect(response.type, IqStanzaType.RESULT);
     expect(response.toJid?.fullJid, equals('peer@example.com/res'));
   });
+
+  test('Roster manager completes addRosterItem on result', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    final manager = RosterManager.getInstance(connection);
+
+    final requestIdFuture = _waitForRosterRequestId(connection);
+    final future = manager.addRosterItem(Buddy(Jid.fromFullJid('alice@example.com')));
+    final requestId = await requestIdFuture;
+
+    final response = '<iq type="result" id="$requestId" from="peer@example.com/res">'
+        '<query xmlns="jabber:iq:roster"/></iq>';
+    connection.handleResponse(connection.prepareStreamResponse(response));
+
+    final result = await future.timeout(const Duration(seconds: 1));
+    expect(result.type, IqStanzaType.SET);
+  });
+
+  test('Invalid roster push yields service-unavailable', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    RosterManager.getInstance(connection);
+
+    final responseFuture = _waitForIqResponse(connection, 'rosterBad');
+    final iq = '<iq type="set" id="rosterBad" from="peer@example.com/res">'
+        '<query xmlns="jabber:iq:roster"/>'
+        '</iq>';
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final response = await responseFuture;
+    expect(response.type, IqStanzaType.ERROR);
+    final error = response.getChild('error');
+    expect(error, isNotNull);
+    final condition = error!.getChild('service-unavailable');
+    expect(condition, isNotNull);
+  });
+
+  test('Invalid privacy list push yields service-unavailable', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    PrivacyListsManager.getInstance(connection);
+
+    final responseFuture = _waitForIqResponse(connection, 'privacyBad');
+    final iq = '<iq type="set" id="privacyBad" from="peer@example.com/res">'
+        '<query xmlns="jabber:iq:privacy"/>'
+        '</iq>';
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final response = await responseFuture;
+    expect(response.type, IqStanzaType.ERROR);
+    final error = response.getChild('error');
+    expect(error, isNotNull);
+    final condition = error!.getChild('service-unavailable');
+    expect(condition, isNotNull);
+  });
 }
 
 Future<IqStanza> _waitForIqResponse(Connection connection, String id) {
@@ -197,6 +258,21 @@ Future<IqStanza> _waitForIqResponse(Connection connection, String id) {
     if (stanza is IqStanza && stanza.id == id) {
       subscription.cancel();
       completer.complete(stanza);
+    }
+  });
+  return completer.future.timeout(const Duration(seconds: 1));
+}
+
+Future<String> _waitForRosterRequestId(Connection connection) {
+  final completer = Completer<String>();
+  late final StreamSubscription<AbstractStanza> subscription;
+  subscription = connection.outStanzasStream.listen((stanza) {
+    if (stanza is IqStanza &&
+        stanza.type == IqStanzaType.SET &&
+        stanza.getChild('query')?.getAttribute('xmlns')?.value ==
+            'jabber:iq:roster') {
+      subscription.cancel();
+      completer.complete(stanza.id!);
     }
   });
   return completer.future.timeout(const Duration(seconds: 1));
