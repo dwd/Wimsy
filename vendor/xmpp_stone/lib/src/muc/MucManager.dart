@@ -224,6 +224,19 @@ String? _extractMessageIdAttr(XmppElement? forwardedMessage, MessageStanza stanz
   return null;
 }
 
+String? _extractReplaceId(XmppElement? element) {
+  final replace = element?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'replace' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:message-correct:0',
+  );
+  final id = replace?.getAttribute('id')?.value;
+  if (id == null || id.isEmpty) {
+    return null;
+  }
+  return id;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -277,6 +290,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   final forwardedStanzaId = _extractStanzaId(forwardedMessage, roomJid);
   final directStanzaId = _extractStanzaId(stanza, roomJid);
   final messageIdAttr = _extractMessageIdAttr(forwardedMessage, stanza);
+  final replaceId = _extractReplaceId(forwardedMessage) ?? _extractReplaceId(stanza);
   return MucParsedGroupMessage.message(
     MucMessage(
       roomJid: roomJid,
@@ -284,6 +298,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       body: body,
       oobUrl: oobUrl,
       rawXml: stanza.buildXmlString(),
+      replaceId: replaceId,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
       mamResultId: mamResultId,
@@ -320,6 +335,7 @@ class MucMessage {
     this.stanzaId,
     this.oobUrl,
     this.rawXml,
+    this.replaceId,
     this.reactionTargetId,
     this.reactions = const [],
   });
@@ -333,6 +349,7 @@ class MucMessage {
   final String? stanzaId;
   final String? oobUrl;
   final String? rawXml;
+  final String? replaceId;
   final String? reactionTargetId;
   final List<String> reactions;
 }

@@ -11,6 +11,8 @@ void main() {
       outgoing: false,
       messageId: 'msg-1',
       rawXml: '<message id="msg-1"><body>hello</body></message>',
+      edited: true,
+      editedAt: DateTime.parse('2024-08-09T10:12:13Z'),
       reactions: const {
         '👍': ['alice@example.com', 'bob@example.com'],
       },
@@ -19,6 +21,8 @@ void main() {
     final roundtrip = ChatMessage.fromMap(message.toMap());
     expect(roundtrip, isNotNull);
     expect(roundtrip!.rawXml, contains('<message'));
+    expect(roundtrip.edited, isTrue);
+    expect(roundtrip.editedAt, DateTime.parse('2024-08-09T10:12:13Z'));
     expect(roundtrip.reactions, isNotNull);
     expect(roundtrip.reactions!['👍'], ['alice@example.com', 'bob@example.com']);
   });

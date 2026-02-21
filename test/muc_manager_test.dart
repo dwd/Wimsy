@@ -80,6 +80,32 @@ void main() {
     expect(received.body, 'Hello room');
   });
 
+  test('MUC groupchat message exposes replace id', () async {
+    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final connection = TestConnection(account);
+    final muc = connection.getMucModule();
+
+    final message = MessageStanza('m2', MessageStanzaType.GROUPCHAT);
+    message.fromJid = Jid.fromFullJid('room@conference.example/alice');
+    message.body = 'Corrected';
+    final replace = XmppElement()..name = 'replace';
+    replace.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:message-correct:0'));
+    replace.addAttribute(XmppAttribute('id', 'orig-1'));
+    message.addChild(replace);
+
+    final completer = Completer<MucMessage>();
+    final sub = muc.roomMessageStream.listen((event) {
+      completer.complete(event);
+    });
+
+    connection.fireNewStanzaEvent(message);
+
+    final received = await completer.future.timeout(const Duration(seconds: 1));
+    await sub.cancel();
+
+    expect(received.replaceId, 'orig-1');
+  });
+
   test('MUC presence emits occupant updates', () async {
     final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
     final connection = TestConnection(account);

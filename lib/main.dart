@@ -359,6 +359,9 @@ class _WimsyHomeState extends State<WimsyHome> {
   String? _lastFocusedChat;
   int _lastMessageCount = 0;
   bool _wasAtBottom = true;
+  String? _editingMessageId;
+  String? _editingChatBareJid;
+  bool _editingIsRoom = false;
 
   @override
   void initState() {
@@ -1025,10 +1028,16 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (activeChat == null) {
       _lastFocusedChat = null;
       _lastMessageCount = 0;
+      if (_editingChatBareJid != null) {
+        _cancelEditing();
+      }
     } else if (activeChat != _lastFocusedChat) {
       _lastFocusedChat = activeChat;
       _lastMessageCount = messages.length;
       _markChatRead(activeChat, messages);
+      if (_editingChatBareJid != null && _editingChatBareJid != activeChat) {
+        _cancelEditing();
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           if (!isBookmark) {
@@ -1135,6 +1144,13 @@ class _WimsyHomeState extends State<WimsyHome> {
                             isRoom: isBookmark,
                           );
                         },
+                        onEdit: (message.outgoing && (message.messageId ?? '').isNotEmpty)
+                            ? () => _startEditingMessage(
+                                  activeChat: activeChat,
+                                  message: message,
+                                  isRoom: isBookmark,
+                                )
+                            : null,
                       );
                     },
                   ),
@@ -1190,24 +1206,72 @@ class _WimsyHomeState extends State<WimsyHome> {
                     ),
                   ),
                 ],
+                if (activeChat != null &&
+                    _editingMessageId != null &&
+                    _editingChatBareJid == activeChat) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Editing message',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _cancelEditing,
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 Row(
                   children: [
                     Expanded(
-                      child: TextField(
-                        controller: _messageController,
+                      child: KeyboardListener(
                         focusNode: _messageFocusNode,
-                        autofocus: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
-                        enabled: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
-                        decoration: const InputDecoration(
-                          labelText: 'Message',
-                        ),
-                        onChanged: (value) {
-                          if (activeChat == null || isBookmark) {
+                        onKeyEvent: (event) {
+                          if (event is! KeyDownEvent) {
                             return;
                           }
-                          _handleTypingState(service, activeChat, value);
+                          if (event.logicalKey != LogicalKeyboardKey.arrowUp) {
+                            return;
+                          }
+                          if (activeChat == null) {
+                            return;
+                          }
+                          if (isBookmark && !(roomEntry?.joined ?? false)) {
+                            return;
+                          }
+                          if (_messageController.text.trim().isNotEmpty) {
+                            return;
+                          }
+                          if (_editingMessageId != null &&
+                              _editingChatBareJid == activeChat) {
+                            return;
+                          }
+                          _editLastOutgoingMessage(activeChat, isBookmark);
                         },
-                        onSubmitted: (_) => _sendMessage(activeChat),
+                        child: TextField(
+                          controller: _messageController,
+                          focusNode: _messageFocusNode,
+                          autofocus: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
+                          enabled: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
+                          decoration: const InputDecoration(
+                            labelText: 'Message',
+                          ),
+                          onChanged: (value) {
+                            if (activeChat == null || isBookmark) {
+                              return;
+                            }
+                            _handleTypingState(service, activeChat, value);
+                          },
+                          onSubmitted: (_) => _sendMessage(activeChat),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1282,15 +1346,90 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     final text = _messageController.text;
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    final isBookmark = widget.service.isBookmark(activeChat);
+    final editingId = _editingMessageId;
+    final editingChat = _editingChatBareJid;
+    final editingIsRoom = _editingIsRoom;
     _messageController.clear();
-    if (widget.service.isBookmark(activeChat)) {
-      widget.service.sendRoomMessage(activeChat, text);
+    if (editingId != null && editingChat == activeChat) {
+      _cancelEditing();
+      if (editingIsRoom) {
+        widget.service.editRoomMessage(
+          roomJid: activeChat,
+          replaceId: editingId,
+          text: trimmed,
+        );
+      } else {
+        widget.service.editMessage(
+          toBareJid: activeChat,
+          replaceId: editingId,
+          text: trimmed,
+        );
+        _setChatState(activeChat, ChatState.ACTIVE);
+      }
+    } else if (isBookmark) {
+      widget.service.sendRoomMessage(activeChat, trimmed);
     } else {
-      widget.service.sendMessage(toBareJid: activeChat, text: text);
+      widget.service.sendMessage(toBareJid: activeChat, text: trimmed);
       _setChatState(activeChat, ChatState.ACTIVE);
     }
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
+    }
+  }
+
+  void _cancelEditing() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _editingMessageId = null;
+      _editingChatBareJid = null;
+      _editingIsRoom = false;
+    });
+  }
+
+  void _startEditingMessage({
+    required String activeChat,
+    required ChatMessage message,
+    required bool isRoom,
+  }) {
+    final messageId = message.messageId;
+    if (messageId == null || messageId.isEmpty) {
+      return;
+    }
+    setState(() {
+      _editingMessageId = messageId;
+      _editingChatBareJid = activeChat;
+      _editingIsRoom = isRoom;
+    });
+    _messageController.text = message.body;
+    _messageController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _messageController.text.length),
+    );
+    if (_messageFocusNode.canRequestFocus) {
+      _messageFocusNode.requestFocus();
+    }
+  }
+
+  void _editLastOutgoingMessage(String activeChat, bool isRoom) {
+    final messages = isRoom
+        ? widget.service.roomMessagesFor(activeChat)
+        : widget.service.messagesFor(activeChat);
+    for (var i = messages.length - 1; i >= 0; i--) {
+      final message = messages[i];
+      if (!message.outgoing) {
+        continue;
+      }
+      if (message.body.trim().isEmpty) {
+        continue;
+      }
+      _startEditingMessage(activeChat: activeChat, message: message, isRoom: isRoom);
+      break;
     }
   }
 
@@ -2024,6 +2163,7 @@ class _MessageBubble extends StatelessWidget {
     required this.inviteReason,
     required this.onJoinInvite,
     required this.onReact,
+    required this.onEdit,
   });
 
   final ChatMessage message;
@@ -2036,6 +2176,7 @@ class _MessageBubble extends StatelessWidget {
   final String? inviteReason;
   final VoidCallback? onJoinInvite;
   final void Function(String emoji)? onReact;
+  final VoidCallback? onEdit;
 
   static const List<String> _reactionOptions = [
     '👍',
@@ -2088,6 +2229,15 @@ class _MessageBubble extends StatelessWidget {
                             timestamp,
                             style: theme.textTheme.labelSmall?.copyWith(color: textColor.withValues(alpha: 0.7)),
                           ),
+                          if (message.edited) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              'edited',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: textColor.withValues(alpha: 0.6),
+                              ),
+                            ),
+                          ],
                           if (tickIcon != null) ...[
                             const SizedBox(width: 6),
                             tickIcon,
@@ -2096,6 +2246,7 @@ class _MessageBubble extends StatelessWidget {
                           _MessageMenuButton(
                             message: message,
                             onReact: onReact,
+                            onEdit: onEdit,
                           ),
                         ],
                       ),
@@ -2532,10 +2683,12 @@ class _MessageMenuButton extends StatelessWidget {
   const _MessageMenuButton({
     required this.message,
     required this.onReact,
+    required this.onEdit,
   });
 
   final ChatMessage message;
   final void Function(String emoji)? onReact;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -2545,6 +2698,9 @@ class _MessageMenuButton extends StatelessWidget {
       icon: const Icon(Icons.more_horiz, size: 16),
       onSelected: (value) {
         switch (value) {
+          case 'edit_message':
+            onEdit?.call();
+            break;
           case 'add_reaction':
             _showReactionSheet(context);
             break;
@@ -2557,6 +2713,11 @@ class _MessageMenuButton extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
+        if (onEdit != null)
+          const PopupMenuItem(
+            value: 'edit_message',
+            child: Text('Edit message'),
+          ),
         if (onReact != null)
           const PopupMenuItem(
             value: 'add_reaction',

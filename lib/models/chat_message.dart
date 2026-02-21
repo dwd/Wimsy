@@ -13,6 +13,8 @@ class ChatMessage {
     this.inviteRoomJid,
     this.inviteReason,
     this.invitePassword,
+    this.edited = false,
+    this.editedAt,
     this.reactions,
     this.acked = false,
     this.receiptReceived = false,
@@ -32,6 +34,8 @@ class ChatMessage {
   final String? inviteRoomJid;
   final String? inviteReason;
   final String? invitePassword;
+  final bool edited;
+  final DateTime? editedAt;
   final Map<String, List<String>>? reactions;
   final bool acked;
   final bool receiptReceived;
@@ -52,6 +56,8 @@ class ChatMessage {
       'inviteRoomJid': inviteRoomJid,
       'inviteReason': inviteReason,
       'invitePassword': invitePassword,
+      'edited': edited,
+      'editedAt': editedAt?.toIso8601String(),
       'reactions': reactions ?? const {},
       'acked': acked,
       'receiptReceived': receiptReceived,
@@ -76,6 +82,8 @@ class ChatMessage {
     final inviteRoomJid = map['inviteRoomJid']?.toString();
     final inviteReason = map['inviteReason']?.toString();
     final invitePassword = map['invitePassword']?.toString();
+    final edited = map['edited'] == true;
+    final editedAtRaw = map['editedAt']?.toString();
     final reactions = _parseReactions(map['reactions']);
     final acked = map['acked'] == true;
     final receiptReceived = map['receiptReceived'] == true;
@@ -91,6 +99,7 @@ class ChatMessage {
     if (timestamp == null) {
       return null;
     }
+    final editedAt = editedAtRaw == null ? null : DateTime.tryParse(editedAtRaw);
     return ChatMessage(
       from: from,
       to: to,
@@ -105,6 +114,8 @@ class ChatMessage {
       inviteRoomJid: inviteRoomJid,
       inviteReason: inviteReason,
       invitePassword: invitePassword,
+      edited: edited,
+      editedAt: editedAt,
       reactions: reactions,
       acked: acked,
       receiptReceived: receiptReceived,

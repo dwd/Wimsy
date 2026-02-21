@@ -853,6 +853,46 @@ class XmppService extends ChangeNotifier {
     chat.myState = ChatState.ACTIVE;
   }
 
+  void editMessage({
+    required String toBareJid,
+    required String replaceId,
+    required String text,
+  }) {
+    final connection = _connection;
+    if (connection == null) {
+      _setError('Not connected.');
+      return;
+    }
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || replaceId.isEmpty) {
+      return;
+    }
+    final stanza = MessageStanza(AbstractStanza.getRandomId(), MessageStanzaType.CHAT);
+    stanza.toJid = Jid.fromFullJid(toBareJid);
+    stanza.fromJid = connection.fullJid;
+    stanza.body = trimmed;
+    stanza.addChild(_buildReplaceElement(replaceId));
+    final receiptRequest = XmppElement()..name = 'request';
+    receiptRequest.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
+    stanza.addChild(receiptRequest);
+    final markable = XmppElement()..name = 'markable';
+    markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
+    stanza.addChild(markable);
+    connection.writeStanza(stanza);
+    final sender = _currentUserBareJid ?? connection.fullJid.userAtDomain;
+    if (sender.isNotEmpty) {
+      _applyMessageCorrection(
+        bareJid: toBareJid,
+        sender: sender,
+        replaceId: replaceId,
+        newBody: trimmed,
+        oobUrl: null,
+        rawXml: _serializeStanza(stanza),
+        timestamp: DateTime.now(),
+      );
+    }
+  }
+
   void setMyChatState(String bareJid, ChatState state) {
     final chatManager = _chatManager;
     if (chatManager == null) {
@@ -1044,6 +1084,39 @@ class XmppService extends ChangeNotifier {
       outgoing: true,
       timestamp: DateTime.now(),
       messageId: messageId,
+    );
+  }
+
+  void editRoomMessage({
+    required String roomJid,
+    required String replaceId,
+    required String text,
+  }) {
+    final connection = _connection;
+    if (connection == null) {
+      _setError('Not connected.');
+      return;
+    }
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || replaceId.isEmpty) {
+      return;
+    }
+    final normalized = _bareJid(roomJid);
+    final stanza = MessageStanza(AbstractStanza.getRandomId(), MessageStanzaType.GROUPCHAT);
+    stanza.toJid = Jid.fromFullJid(normalized);
+    stanza.body = trimmed;
+    stanza.addChild(_buildReplaceElement(replaceId));
+    connection.writeStanza(stanza);
+    final rawXml = _serializeStanza(stanza);
+    final nick = _roomNickFor(normalized);
+    _applyRoomMessageCorrection(
+      roomJid: normalized,
+      sender: nick,
+      replaceId: replaceId,
+      newBody: trimmed,
+      oobUrl: null,
+      rawXml: rawXml,
+      timestamp: DateTime.now(),
     );
   }
 
@@ -1387,6 +1460,20 @@ class XmppService extends ChangeNotifier {
     _roomSubscriptions['message'] =
         _mucManager!.roomMessageStream.listen((message) {
       _noteRoomTraffic(message.roomJid);
+      if (message.replaceId != null && message.replaceId!.isNotEmpty) {
+        final applied = _applyRoomMessageCorrection(
+          roomJid: message.roomJid,
+          sender: message.nick,
+          replaceId: message.replaceId!,
+          newBody: message.body,
+          oobUrl: message.oobUrl,
+          rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
+          timestamp: message.timestamp,
+        );
+        if (applied) {
+          return;
+        }
+      }
       if (message.reactionTargetId != null) {
         _applyRoomReactionUpdate(
           message.roomJid,
@@ -1711,6 +1798,38 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
+  String? _extractReplaceIdFromStanza(XmppElement stanza) {
+    final candidates = <XmppElement>[stanza];
+    for (final child in stanza.children) {
+      if (child.name != 'result' && child.name != 'sent' && child.name != 'received') {
+        continue;
+      }
+      final forwarded = child.getChild('forwarded');
+      final message = forwarded?.getChild('message');
+      if (message != null) {
+        candidates.add(message);
+      }
+    }
+    final directForwarded = stanza.getChild('forwarded');
+    final forwardedMessage = directForwarded?.getChild('message');
+    if (forwardedMessage != null) {
+      candidates.add(forwardedMessage);
+    }
+    for (final candidate in candidates) {
+      for (final child in candidate.children) {
+        if (child.name != 'replace' ||
+            child.getAttribute('xmlns')?.value != 'urn:xmpp:message-correct:0') {
+          continue;
+        }
+        final id = child.getAttribute('id')?.value;
+        if (id != null && id.isNotEmpty) {
+          return id;
+        }
+      }
+    }
+    return null;
+  }
+
   String _reactionChatTarget(String fromBare, String toBare) {
     final selfBare = _currentUserBareJid;
     if (selfBare != null && _bareJid(fromBare) == selfBare) {
@@ -1731,6 +1850,128 @@ class XmppService extends ChangeNotifier {
     }
     notifyListeners();
     _messagePersistor?.call(normalized, List.unmodifiable(list));
+  }
+
+  bool _applyMessageCorrection({
+    required String bareJid,
+    required String sender,
+    required String replaceId,
+    required String newBody,
+    required String rawXml,
+    required DateTime timestamp,
+    String? oobUrl,
+  }) {
+    final normalized = _bareJid(bareJid);
+    final list = _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = _applyCorrectionInList(
+      list,
+      sender: sender,
+      replaceId: replaceId,
+      newBody: newBody,
+      oobUrl: oobUrl,
+      rawXml: rawXml,
+      timestamp: timestamp,
+      matchSenderBare: true,
+    );
+    if (applied) {
+      notifyListeners();
+      _messagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
+  }
+
+  bool _applyRoomMessageCorrection({
+    required String roomJid,
+    required String sender,
+    required String replaceId,
+    required String newBody,
+    required String rawXml,
+    required DateTime timestamp,
+    String? oobUrl,
+  }) {
+    final normalized = _bareJid(roomJid);
+    final list = _roomMessages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = _applyCorrectionInList(
+      list,
+      sender: sender,
+      replaceId: replaceId,
+      newBody: newBody,
+      oobUrl: oobUrl,
+      rawXml: rawXml,
+      timestamp: timestamp,
+      matchSenderBare: false,
+    );
+    if (applied) {
+      notifyListeners();
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
+  }
+
+  bool _applyCorrectionInList(
+    List<ChatMessage> list, {
+    required String sender,
+    required String replaceId,
+    required String newBody,
+    required String rawXml,
+    required DateTime timestamp,
+    required bool matchSenderBare,
+    String? oobUrl,
+  }) {
+    for (var i = list.length - 1; i >= 0; i--) {
+      final existing = list[i];
+      if (existing.messageId != replaceId) {
+        continue;
+      }
+      if (matchSenderBare) {
+        if (_bareJid(existing.from) != _bareJid(sender)) {
+          continue;
+        }
+      } else {
+        if (existing.from != sender) {
+          continue;
+        }
+      }
+      final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
+      final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
+      final nextEditedAt = timestamp;
+      if (existing.body == newBody &&
+          existing.oobUrl == nextOobUrl &&
+          existing.rawXml == nextRawXml &&
+          existing.edited &&
+          existing.editedAt == nextEditedAt) {
+        return true;
+      }
+      list[i] = ChatMessage(
+        from: existing.from,
+        to: existing.to,
+        body: newBody,
+        outgoing: existing.outgoing,
+        timestamp: existing.timestamp,
+        messageId: existing.messageId,
+        mamId: existing.mamId,
+        stanzaId: existing.stanzaId,
+        oobUrl: nextOobUrl,
+        rawXml: nextRawXml,
+        inviteRoomJid: existing.inviteRoomJid,
+        inviteReason: existing.inviteReason,
+        invitePassword: existing.invitePassword,
+        edited: true,
+        editedAt: nextEditedAt,
+        reactions: existing.reactions ?? const {},
+        acked: existing.acked,
+        receiptReceived: existing.receiptReceived,
+        displayed: existing.displayed,
+      );
+      return true;
+    }
+    return false;
   }
 
   void _applyRoomReactionUpdate(
@@ -1786,6 +2027,8 @@ class XmppService extends ChangeNotifier {
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
         rawXml: existing.rawXml,
+        edited: existing.edited,
+        editedAt: existing.editedAt,
         reactions: nextReactions,
         acked: existing.acked,
         receiptReceived: existing.receiptReceived,
@@ -2038,6 +2281,13 @@ class XmppService extends ChangeNotifier {
     stanza.toJid = Jid.fromFullJid(roomJid);
     stanza.body = body;
     return _serializeStanza(stanza);
+  }
+
+  XmppElement _buildReplaceElement(String replaceId) {
+    final replace = XmppElement()..name = 'replace';
+    replace.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:message-correct:0'));
+    replace.addAttribute(XmppAttribute('id', replaceId));
+    return replace;
   }
 
   String _buildIncomingGroupFallbackXml(MucMessage message) {
@@ -2607,6 +2857,7 @@ class XmppService extends ChangeNotifier {
         final body = message.text ?? '';
         final oobUrl = _extractOobUrlFromStanza(message.messageStanza);
         final rawXml = _serializeStanza(message.messageStanza);
+        final replaceId = _extractReplaceIdFromStanza(message.messageStanza);
         final reaction = _extractReactionUpdate(message.messageStanza);
         if (reaction != null) {
           final targetBare = _reactionChatTarget(from, to);
@@ -2619,8 +2870,23 @@ class XmppService extends ChangeNotifier {
           continue;
         }
         final outgoing = from == (_currentUserBareJid ?? '');
+        final targetBare = outgoing ? to : from;
+        if (replaceId != null && replaceId.isNotEmpty && targetBare.isNotEmpty) {
+          final applied = _applyMessageCorrection(
+            bareJid: targetBare,
+            sender: from,
+            replaceId: replaceId,
+            newBody: body,
+            oobUrl: oobUrl,
+            rawXml: rawXml,
+            timestamp: message.time,
+          );
+          if (applied) {
+            continue;
+          }
+        }
         _addMessage(
-          bareJid: outgoing ? to : from,
+          bareJid: targetBare,
           from: from,
           to: to,
           body: body,
@@ -2641,8 +2907,25 @@ class XmppService extends ChangeNotifier {
       final body = message.text ?? '';
       final oobUrl = _extractOobUrlFromStanza(message.messageStanza);
       final rawXml = _serializeStanza(message.messageStanza);
+      final replaceId = _extractReplaceIdFromStanza(message.messageStanza);
       final reaction = _extractReactionUpdate(message.messageStanza);
       final invite = parseMucDirectInvite(message.messageStanza);
+      final outgoing = from == (_currentUserBareJid ?? '');
+      final targetBare = outgoing ? to : from;
+      if (replaceId != null && replaceId.isNotEmpty && targetBare.isNotEmpty) {
+        final applied = _applyMessageCorrection(
+          bareJid: targetBare,
+          sender: from,
+          replaceId: replaceId,
+          newBody: body,
+          oobUrl: oobUrl,
+          rawXml: rawXml,
+          timestamp: message.time,
+        );
+        if (applied) {
+          return;
+        }
+      }
       if (reaction != null) {
         final targetBare = _reactionChatTarget(from, to);
         if (targetBare.isNotEmpty) {
@@ -2655,9 +2938,8 @@ class XmppService extends ChangeNotifier {
           invite == null) {
         return;
       }
-      final outgoing = from == (_currentUserBareJid ?? '');
       _addMessage(
-        bareJid: outgoing ? to : from,
+        bareJid: targetBare,
         from: from,
         to: to,
         body: body,
@@ -2739,6 +3021,8 @@ class XmppService extends ChangeNotifier {
             inviteRoomJid: nextInviteRoomJid,
             inviteReason: nextInviteReason,
             invitePassword: nextInvitePassword,
+            edited: existing.edited,
+            editedAt: existing.editedAt,
             reactions: existing.reactions ?? const {},
             acked: existing.acked,
             receiptReceived: existing.receiptReceived,
@@ -2876,6 +3160,8 @@ class XmppService extends ChangeNotifier {
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
             rawXml: nextRawXml,
+            edited: existing.edited,
+            editedAt: existing.editedAt,
             reactions: existing.reactions ?? const {},
             acked: existing.acked,
             receiptReceived: nextReceiptReceived,
@@ -3020,6 +3306,8 @@ class XmppService extends ChangeNotifier {
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
         rawXml: existing.rawXml,
+        edited: existing.edited,
+        editedAt: existing.editedAt,
         reactions: existing.reactions ?? const {},
         acked: nextAcked,
         receiptReceived: nextReceipt,
@@ -3068,6 +3356,8 @@ class XmppService extends ChangeNotifier {
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
         rawXml: existing.rawXml,
+        edited: existing.edited,
+        editedAt: existing.editedAt,
         reactions: existing.reactions ?? const {},
         acked: nextAcked,
         receiptReceived: nextReceipt,
@@ -3191,6 +3481,8 @@ class XmppService extends ChangeNotifier {
           stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
           oobUrl: existing.oobUrl,
           rawXml: nextRawXml,
+          edited: existing.edited,
+          editedAt: existing.editedAt,
           reactions: existing.reactions ?? const {},
           acked: existing.acked,
           receiptReceived: existing.receiptReceived,
@@ -3222,6 +3514,8 @@ class XmppService extends ChangeNotifier {
         stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
         oobUrl: existing.oobUrl,
         rawXml: existing.rawXml,
+        edited: existing.edited,
+        editedAt: existing.editedAt,
         reactions: existing.reactions ?? const {},
         acked: existing.acked,
         receiptReceived: existing.receiptReceived,
