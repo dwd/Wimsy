@@ -16,4 +16,33 @@ void main() {
     expect(ping, isNotNull);
     expect(ping!.getAttribute('xmlns')?.value, 'urn:xmpp:ping');
   });
+
+  test('mucSelfPingOutcomeFromResponse handles result', () {
+    final stanza = IqStanza('id1', IqStanzaType.RESULT);
+    expect(mucSelfPingOutcomeFromResponse(stanza), MucSelfPingOutcome.joined);
+  });
+
+  test('mucSelfPingOutcomeFromResponse handles not-acceptable error', () {
+    final stanza = IqStanza('id2', IqStanzaType.ERROR);
+    final error = XmppElement()..name = 'error';
+    final condition = XmppElement()..name = 'not-acceptable';
+    condition.addAttribute(
+      XmppAttribute('xmlns', 'urn:ietf:params:xml:ns:xmpp-stanzas'),
+    );
+    error.addChild(condition);
+    stanza.addChild(error);
+    expect(mucSelfPingOutcomeFromResponse(stanza), MucSelfPingOutcome.notJoined);
+  });
+
+  test('mucSelfPingOutcomeFromResponse treats item-not-found as joined', () {
+    final stanza = IqStanza('id3', IqStanzaType.ERROR);
+    final error = XmppElement()..name = 'error';
+    final condition = XmppElement()..name = 'item-not-found';
+    condition.addAttribute(
+      XmppAttribute('xmlns', 'urn:ietf:params:xml:ns:xmpp-stanzas'),
+    );
+    error.addChild(condition);
+    stanza.addChild(error);
+    expect(mucSelfPingOutcomeFromResponse(stanza), MucSelfPingOutcome.joined);
+  });
 }

@@ -67,6 +67,8 @@ class XmppService extends ChangeNotifier {
   Timer? _smAckTimeoutTimer;
   Timer? _csiIdleTimer;
   Timer? _mucSelfPingTimer;
+  final Map<String, String> _pendingMucSelfPings = {};
+  final Map<String, Timer> _mucSelfPingTimeouts = {};
   final Map<String, DateTime> _pendingPings = {};
   final Map<String, Timer> _pingTimeoutTimers = {};
   final Map<String, bool> _pingTimeoutShort = {};
@@ -79,6 +81,7 @@ class XmppService extends ChangeNotifier {
   static const Duration _pingIntervalBackground = Duration(minutes: 5);
   static const Duration _mucSelfPingIdle = Duration(minutes: 10);
   static const Duration _mucSelfPingCheckInterval = Duration(minutes: 1);
+  static const Duration _mucSelfPingTimeout = Duration(seconds: 30);
   final Map<String, StreamSubscription<Message>> _chatMessageSubscriptions = {};
   final Map<String, StreamSubscription<ChatState?>> _chatStateSubscriptions = {};
 
@@ -1529,9 +1532,22 @@ class XmppService extends ChangeNotifier {
       if (lastPing != null && !lastPing.isBefore(lastTraffic)) {
         continue;
       }
+      if (_hasPendingMucSelfPing(roomJid)) {
+        continue;
+      }
       _sendMucSelfPing(roomJid, entry.nick!);
       _roomLastPingAt[roomJid] = now;
     }
+  }
+
+  bool _hasPendingMucSelfPing(String roomJid) {
+    final normalized = _bareJid(roomJid);
+    for (final pending in _pendingMucSelfPings.values) {
+      if (pending == normalized) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _sendMucSelfPing(String roomJid, String nick) {
@@ -1545,6 +1561,45 @@ class XmppService extends ChangeNotifier {
       fullJid: '${_bareJid(roomJid)}/$nick',
     );
     connection.writeStanza(stanza);
+    _pendingMucSelfPings[id] = _bareJid(roomJid);
+    _mucSelfPingTimeouts[id]?.cancel();
+    _mucSelfPingTimeouts[id] =
+        Timer(_mucSelfPingTimeout, () => _handleMucSelfPingTimeout(id));
+  }
+
+  void _handleMucSelfPingTimeout(String id) {
+    final roomJid = _pendingMucSelfPings.remove(id);
+    _mucSelfPingTimeouts.remove(id)?.cancel();
+    if (roomJid == null) {
+      return;
+    }
+    _roomLastPingAt[roomJid] = DateTime.now();
+  }
+
+  void _handleMucSelfPingResponse(String roomJid, IqStanza stanza) {
+    final normalized = _bareJid(roomJid);
+    final outcome = mucSelfPingOutcomeFromResponse(stanza);
+    switch (outcome) {
+      case MucSelfPingOutcome.joined:
+        _roomLastTrafficAt[normalized] = DateTime.now();
+        _roomLastPingAt[normalized] = DateTime.now();
+        return;
+      case MucSelfPingOutcome.inconclusive:
+        _roomLastPingAt[normalized] = DateTime.now();
+        return;
+      case MucSelfPingOutcome.notJoined:
+        _roomLastPingAt[normalized] = DateTime.now();
+        _rejoinRoom(normalized);
+        return;
+    }
+  }
+
+  void _rejoinRoom(String roomJid) {
+    final entry = _rooms[_bareJid(roomJid)];
+    if (entry == null) {
+      return;
+    }
+    joinRoom(entry.roomJid, nick: entry.nick);
   }
 
   bool _hasReceiptRequest(MessageStanza stanza) {
@@ -2478,6 +2533,13 @@ class XmppService extends ChangeNotifier {
           notifyListeners();
           return;
         }
+        final selfPingRoom = _pendingMucSelfPings.remove(stanza.id);
+        if (selfPingRoom != null) {
+          final timer = _mucSelfPingTimeouts.remove(stanza.id);
+          timer?.cancel();
+          _handleMucSelfPingResponse(selfPingRoom, stanza);
+          return;
+        }
         final id = stanza.id;
         if (id == null || !_pendingPings.containsKey(id)) {
           return;
@@ -3349,6 +3411,11 @@ class XmppService extends ChangeNotifier {
     _csiIdleTimer = null;
     _mucSelfPingTimer?.cancel();
     _mucSelfPingTimer = null;
+    for (final timer in _mucSelfPingTimeouts.values) {
+      timer.cancel();
+    }
+    _mucSelfPingTimeouts.clear();
+    _pendingMucSelfPings.clear();
     _smNonzaSubscription?.cancel();
     _smNonzaSubscription = null;
     _pingSubscription?.cancel();
