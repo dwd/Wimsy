@@ -150,6 +150,12 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0363.html"/>
+        <xmpp:status>complete</xmpp:status>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0368.html"/>
         <xmpp:status>complete</xmpp:status>
       </xmpp:SupportedXep>
@@ -158,6 +164,12 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0402.html"/>
         <xmpp:status>complete</xmpp:status>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0428.html"/>
+        <xmpp:status>partial</xmpp:status>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>

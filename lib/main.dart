@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1186,6 +1187,18 @@ class _WimsyHomeState extends State<WimsyHome> {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    IconButton(
+                      onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
+                          ? null
+                          : () => _sendAttachment(
+                                activeChat,
+                                isBookmark: isBookmark,
+                                roomEntry: roomEntry,
+                              ),
+                      icon: const Icon(Icons.attach_file),
+                      tooltip: 'Send file',
+                    ),
+                    const SizedBox(width: 4),
                     FilledButton(
                       onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
                           ? null
@@ -1254,6 +1267,93 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
+    }
+  }
+
+  Future<void> _sendAttachment(String? activeChat, {required bool isBookmark, RoomEntry? roomEntry}) async {
+    if (activeChat == null) {
+      return;
+    }
+    if (isBookmark && !(roomEntry?.joined ?? false)) {
+      return;
+    }
+    final selection = await FilePicker.platform.pickFiles(withData: true);
+    if (selection == null || selection.files.isEmpty) {
+      return;
+    }
+    final file = selection.files.first;
+    final bytes = await _readPickedFileBytes(file);
+    if (bytes == null || bytes.isEmpty) {
+      _showSnack('Unable to read file.');
+      return;
+    }
+    final contentType = _guessContentType(file.name);
+    final error = isBookmark
+        ? await widget.service.sendRoomFile(
+            roomJid: activeChat,
+            bytes: bytes,
+            fileName: file.name,
+            contentType: contentType,
+          )
+        : await widget.service.sendFile(
+            toBareJid: activeChat,
+            bytes: bytes,
+            fileName: file.name,
+            contentType: contentType,
+          );
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      _showSnack(error);
+    }
+  }
+
+  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
+    if (file.bytes != null) {
+      return file.bytes;
+    }
+    final path = file.path;
+    if (path == null || path.isEmpty) {
+      return null;
+    }
+    try {
+      return await File(path).readAsBytes();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _guessContentType(String fileName) {
+    final parts = fileName.toLowerCase().split('.');
+    if (parts.length < 2) {
+      return null;
+    }
+    final ext = parts.last;
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'svg':
+        return 'image/svg+xml';
+      case 'mp4':
+        return 'video/mp4';
+      case 'mov':
+        return 'video/quicktime';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'wav':
+        return 'audio/wav';
+      case 'pdf':
+        return 'application/pdf';
+      default:
+        return null;
     }
   }
 

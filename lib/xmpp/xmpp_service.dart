@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
+import 'package:http/http.dart' as http;
 import 'package:xmpp_stone/xmpp_stone.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
@@ -10,6 +11,7 @@ import '../bookmarks/bookmarks_manager.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/storage_service.dart';
+import 'http_upload.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
 import 'alt_connection.dart';
@@ -128,6 +130,7 @@ class XmppService extends ChangeNotifier {
   PepCapsManager? _pepCapsManager;
   BookmarksManager? _bookmarksManager;
   PrivacyListsManager? _privacyListsManager;
+  String? _httpUploadServiceJid;
   final Set<String> _blockedJids = {};
   static const String _blockListName = 'wimsy-blocked';
   MucManager? _mucManager;
@@ -999,6 +1002,122 @@ class XmppService extends ChangeNotifier {
     );
   }
 
+  Future<String?> sendFile({
+    required String toBareJid,
+    required Uint8List bytes,
+    required String fileName,
+    String? contentType,
+  }) async {
+    return _sendFileInternal(
+      targetJid: toBareJid,
+      bytes: bytes,
+      fileName: fileName,
+      contentType: contentType,
+      isRoom: false,
+    );
+  }
+
+  Future<String?> sendRoomFile({
+    required String roomJid,
+    required Uint8List bytes,
+    required String fileName,
+    String? contentType,
+  }) async {
+    return _sendFileInternal(
+      targetJid: roomJid,
+      bytes: bytes,
+      fileName: fileName,
+      contentType: contentType,
+      isRoom: true,
+    );
+  }
+
+  Future<String?> _sendFileInternal({
+    required String targetJid,
+    required Uint8List bytes,
+    required String fileName,
+    required bool isRoom,
+    String? contentType,
+  }) async {
+    if (bytes.isEmpty) {
+      return 'File is empty.';
+    }
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return 'Not connected.';
+    }
+    if (!isRoom && isBookmark(targetJid)) {
+      return 'Not connected to the room.';
+    }
+    final uploadService = await _resolveHttpUploadServiceJid();
+    if (uploadService == null) {
+      return 'Server does not advertise HTTP upload.';
+    }
+    final slot = await _requestHttpUploadSlot(
+      uploadService: uploadService,
+      fileName: fileName,
+      size: bytes.length,
+      contentType: contentType,
+    );
+    if (slot == null) {
+      return 'Unable to request an upload slot.';
+    }
+    final uploaded = await _uploadToSlot(
+      slot: slot,
+      bytes: bytes,
+      contentType: contentType,
+    );
+    if (!uploaded) {
+      return 'Upload failed.';
+    }
+    final normalized = _bareJid(targetJid);
+    final messageId = AbstractStanza.getRandomId();
+    final url = slot.getUrl.toString();
+    final stanza = _buildOobMessageStanza(
+      targetJid: normalized,
+      messageId: messageId,
+      url: url,
+      isRoom: isRoom,
+    );
+    connection.writeStanza(stanza);
+    final rawXml = _serializeStanza(stanza);
+    final now = DateTime.now();
+    if (isRoom) {
+      final nick = _roomNickFor(normalized);
+      _addRoomMessage(
+        roomJid: normalized,
+        from: nick,
+        body: url,
+        rawXml: rawXml,
+        outgoing: true,
+        timestamp: now,
+        messageId: messageId,
+        oobUrl: url,
+      );
+      return null;
+    }
+
+    final chatManager = _chatManager;
+    if (chatManager == null) {
+      return 'Not connected.';
+    }
+    final chat = chatManager.getChat(Jid.fromFullJid(normalized));
+    _ensureChatSubscription(chat);
+    _addMessage(
+      bareJid: normalized,
+      from: _currentUserBareJid ?? '',
+      to: normalized,
+      body: url,
+      rawXml: rawXml,
+      oobUrl: url,
+      outgoing: true,
+      timestamp: now,
+      messageId: messageId,
+    );
+    chat.myState = ChatState.ACTIVE;
+    return null;
+  }
+
   void sendReaction({
     required String bareJid,
     required ChatMessage message,
@@ -1499,6 +1618,183 @@ class XmppService extends ChangeNotifier {
     } catch (_) {
       return stanza.buildXmlString();
     }
+  }
+
+  Future<String?> _resolveHttpUploadServiceJid() async {
+    final connection = _connection;
+    if (connection == null) {
+      return null;
+    }
+    if (_httpUploadServiceJid != null) {
+      return _httpUploadServiceJid;
+    }
+    final features = connection.getSupportedFeatures();
+    if (features.any((feature) => feature.xmppVar == httpUploadNamespace)) {
+      _httpUploadServiceJid = connection.serverName.userAtDomain;
+      return _httpUploadServiceJid;
+    }
+    final items = await _requestDiscoItems(connection.serverName.userAtDomain);
+    for (final item in items) {
+      final info = await _requestDiscoInfo(item);
+      if (info != null && discoInfoSupportsHttpUpload(info)) {
+        _httpUploadServiceJid = item;
+        return _httpUploadServiceJid;
+      }
+    }
+    return null;
+  }
+
+  Future<List<String>> _requestDiscoItems(String targetJid) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(targetJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#items'));
+    iqStanza.addChild(query);
+    final result = await _sendIqAndAwait(iqStanza);
+    if (result == null || result.type != IqStanzaType.RESULT) {
+      return const [];
+    }
+    final resultQuery = result.getChild('query');
+    if (resultQuery == null ||
+        resultQuery.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/disco#items') {
+      return const [];
+    }
+    final items = <String>[];
+    for (final child in resultQuery.children) {
+      if (child.name != 'item') {
+        continue;
+      }
+      final jid = child.getAttribute('jid')?.value?.trim() ?? '';
+      if (jid.isNotEmpty) {
+        items.add(jid);
+      }
+    }
+    return items;
+  }
+
+  Future<IqStanza?> _requestDiscoInfo(String targetJid) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(targetJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#info'));
+    iqStanza.addChild(query);
+    return _sendIqAndAwait(iqStanza);
+  }
+
+  Future<HttpUploadSlot?> _requestHttpUploadSlot({
+    required String uploadService,
+    required String fileName,
+    required int size,
+    String? contentType,
+  }) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(uploadService);
+    iqStanza.addChild(buildHttpUploadRequest(
+      fileName: fileName,
+      size: size,
+      contentType: contentType,
+    ));
+    final result = await _sendIqAndAwait(iqStanza);
+    if (result == null) {
+      return null;
+    }
+    return HttpUploadSlot.fromIq(result);
+  }
+
+  Future<bool> _uploadToSlot({
+    required HttpUploadSlot slot,
+    required Uint8List bytes,
+    String? contentType,
+  }) async {
+    final headers = Map<String, String>.from(slot.putHeaders);
+    if (contentType != null &&
+        contentType.isNotEmpty &&
+        !_hasHeader(headers, 'content-type')) {
+      headers['Content-Type'] = contentType;
+    }
+    try {
+      final response = await http.put(slot.putUrl, headers: headers, body: bytes);
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _hasHeader(Map<String, String> headers, String name) {
+    final target = name.toLowerCase();
+    return headers.keys.any((key) => key.toLowerCase() == target);
+  }
+
+  MessageStanza _buildOobMessageStanza({
+    required String targetJid,
+    required String messageId,
+    required String url,
+    required bool isRoom,
+  }) {
+    final stanza = MessageStanza(
+      messageId,
+      isRoom ? MessageStanzaType.GROUPCHAT : MessageStanzaType.CHAT,
+    );
+    stanza.toJid = Jid.fromFullJid(targetJid);
+    if (!isRoom) {
+      stanza.fromJid = _connection?.fullJid;
+    }
+    stanza.body = url;
+    final oob = XmppElement()..name = 'x';
+    oob.addAttribute(XmppAttribute('xmlns', 'jabber:x:oob'));
+    final urlElement = XmppElement()..name = 'url';
+    urlElement.textValue = url;
+    oob.addChild(urlElement);
+    stanza.addChild(oob);
+    final fallback = XmppElement()..name = 'fallback';
+    fallback.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fallback:0'));
+    final bodyFallback = XmppElement()..name = 'body';
+    fallback.addChild(bodyFallback);
+    stanza.addChild(fallback);
+    if (!isRoom) {
+      final receiptRequest = XmppElement()..name = 'request';
+      receiptRequest.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:receipts'),
+      );
+      stanza.addChild(receiptRequest);
+      final markable = XmppElement()..name = 'markable';
+      markable.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'),
+      );
+      stanza.addChild(markable);
+    }
+    return stanza;
+  }
+
+  Future<IqStanza?> _sendIqAndAwait(
+    IqStanza stanza, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final connection = _connection;
+    final id = stanza.id;
+    if (connection == null || id == null || id.isEmpty) {
+      return null;
+    }
+    final router = IqRouter.getInstance(connection);
+    final completer = Completer<IqStanza?>();
+    Timer? timer;
+    timer = Timer(timeout, () {
+      router.unregisterResponseHandler(id);
+      if (!completer.isCompleted) {
+        completer.complete(null);
+      }
+    });
+    router.registerResponseHandler(id, (response) {
+      timer?.cancel();
+      if (!completer.isCompleted) {
+        completer.complete(response);
+      }
+    });
+    connection.writeStanza(stanza);
+    return completer.future;
   }
 
   String _buildOutgoingGroupStanzaXml(String roomJid, String messageId, String body) {
