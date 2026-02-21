@@ -2,6 +2,10 @@
 
 This plan targets voice and video calling across all platforms using the XEP-0479 A/V Calling suite as the compliance checklist, and includes a staged path to Muji (XEP-0272) multi-party calls. It covers implementation and testing, with concrete deliverables and sequencing.
 
+## Current Status
+- Camera capture is already implemented for avatar updates (XEP-0054 workflow).
+- Jingle file transfer over IBB is implemented (XEP-0166 + XEP-0234 + XEP-0261 + XEP-0047).
+
 ## Phase 0 — Architecture + Decisions
 - Decide signaling flow: Jingle (XEP-0166) for session control + Jingle RTP (XEP-0167) for media.
 - Decide whether to require Jingle Message Initiation (XEP-0353) or use it opportunistically with IQ fallback.
@@ -17,6 +21,7 @@ This plan targets voice and video calling across all platforms using the XEP-047
 Deliverables:
 - Architecture doc outlining signaling flow, media abstraction, and platform-specific choices.
 - Decision record: JMI usage and fallback rules.
+- Reuse/extend the existing Jingle session flow from file transfer where practical.
 
 ## Phase 1 — Core Signaling + Discovery
 - Implement Jingle session state machine:
@@ -61,7 +66,7 @@ Deliverables:
   - audio routing (speaker/earpiece/Bluetooth)
   - echo cancellation and gain control
 - Add video:
-  - camera capture, encode, send/receive
+  - camera capture, encode, send/receive (camera capture already used for avatars; extend for live streams)
   - dynamic resolution/bitrate adaptation
   - UI for local preview and remote video
 - In-call UI:
