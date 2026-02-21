@@ -516,6 +516,7 @@ class XmppService extends ChangeNotifier {
     _status = XmppStatus.connecting;
     _errorMessage = null;
     _currentUserBareJid = bareJid;
+    _primeSelfVcardHash();
     notifyListeners();
 
     try {
@@ -598,6 +599,7 @@ class XmppService extends ChangeNotifier {
           _setupBlocking();
           _setupDisplayedSync();
           _primeMamSync();
+          _requestVcardDetails(_currentUserBareJid!, preferName: true);
           _sendInitialPresence();
           _applyClientState();
         } else if (_isTerminalError(state)) {
@@ -3570,6 +3572,31 @@ class XmppService extends ChangeNotifier {
 
   void _sendInitialPresence() {
     _sendPresence(_selfPresence);
+  }
+
+  void _primeSelfVcardHash() {
+    final selfBareJid = _currentUserBareJid;
+    if (selfBareJid == null || selfBareJid.isEmpty) {
+      return;
+    }
+    final state = _vcardAvatarState[selfBareJid];
+    if (state == _vcardNoAvatar) {
+      _selfVcardPhotoHash = '';
+      _selfVcardPhotoKnown = true;
+      return;
+    }
+    if (state != null && state.isNotEmpty) {
+      _selfVcardPhotoHash = state;
+      _selfVcardPhotoKnown = true;
+      return;
+    }
+    final bytes = _vcardAvatarBytes[selfBareJid];
+    if (bytes != null && bytes.isNotEmpty) {
+      vcardPhotoHash(bytes).then((hash) {
+        _selfVcardPhotoHash = hash;
+        _selfVcardPhotoKnown = true;
+      });
+    }
   }
 
   void _sendPresence(PresenceData presence) {

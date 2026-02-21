@@ -28,7 +28,6 @@ Client shortfalls (must also satisfy Core Client):
 Status: IM Client appears met.
 
 Advanced Client shortfalls (must also satisfy IM Client):
-- XEP-0398 + XEP-0153 (User Avatar Compatibility) — partial (server-side injection depends on server support; client sends vcard-temp:x:update but does not compute hashes itself).
 - XEP-0308 (Last Message Correction).
 - XEP-0234 + XEP-0261 (Jingle File Transfer + Jingle IBB transport).
 
