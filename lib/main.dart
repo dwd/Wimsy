@@ -794,7 +794,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                     )
                   : ListView.separated(
                       itemCount: contacts.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (context, index) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final contact = contacts[index];
                         final jid = contact.jid;
