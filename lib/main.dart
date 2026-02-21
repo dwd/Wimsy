@@ -1163,6 +1163,12 @@ class _WimsyHomeState extends State<WimsyHome> {
                                 message.fileState == 'offered')
                             ? () => _declineFileTransfer(message)
                             : null,
+                        onFallbackUpload: (!isBookmark &&
+                                message.outgoing &&
+                                (message.fileTransferId ?? '').isNotEmpty &&
+                                (message.fileState == 'failed' || message.fileState == 'declined'))
+                            ? () => _fallbackFileTransfer(message)
+                            : null,
                       );
                     },
                   ),
@@ -1510,6 +1516,22 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     await widget.service.declineFileTransfer(transferId: transferId);
+  }
+
+  Future<void> _fallbackFileTransfer(ChatMessage message) async {
+    final transferId = message.fileTransferId;
+    if (transferId == null || transferId.isEmpty) {
+      return;
+    }
+    final error = await widget.service.fallbackFileTransferToHttpUpload(
+      transferId: transferId,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      _showSnack(error);
+    }
   }
 
   Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
@@ -2211,6 +2233,7 @@ class _MessageBubble extends StatelessWidget {
     required this.onEdit,
     required this.onAcceptFile,
     required this.onDeclineFile,
+    required this.onFallbackUpload,
   });
 
   final ChatMessage message;
@@ -2226,6 +2249,7 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onAcceptFile;
   final VoidCallback? onDeclineFile;
+  final VoidCallback? onFallbackUpload;
 
   static const List<String> _reactionOptions = [
     '👍',
@@ -2520,6 +2544,9 @@ class _MessageBubble extends StatelessWidget {
     final showActions = !message.outgoing &&
         state == 'offered' &&
         (onAcceptFile != null || onDeclineFile != null);
+    final showFallback = message.outgoing &&
+        (state == 'failed' || state == 'declined') &&
+        onFallbackUpload != null;
     final hasProgress = size != null && size > 0 && state == 'in_progress';
     final progressValue = hasProgress ? (bytes / size).clamp(0.0, 1.0) : null;
 
@@ -2569,6 +2596,13 @@ class _MessageBubble extends StatelessWidget {
                   child: const Text('Decline'),
                 ),
               ],
+            ),
+          ],
+          if (showFallback) ...[
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: onFallbackUpload,
+              child: const Text('Send via HTTP'),
             ),
           ],
         ],

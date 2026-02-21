@@ -1269,6 +1269,32 @@ class XmppService extends ChangeNotifier {
         contentType: contentType,
       );
     }
+    return _sendHttpUploadMessage(
+      targetJid: targetJid,
+      bytes: bytes,
+      fileName: fileName,
+      contentType: contentType,
+      isRoom: true,
+    );
+  }
+
+  Future<String?> _sendHttpUploadMessage({
+    required String targetJid,
+    required Uint8List bytes,
+    required String fileName,
+    required bool isRoom,
+    String? contentType,
+  }) async {
+    if (bytes.isEmpty) {
+      return 'File is empty.';
+    }
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return 'Not connected.';
+    }
+    if (!isRoom && isBookmark(targetJid)) {
+      return 'Not connected to the room.';
+    }
     final uploadService = await _resolveHttpUploadServiceJid();
     if (uploadService == null) {
       return 'Server does not advertise HTTP upload.';
@@ -1336,6 +1362,27 @@ class XmppService extends ChangeNotifier {
     );
     chat.myState = ChatState.ACTIVE;
     return null;
+  }
+
+  Future<String?> fallbackFileTransferToHttpUpload({
+    required String transferId,
+  }) async {
+    final session = _fileTransfers[transferId];
+    if (session == null || session.incoming) {
+      return 'File transfer not available.';
+    }
+    final bytes = session.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      return 'Original file bytes are no longer available.';
+    }
+    final result = await _sendHttpUploadMessage(
+      targetJid: session.peerBareJid,
+      bytes: bytes,
+      fileName: session.fileName,
+      contentType: session.fileMime,
+      isRoom: false,
+    );
+    return result;
   }
 
   Future<String?> _sendJingleFile({
