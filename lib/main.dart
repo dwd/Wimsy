@@ -1885,7 +1885,15 @@ class _MessageBubble extends StatelessWidget {
                   oobImage,
                   const SizedBox(height: 8),
                 ],
-                if (_shouldShowBody(message.body, message.oobUrl))
+                if (_meCommandAction(message.body) != null)
+                  SelectableText(
+                    _formatMeCommand(senderName, _meCommandAction(message.body)!),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: textColor,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  )
+                else if (_shouldShowBody(message.body, message.oobUrl))
                   SelectableText.rich(
                     TextSpan(
                       style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
@@ -1897,8 +1905,8 @@ class _MessageBubble extends StatelessWidget {
                           decoration: TextDecoration.underline,
                         ),
                       ),
+                    ),
                   ),
-                ),
                 if (reactions.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   _buildReactionRow(context, reactions),
@@ -1986,6 +1994,18 @@ class _MessageBubble extends StatelessWidget {
       result = result.substring(0, result.length - 1);
     }
     return result;
+  }
+
+  String? _meCommandAction(String body) {
+    if (!body.startsWith('/me ')) {
+      return null;
+    }
+    final action = body.substring(4).trim();
+    return action.isEmpty ? null : action;
+  }
+
+  String _formatMeCommand(String senderName, String action) {
+    return '* $senderName $action';
   }
 
   bool _shouldShowBody(String body, String? oobUrl) {
