@@ -13,12 +13,12 @@ Advanced Client: appears met (Direct TLS XEP-0368, PEP XEP-0163). No shortfalls 
 ## Web Suite
 
 Client shortfalls (must also satisfy Core Client):
-- XEP-0206 (XMPP Over BOSH) — required as part of “Web Connection Mechanisms”.
+- None noted.
 
 Advanced Client shortfalls (must also satisfy Core Advanced Client + Web Client):
 - No additional items beyond Web Client shortfalls.
 
-Status: Web Client and Advanced Web Client are not met until the above are implemented.
+Status: Web Client and Advanced Web Client appear met.
 
 ## IM Suite
 
