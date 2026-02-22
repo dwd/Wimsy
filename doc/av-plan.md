@@ -89,6 +89,7 @@ Deliverables:
 - [x] Minimal in-chat call UI (incoming/outgoing/active + accept/decline/hang up).
 - [x] Media pipeline (offer/answer + track wiring scaffolded).
 - [x] Local preview and remote rendering (minimal).
+- [x] Basic media controls (mute/camera toggle).
 - [ ] Audio routing and device controls.
 
 ## Phase 4 — Advanced A/V (XEP-0479 Advanced Client)

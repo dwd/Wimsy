@@ -174,6 +174,8 @@ class XmppService extends ChangeNotifier {
   final Map<String, MediaStream> _callRemoteStreamBySid = {};
   final Map<String, JingleIceTransport> _callLocalTransportBySid = {};
   final Map<String, JingleIceTransport> _callRemoteTransportBySid = {};
+  final Map<String, bool> _callMutedBySid = {};
+  final Map<String, bool> _callVideoEnabledBySid = {};
   StreamSubscription<JingleSessionEvent>? _jingleSubscription;
   StreamSubscription<IbbOpen>? _ibbOpenSubscription;
   StreamSubscription<IbbData>? _ibbDataSubscription;
@@ -227,6 +229,22 @@ class XmppService extends ChangeNotifier {
       return null;
     }
     return _callRemoteStreamBySid[key];
+  }
+
+  bool isCallMuted(String bareJid) {
+    final key = _callSessionByBareJid[_bareJid(bareJid)];
+    if (key == null) {
+      return false;
+    }
+    return _callMutedBySid[key] ?? false;
+  }
+
+  bool isCallVideoEnabled(String bareJid) {
+    final key = _callSessionByBareJid[_bareJid(bareJid)];
+    if (key == null) {
+      return true;
+    }
+    return _callVideoEnabledBySid[key] ?? true;
   }
 
   void attachStorage(StorageService storage) {
@@ -1958,6 +1976,8 @@ class XmppService extends ChangeNotifier {
     _callSessions[event.sid] = session;
     _callSessionByBareJid[peerBare] = event.sid;
     _callOfferBySid[event.sid] = description;
+    _callMutedBySid[event.sid] = false;
+    _callVideoEnabledBySid[event.sid] = session.video;
     notifyListeners();
   }
 
@@ -2009,6 +2029,8 @@ class XmppService extends ChangeNotifier {
     _callSessions[sid] = session;
     _callSessionByBareJid[normalized] = sid;
     _callOfferBySid[sid] = mapping.description;
+    _callMutedBySid[sid] = false;
+    _callVideoEnabledBySid[sid] = video;
     notifyListeners();
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -2088,6 +2110,38 @@ class XmppService extends ChangeNotifier {
     _removeCallSession(session);
   }
 
+  void toggleCallMute(String bareJid) {
+    final key = _callSessionByBareJid[_bareJid(bareJid)];
+    if (key == null) {
+      return;
+    }
+    final muted = !(_callMutedBySid[key] ?? false);
+    _callMutedBySid[key] = muted;
+    final stream = _callLocalStreamBySid[key];
+    if (stream != null) {
+      for (final track in stream.getAudioTracks()) {
+        track.enabled = !muted;
+      }
+    }
+    notifyListeners();
+  }
+
+  void toggleCallVideo(String bareJid) {
+    final key = _callSessionByBareJid[_bareJid(bareJid)];
+    if (key == null) {
+      return;
+    }
+    final enabled = !(_callVideoEnabledBySid[key] ?? true);
+    _callVideoEnabledBySid[key] = enabled;
+    final stream = _callLocalStreamBySid[key];
+    if (stream != null) {
+      for (final track in stream.getVideoTracks()) {
+        track.enabled = enabled;
+      }
+    }
+    notifyListeners();
+  }
+
   void _removeCallSession(CallSession session) {
     final pc = _callPeerConnections.remove(session.sid);
     pc?.close();
@@ -2096,6 +2150,8 @@ class XmppService extends ChangeNotifier {
     _callMediaKindBySid.remove(session.sid);
     _callLocalTransportBySid.remove(session.sid);
     _callRemoteTransportBySid.remove(session.sid);
+    _callMutedBySid.remove(session.sid);
+    _callVideoEnabledBySid.remove(session.sid);
     _callSessions.remove(session.sid);
     _callOfferBySid.remove(session.sid);
     _callSessionByBareJid.remove(session.peerBareJid);

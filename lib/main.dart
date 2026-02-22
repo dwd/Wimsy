@@ -1603,6 +1603,33 @@ class _WimsyHomeState extends State<WimsyHome> {
                 ),
               ),
             ],
+            if (isActive) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: () => service.toggleCallMute(bareJid),
+                    icon: Icon(
+                      service.isCallMuted(bareJid) ? Icons.mic_off : Icons.mic,
+                    ),
+                    tooltip: service.isCallMuted(bareJid) ? 'Unmute' : 'Mute',
+                  ),
+                  if (session.video)
+                    IconButton(
+                      onPressed: () => service.toggleCallVideo(bareJid),
+                      icon: Icon(
+                        service.isCallVideoEnabled(bareJid)
+                            ? Icons.videocam
+                            : Icons.videocam_off,
+                      ),
+                      tooltip: service.isCallVideoEnabled(bareJid)
+                          ? 'Disable camera'
+                          : 'Enable camera',
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
