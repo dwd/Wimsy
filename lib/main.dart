@@ -99,7 +99,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       });
       _service.setIncomingMessageHandler(_handleIncomingMessage);
       _service.setIncomingRoomMessageHandler(_handleIncomingRoomMessage);
-      if (Platform.isAndroid) {
+      if (!kIsWeb && Platform.isAndroid) {
         _startAndroidForegroundService();
         _connectivitySubscription =
             _connectivity.onConnectivityChanged.listen((results) {
@@ -123,7 +123,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appIsForeground = state == AppLifecycleState.resumed;
-    if (Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid) {
       _service.setBackgroundMode(state != AppLifecycleState.resumed);
     }
   }
