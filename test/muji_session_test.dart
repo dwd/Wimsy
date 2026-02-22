@@ -16,6 +16,7 @@ void main() {
     ));
 
     expect(session.participants, hasLength(2));
+    expect(session.participants.first.muted, isFalse);
 
     session.removeParticipant(Jid.fromFullJid('alice@example.com/resource'));
     expect(session.participants, hasLength(1));
@@ -32,5 +33,24 @@ void main() {
     session.clear();
 
     expect(session.participants, isEmpty);
+  });
+
+  test('MujiSessionState updates active speaker', () {
+    final session = MujiSessionState();
+    session.addParticipant(MujiParticipant(
+      jid: Jid.fromFullJid('alice@example.com/resource'),
+      nick: 'Alice',
+    ));
+    session.addParticipant(MujiParticipant(
+      jid: Jid.fromFullJid('bob@example.com/resource'),
+      nick: 'Bob',
+    ));
+
+    session.setActiveSpeaker('Bob');
+
+    final alice = session.participants.firstWhere((p) => p.nick == 'Alice');
+    final bob = session.participants.firstWhere((p) => p.nick == 'Bob');
+    expect(alice.speaking, isFalse);
+    expect(bob.speaking, isTrue);
   });
 }

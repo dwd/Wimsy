@@ -1836,6 +1836,10 @@ class XmppService extends ChangeNotifier {
     _roomSubscriptions['message'] =
         _mucManager!.roomMessageStream.listen((message) {
       _noteRoomTraffic(message.roomJid);
+      final mujiSession = _mujiSessions[_bareJid(message.roomJid)];
+      if (mujiSession != null && message.nick.isNotEmpty) {
+        mujiSession.setActiveSpeaker(message.nick);
+      }
       if (message.replaceId != null && message.replaceId!.isNotEmpty) {
         final applied = _applyRoomMessageCorrection(
           roomJid: message.roomJid,

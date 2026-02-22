@@ -1150,6 +1150,11 @@ class _WimsyHomeState extends State<WimsyHome> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildCallBanner(service, activeChat),
             ),
+          if (activeChat != null && isBookmark && service.mujiSessionFor(activeChat) != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildMujiParticipantBar(service, activeChat),
+            ),
           const Divider(height: 1),
           Expanded(
             child: activeChat == null
@@ -1455,6 +1460,42 @@ class _WimsyHomeState extends State<WimsyHome> {
     await widget.service.endCall(session);
   }
 
+  Future<void> _showAudioOutputPicker() async {
+    final outputs = await widget.service.listAudioOutputs();
+    if (!mounted) {
+      return;
+    }
+    if (outputs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No audio outputs available.')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text('Audio output'),
+              ),
+              for (final output in outputs)
+                ListTile(
+                  title: Text(output.label.isEmpty ? output.deviceId : output.label),
+                  onTap: () {
+                    widget.service.selectAudioOutput(output.deviceId);
+                    Navigator.of(context).pop();
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _cancelEditing() {
     if (!mounted) {
       return;
@@ -1615,6 +1656,18 @@ class _WimsyHomeState extends State<WimsyHome> {
                     ),
                     tooltip: service.isCallMuted(bareJid) ? 'Unmute' : 'Mute',
                   ),
+                  IconButton(
+                    onPressed: () => service.toggleSpeakerphone(),
+                    icon: Icon(
+                      service.isSpeakerphoneOn ? Icons.volume_up : Icons.volume_down,
+                    ),
+                    tooltip: service.isSpeakerphoneOn ? 'Speaker on' : 'Speaker off',
+                  ),
+                  IconButton(
+                    onPressed: _showAudioOutputPicker,
+                    icon: const Icon(Icons.headphones),
+                    tooltip: 'Select audio output',
+                  ),
                   if (session.video)
                     IconButton(
                       onPressed: () => service.toggleCallVideo(bareJid),
@@ -1630,6 +1683,71 @@ class _WimsyHomeState extends State<WimsyHome> {
                 ],
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMujiParticipantBar(XmppService service, String roomJid) {
+    final session = service.mujiSessionFor(roomJid);
+    if (session == null) {
+      return const SizedBox.shrink();
+    }
+    final participants = session.participants;
+    if (participants.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      color: theme.colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Participants (${participants.length})',
+              style: theme.textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: participants.map((participant) {
+                final icon = participant.muted ? Icons.mic_off : Icons.mic;
+                final speakerIcon =
+                    participant.speaking ? Icons.volume_up : Icons.volume_off;
+                return Chip(
+                  avatar: Icon(
+                    icon,
+                    size: 16,
+                    color: participant.muted
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.primary,
+                  ),
+                  label: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(participant.nick),
+                      const SizedBox(width: 4),
+                      Icon(
+                        speakerIcon,
+                        size: 16,
+                        color: participant.speaking
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(growable: false),
+            ),
           ],
         ),
       ),

@@ -142,6 +142,13 @@ Deliverables:
 - Camera switching and background behavior on mobile.
 - Desktop audio devices and camera permissions.
 
+## Manual Tests
+- Place a 1:1 call (voice and video), accept on another client, verify audio/video both directions.
+- Join a Muji room with two clients, verify participant list shows both, and speaker indicator updates when someone sends a message in the room.
+- Toggle mute/unmute locally in a 1:1 call and verify UI state changes; ensure call quality stats continue updating.
+- Force a poor network (throttle) and verify bitrate target decreases; remove throttle and confirm it ramps back up.
+- Verify JMI propose/proceed fallback still works with multi-content sessions (audio+video).
+
 ## Work Breakdown (Suggested Order)
 1) Jingle session state machine + RTP negotiation
 2) ICE-UDP transport mapping + candidate exchange
