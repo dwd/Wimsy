@@ -10,6 +10,7 @@ const List<String> SERVICE_DISCOVERY_SUPPORT_LIST = [
   'urn:xmpp:jingle:apps:rtp:video',
   'urn:xmpp:jingle:apps:rtp:rtcp-fb:0',
   'urn:xmpp:jingle:apps:rtp:rtp-hdrext:0',
+  'urn:xmpp:jingle:apps:rtp:ssma:0',
   'urn:xmpp:jingle:transports:ice-udp:1',
   'urn:xmpp:jingle:apps:dtls:0',
   'urn:xmpp:jingle:apps:file-transfer:5',
