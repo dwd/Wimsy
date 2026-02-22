@@ -12,6 +12,7 @@ enum JingleAction {
   sessionInitiate,
   sessionAccept,
   sessionTerminate,
+  transportInfo,
   unknown,
 }
 
@@ -511,6 +512,8 @@ class JingleManager {
         return JingleAction.sessionAccept;
       case 'session-terminate':
         return JingleAction.sessionTerminate;
+      case 'transport-info':
+        return JingleAction.transportInfo;
       default:
         return JingleAction.unknown;
     }
@@ -572,6 +575,29 @@ class JingleManager {
     final reasonChild = XmppElement()..name = reason;
     reasonElement.addChild(reasonChild);
     jingle.addChild(reasonElement);
+    stanza.addChild(jingle);
+    return stanza;
+  }
+
+  IqStanza buildTransportInfo({
+    required Jid to,
+    required String sid,
+    required String contentName,
+    required String creator,
+    required JingleIceTransport transport,
+  }) {
+    final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+    stanza.toJid = to;
+    stanza.fromJid = _connection.fullJid;
+    final jingle = XmppElement()..name = 'jingle';
+    jingle.addAttribute(XmppAttribute('xmlns', jingleNamespace));
+    jingle.addAttribute(XmppAttribute('action', 'transport-info'));
+    jingle.addAttribute(XmppAttribute('sid', sid));
+    final content = XmppElement()..name = 'content';
+    content.addAttribute(XmppAttribute('creator', creator));
+    content.addAttribute(XmppAttribute('name', contentName));
+    content.addChild(_buildIceTransport(transport));
+    jingle.addChild(content);
     stanza.addChild(jingle);
     return stanza;
   }

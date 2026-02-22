@@ -10,6 +10,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -1534,6 +1535,8 @@ class _WimsyHomeState extends State<WimsyHome> {
         : isIncoming
             ? 'Incoming $typeLabel call'
             : 'Calling...';
+    final localStream = service.callLocalStreamFor(bareJid);
+    final remoteStream = service.callRemoteStreamFor(bareJid);
     return Card(
       color: theme.colorScheme.surface,
       elevation: 0,
@@ -1543,34 +1546,63 @@ class _WimsyHomeState extends State<WimsyHome> {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
+        child: Column(
           children: [
-            Icon(
-              session.video ? Icons.videocam : Icons.call,
-              color: theme.colorScheme.primary,
+            Row(
+              children: [
+                Icon(
+                  session.video ? Icons.videocam : Icons.call,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+                if (!isActive && isIncoming) ...[
+                  TextButton(
+                    onPressed: () => _declineCall(session),
+                    child: const Text('Decline'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => _acceptCall(session),
+                    child: const Text('Accept'),
+                  ),
+                ] else
+                  FilledButton(
+                    onPressed: () => _endCall(session),
+                    child: const Text('Hang up'),
+                  ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                title,
-                style: theme.textTheme.bodyMedium,
+            if (session.video) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 180,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _CallVideoView(
+                        stream: remoteStream ?? localStream,
+                        mirrored: false,
+                        placeholder: 'Remote video',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _CallVideoView(
+                        stream: localStream,
+                        mirrored: true,
+                        placeholder: 'Local preview',
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (!isActive && isIncoming) ...[
-              TextButton(
-                onPressed: () => _declineCall(session),
-                child: const Text('Decline'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: () => _acceptCall(session),
-                child: const Text('Accept'),
-              ),
-            ] else
-              FilledButton(
-                onPressed: () => _endCall(session),
-                child: const Text('Hang up'),
-              ),
+            ],
           ],
         ),
       ),
@@ -3789,5 +3821,84 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
       _sentryOptIn = existing;
       _loadedSentryPref = true;
     });
+  }
+}
+
+class _CallVideoView extends StatefulWidget {
+  const _CallVideoView({
+    required this.stream,
+    required this.mirrored,
+    required this.placeholder,
+  });
+
+  final MediaStream? stream;
+  final bool mirrored;
+  final String placeholder;
+
+  @override
+  State<_CallVideoView> createState() => _CallVideoViewState();
+}
+
+class _CallVideoViewState extends State<_CallVideoView> {
+  final RTCVideoRenderer _renderer = RTCVideoRenderer();
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _renderer.initialize();
+    if (!mounted) {
+      return;
+    }
+    _renderer.srcObject = widget.stream;
+    setState(() {
+      _initialized = true;
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _CallVideoView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_renderer.srcObject != widget.stream) {
+      _renderer.srcObject = widget.stream;
+    }
+  }
+
+  @override
+  void dispose() {
+    _renderer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (!_initialized || widget.stream == null) {
+      return Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          widget.placeholder,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: RTCVideoView(
+        _renderer,
+        mirror: widget.mirrored,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      ),
+    );
   }
 }

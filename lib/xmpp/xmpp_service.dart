@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
@@ -14,6 +15,7 @@ import '../pep/pep_caps_manager.dart';
 import '../storage/storage_service.dart';
 import '../av/call_session.dart';
 import '../av/media_session.dart';
+import '../av/sdp_mapper.dart';
 import 'blocking.dart';
 import 'http_upload.dart';
 import 'muc_invite.dart';
@@ -166,6 +168,12 @@ class XmppService extends ChangeNotifier {
   final Map<String, String> _callSessionByBareJid = {};
   final Map<String, JingleRtpDescription> _callOfferBySid = {};
   final WebRtcMediaSession _mediaSession = WebRtcMediaSession();
+  final Map<String, RTCPeerConnection> _callPeerConnections = {};
+  final Map<String, CallMediaKind> _callMediaKindBySid = {};
+  final Map<String, MediaStream> _callLocalStreamBySid = {};
+  final Map<String, MediaStream> _callRemoteStreamBySid = {};
+  final Map<String, JingleIceTransport> _callLocalTransportBySid = {};
+  final Map<String, JingleIceTransport> _callRemoteTransportBySid = {};
   StreamSubscription<JingleSessionEvent>? _jingleSubscription;
   StreamSubscription<IbbOpen>? _ibbOpenSubscription;
   StreamSubscription<IbbData>? _ibbDataSubscription;
@@ -203,6 +211,22 @@ class XmppService extends ChangeNotifier {
       return null;
     }
     return _callSessions[key];
+  }
+
+  MediaStream? callLocalStreamFor(String bareJid) {
+    final key = _callSessionByBareJid[_bareJid(bareJid)];
+    if (key == null) {
+      return null;
+    }
+    return _callLocalStreamBySid[key];
+  }
+
+  MediaStream? callRemoteStreamFor(String bareJid) {
+    final key = _callSessionByBareJid[_bareJid(bareJid)];
+    if (key == null) {
+      return null;
+    }
+    return _callRemoteStreamBySid[key];
   }
 
   void attachStorage(StorageService storage) {
@@ -1803,6 +1827,9 @@ class XmppService extends ChangeNotifier {
       case JingleAction.sessionTerminate:
         _handleJingleSessionTerminate(event);
         return;
+      case JingleAction.transportInfo:
+        _handleJingleTransportInfo(event);
+        return;
       case JingleAction.unknown:
         return;
     }
@@ -1811,7 +1838,7 @@ class XmppService extends ChangeNotifier {
   void _handleJingleSessionInitiate(JingleSessionEvent event) {
     final rtpDescription = event.content?.rtpDescription;
     if (rtpDescription != null) {
-      _handleIncomingCall(event, rtpDescription);
+      _handleIncomingCall(event, rtpDescription, event.content?.iceTransport);
       return;
     }
     final offer = event.content?.fileOffer;
@@ -1850,7 +1877,12 @@ class XmppService extends ChangeNotifier {
     final callSession = _callSessions[event.sid];
     if (callSession != null && callSession.direction == CallDirection.outgoing) {
       callSession.state = CallState.active;
-      unawaited(_mediaSession.start(audio: true, video: callSession.video));
+      unawaited(_applyRemoteDescriptionForCall(
+        sid: callSession.sid,
+        rtpDescription: event.content?.rtpDescription,
+        iceTransport: event.content?.iceTransport,
+        direction: callSession.direction,
+      ));
       notifyListeners();
       return;
     }
@@ -1896,7 +1928,11 @@ class XmppService extends ChangeNotifier {
     _finalizeTransfer(session);
   }
 
-  void _handleIncomingCall(JingleSessionEvent event, JingleRtpDescription description) {
+  void _handleIncomingCall(
+    JingleSessionEvent event,
+    JingleRtpDescription description,
+    JingleIceTransport? transport,
+  ) {
     final peerBare = event.from.userAtDomain;
     if (peerBare.isEmpty) {
       return;
@@ -1904,6 +1940,14 @@ class XmppService extends ChangeNotifier {
     if (_callSessions.containsKey(event.sid)) {
       return;
     }
+    _callMediaKindBySid[event.sid] =
+        description.media.toLowerCase() == 'video' ? CallMediaKind.video : CallMediaKind.audio;
+    unawaited(_applyRemoteDescriptionForCall(
+      sid: event.sid,
+      rtpDescription: description,
+      iceTransport: transport,
+      direction: CallDirection.incoming,
+    ));
     final session = CallSession(
       sid: event.sid,
       peerBareJid: peerBare,
@@ -1933,15 +1977,27 @@ class XmppService extends ChangeNotifier {
       return 'Not connected.';
     }
     final sid = AbstractStanza.getRandomId();
-    final description = _defaultRtpDescription(video: video);
-    final transport = _placeholderIceTransport();
+    final kind = video ? CallMediaKind.video : CallMediaKind.audio;
+    _callMediaKindBySid[sid] = kind;
+    final pc = await _createPeerConnection(
+      sid: sid,
+      peerBareJid: normalized,
+      kind: kind,
+    );
+    if (pc == null) {
+      return 'Unable to initialize WebRTC.';
+    }
+    final offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    final mapping = mapSdpToJingle(sdp: offer.sdp ?? '', mediaKind: kind);
+    _callLocalTransportBySid[sid] = mapping.transport;
     final iq = jingle.buildRtpSessionInitiate(
       to: Jid.fromFullJid(normalized),
       sid: sid,
-      contentName: description.media,
+      contentName: mapping.description.media,
       creator: 'initiator',
-      description: description,
-      transport: transport,
+      description: mapping.description,
+      transport: mapping.transport,
     );
     final session = CallSession(
       sid: sid,
@@ -1952,7 +2008,7 @@ class XmppService extends ChangeNotifier {
     );
     _callSessions[sid] = session;
     _callSessionByBareJid[normalized] = sid;
-    _callOfferBySid[sid] = description;
+    _callOfferBySid[sid] = mapping.description;
     notifyListeners();
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -1968,16 +2024,38 @@ class XmppService extends ChangeNotifier {
     if (jingle == null) {
       return;
     }
-    final description = _callOfferBySid[session.sid] ??
-        _defaultRtpDescription(video: session.video);
-    final transport = _placeholderIceTransport();
+    final kind = session.video ? CallMediaKind.video : CallMediaKind.audio;
+    _callMediaKindBySid[session.sid] = kind;
+    final pc = await _createPeerConnection(
+      sid: session.sid,
+      peerBareJid: session.peerBareJid,
+      kind: kind,
+    );
+    if (pc == null) {
+      session.state = CallState.failed;
+      _removeCallSession(session);
+      return;
+    }
+    final remoteDescription = _callOfferBySid[session.sid];
+    final remoteTransport = _callRemoteTransportBySid[session.sid];
+    if (remoteDescription != null && remoteTransport != null) {
+      final sdp = buildMinimalSdpFromJingle(
+        description: remoteDescription,
+        transport: remoteTransport,
+      );
+      await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+    }
+    final answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    final mapping = mapSdpToJingle(sdp: answer.sdp ?? '', mediaKind: kind);
+    _callLocalTransportBySid[session.sid] = mapping.transport;
     final iq = jingle.buildRtpSessionAccept(
       to: Jid.fromFullJid(session.peerBareJid),
       sid: session.sid,
-      contentName: description.media,
+      contentName: mapping.description.media,
       creator: 'initiator',
-      description: description,
-      transport: transport,
+      description: mapping.description,
+      transport: mapping.transport,
     );
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -2011,6 +2089,13 @@ class XmppService extends ChangeNotifier {
   }
 
   void _removeCallSession(CallSession session) {
+    final pc = _callPeerConnections.remove(session.sid);
+    pc?.close();
+    _callLocalStreamBySid.remove(session.sid);
+    _callRemoteStreamBySid.remove(session.sid);
+    _callMediaKindBySid.remove(session.sid);
+    _callLocalTransportBySid.remove(session.sid);
+    _callRemoteTransportBySid.remove(session.sid);
     _callSessions.remove(session.sid);
     _callOfferBySid.remove(session.sid);
     _callSessionByBareJid.remove(session.peerBareJid);
@@ -2018,37 +2103,148 @@ class XmppService extends ChangeNotifier {
     notifyListeners();
   }
 
-  JingleRtpDescription _defaultRtpDescription({required bool video}) {
-    if (video) {
-      return const JingleRtpDescription(
-        media: 'video',
-        payloadTypes: [
-          JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
-        ],
+  Future<void> _applyRemoteDescriptionForCall({
+    required String sid,
+    required JingleRtpDescription? rtpDescription,
+    required JingleIceTransport? iceTransport,
+    required CallDirection direction,
+  }) async {
+    if (rtpDescription == null || iceTransport == null) {
+      return;
+    }
+    _callOfferBySid[sid] = rtpDescription;
+    _callRemoteTransportBySid[sid] = iceTransport;
+    if (direction == CallDirection.incoming) {
+      return;
+    }
+    final pc = _callPeerConnections[sid];
+    if (pc == null) {
+      return;
+    }
+    final sdp = buildMinimalSdpFromJingle(
+      description: rtpDescription,
+      transport: iceTransport,
+    );
+    await pc.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+  }
+
+  void _handleJingleTransportInfo(JingleSessionEvent event) {
+    final transport = event.content?.iceTransport;
+    if (transport == null) {
+      return;
+    }
+    _callRemoteTransportBySid[event.sid] = transport;
+    final pc = _callPeerConnections[event.sid];
+    if (pc == null) {
+      return;
+    }
+    final kind = _callMediaKindBySid[event.sid];
+    final mid = kind == CallMediaKind.video ? 'video' : 'audio';
+    for (final candidate in transport.candidates) {
+      final candidateLine = _buildCandidateLine(candidate);
+      pc.addCandidate(RTCIceCandidate(candidateLine, mid, null));
+    }
+  }
+
+  String _buildCandidateLine(JingleIceCandidate candidate) {
+    final buffer = StringBuffer();
+    buffer.write('candidate:${candidate.foundation} ');
+    buffer.write('${candidate.component} ');
+    buffer.write('${candidate.protocol} ');
+    buffer.write('${candidate.priority} ');
+    buffer.write('${candidate.ip} ');
+    buffer.write('${candidate.port} ');
+    buffer.write('typ ${candidate.type}');
+    return buffer.toString();
+  }
+
+  Future<RTCPeerConnection?> _createPeerConnection({
+    required String sid,
+    required String peerBareJid,
+    required CallMediaKind kind,
+  }) async {
+    final config = <String, dynamic>{'iceServers': []};
+    final pc = await createPeerConnection(config);
+    _callPeerConnections[sid] = pc;
+    final handle = await _mediaSession.start(
+      audio: true,
+      video: kind == CallMediaKind.video,
+    );
+    if (handle is WebRtcMediaStreamHandle) {
+      _callLocalStreamBySid[sid] = handle.stream;
+      for (final track in handle.stream.getTracks()) {
+        await pc.addTrack(track, handle.stream);
+      }
+    }
+    pc.onTrack = (event) {
+      if (event.streams.isNotEmpty) {
+        _callRemoteStreamBySid[sid] = event.streams.first;
+        notifyListeners();
+      }
+    };
+    pc.onIceCandidate = (candidate) {
+      final transport = _callLocalTransportBySid[sid];
+      if (transport == null) {
+        return;
+      }
+      final parsed = _parseIceCandidate(candidate.candidate);
+      if (parsed == null) {
+        return;
+      }
+      final jingle = _jingleManager;
+      if (jingle == null) {
+        return;
+      }
+      final info = jingle.buildTransportInfo(
+        to: Jid.fromFullJid(peerBareJid),
+        sid: sid,
+        contentName: kind == CallMediaKind.video ? 'video' : 'audio',
+        creator: 'initiator',
+        transport: JingleIceTransport(
+          ufrag: transport.ufrag,
+          password: transport.password,
+          candidates: [parsed],
+          fingerprint: transport.fingerprint,
+        ),
       );
-    }
-    return const JingleRtpDescription(
-      media: 'audio',
-      payloadTypes: [
-        JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
-      ],
-    );
+      unawaited(_sendIqAndAwait(info));
+    };
+    return pc;
   }
 
-  JingleIceTransport _placeholderIceTransport() {
-    return JingleIceTransport(
-      ufrag: _randomToken(6),
-      password: _randomToken(12),
-      candidates: const [],
-    );
-  }
-
-  String _randomToken(int length) {
-    final rand = DateTime.now().microsecondsSinceEpoch.toString();
-    if (rand.length >= length) {
-      return rand.substring(rand.length - length);
+  JingleIceCandidate? _parseIceCandidate(String? candidateLine) {
+    if (candidateLine == null || candidateLine.isEmpty) {
+      return null;
     }
-    return rand.padLeft(length, '0');
+    final value = candidateLine.startsWith('candidate:')
+        ? candidateLine.substring('candidate:'.length)
+        : candidateLine;
+    final parts = value.split(' ');
+    if (parts.length < 8) {
+      return null;
+    }
+    final foundation = parts[0];
+    final component = int.tryParse(parts[1]);
+    final protocol = parts[2];
+    final priority = int.tryParse(parts[3]);
+    final ip = parts[4];
+    final port = int.tryParse(parts[5]);
+    final typeIndex = parts.indexOf('typ');
+    final type = typeIndex >= 0 && typeIndex + 1 < parts.length
+        ? parts[typeIndex + 1]
+        : '';
+    if (component == null || priority == null || port == null || type.isEmpty) {
+      return null;
+    }
+    return JingleIceCandidate(
+      foundation: foundation,
+      component: component,
+      protocol: protocol,
+      priority: priority,
+      ip: ip,
+      port: port,
+      type: type,
+    );
   }
 
   void _handleIbbOpen(IbbOpen open) {

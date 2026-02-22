@@ -216,6 +216,35 @@ void main() {
     expect(event.content!.iceTransport!.fingerprint?.hash, 'sha-256');
     expect(event.content!.iceTransport!.fingerprint?.fingerprint, 'AA:BB');
   });
+
+  test('Jingle transport-info parses ICE candidates', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+
+    final completer = Completer<JingleSessionEvent>();
+    manager.sessionStream.listen((event) {
+      completer.complete(event);
+    });
+
+    final iq = '<iq type="set" id="j5" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="transport-info" sid="sid128">'
+        '<content creator="initiator" name="audio">'
+        '<transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="uf" pwd="pw">'
+        '<candidate foundation="1" component="1" protocol="udp" priority="123" ip="10.0.0.2" port="9999" type="host" />'
+        '</transport>'
+        '</content>'
+        '</jingle>'
+        '</iq>';
+
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final event = await completer.future.timeout(const Duration(seconds: 1));
+    expect(event.action, JingleAction.transportInfo);
+    expect(event.content?.iceTransport, isNotNull);
+    expect(event.content!.iceTransport!.candidates, hasLength(1));
+  });
 }
 
 class _FakeSocket extends Stream<String> implements XmppWebSocket {

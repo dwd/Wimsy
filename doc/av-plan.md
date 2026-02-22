@@ -61,8 +61,8 @@ Deliverables:
 
 Deliverables:
 - [x] ICE-UDP and DTLS transport parsing/building scaffolding.
-- [ ] ICE candidate exchange / trickle transport-info.
-- [ ] DTLS fingerprint derivation and validation.
+- [x] ICE candidate exchange / trickle transport-info (basic).
+- [x] DTLS fingerprint mapping from SDP (basic).
 - [ ] STUN/TURN configuration via XEP-0215.
 
 ## Phase 3 — Media Pipeline + UX
@@ -87,8 +87,8 @@ Deliverables:
 Deliverables:
 - [x] WebRTC media session start/stop scaffold.
 - [x] Minimal in-chat call UI (incoming/outgoing/active + accept/decline/hang up).
-- [ ] Media pipeline (offer/answer + track wiring).
-- [ ] Local preview and remote rendering.
+- [x] Media pipeline (offer/answer + track wiring scaffolded).
+- [x] Local preview and remote rendering (minimal).
 - [ ] Audio routing and device controls.
 
 ## Phase 4 — Advanced A/V (XEP-0479 Advanced Client)
@@ -152,6 +152,6 @@ Deliverables:
 
 ## Open Questions
 - When do we implement JMI (XEP-0353) and its fallback rules in production?
-- How should we map SDP offers/answers to Jingle RTP (and back) for WebRTC interoperability?
+- SDP↔Jingle mapping is currently minimal (rtpmap + ICE + fingerprint only). Add full SDP attribute coverage (rtcp-fb, fmtp, extmaps, mid, msid).
 - Do we require multi-content Jingle (audio + video in one session) from day one?
 - For Muji, is mesh-only acceptable initially, or do we need early MCU/relay support?

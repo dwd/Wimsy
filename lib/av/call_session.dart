@@ -3,6 +3,11 @@ enum CallDirection {
   outgoing,
 }
 
+enum CallMediaKind {
+  audio,
+  video,
+}
+
 enum CallState {
   ringing,
   active,
