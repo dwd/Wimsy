@@ -1386,12 +1386,25 @@ class XmppService extends ChangeNotifier {
       return 'Not connected to the room.';
     }
     if (!isRoom) {
-      return _sendJingleFile(
+      final result = await _sendJingleFile(
         toBareJid: targetJid,
         bytes: bytes,
         fileName: fileName,
         contentType: contentType,
       );
+      if (result.status == _JingleFileSendStatus.ok) {
+        return null;
+      }
+      if (result.status == _JingleFileSendStatus.unsupported) {
+        return _sendHttpUploadMessage(
+          targetJid: targetJid,
+          bytes: bytes,
+          fileName: fileName,
+          contentType: contentType,
+          isRoom: false,
+        );
+      }
+      return result.error ?? 'File transfer failed.';
     }
     return _sendHttpUploadMessage(
       targetJid: targetJid,
@@ -1443,10 +1456,12 @@ class XmppService extends ChangeNotifier {
     final normalized = _bareJid(targetJid);
     final messageId = AbstractStanza.getRandomId();
     final url = slot.getUrl.toString();
+    final description = fileName.trim();
     final stanza = _buildOobMessageStanza(
       targetJid: normalized,
       messageId: messageId,
       url: url,
+      description: description.isEmpty ? null : description,
       isRoom: isRoom,
     );
     connection.writeStanza(stanza);
@@ -1463,6 +1478,7 @@ class XmppService extends ChangeNotifier {
         timestamp: now,
         messageId: messageId,
         oobUrl: url,
+        oobDescription: description.isEmpty ? null : description,
       );
       return null;
     }
@@ -1480,6 +1496,7 @@ class XmppService extends ChangeNotifier {
       body: url,
       rawXml: rawXml,
       oobUrl: url,
+      oobDescription: description.isEmpty ? null : description,
       outgoing: true,
       timestamp: now,
       messageId: messageId,
@@ -1509,7 +1526,7 @@ class XmppService extends ChangeNotifier {
     return result;
   }
 
-  Future<String?> _sendJingleFile({
+  Future<_JingleFileSendResult> _sendJingleFile({
     required String toBareJid,
     required Uint8List bytes,
     required String fileName,
@@ -1518,11 +1535,17 @@ class XmppService extends ChangeNotifier {
     final connection = _connection;
     final jingle = _jingleManager;
     if (connection == null || jingle == null || _currentUserBareJid == null) {
-      return 'Not connected.';
+      return const _JingleFileSendResult(
+        _JingleFileSendStatus.failed,
+        'Not connected.',
+      );
     }
     final normalized = _bareJid(toBareJid);
     if (normalized.isEmpty) {
-      return 'Invalid JID.';
+      return const _JingleFileSendResult(
+        _JingleFileSendStatus.failed,
+        'Invalid JID.',
+      );
     }
     final sid = AbstractStanza.getRandomId();
     final ibbSid = AbstractStanza.getRandomId();
@@ -1573,9 +1596,18 @@ class XmppService extends ChangeNotifier {
         transferId: sid,
         state: _fileTransferStateFailed,
       );
-      return 'Jingle session-initiate failed.';
+      if (result != null && result.type == IqStanzaType.ERROR) {
+        final condition = _iqErrorCondition(result);
+        if (_isJingleUnsupportedError(condition)) {
+          return const _JingleFileSendResult(_JingleFileSendStatus.unsupported);
+        }
+      }
+      return const _JingleFileSendResult(
+        _JingleFileSendStatus.failed,
+        'Jingle session-initiate failed.',
+      );
     }
-    return null;
+    return const _JingleFileSendResult(_JingleFileSendStatus.ok);
   }
 
   Future<void> acceptFileTransfer({
@@ -2991,7 +3023,8 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final body = stanza.body ?? '';
-    final oobUrl = _extractOobUrlFromStanza(stanza);
+    final oobInfo = _extractOobInfoFromStanza(stanza);
+    final oobUrl = oobInfo?.url;
     if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
       return;
     }
@@ -3197,7 +3230,7 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
-  String? _extractOobUrlFromStanza(XmppElement stanza) {
+  _OobInfo? _extractOobInfoFromStanza(XmppElement stanza) {
     final candidates = <XmppElement>[stanza];
     for (final child in stanza.children) {
       if (child.name != 'result' && child.name != 'sent' && child.name != 'received') {
@@ -3223,9 +3256,11 @@ class XmppService extends ChangeNotifier {
           continue;
         }
         final url = child.getChild('url')?.textValue?.trim();
-        if (url != null && url.isNotEmpty) {
-          return url;
+        if (url == null || url.isEmpty) {
+          continue;
         }
+        final description = child.getChild('desc')?.textValue?.trim();
+        return _OobInfo(url: url, description: description);
       }
     }
     return null;
@@ -3331,6 +3366,7 @@ class XmppService extends ChangeNotifier {
     required String rawXml,
     required DateTime timestamp,
     String? oobUrl,
+    String? oobDescription,
   }) {
     final normalized = _bareJid(bareJid);
     final list = _messages[normalized];
@@ -3343,6 +3379,7 @@ class XmppService extends ChangeNotifier {
       replaceId: replaceId,
       newBody: newBody,
       oobUrl: oobUrl,
+      oobDescription: oobDescription,
       rawXml: rawXml,
       timestamp: timestamp,
       matchSenderBare: true,
@@ -3362,6 +3399,7 @@ class XmppService extends ChangeNotifier {
     required String rawXml,
     required DateTime timestamp,
     String? oobUrl,
+    String? oobDescription,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages[normalized];
@@ -3374,6 +3412,7 @@ class XmppService extends ChangeNotifier {
       replaceId: replaceId,
       newBody: newBody,
       oobUrl: oobUrl,
+      oobDescription: oobDescription,
       rawXml: rawXml,
       timestamp: timestamp,
       matchSenderBare: false,
@@ -3394,6 +3433,7 @@ class XmppService extends ChangeNotifier {
     required DateTime timestamp,
     required bool matchSenderBare,
     String? oobUrl,
+    String? oobDescription,
   }) {
     for (var i = list.length - 1; i >= 0; i--) {
       final existing = list[i];
@@ -3411,9 +3451,13 @@ class XmppService extends ChangeNotifier {
       }
       final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
       final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
+      final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+          ? oobDescription
+          : existing.oobDescription;
       final nextEditedAt = timestamp;
       if (existing.body == newBody &&
           existing.oobUrl == nextOobUrl &&
+          existing.oobDescription == nextOobDescription &&
           existing.rawXml == nextRawXml &&
           existing.edited &&
           existing.editedAt == nextEditedAt) {
@@ -3429,6 +3473,7 @@ class XmppService extends ChangeNotifier {
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
         oobUrl: nextOobUrl,
+        oobDescription: nextOobDescription,
         rawXml: nextRawXml,
         inviteRoomJid: existing.inviteRoomJid,
         inviteReason: existing.inviteReason,
@@ -3503,6 +3548,7 @@ class XmppService extends ChangeNotifier {
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
+        oobDescription: existing.oobDescription,
         rawXml: existing.rawXml,
         fileTransferId: existing.fileTransferId,
         fileName: existing.fileName,
@@ -3694,6 +3740,7 @@ class XmppService extends ChangeNotifier {
     required String targetJid,
     required String messageId,
     required String url,
+    String? description,
     required bool isRoom,
   }) {
     final stanza = MessageStanza(
@@ -3710,6 +3757,12 @@ class XmppService extends ChangeNotifier {
     final urlElement = XmppElement()..name = 'url';
     urlElement.textValue = url;
     oob.addChild(urlElement);
+    final trimmedDescription = description?.trim();
+    if (trimmedDescription != null && trimmedDescription.isNotEmpty) {
+      final descElement = XmppElement()..name = 'desc';
+      descElement.textValue = trimmedDescription;
+      oob.addChild(descElement);
+    }
     stanza.addChild(oob);
     final fallback = XmppElement()..name = 'fallback';
     fallback.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fallback:0'));
@@ -4338,7 +4391,9 @@ class XmppService extends ChangeNotifier {
         final from = message.from?.userAtDomain ?? 'unknown';
         final to = message.to?.userAtDomain ?? '';
         final body = message.text ?? '';
-        final oobUrl = _extractOobUrlFromStanza(message.messageStanza);
+        final oobInfo = _extractOobInfoFromStanza(message.messageStanza);
+        final oobUrl = oobInfo?.url;
+        final oobDescription = oobInfo?.description;
         final rawXml = _serializeStanza(message.messageStanza);
         final replaceId = _extractReplaceIdFromStanza(message.messageStanza);
         final reaction = _extractReactionUpdate(message.messageStanza);
@@ -4361,6 +4416,7 @@ class XmppService extends ChangeNotifier {
             replaceId: replaceId,
             newBody: body,
             oobUrl: oobUrl,
+            oobDescription: oobDescription,
             rawXml: rawXml,
             timestamp: message.time,
           );
@@ -4375,6 +4431,7 @@ class XmppService extends ChangeNotifier {
           body: body,
           rawXml: rawXml,
           oobUrl: oobUrl,
+          oobDescription: oobDescription,
           outgoing: outgoing,
           timestamp: message.time,
           messageId: message.messageId,
@@ -4388,7 +4445,9 @@ class XmppService extends ChangeNotifier {
       final from = message.from?.userAtDomain ?? 'unknown';
       final to = message.to?.userAtDomain ?? '';
       final body = message.text ?? '';
-      final oobUrl = _extractOobUrlFromStanza(message.messageStanza);
+      final oobInfo = _extractOobInfoFromStanza(message.messageStanza);
+      final oobUrl = oobInfo?.url;
+      final oobDescription = oobInfo?.description;
       final rawXml = _serializeStanza(message.messageStanza);
       final replaceId = _extractReplaceIdFromStanza(message.messageStanza);
       final reaction = _extractReactionUpdate(message.messageStanza);
@@ -4402,6 +4461,7 @@ class XmppService extends ChangeNotifier {
           replaceId: replaceId,
           newBody: body,
           oobUrl: oobUrl,
+          oobDescription: oobDescription,
           rawXml: rawXml,
           timestamp: message.time,
         );
@@ -4428,6 +4488,7 @@ class XmppService extends ChangeNotifier {
         body: body,
         rawXml: rawXml,
         oobUrl: oobUrl,
+        oobDescription: oobDescription,
         outgoing: outgoing,
         timestamp: message.time,
         messageId: message.messageId,
@@ -4459,6 +4520,7 @@ class XmppService extends ChangeNotifier {
     String? mamId,
     String? stanzaId,
     String? oobUrl,
+    String? oobDescription,
     String? inviteRoomJid,
     String? inviteReason,
     String? invitePassword,
@@ -4477,6 +4539,9 @@ class XmppService extends ChangeNotifier {
             (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId;
         final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
         final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
+        final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+            ? oobDescription
+            : existing.oobDescription;
         final nextInviteRoomJid =
             (inviteRoomJid != null && inviteRoomJid.isNotEmpty) ? inviteRoomJid : existing.inviteRoomJid;
         final nextInviteReason =
@@ -4487,6 +4552,7 @@ class XmppService extends ChangeNotifier {
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
             nextRawXml != existing.rawXml ||
+            nextOobDescription != existing.oobDescription ||
             nextInviteRoomJid != existing.inviteRoomJid ||
             nextInviteReason != existing.inviteReason ||
             nextInvitePassword != existing.invitePassword) {
@@ -4500,6 +4566,7 @@ class XmppService extends ChangeNotifier {
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
+            oobDescription: nextOobDescription,
             rawXml: nextRawXml,
             inviteRoomJid: nextInviteRoomJid,
             inviteReason: nextInviteReason,
@@ -4541,6 +4608,7 @@ class XmppService extends ChangeNotifier {
         to: to,
         body: body,
         oobUrl: oobUrl,
+        oobDescription: oobDescription,
         rawXml: rawXml,
         outgoing: outgoing,
         timestamp: timestamp,
@@ -4569,6 +4637,7 @@ class XmppService extends ChangeNotifier {
           mamId: mamId,
           stanzaId: stanzaId,
           oobUrl: oobUrl,
+          oobDescription: oobDescription,
           rawXml: rawXml,
           reactions: const {},
         ),
@@ -4591,6 +4660,7 @@ class XmppService extends ChangeNotifier {
       mamId: mamId,
       stanzaId: stanzaId,
       oobUrl: oobUrl,
+      oobDescription: oobDescription,
       rawXml: rawXml,
       reactions: const {},
     );
@@ -4616,6 +4686,7 @@ class XmppService extends ChangeNotifier {
     String? mamId,
     String? stanzaId,
     String? oobUrl,
+    String? oobDescription,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
@@ -4632,11 +4703,15 @@ class XmppService extends ChangeNotifier {
         final nextTimestamp = (!outgoing && existing.outgoing) ? timestamp : existing.timestamp;
         final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
         final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
+        final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+            ? oobDescription
+            : existing.oobDescription;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextReceiptReceived != existing.receiptReceived ||
             nextTimestamp != existing.timestamp ||
             nextOobUrl != existing.oobUrl ||
+            nextOobDescription != existing.oobDescription ||
             nextRawXml != existing.rawXml) {
           final updated = ChatMessage(
             from: existing.from,
@@ -4648,6 +4723,7 @@ class XmppService extends ChangeNotifier {
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
+            oobDescription: nextOobDescription,
             rawXml: nextRawXml,
             fileTransferId: existing.fileTransferId,
             fileName: existing.fileName,
@@ -4691,6 +4767,7 @@ class XmppService extends ChangeNotifier {
           mamId: mamId,
           stanzaId: stanzaId,
           oobUrl: oobUrl,
+          oobDescription: oobDescription,
           rawXml: rawXml,
           reactions: const {},
         ),
@@ -4713,6 +4790,7 @@ class XmppService extends ChangeNotifier {
       mamId: mamId,
       stanzaId: stanzaId,
       oobUrl: oobUrl,
+      oobDescription: oobDescription,
       rawXml: rawXml,
       reactions: const {},
     );
@@ -4828,6 +4906,7 @@ class XmppService extends ChangeNotifier {
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
+        oobDescription: existing.oobDescription,
         rawXml: existing.rawXml,
         inviteRoomJid: existing.inviteRoomJid,
         inviteReason: existing.inviteReason,
@@ -4935,6 +5014,31 @@ class XmppService extends ChangeNotifier {
     await _sendIqAndAwait(iq);
   }
 
+  String? _iqErrorCondition(IqStanza stanza) {
+    final error = stanza.getChild('error');
+    if (error == null) {
+      return null;
+    }
+    for (final child in error.children) {
+      if (child.getAttribute('xmlns')?.value ==
+          'urn:ietf:params:xml:ns:xmpp-stanzas') {
+        return child.name;
+      }
+    }
+    return null;
+  }
+
+  bool _isJingleUnsupportedError(String? condition) {
+    switch (condition) {
+      case 'feature-not-implemented':
+      case 'service-unavailable':
+      case 'item-not-found':
+      case 'not-acceptable':
+        return true;
+    }
+    return false;
+  }
+
   _FileTransferSession? _findTransferByIbbSid(String ibbSid) {
     for (final session in _fileTransfers.values) {
       if (session.ibbSid == ibbSid) {
@@ -4986,6 +5090,7 @@ class XmppService extends ChangeNotifier {
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
+        oobDescription: existing.oobDescription,
         rawXml: existing.rawXml,
         fileTransferId: existing.fileTransferId,
         fileName: existing.fileName,
@@ -5042,6 +5147,7 @@ class XmppService extends ChangeNotifier {
         mamId: existing.mamId,
         stanzaId: existing.stanzaId,
         oobUrl: existing.oobUrl,
+        oobDescription: existing.oobDescription,
         rawXml: existing.rawXml,
         fileTransferId: existing.fileTransferId,
         fileName: existing.fileName,
@@ -5148,6 +5254,7 @@ class XmppService extends ChangeNotifier {
     required String to,
     required String body,
     String? oobUrl,
+    String? oobDescription,
     String? rawXml,
     required bool outgoing,
     required DateTime timestamp,
@@ -5163,6 +5270,9 @@ class XmppService extends ChangeNotifier {
           existing.messageId == messageId &&
           ((existing.mamId ?? '').isEmpty || (existing.stanzaId ?? '').isEmpty)) {
         final nextRawXml = (rawXml != null && rawXml.isNotEmpty) ? rawXml : existing.rawXml;
+        final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+            ? oobDescription
+            : existing.oobDescription;
         list[i] = ChatMessage(
           from: existing.from,
           to: existing.to,
@@ -5173,6 +5283,7 @@ class XmppService extends ChangeNotifier {
           mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
           stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
           oobUrl: existing.oobUrl,
+          oobDescription: nextOobDescription,
           rawXml: nextRawXml,
           fileTransferId: existing.fileTransferId,
           fileName: existing.fileName,
@@ -5212,6 +5323,7 @@ class XmppService extends ChangeNotifier {
         mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
         stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
         oobUrl: existing.oobUrl,
+        oobDescription: existing.oobDescription,
         rawXml: existing.rawXml,
         fileTransferId: existing.fileTransferId,
         fileName: existing.fileName,
@@ -6401,6 +6513,13 @@ class _ReactionUpdate {
   final List<String> reactions;
 }
 
+class _OobInfo {
+  _OobInfo({required this.url, this.description});
+
+  final String url;
+  final String? description;
+}
+
 class _CallStatsTracker {
   DateTime? lastSampleAt;
   int? lastOutboundBytes;
@@ -6408,4 +6527,13 @@ class _CallStatsTracker {
   int? lastPacketsLost;
   int? lastPacketsReceived;
   int? videoBitrateTargetBps;
+}
+
+enum _JingleFileSendStatus { ok, unsupported, failed }
+
+class _JingleFileSendResult {
+  const _JingleFileSendResult(this.status, [this.error]);
+
+  final _JingleFileSendStatus status;
+  final String? error;
 }

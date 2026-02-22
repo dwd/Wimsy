@@ -2647,7 +2647,12 @@ String _messagePreviewText(XmppService service, ChatMessage message) {
     return body;
   }
   final oob = message.oobUrl?.trim() ?? '';
-  return oob.isNotEmpty ? oob : 'Message';
+  if (oob.isEmpty) {
+    return 'Message';
+  }
+  final uri = Uri.tryParse(oob);
+  final name = uri == null || uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
+  return name.isEmpty ? oob : 'File: ${Uri.decodeComponent(name)}';
 }
 
 class _MessageBubble extends StatelessWidget {
@@ -2702,6 +2707,7 @@ class _MessageBubble extends StatelessWidget {
         ? textColor.withValues(alpha: 0.85)
         : xep0392ColorForLabel(senderName);
     final oobImage = _buildOobImage(context);
+    final oobFileCard = _buildOobFileCard(context);
     final fileTransferCard = _buildFileTransferCard(context);
     final inviteCard = _buildInviteCard(context);
     final reactions = message.reactions ?? const {};
@@ -2769,6 +2775,10 @@ class _MessageBubble extends StatelessWidget {
                 ],
                 if (oobImage != null) ...[
                   oobImage,
+                  const SizedBox(height: 8),
+                ],
+                if (oobFileCard != null) ...[
+                  oobFileCard,
                   const SizedBox(height: 8),
                 ],
                 if (_meCommandAction(message.body) != null)
@@ -2895,6 +2905,9 @@ class _MessageBubble extends StatelessWidget {
   }
 
   bool _shouldShowBody(String body, String? oobUrl) {
+    if (_isNonImageOob(oobUrl)) {
+      return false;
+    }
     final trimmed = body.trim();
     if (trimmed.isEmpty) {
       return false;
@@ -3109,6 +3122,92 @@ class _MessageBubble extends StatelessWidget {
         );
       },
     );
+  }
+
+  Widget? _buildOobFileCard(BuildContext context) {
+    final url = message.oobUrl?.trim() ?? '';
+    if (url.isEmpty || _isImageUrl(url)) {
+      return null;
+    }
+    final theme = Theme.of(context);
+    final description = _oobDescriptionText(url);
+    final name = _oobFileName(url);
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            name,
+            style: theme.textTheme.titleSmall,
+          ),
+          if (description.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              description,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton(
+              onPressed: () async {
+                final uri = Uri.tryParse(url);
+                if (uri == null) {
+                  return;
+                }
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              },
+              child: const Text('Download'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isNonImageOob(String? oobUrl) {
+    final raw = oobUrl?.trim();
+    if (raw == null || raw.isEmpty) {
+      return false;
+    }
+    return !_isImageUrl(raw);
+  }
+
+  String _oobDescriptionText(String url) {
+    final description = message.oobDescription?.trim();
+    if (description != null && description.isNotEmpty) {
+      return description;
+    }
+    final body = message.body.trim();
+    if (body.isNotEmpty && _normalizeUrl(body) != _normalizeUrl(url)) {
+      return body;
+    }
+    return url;
+  }
+
+  String _oobFileName(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      return 'File';
+    }
+    final segments = uri.pathSegments;
+    if (segments.isEmpty) {
+      return 'File';
+    }
+    final last = segments.last.trim();
+    if (last.isEmpty) {
+      return 'File';
+    }
+    return Uri.decodeComponent(last);
   }
 
   String? _imageUrlForMessage(String? oobUrl) {

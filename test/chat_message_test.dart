@@ -11,6 +11,7 @@ void main() {
       outgoing: false,
       messageId: 'msg-1',
       rawXml: '<message id="msg-1"><body>hello</body></message>',
+      oobDescription: 'A friendly greeting',
       edited: true,
       editedAt: DateTime.parse('2024-08-09T10:12:13Z'),
       fileTransferId: 'ft-1',
@@ -27,6 +28,7 @@ void main() {
     final roundtrip = ChatMessage.fromMap(message.toMap());
     expect(roundtrip, isNotNull);
     expect(roundtrip!.rawXml, contains('<message'));
+    expect(roundtrip.oobDescription, 'A friendly greeting');
     expect(roundtrip.edited, isTrue);
     expect(roundtrip.editedAt, DateTime.parse('2024-08-09T10:12:13Z'));
     expect(roundtrip.fileTransferId, 'ft-1');

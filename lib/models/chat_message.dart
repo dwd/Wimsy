@@ -9,6 +9,7 @@ class ChatMessage {
     this.mamId,
     this.stanzaId,
     this.oobUrl,
+    this.oobDescription,
     this.rawXml,
     this.inviteRoomJid,
     this.inviteReason,
@@ -36,6 +37,7 @@ class ChatMessage {
   final String? mamId;
   final String? stanzaId;
   final String? oobUrl;
+  final String? oobDescription;
   final String? rawXml;
   final String? inviteRoomJid;
   final String? inviteReason;
@@ -64,6 +66,7 @@ class ChatMessage {
       'mamId': mamId,
       'stanzaId': stanzaId,
       'oobUrl': oobUrl,
+      'oobDescription': oobDescription,
       'rawXml': rawXml,
       'inviteRoomJid': inviteRoomJid,
       'inviteReason': inviteReason,
@@ -96,6 +99,7 @@ class ChatMessage {
     final mamId = map['mamId']?.toString();
     final stanzaId = map['stanzaId']?.toString();
     final oobUrl = map['oobUrl']?.toString();
+    final oobDescription = map['oobDescription']?.toString();
     final rawXml = map['rawXml']?.toString();
     final inviteRoomJid = map['inviteRoomJid']?.toString();
     final inviteReason = map['inviteReason']?.toString();
@@ -141,6 +145,7 @@ class ChatMessage {
       mamId: mamId,
       stanzaId: stanzaId,
       oobUrl: oobUrl,
+      oobDescription: oobDescription,
       rawXml: rawXml,
       inviteRoomJid: inviteRoomJid,
       inviteReason: inviteReason,
