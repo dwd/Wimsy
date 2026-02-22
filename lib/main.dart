@@ -1430,15 +1430,27 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (messageId == null || messageId.isEmpty) {
       return;
     }
+    final body = message.body;
     setState(() {
       _editingMessageId = messageId;
       _editingChatBareJid = activeChat;
       _editingIsRoom = isRoom;
     });
-    _messageController.text = message.body;
-    _messageController.selection = TextSelection.fromPosition(
-      TextPosition(offset: _messageController.text.length),
+    _messageController.value = TextEditingValue(
+      text: body,
+      selection: TextSelection.collapsed(offset: body.length),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      if (_messageController.text != body) {
+        _messageController.value = TextEditingValue(
+          text: body,
+          selection: TextSelection.collapsed(offset: body.length),
+        );
+      }
+    });
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
     }
