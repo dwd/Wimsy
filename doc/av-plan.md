@@ -17,11 +17,13 @@ This plan targets voice and video calling across all platforms using the XEP-047
   - DTLS-SRTP parameters
   - stats and call quality metrics
 - Security baseline: DTLS-SRTP (XEP-0320) for all media.
+- Linux camera access: image_picker does not support ImageSource.camera on Linux. For A/V we must use a WebRTC-capable camera stack (or another Linux-capable capture plugin) and expose it via the media abstraction.
 
 Deliverables:
 - Architecture doc outlining signaling flow, media abstraction, and platform-specific choices.
 - Decision record: JMI usage and fallback rules.
 - Reuse/extend the existing Jingle session flow from file transfer where practical.
+- Document Linux camera capture approach and target WebRTC stack.
 
 ## Phase 1 — Core Signaling + Discovery
 - Implement Jingle session state machine:
