@@ -192,7 +192,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, Jid> _jmiProceedTargetBySid = {};
   final Set<String> _jmiIncomingPending = {};
   final Set<String> _jmiAutoAcceptBySid = {};
-  final Set<String> _jingleInitiatedBySid = {};
+  final Map<String, String> _jingleInitiatedTargets = {};
   List<Map<String, dynamic>> _iceServers = const [];
   bool _speakerphoneOn = false;
   StreamSubscription<JingleSessionEvent>? _jingleSubscription;
@@ -2588,7 +2588,7 @@ class XmppService extends ChangeNotifier {
     _jmiProceedTargetBySid.remove(session.sid);
     _jmiIncomingPending.remove(session.sid);
     _jmiAutoAcceptBySid.remove(session.sid);
-    _jingleInitiatedBySid.remove(session.sid);
+    _jingleInitiatedTargets.remove(session.sid);
     final pc = _callPeerConnections.remove(session.sid);
     pc?.close();
     _callLocalStreamBySid.remove(session.sid);
@@ -2717,7 +2717,12 @@ class XmppService extends ChangeNotifier {
     if (jingle == null) {
       return;
     }
-    if (_jingleInitiatedBySid.contains(sid)) {
+    final targetKey = to.fullJid ?? to.userAtDomain;
+    if (targetKey.isEmpty) {
+      return;
+    }
+    final previousTarget = _jingleInitiatedTargets[sid];
+    if (previousTarget == targetKey) {
       return;
     }
     final descriptions = _callLocalDescriptionsBySid[sid];
@@ -2734,7 +2739,7 @@ class XmppService extends ChangeNotifier {
       sid: sid,
       contents: contents,
     );
-    _jingleInitiatedBySid.add(sid);
+    _jingleInitiatedTargets[sid] = targetKey;
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
       _failCallSession(sid, CallState.failed);
