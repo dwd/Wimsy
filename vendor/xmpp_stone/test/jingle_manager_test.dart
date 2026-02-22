@@ -88,7 +88,9 @@ void main() {
         '<jingle xmlns="urn:xmpp:jingle:1" action="session-initiate" sid="sid125">'
         '<content creator="initiator" name="audio">'
         '<description xmlns="urn:xmpp:jingle:apps:rtp:1" media="audio">'
-        '<payload-type id="111" name="opus" clockrate="48000" channels="2" />'
+        '<payload-type id="111" name="opus" clockrate="48000" channels="2">'
+        '<parameter name="minptime" value="10" />'
+        '</payload-type>'
         '<rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="nack" subtype="pli" />'
         '<rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="1" uri="urn:ietf:params:rtp-hdrext:ssrc-audio-level" />'
         '</description>'
@@ -107,6 +109,7 @@ void main() {
     expect(event.content!.rtpDescription!.payloadTypes.first.name, 'opus');
     expect(event.content!.rtpDescription!.payloadTypes.first.clockRate, 48000);
     expect(event.content!.rtpDescription!.payloadTypes.first.channels, 2);
+    expect(event.content!.rtpDescription!.payloadTypes.first.parameters['minptime'], '10');
     expect(event.content!.rtpDescription!.rtcpFeedback, hasLength(1));
     expect(event.content!.rtpDescription!.rtcpFeedback.first.type, 'nack');
     expect(event.content!.rtpDescription!.rtcpFeedback.first.subtype, 'pli');
@@ -128,7 +131,12 @@ void main() {
       description: const JingleRtpDescription(
         media: 'audio',
         payloadTypes: [
-          JingleRtpPayloadType(id: 0, name: 'PCMU', clockRate: 8000),
+          JingleRtpPayloadType(
+            id: 0,
+            name: 'PCMU',
+            clockRate: 8000,
+            parameters: {'minptime': '10'},
+          ),
         ],
         rtcpFeedback: [
           JingleRtpFeedback(type: 'nack', subtype: 'pli'),
@@ -174,6 +182,9 @@ void main() {
         JingleManager.rtcpFbNamespace);
     expect(description?.getChild('rtp-hdrext')?.getAttribute('xmlns')?.value,
         JingleManager.rtpHdrextNamespace);
+    final payload = description?.getChild('payload-type');
+    expect(payload?.getChild('parameter')?.getAttribute('name')?.value,
+        'minptime');
     final transport = content?.getChild('transport');
     expect(transport?.getAttribute('xmlns')?.value,
         JingleManager.iceUdpNamespace);

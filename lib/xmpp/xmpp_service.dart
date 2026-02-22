@@ -16,6 +16,8 @@ import '../storage/storage_service.dart';
 import '../av/call_session.dart';
 import '../av/media_session.dart';
 import '../av/sdp_mapper.dart';
+import 'extdisco.dart';
+import 'jmi.dart';
 import 'blocking.dart';
 import 'http_upload.dart';
 import 'muc_invite.dart';
@@ -174,8 +176,15 @@ class XmppService extends ChangeNotifier {
   final Map<String, MediaStream> _callRemoteStreamBySid = {};
   final Map<String, JingleIceTransport> _callLocalTransportBySid = {};
   final Map<String, JingleIceTransport> _callRemoteTransportBySid = {};
+  final Map<String, String> _callContentNameBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
+  final Map<String, Timer> _jmiFallbackTimers = {};
+  final Map<String, Jid> _jmiProceedTargetBySid = {};
+  final Set<String> _jmiIncomingPending = {};
+  final Set<String> _jmiAutoAcceptBySid = {};
+  final Set<String> _jingleInitiatedBySid = {};
+  List<Map<String, dynamic>> _iceServers = const [];
   StreamSubscription<JingleSessionEvent>? _jingleSubscription;
   StreamSubscription<IbbOpen>? _ibbOpenSubscription;
   StreamSubscription<IbbData>? _ibbDataSubscription;
@@ -673,6 +682,7 @@ class XmppService extends ChangeNotifier {
           _setupBookmarks();
           _setupBlocking();
           _setupDisplayedSync();
+          _refreshExternalServices();
           _primeMamSync();
           _requestVcardDetails(_currentUserBareJid!, preferName: true);
           _sendInitialPresence();
@@ -1856,6 +1866,22 @@ class XmppService extends ChangeNotifier {
   void _handleJingleSessionInitiate(JingleSessionEvent event) {
     final rtpDescription = event.content?.rtpDescription;
     if (rtpDescription != null) {
+      if (_callSessions.containsKey(event.sid)) {
+        unawaited(_applyRemoteDescriptionForCall(
+          sid: event.sid,
+          rtpDescription: rtpDescription,
+          iceTransport: event.content?.iceTransport,
+          direction: CallDirection.incoming,
+        ));
+        if (_jmiAutoAcceptBySid.remove(event.sid)) {
+          final session = _callSessions[event.sid];
+          if (session != null) {
+            _jmiIncomingPending.remove(event.sid);
+            unawaited(acceptCall(session));
+          }
+        }
+        return;
+      }
       _handleIncomingCall(event, rtpDescription, event.content?.iceTransport);
       return;
     }
@@ -2011,14 +2037,7 @@ class XmppService extends ChangeNotifier {
     await pc.setLocalDescription(offer);
     final mapping = mapSdpToJingle(sdp: offer.sdp ?? '', mediaKind: kind);
     _callLocalTransportBySid[sid] = mapping.transport;
-    final iq = jingle.buildRtpSessionInitiate(
-      to: Jid.fromFullJid(normalized),
-      sid: sid,
-      contentName: mapping.description.media,
-      creator: 'initiator',
-      description: mapping.description,
-      transport: mapping.transport,
-    );
+    _callContentNameBySid[sid] = mapping.contentName;
     final session = CallSession(
       sid: sid,
       peerBareJid: normalized,
@@ -2032,16 +2051,20 @@ class XmppService extends ChangeNotifier {
     _callMutedBySid[sid] = false;
     _callVideoEnabledBySid[sid] = video;
     notifyListeners();
-    final result = await _sendIqAndAwait(iq);
-    if (result == null || result.type != IqStanzaType.RESULT) {
-      session.state = CallState.failed;
-      _removeCallSession(session);
-      return 'Call initiation failed.';
-    }
+    _sendJmiPropose(normalized, sid, mapping.description);
+    _startJmiFallbackTimer(sid, normalized);
     return null;
   }
 
   Future<void> acceptCall(CallSession session) async {
+    if (_jmiIncomingPending.contains(session.sid)) {
+      final target = _jmiProceedTargetBySid[session.sid];
+      if (target != null) {
+        _sendJmiProceed(target, session.sid);
+        _jmiAutoAcceptBySid.add(session.sid);
+        return;
+      }
+    }
     final jingle = _jingleManager;
     if (jingle == null) {
       return;
@@ -2071,10 +2094,11 @@ class XmppService extends ChangeNotifier {
     await pc.setLocalDescription(answer);
     final mapping = mapSdpToJingle(sdp: answer.sdp ?? '', mediaKind: kind);
     _callLocalTransportBySid[session.sid] = mapping.transport;
+    _callContentNameBySid[session.sid] = mapping.contentName;
     final iq = jingle.buildRtpSessionAccept(
       to: Jid.fromFullJid(session.peerBareJid),
       sid: session.sid,
-      contentName: mapping.description.media,
+      contentName: mapping.contentName,
       creator: 'initiator',
       description: mapping.description,
       transport: mapping.transport,
@@ -2091,6 +2115,15 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> declineCall(CallSession session) async {
+    if (_jmiIncomingPending.contains(session.sid)) {
+      final target = _jmiProceedTargetBySid[session.sid];
+      if (target != null) {
+        _sendJmiReject(target, session.sid);
+      }
+      session.state = CallState.declined;
+      _removeCallSession(session);
+      return;
+    }
     await _sendJingleTerminate(
       Jid.fromFullJid(session.peerBareJid),
       session.sid,
@@ -2101,6 +2134,13 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> endCall(CallSession session) async {
+    if (_jmiFallbackTimers.containsKey(session.sid)) {
+      final target = Jid.fromFullJid(session.peerBareJid);
+      _sendJmiRetract(target, session.sid);
+      session.state = CallState.ended;
+      _removeCallSession(session);
+      return;
+    }
     await _sendJingleTerminate(
       Jid.fromFullJid(session.peerBareJid),
       session.sid,
@@ -2143,6 +2183,11 @@ class XmppService extends ChangeNotifier {
   }
 
   void _removeCallSession(CallSession session) {
+    _jmiFallbackTimers.remove(session.sid)?.cancel();
+    _jmiProceedTargetBySid.remove(session.sid);
+    _jmiIncomingPending.remove(session.sid);
+    _jmiAutoAcceptBySid.remove(session.sid);
+    _jingleInitiatedBySid.remove(session.sid);
     final pc = _callPeerConnections.remove(session.sid);
     pc?.close();
     _callLocalStreamBySid.remove(session.sid);
@@ -2150,6 +2195,7 @@ class XmppService extends ChangeNotifier {
     _callMediaKindBySid.remove(session.sid);
     _callLocalTransportBySid.remove(session.sid);
     _callRemoteTransportBySid.remove(session.sid);
+    _callContentNameBySid.remove(session.sid);
     _callMutedBySid.remove(session.sid);
     _callVideoEnabledBySid.remove(session.sid);
     _callSessions.remove(session.sid);
@@ -2157,6 +2203,136 @@ class XmppService extends ChangeNotifier {
     _callSessionByBareJid.remove(session.peerBareJid);
     unawaited(_mediaSession.stop());
     notifyListeners();
+  }
+
+  void _handleJmiMessage(MessageStanza stanza, JmiAction action) {
+    final fromJid = stanza.fromJid;
+    final fromBare = fromJid?.userAtDomain ?? '';
+    if (fromJid == null || fromBare.isEmpty) {
+      return;
+    }
+    switch (action) {
+      case JmiAction.propose:
+        final propose = parseJmiPropose(stanza);
+        if (propose == null) {
+          return;
+        }
+        if (_currentUserBareJid != null &&
+            _bareJid(fromBare) == _currentUserBareJid) {
+          return;
+        }
+        if (_callSessions.containsKey(propose.sid)) {
+          return;
+        }
+        _jmiProceedTargetBySid[propose.sid] = fromJid;
+        _jmiIncomingPending.add(propose.sid);
+        _handleIncomingCall(
+          JingleSessionEvent(
+            action: JingleAction.sessionInitiate,
+            sid: propose.sid,
+            from: fromJid,
+            to: _connection?.fullJid ?? fromJid,
+            stanza: IqStanza(propose.sid, IqStanzaType.SET),
+            content: JingleContent(
+              name: propose.description.media,
+              creator: 'initiator',
+              rtpDescription: propose.description,
+            ),
+          ),
+          propose.description,
+          null,
+        );
+        _sendJmiRinging(fromJid, propose.sid);
+        return;
+      case JmiAction.proceed:
+        final sid = parseJmiSid(stanza);
+        if (sid == null) {
+          return;
+        }
+        _jmiFallbackTimers.remove(sid)?.cancel();
+        _sendPendingJingleInitiate(sid, fromJid);
+        return;
+      case JmiAction.reject:
+      case JmiAction.retract:
+        final sid = parseJmiSid(stanza);
+        if (sid == null) {
+          return;
+        }
+        final session = _callSessions[sid];
+        if (session != null) {
+          session.state =
+              action == JmiAction.reject ? CallState.declined : CallState.ended;
+          _removeCallSession(session);
+        }
+        return;
+      case JmiAction.ringing:
+        return;
+    }
+  }
+
+  void _sendJmiMessage(Jid to, XmppElement child) {
+    final message = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.CHAT,
+    );
+    message.toJid = to;
+    message.fromJid = _connection?.fullJid;
+    message.addChild(child);
+    _connection?.writeStanza(message);
+  }
+
+  void _sendJmiPropose(String bareJid, String sid, JingleRtpDescription description) {
+    final to = Jid.fromFullJid(bareJid);
+    _sendJmiMessage(to, buildJmiProposeElement(sid: sid, description: description));
+  }
+
+  void _sendJmiProceed(Jid to, String sid) {
+    _sendJmiMessage(to, buildJmiProceedElement(sid: sid));
+  }
+
+  void _sendJmiReject(Jid to, String sid) {
+    _sendJmiMessage(to, buildJmiRejectElement(sid: sid));
+  }
+
+  void _sendJmiRinging(Jid to, String sid) {
+    _sendJmiMessage(to, buildJmiRingingElement(sid: sid));
+  }
+
+  void _sendJmiRetract(Jid to, String sid) {
+    _sendJmiMessage(to, buildJmiRetractElement(sid: sid));
+  }
+
+  void _startJmiFallbackTimer(String sid, String bareJid) {
+    _jmiFallbackTimers[sid]?.cancel();
+    _jmiFallbackTimers[sid] = Timer(const Duration(seconds: 5), () {
+      _sendPendingJingleInitiate(sid, Jid.fromFullJid(bareJid));
+    });
+  }
+
+  void _sendPendingJingleInitiate(String sid, Jid to) {
+    final jingle = _jingleManager;
+    if (jingle == null) {
+      return;
+    }
+    if (_jingleInitiatedBySid.contains(sid)) {
+      return;
+    }
+    final description = _callOfferBySid[sid];
+    final transport = _callLocalTransportBySid[sid];
+    if (description == null || transport == null) {
+      return;
+    }
+    final contentName = _callContentNameBySid[sid] ?? description.media;
+    final iq = jingle.buildRtpSessionInitiate(
+      to: to,
+      sid: sid,
+      contentName: contentName,
+      creator: 'initiator',
+      description: description,
+      transport: transport,
+    );
+    _jingleInitiatedBySid.add(sid);
+    unawaited(_sendIqAndAwait(iq));
   }
 
   Future<void> _applyRemoteDescriptionForCall({
@@ -2180,6 +2356,7 @@ class XmppService extends ChangeNotifier {
     final sdp = buildMinimalSdpFromJingle(
       description: rtpDescription,
       transport: iceTransport,
+      contentName: _callContentNameBySid[sid],
     );
     await pc.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
   }
@@ -2194,8 +2371,8 @@ class XmppService extends ChangeNotifier {
     if (pc == null) {
       return;
     }
-    final kind = _callMediaKindBySid[event.sid];
-    final mid = kind == CallMediaKind.video ? 'video' : 'audio';
+    final mid = _callContentNameBySid[event.sid] ??
+        (_callMediaKindBySid[event.sid] == CallMediaKind.video ? 'video' : 'audio');
     for (final candidate in transport.candidates) {
       final candidateLine = _buildCandidateLine(candidate);
       pc.addCandidate(RTCIceCandidate(candidateLine, mid, null));
@@ -2219,7 +2396,7 @@ class XmppService extends ChangeNotifier {
     required String peerBareJid,
     required CallMediaKind kind,
   }) async {
-    final config = <String, dynamic>{'iceServers': []};
+    final config = <String, dynamic>{'iceServers': _iceServers};
     final pc = await createPeerConnection(config);
     _callPeerConnections[sid] = pc;
     final handle = await _mediaSession.start(
@@ -2356,6 +2533,11 @@ class XmppService extends ChangeNotifier {
     if (fromBare.isEmpty) {
       return;
     }
+    final jmiAction = parseJmiAction(stanza);
+    if (jmiAction != null) {
+      _handleJmiMessage(stanza, jmiAction);
+      return;
+    }
     final receiptId = _extractReceiptsId(stanza);
     if (receiptId != null) {
       _applyReceipt(fromBare, receiptId);
@@ -2411,6 +2593,43 @@ class XmppService extends ChangeNotifier {
     }
     _roomLastTrafficAt[normalized] = DateTime.now();
     _roomLastPingAt.remove(normalized);
+  }
+
+  Future<void> _refreshExternalServices() async {
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    final domain = Jid.fromFullJid(_currentUserBareJid!).domain;
+    if (domain.isEmpty) {
+      return;
+    }
+    final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.GET);
+    iq.toJid = Jid.fromFullJid(domain);
+    final services = XmppElement()..name = 'services';
+    services.addAttribute(XmppAttribute('xmlns', extDiscoNamespace));
+    iq.addChild(services);
+    final result = await _sendIqAndAwait(iq);
+    if (result == null || result.type != IqStanzaType.RESULT) {
+      return;
+    }
+    final servicesElement = result.getChild('services');
+    final parsed = parseExternalServices(servicesElement);
+    _iceServers = parsed.map(_toIceServer).toList(growable: false);
+  }
+
+  Map<String, dynamic> _toIceServer(ExternalService service) {
+    final uri = service.toUriString();
+    if (service.type.toLowerCase().startsWith('turn')) {
+      return {
+        'urls': [uri],
+        'username': service.username ?? '',
+        'credential': service.password ?? '',
+      };
+    }
+    return {
+      'urls': [uri],
+    };
   }
 
   void _startMucSelfPingTimer() {

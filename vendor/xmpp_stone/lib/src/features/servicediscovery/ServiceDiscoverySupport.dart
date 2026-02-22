@@ -4,6 +4,7 @@ const List<String> SERVICE_DISCOVERY_SUPPORT_LIST = [
   'urn:xmpp:blocking',
   'urn:xmpp:avatar:metadata+notify',
   'urn:xmpp:jingle:1',
+  'urn:xmpp:jingle-message:0',
   'urn:xmpp:jingle:apps:rtp:1',
   'urn:xmpp:jingle:apps:rtp:audio',
   'urn:xmpp:jingle:apps:rtp:video',

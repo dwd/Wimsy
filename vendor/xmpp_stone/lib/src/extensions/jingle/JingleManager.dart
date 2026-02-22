@@ -94,12 +94,14 @@ class JingleRtpPayloadType {
     this.name,
     this.clockRate,
     this.channels,
+    this.parameters = const {},
   });
 
   final int id;
   final String? name;
   final int? clockRate;
   final int? channels;
+  final Map<String, String> parameters;
 }
 
 class JingleRtpFeedback {
@@ -442,15 +444,28 @@ class JingleManager {
         final clockRateValue = child.getAttribute('clockrate')?.value;
         final clockRate =
             clockRateValue == null ? null : int.tryParse(clockRateValue);
-        final channelsValue = child.getAttribute('channels')?.value;
-        final channels =
-            channelsValue == null ? null : int.tryParse(channelsValue);
-        payloadTypes.add(JingleRtpPayloadType(
-          id: id,
-          name: (name == null || name.isEmpty) ? null : name,
-          clockRate: clockRate,
-          channels: channels,
-        ));
+      final channelsValue = child.getAttribute('channels')?.value;
+      final channels =
+          channelsValue == null ? null : int.tryParse(channelsValue);
+      final parameters = <String, String>{};
+      for (final param in child.children) {
+        if (param.name != 'parameter') {
+          continue;
+        }
+        final nameAttr = param.getAttribute('name')?.value ?? '';
+        final valueAttr = param.getAttribute('value')?.value ?? '';
+        if (nameAttr.isEmpty) {
+          continue;
+        }
+        parameters[nameAttr] = valueAttr;
+      }
+      payloadTypes.add(JingleRtpPayloadType(
+        id: id,
+        name: (name == null || name.isEmpty) ? null : name,
+        clockRate: clockRate,
+        channels: channels,
+        parameters: parameters,
+      ));
         continue;
       }
       if (child.name == 'rtcp-fb' &&
@@ -737,6 +752,12 @@ class JingleManager {
       final channels = payload.channels;
       if (channels != null) {
         payloadElement.addAttribute(XmppAttribute('channels', channels.toString()));
+      }
+      for (final entry in payload.parameters.entries) {
+        final paramElement = XmppElement()..name = 'parameter';
+        paramElement.addAttribute(XmppAttribute('name', entry.key));
+        paramElement.addAttribute(XmppAttribute('value', entry.value));
+        payloadElement.addChild(paramElement);
       }
       element.addChild(payloadElement);
     }
