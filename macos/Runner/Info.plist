@@ -30,6 +30,8 @@
 	<string>NSApplication</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Allow Wimsy to take a profile photo.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Allow Wimsy to record audio for calls.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Allow Wimsy to select a profile photo.</string>
 </dict>

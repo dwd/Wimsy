@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 abstract class MediaStreamHandle {
   String get id;
@@ -59,10 +61,42 @@ class WebRtcMediaSession {
     required bool audio,
     required bool video,
   }) async {
+    await _ensurePermissions(audio: audio, video: video);
     final stream = await navigator.mediaDevices.getUserMedia({
       'audio': audio,
       'video': video,
     });
     return WebRtcMediaStreamHandle(stream);
+  }
+
+  static Future<void> _ensurePermissions({
+    required bool audio,
+    required bool video,
+  }) async {
+    if (kIsWeb) {
+      return;
+    }
+    final platform = defaultTargetPlatform;
+    final supportsPermissions = platform == TargetPlatform.android ||
+        platform == TargetPlatform.iOS ||
+        platform == TargetPlatform.macOS;
+    if (!supportsPermissions) {
+      return;
+    }
+    final permissions = <Permission>[];
+    if (audio) {
+      permissions.add(Permission.microphone);
+    }
+    if (video) {
+      permissions.add(Permission.camera);
+    }
+    if (permissions.isEmpty) {
+      return;
+    }
+    final statuses = await permissions.request();
+    final denied = statuses.values.any((status) => !status.isGranted);
+    if (denied) {
+      throw StateError('Media permissions denied');
+    }
   }
 }

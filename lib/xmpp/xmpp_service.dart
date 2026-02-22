@@ -2818,10 +2818,18 @@ class XmppService extends ChangeNotifier {
     final config = <String, dynamic>{'iceServers': _iceServers};
     final pc = await createPeerConnection(config);
     _callPeerConnections[sid] = pc;
-    final handle = await _mediaSession.start(
-      audio: true,
-      video: kind == CallMediaKind.video,
-    );
+    MediaStreamHandle handle;
+    try {
+      handle = await _mediaSession.start(
+        audio: true,
+        video: kind == CallMediaKind.video,
+      );
+    } catch (error) {
+      Log.w('XmppService', 'Unable to start media session: $error');
+      await pc.close();
+      _callPeerConnections.remove(sid);
+      return null;
+    }
     if (handle is WebRtcMediaStreamHandle) {
       _callLocalStreamBySid[sid] = handle.stream;
       for (final track in handle.stream.getTracks()) {
