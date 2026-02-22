@@ -362,11 +362,15 @@ class _WimsyHomeState extends State<WimsyHome> {
   String? _editingMessageId;
   String? _editingChatBareJid;
   bool _editingIsRoom = false;
+  String? _activeChatForKeyHandler;
+  bool _activeChatIsBookmark = false;
+  bool _activeChatRoomJoined = false;
 
   @override
   void initState() {
     super.initState();
     _messageScrollController.addListener(_handleScrollPosition);
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     widget.service.attachStorage(widget.storage);
     widget.service.setRosterPersistor((roster) => widget.storage.storeRoster(roster));
     widget.service.setBookmarkPersistor((bookmarks) => widget.storage.storeBookmarks(bookmarks));
@@ -443,6 +447,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     _typingDebounce?.cancel();
     _idleTimer?.cancel();
     _messageScrollController.removeListener(_handleScrollPosition);
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _messageFocusNode.dispose();
     _messageScrollController.dispose();
     _jidController.dispose();
@@ -454,6 +459,33 @@ class _WimsyHomeState extends State<WimsyHome> {
     _wsProtocolsController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  bool _handleHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return false;
+    }
+    if (event.logicalKey != LogicalKeyboardKey.arrowUp) {
+      return false;
+    }
+    if (!_messageFocusNode.hasFocus) {
+      return false;
+    }
+    final activeChat = _activeChatForKeyHandler;
+    if (activeChat == null) {
+      return false;
+    }
+    if (_activeChatIsBookmark && !_activeChatRoomJoined) {
+      return false;
+    }
+    if (_messageController.text.trim().isNotEmpty) {
+      return false;
+    }
+    if (_editingMessageId != null && _editingChatBareJid == activeChat) {
+      return false;
+    }
+    _editLastOutgoingMessage(activeChat, _activeChatIsBookmark);
+    return true;
   }
 
   @override
@@ -1021,6 +1053,9 @@ class _WimsyHomeState extends State<WimsyHome> {
             ? service.roomMessagesFor(activeChat)
             : service.messagesFor(activeChat);
     final roomEntry = activeChat == null ? null : service.roomFor(activeChat);
+    _activeChatForKeyHandler = activeChat;
+    _activeChatIsBookmark = isBookmark;
+    _activeChatRoomJoined = roomEntry?.joined ?? false;
     _handleAutoScroll(messages.length);
     if (activeChat != null) {
       _markChatRead(activeChat, messages);
@@ -1250,46 +1285,21 @@ class _WimsyHomeState extends State<WimsyHome> {
                 Row(
                   children: [
                     Expanded(
-                      child: KeyboardListener(
+                      child: TextField(
+                        controller: _messageController,
                         focusNode: _messageFocusNode,
-                        onKeyEvent: (event) {
-                          if (event is! KeyDownEvent) {
-                            return;
-                          }
-                          if (event.logicalKey != LogicalKeyboardKey.arrowUp) {
-                            return;
-                          }
-                          if (activeChat == null) {
-                            return;
-                          }
-                          if (isBookmark && !(roomEntry?.joined ?? false)) {
-                            return;
-                          }
-                          if (_messageController.text.trim().isNotEmpty) {
-                            return;
-                          }
-                          if (_editingMessageId != null &&
-                              _editingChatBareJid == activeChat) {
-                            return;
-                          }
-                          _editLastOutgoingMessage(activeChat, isBookmark);
-                        },
-                        child: TextField(
-                          controller: _messageController,
-                          focusNode: _messageFocusNode,
-                          autofocus: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
-                          enabled: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
-                          decoration: const InputDecoration(
-                            labelText: 'Message',
-                          ),
-                          onChanged: (value) {
-                            if (activeChat == null || isBookmark) {
-                              return;
-                            }
-                            _handleTypingState(service, activeChat, value);
-                          },
-                          onSubmitted: (_) => _sendMessage(activeChat),
+                        autofocus: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
+                        enabled: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
+                        decoration: const InputDecoration(
+                          labelText: 'Message',
                         ),
+                        onChanged: (value) {
+                          if (activeChat == null || isBookmark) {
+                            return;
+                          }
+                          _handleTypingState(service, activeChat, value);
+                        },
+                        onSubmitted: (_) => _sendMessage(activeChat),
                       ),
                     ),
                     const SizedBox(width: 12),
