@@ -117,4 +117,45 @@ void main() {
     expect(videoMapping.contentName, 'video0');
     expect(videoMapping.description.payloadTypes.first.name, 'VP8');
   });
+
+  test('buildMinimalSdpFromJingleContents includes bundle and mids', () {
+    final sdp = buildMinimalSdpFromJingleContents(contents: const [
+      JingleContent(
+        name: 'audio0',
+        creator: 'initiator',
+        rtpDescription: JingleRtpDescription(
+          media: 'audio',
+          payloadTypes: [
+            JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
+          ],
+        ),
+        iceTransport: JingleIceTransport(
+          ufrag: 'uf',
+          password: 'pw',
+          candidates: [],
+        ),
+      ),
+      JingleContent(
+        name: 'video0',
+        creator: 'initiator',
+        rtpDescription: JingleRtpDescription(
+          media: 'video',
+          payloadTypes: [
+            JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
+          ],
+        ),
+        iceTransport: JingleIceTransport(
+          ufrag: 'uf',
+          password: 'pw',
+          candidates: [],
+        ),
+      ),
+    ]);
+
+    expect(sdp, contains('a=group:BUNDLE audio0 video0'));
+    expect(sdp, contains('a=mid:audio0'));
+    expect(sdp, contains('a=mid:video0'));
+    expect(sdp, contains('m=audio 9 UDP/TLS/RTP/SAVPF 111'));
+    expect(sdp, contains('m=video 9 UDP/TLS/RTP/SAVPF 96'));
+  });
 }

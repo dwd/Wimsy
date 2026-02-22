@@ -93,6 +93,13 @@ void main() {
         '</payload-type>'
         '<rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="nack" subtype="pli" />'
         '<rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="1" uri="urn:ietf:params:rtp-hdrext:ssrc-audio-level" />'
+        '<source xmlns="urn:xmpp:jingle:apps:rtp:ssma:0" ssrc="1234">'
+        '<parameter name="cname" value="abcd" />'
+        '</source>'
+        '<ssrc-group xmlns="urn:xmpp:jingle:apps:rtp:ssma:0" semantics="FID">'
+        '<source ssrc="1234" />'
+        '<source ssrc="5678" />'
+        '</ssrc-group>'
         '</description>'
         '</content>'
         '</jingle>'
@@ -115,6 +122,46 @@ void main() {
     expect(event.content!.rtpDescription!.rtcpFeedback.first.subtype, 'pli');
     expect(event.content!.rtpDescription!.headerExtensions, hasLength(1));
     expect(event.content!.rtpDescription!.headerExtensions.first.id, 1);
+    expect(event.content!.rtpDescription!.sources, hasLength(1));
+    expect(event.content!.rtpDescription!.sources.first.ssrc, 1234);
+    expect(event.content!.rtpDescription!.sourceGroups, hasLength(1));
+    expect(event.content!.rtpDescription!.sourceGroups.first.semantics, 'FID');
+  });
+
+  test('Jingle session-initiate parses multiple RTP contents', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+
+    final completer = Completer<JingleSessionEvent>();
+    manager.sessionStream.listen((event) {
+      completer.complete(event);
+    });
+
+    final iq = '<iq type="set" id="jMulti" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="session-initiate" sid="sidMulti">'
+        '<content creator="initiator" name="audio">'
+        '<description xmlns="urn:xmpp:jingle:apps:rtp:1" media="audio">'
+        '<payload-type id="111" name="opus" clockrate="48000" channels="2" />'
+        '</description>'
+        '<transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="uf" pwd="pw" />'
+        '</content>'
+        '<content creator="initiator" name="video">'
+        '<description xmlns="urn:xmpp:jingle:apps:rtp:1" media="video">'
+        '<payload-type id="96" name="VP8" clockrate="90000" />'
+        '</description>'
+        '<transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="uf" pwd="pw" />'
+        '</content>'
+        '</jingle>'
+        '</iq>';
+
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final event = await completer.future.timeout(const Duration(seconds: 1));
+    expect(event.contents, hasLength(2));
+    expect(event.contents.first.rtpDescription?.media, 'audio');
+    expect(event.contents.last.rtpDescription?.media, 'video');
   });
 
   test('Jingle manager builds RTP session-initiate', () {
@@ -146,6 +193,12 @@ void main() {
             id: 1,
             uri: 'urn:ietf:params:rtp-hdrext:ssrc-audio-level',
           ),
+        ],
+        sources: [
+          JingleRtpSource(ssrc: 1234, parameters: {'cname': 'abcd'}),
+        ],
+        sourceGroups: [
+          JingleRtpSourceGroup(semantics: 'FID', sources: [1234, 5678]),
         ],
       ),
       transport: const JingleIceTransport(
@@ -185,10 +238,51 @@ void main() {
     final payload = description?.getChild('payload-type');
     expect(payload?.getChild('parameter')?.getAttribute('name')?.value,
         'minptime');
+    expect(description?.getChild('source')?.getAttribute('xmlns')?.value,
+        JingleManager.ssmaNamespace);
     final transport = content?.getChild('transport');
     expect(transport?.getAttribute('xmlns')?.value,
         JingleManager.iceUdpNamespace);
     expect(transport?.getChild('fingerprint')?.textValue, 'AB:CD');
+  });
+
+  test('Jingle manager builds RTP session-initiate with multiple contents', () {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+
+    final stanza = manager.buildRtpSessionInitiateMulti(
+      to: account.fullJid,
+      sid: 'sidMultiBuild',
+      contents: const [
+        JingleContent(
+          name: 'audio',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'audio',
+            payloadTypes: [
+              JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000),
+            ],
+          ),
+        ),
+        JingleContent(
+          name: 'video',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'video',
+            payloadTypes: [
+              JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    final jingle = stanza.getChild('jingle');
+    expect(jingle, isNotNull);
+    final contents = jingle!.children.where((child) => child.name == 'content');
+    expect(contents.length, 2);
   });
 
   test('Jingle session-initiate parses ICE transport and DTLS fingerprint',

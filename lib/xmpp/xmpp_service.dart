@@ -168,15 +168,16 @@ class XmppService extends ChangeNotifier {
   final Map<String, _FileTransferSession> _fileTransfers = {};
   final Map<String, CallSession> _callSessions = {};
   final Map<String, String> _callSessionByBareJid = {};
-  final Map<String, JingleRtpDescription> _callOfferBySid = {};
+  final Map<String, Map<String, JingleRtpDescription>> _callLocalDescriptionsBySid = {};
+  final Map<String, Map<String, JingleRtpDescription>> _callRemoteDescriptionsBySid = {};
   final WebRtcMediaSession _mediaSession = WebRtcMediaSession();
   final Map<String, RTCPeerConnection> _callPeerConnections = {};
   final Map<String, CallMediaKind> _callMediaKindBySid = {};
   final Map<String, MediaStream> _callLocalStreamBySid = {};
   final Map<String, MediaStream> _callRemoteStreamBySid = {};
-  final Map<String, JingleIceTransport> _callLocalTransportBySid = {};
-  final Map<String, JingleIceTransport> _callRemoteTransportBySid = {};
-  final Map<String, String> _callContentNameBySid = {};
+  final Map<String, Map<String, JingleIceTransport>> _callLocalTransportsBySid = {};
+  final Map<String, Map<String, JingleIceTransport>> _callRemoteTransportsBySid = {};
+  final Map<String, List<String>> _callContentNamesBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
   final Map<String, Timer> _callTimeoutTimers = {};
@@ -1887,19 +1888,12 @@ class XmppService extends ChangeNotifier {
   }
 
   void _handleJingleSessionInitiate(JingleSessionEvent event) {
-    final rtpDescription = event.content?.rtpDescription;
-    if (rtpDescription != null) {
+    final rtpContents = event.contents
+        .where((content) => content.rtpDescription != null)
+        .toList(growable: false);
+    if (rtpContents.isNotEmpty) {
       if (_callSessions.containsKey(event.sid)) {
-        final contentName = event.content?.name;
-        if (contentName != null && contentName.isNotEmpty) {
-          _callContentNameBySid[event.sid] = contentName;
-        }
-        unawaited(_applyRemoteDescriptionForCall(
-          sid: event.sid,
-          rtpDescription: rtpDescription,
-          iceTransport: event.content?.iceTransport,
-          direction: CallDirection.incoming,
-        ));
+        _storeRemoteCallContents(event.sid, rtpContents);
         if (_jmiAutoAcceptBySid.remove(event.sid)) {
           final session = _callSessions[event.sid];
           if (session != null) {
@@ -1909,12 +1903,7 @@ class XmppService extends ChangeNotifier {
         }
         return;
       }
-      _handleIncomingCall(
-        event,
-        rtpDescription,
-        event.content?.iceTransport,
-        contentName: event.content?.name,
-      );
+      _handleIncomingCall(event, rtpContents);
       return;
     }
     final offer = event.content?.fileOffer;
@@ -1954,11 +1943,14 @@ class XmppService extends ChangeNotifier {
     if (callSession != null && callSession.direction == CallDirection.outgoing) {
       callSession.state = CallState.active;
       _cancelCallTimeout(callSession.sid);
-      unawaited(_applyRemoteDescriptionForCall(
+      final rtpContents = event.contents
+          .where((content) => content.rtpDescription != null)
+          .toList(growable: false);
+      unawaited(_applyRemoteDescriptionsForCall(
         sid: callSession.sid,
-        rtpDescription: event.content?.rtpDescription,
-        iceTransport: event.content?.iceTransport,
+        contents: rtpContents,
         direction: callSession.direction,
+        sdpType: 'answer',
       ));
       notifyListeners();
       return;
@@ -2005,12 +1997,7 @@ class XmppService extends ChangeNotifier {
     _finalizeTransfer(session);
   }
 
-  void _handleIncomingCall(
-    JingleSessionEvent event,
-    JingleRtpDescription description,
-    JingleIceTransport? transport, {
-    String? contentName,
-  }) {
+  void _handleIncomingCall(JingleSessionEvent event, List<JingleContent> contents) {
     final peerBare = event.from.userAtDomain;
     if (peerBare.isEmpty) {
       return;
@@ -2018,26 +2005,20 @@ class XmppService extends ChangeNotifier {
     if (_callSessions.containsKey(event.sid)) {
       return;
     }
-    _callMediaKindBySid[event.sid] =
-        description.media.toLowerCase() == 'video' ? CallMediaKind.video : CallMediaKind.audio;
-    unawaited(_applyRemoteDescriptionForCall(
-      sid: event.sid,
-      rtpDescription: description,
-      iceTransport: transport,
-      direction: CallDirection.incoming,
-    ));
+    _storeRemoteCallContents(event.sid, contents);
+    final hasVideo = contents.any((content) =>
+        (content.rtpDescription?.media.toLowerCase() ?? '') == 'video');
+    _callMediaKindBySid[event.sid] = hasVideo ? CallMediaKind.video : CallMediaKind.audio;
     final session = CallSession(
       sid: event.sid,
       peerBareJid: peerBare,
       direction: CallDirection.incoming,
-      video: description.media.toLowerCase() == 'video',
+      video: hasVideo,
       state: CallState.ringing,
     );
     _callSessions[event.sid] = session;
     _callSessionByBareJid[peerBare] = event.sid;
-    _callContentNameBySid[event.sid] =
-        (contentName == null || contentName.isEmpty) ? description.media : contentName;
-    _callOfferBySid[event.sid] = description;
+    _callContentNamesBySid[event.sid] = _contentNamesFor(contents);
     _callMutedBySid[event.sid] = false;
     _callVideoEnabledBySid[event.sid] = session.video;
     _startCallTimeout(
@@ -2046,6 +2027,70 @@ class XmppService extends ChangeNotifier {
       incoming: true,
     );
     notifyListeners();
+  }
+
+  List<String> _contentNamesFor(List<JingleContent> contents) {
+    final names = <String>[];
+    for (final content in contents) {
+      final description = content.rtpDescription;
+      if (description == null) {
+        continue;
+      }
+      final name = content.name.isEmpty ? description.media : content.name;
+      if (name.isNotEmpty && !names.contains(name)) {
+        names.add(name);
+      }
+    }
+    return names;
+  }
+
+  void _storeRemoteCallContents(String sid, List<JingleContent> contents) {
+    final descriptions = <String, JingleRtpDescription>{};
+    final transports = <String, JingleIceTransport>{};
+    for (final content in contents) {
+      final description = content.rtpDescription;
+      if (description == null) {
+        continue;
+      }
+      final name = content.name.isEmpty ? description.media : content.name;
+      descriptions[name] = description;
+      final transport = content.iceTransport;
+      if (transport != null) {
+        transports[name] = transport;
+      }
+    }
+    if (descriptions.isNotEmpty) {
+      _callRemoteDescriptionsBySid[sid] = descriptions;
+      _callContentNamesBySid[sid] = _contentNamesFor(contents);
+    }
+    if (transports.isNotEmpty) {
+      _callRemoteTransportsBySid[sid] = transports;
+    }
+  }
+
+  List<JingleContent> _buildCallContents(
+    Map<String, JingleRtpDescription> descriptions,
+    Map<String, JingleIceTransport> transports,
+  ) {
+    final contents = <JingleContent>[];
+    for (final entry in descriptions.entries) {
+      contents.add(JingleContent(
+        name: entry.key,
+        creator: 'initiator',
+        rtpDescription: entry.value,
+        iceTransport: transports[entry.key],
+      ));
+    }
+    return contents;
+  }
+
+  JingleSdpMapping _selectPrimaryMapping(List<JingleSdpMapping> mappings) {
+    for (final mapping in mappings) {
+      if (mapping.description.media.toLowerCase() == 'audio') {
+        return mapping;
+      }
+    }
+    return mappings.first;
   }
 
   Future<String?> startCall({
@@ -2076,9 +2121,20 @@ class XmppService extends ChangeNotifier {
     }
     final offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    final mapping = mapSdpToJingle(sdp: offer.sdp ?? '', mediaKind: kind);
-    _callLocalTransportBySid[sid] = mapping.transport;
-    _callContentNameBySid[sid] = mapping.contentName;
+    final mappings = mapSdpToJingleContents(sdp: offer.sdp ?? '');
+    if (mappings.isEmpty) {
+      return 'Unable to parse local SDP.';
+    }
+    final localDescriptions = <String, JingleRtpDescription>{};
+    final localTransports = <String, JingleIceTransport>{};
+    for (final mapping in mappings) {
+      localDescriptions[mapping.contentName] = mapping.description;
+      localTransports[mapping.contentName] = mapping.transport;
+    }
+    _callLocalDescriptionsBySid[sid] = localDescriptions;
+    _callLocalTransportsBySid[sid] = localTransports;
+    _callContentNamesBySid[sid] =
+        mappings.map((mapping) => mapping.contentName).toList(growable: false);
     final session = CallSession(
       sid: sid,
       peerBareJid: normalized,
@@ -2088,7 +2144,6 @@ class XmppService extends ChangeNotifier {
     );
     _callSessions[sid] = session;
     _callSessionByBareJid[normalized] = sid;
-    _callOfferBySid[sid] = mapping.description;
     _callMutedBySid[sid] = false;
     _callVideoEnabledBySid[sid] = video;
     _startCallTimeout(
@@ -2097,7 +2152,8 @@ class XmppService extends ChangeNotifier {
       incoming: false,
     );
     notifyListeners();
-    _sendJmiPropose(normalized, sid, mapping.description);
+    final proposeMapping = _selectPrimaryMapping(mappings);
+    _sendJmiPropose(normalized, sid, proposeMapping.description);
     _startJmiFallbackTimer(sid, normalized);
     return null;
   }
@@ -2127,27 +2183,31 @@ class XmppService extends ChangeNotifier {
       _removeCallSession(session);
       return;
     }
-    final remoteDescription = _callOfferBySid[session.sid];
-    final remoteTransport = _callRemoteTransportBySid[session.sid];
-    if (remoteDescription != null && remoteTransport != null) {
-      final sdp = buildMinimalSdpFromJingle(
-        description: remoteDescription,
-        transport: remoteTransport,
+    final remoteDescriptions = _callRemoteDescriptionsBySid[session.sid] ?? {};
+    final remoteTransports = _callRemoteTransportsBySid[session.sid] ?? {};
+    if (remoteDescriptions.isNotEmpty && remoteTransports.isNotEmpty) {
+      final sdp = buildMinimalSdpFromJingleContents(
+        contents: _buildCallContents(remoteDescriptions, remoteTransports),
       );
       await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
     }
     final answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    final mapping = mapSdpToJingle(sdp: answer.sdp ?? '', mediaKind: kind);
-    _callLocalTransportBySid[session.sid] = mapping.transport;
-    _callContentNameBySid[session.sid] = mapping.contentName;
-    final iq = jingle.buildRtpSessionAccept(
+    final mappings = mapSdpToJingleContents(sdp: answer.sdp ?? '');
+    final localDescriptions = <String, JingleRtpDescription>{};
+    final localTransports = <String, JingleIceTransport>{};
+    for (final mapping in mappings) {
+      localDescriptions[mapping.contentName] = mapping.description;
+      localTransports[mapping.contentName] = mapping.transport;
+    }
+    _callLocalDescriptionsBySid[session.sid] = localDescriptions;
+    _callLocalTransportsBySid[session.sid] = localTransports;
+    _callContentNamesBySid[session.sid] =
+        mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    final iq = jingle.buildRtpSessionAcceptMulti(
       to: Jid.fromFullJid(session.peerBareJid),
       sid: session.sid,
-      contentName: mapping.contentName,
-      creator: 'initiator',
-      description: mapping.description,
-      transport: mapping.transport,
+      contents: _buildCallContents(localDescriptions, localTransports),
     );
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -2295,13 +2355,14 @@ class XmppService extends ChangeNotifier {
     _callLocalStreamBySid.remove(session.sid);
     _callRemoteStreamBySid.remove(session.sid);
     _callMediaKindBySid.remove(session.sid);
-    _callLocalTransportBySid.remove(session.sid);
-    _callRemoteTransportBySid.remove(session.sid);
-    _callContentNameBySid.remove(session.sid);
+    _callLocalDescriptionsBySid.remove(session.sid);
+    _callRemoteDescriptionsBySid.remove(session.sid);
+    _callLocalTransportsBySid.remove(session.sid);
+    _callRemoteTransportsBySid.remove(session.sid);
+    _callContentNamesBySid.remove(session.sid);
     _callMutedBySid.remove(session.sid);
     _callVideoEnabledBySid.remove(session.sid);
     _callSessions.remove(session.sid);
-    _callOfferBySid.remove(session.sid);
     _callSessionByBareJid.remove(session.peerBareJid);
     unawaited(_mediaSession.stop());
     notifyListeners();
@@ -2328,6 +2389,11 @@ class XmppService extends ChangeNotifier {
         }
         _jmiProceedTargetBySid[propose.sid] = fromJid;
         _jmiIncomingPending.add(propose.sid);
+        final content = JingleContent(
+          name: propose.description.media,
+          creator: 'initiator',
+          rtpDescription: propose.description,
+        );
         _handleIncomingCall(
           JingleSessionEvent(
             action: JingleAction.sessionInitiate,
@@ -2335,14 +2401,10 @@ class XmppService extends ChangeNotifier {
             from: fromJid,
             to: _connection?.fullJid ?? fromJid,
             stanza: IqStanza(propose.sid, IqStanzaType.SET),
-            content: JingleContent(
-              name: propose.description.media,
-              creator: 'initiator',
-              rtpDescription: propose.description,
-            ),
+            content: content,
+            contents: [content],
           ),
-          propose.description,
-          null,
+          [content],
         );
         _sendJmiRinging(fromJid, propose.sid);
         return;
@@ -2419,19 +2481,19 @@ class XmppService extends ChangeNotifier {
     if (_jingleInitiatedBySid.contains(sid)) {
       return;
     }
-    final description = _callOfferBySid[sid];
-    final transport = _callLocalTransportBySid[sid];
-    if (description == null || transport == null) {
+    final descriptions = _callLocalDescriptionsBySid[sid];
+    final transports = _callLocalTransportsBySid[sid];
+    if (descriptions == null || transports == null) {
       return;
     }
-    final contentName = _callContentNameBySid[sid] ?? description.media;
-    final iq = jingle.buildRtpSessionInitiate(
+    final contents = _buildCallContents(descriptions, transports);
+    if (contents.isEmpty) {
+      return;
+    }
+    final iq = jingle.buildRtpSessionInitiateMulti(
       to: to,
       sid: sid,
-      contentName: contentName,
-      creator: 'initiator',
-      description: description,
-      transport: transport,
+      contents: contents,
     );
     _jingleInitiatedBySid.add(sid);
     final result = await _sendIqAndAwait(iq);
@@ -2440,17 +2502,16 @@ class XmppService extends ChangeNotifier {
     }
   }
 
-  Future<void> _applyRemoteDescriptionForCall({
+  Future<void> _applyRemoteDescriptionsForCall({
     required String sid,
-    required JingleRtpDescription? rtpDescription,
-    required JingleIceTransport? iceTransport,
+    required List<JingleContent> contents,
     required CallDirection direction,
+    required String sdpType,
   }) async {
-    if (rtpDescription == null || iceTransport == null) {
+    if (contents.isEmpty) {
       return;
     }
-    _callOfferBySid[sid] = rtpDescription;
-    _callRemoteTransportBySid[sid] = iceTransport;
+    _storeRemoteCallContents(sid, contents);
     if (direction == CallDirection.incoming) {
       return;
     }
@@ -2458,12 +2519,15 @@ class XmppService extends ChangeNotifier {
     if (pc == null) {
       return;
     }
-    final sdp = buildMinimalSdpFromJingle(
-      description: rtpDescription,
-      transport: iceTransport,
-      contentName: _callContentNameBySid[sid],
+    final remoteDescriptions = _callRemoteDescriptionsBySid[sid] ?? {};
+    final remoteTransports = _callRemoteTransportsBySid[sid] ?? {};
+    if (remoteDescriptions.isEmpty || remoteTransports.isEmpty) {
+      return;
+    }
+    final sdp = buildMinimalSdpFromJingleContents(
+      contents: _buildCallContents(remoteDescriptions, remoteTransports),
     );
-    await pc.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+    await pc.setRemoteDescription(RTCSessionDescription(sdp, sdpType));
   }
 
   void _handleJingleTransportInfo(JingleSessionEvent event) {
@@ -2471,17 +2535,19 @@ class XmppService extends ChangeNotifier {
     if (transport == null) {
       return;
     }
-    _callRemoteTransportBySid[event.sid] = transport;
-    final contentName = event.content?.name;
-    if (contentName != null && contentName.isNotEmpty) {
-      _callContentNameBySid[event.sid] = contentName;
+    final contentName = event.content?.name ?? '';
+    if (contentName.isEmpty) {
+      return;
     }
+    final remoteTransports =
+        _callRemoteTransportsBySid[event.sid] ?? <String, JingleIceTransport>{};
+    remoteTransports[contentName] = transport;
+    _callRemoteTransportsBySid[event.sid] = remoteTransports;
     final pc = _callPeerConnections[event.sid];
     if (pc == null) {
       return;
     }
-    final mid = _callContentNameBySid[event.sid] ??
-        (_callMediaKindBySid[event.sid] == CallMediaKind.video ? 'video' : 'audio');
+    final mid = contentName;
     for (final candidate in transport.candidates) {
       final candidateLine = _buildCandidateLine(candidate);
       pc.addCandidate(RTCIceCandidate(candidateLine, mid, null));
@@ -2525,8 +2591,8 @@ class XmppService extends ChangeNotifier {
       }
     };
     pc.onIceCandidate = (candidate) {
-      final transport = _callLocalTransportBySid[sid];
-      if (transport == null) {
+      final transports = _callLocalTransportsBySid[sid];
+      if (transports == null || transports.isEmpty) {
         return;
       }
       final parsed = _parseIceCandidate(candidate.candidate);
@@ -2537,8 +2603,10 @@ class XmppService extends ChangeNotifier {
       if (jingle == null) {
         return;
       }
-      final contentName = _callContentNameBySid[sid] ??
+      final contentName = candidate.sdpMid ??
+          _callContentNamesBySid[sid]?.first ??
           (kind == CallMediaKind.video ? 'video' : 'audio');
+      final transport = transports[contentName] ?? transports.values.first;
       final info = jingle.buildTransportInfo(
         to: Jid.fromFullJid(peerBareJid),
         sid: sid,

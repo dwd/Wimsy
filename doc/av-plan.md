@@ -46,6 +46,7 @@ Deliverables:
 - [x] Discovery/advertising for call support.
 - [x] JMI implementation (message-based invite + IQ fallback).
 - [x] Full session state machine for calls (timeouts, retries, errors).
+- [x] Multi-content Jingle sessions (audio + video) with SDP mapping.
 
 ## Phase 2 — Transport + Security
 - ICE-UDP transport mapping:
@@ -153,5 +154,4 @@ Deliverables:
 
 ## Open Questions
 - When do we implement JMI (XEP-0353) and its fallback rules in production?
-- Do we require multi-content Jingle (audio + video in one session) from day one?
 - For Muji, is mesh-only acceptable initially, or do we need early MCU/relay support?
