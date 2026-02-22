@@ -39,6 +39,54 @@ class JingleIbbTransport {
   final String? stanza;
 }
 
+class JingleIceCandidate {
+  const JingleIceCandidate({
+    required this.foundation,
+    required this.component,
+    required this.protocol,
+    required this.priority,
+    required this.ip,
+    required this.port,
+    required this.type,
+    this.generation,
+  });
+
+  final String foundation;
+  final int component;
+  final String protocol;
+  final int priority;
+  final String ip;
+  final int port;
+  final String type;
+  final int? generation;
+}
+
+class JingleDtlsFingerprint {
+  const JingleDtlsFingerprint({
+    required this.hash,
+    required this.fingerprint,
+    this.setup,
+  });
+
+  final String hash;
+  final String fingerprint;
+  final String? setup;
+}
+
+class JingleIceTransport {
+  const JingleIceTransport({
+    required this.ufrag,
+    required this.password,
+    required this.candidates,
+    this.fingerprint,
+  });
+
+  final String ufrag;
+  final String password;
+  final List<JingleIceCandidate> candidates;
+  final JingleDtlsFingerprint? fingerprint;
+}
+
 class JingleRtpPayloadType {
   const JingleRtpPayloadType({
     required this.id,
@@ -70,6 +118,7 @@ class JingleContent {
     this.fileOffer,
     this.ibbTransport,
     this.rtpDescription,
+    this.iceTransport,
   });
 
   final String name;
@@ -77,6 +126,7 @@ class JingleContent {
   final JingleFileTransferOffer? fileOffer;
   final JingleIbbTransport? ibbTransport;
   final JingleRtpDescription? rtpDescription;
+  final JingleIceTransport? iceTransport;
 }
 
 class JingleSessionEvent {
@@ -105,6 +155,8 @@ class JingleManager {
   static const String fileMetadataNamespace = 'urn:xmpp:file:metadata:0';
   static const String ibbTransportNamespace = 'urn:xmpp:jingle:transports:ibb:1';
   static const String rtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
+  static const String iceUdpNamespace = 'urn:xmpp:jingle:transports:ice-udp:1';
+  static const String dtlsNamespace = 'urn:xmpp:jingle:apps:dtls:0';
 
   static final Map<Connection, JingleManager> _instances = {};
 
@@ -186,11 +238,13 @@ class JingleManager {
       final description = child.getChild('description');
       final offer = _parseFileOffer(description);
       final rtpDescription = _parseRtpDescription(description);
+      final iceTransport = _parseIceTransport(child.getChild('transport'));
       final transport = _parseIbbTransport(child.getChild('transport'));
       if (name.isEmpty &&
           offer == null &&
           transport == null &&
-          rtpDescription == null) {
+          rtpDescription == null &&
+          iceTransport == null) {
         continue;
       }
       return JingleContent(
@@ -199,6 +253,7 @@ class JingleManager {
         fileOffer: offer,
         ibbTransport: transport,
         rtpDescription: rtpDescription,
+        iceTransport: iceTransport,
       );
     }
     return null;
@@ -253,6 +308,85 @@ class JingleManager {
       blockSize: blockSize,
       stanza: stanza,
     );
+  }
+
+  JingleIceTransport? _parseIceTransport(XmppElement? transport) {
+    if (transport == null ||
+        transport.getAttribute('xmlns')?.value != iceUdpNamespace) {
+      return null;
+    }
+    final ufrag = transport.getAttribute('ufrag')?.value ?? '';
+    final password = transport.getAttribute('pwd')?.value ?? '';
+    final candidates = <JingleIceCandidate>[];
+    for (final child in transport.children) {
+      if (child.name != 'candidate') {
+        continue;
+      }
+      final foundation = child.getAttribute('foundation')?.value ?? '';
+      final componentValue = child.getAttribute('component')?.value ?? '';
+      final protocol = child.getAttribute('protocol')?.value ?? '';
+      final priorityValue = child.getAttribute('priority')?.value ?? '';
+      final ip = child.getAttribute('ip')?.value ?? '';
+      final portValue = child.getAttribute('port')?.value ?? '';
+      final type = child.getAttribute('type')?.value ?? '';
+      final component = int.tryParse(componentValue);
+      final priority = int.tryParse(priorityValue);
+      final port = int.tryParse(portValue);
+      if (foundation.isEmpty ||
+          component == null ||
+          protocol.isEmpty ||
+          priority == null ||
+          ip.isEmpty ||
+          port == null ||
+          type.isEmpty) {
+        continue;
+      }
+      final generationValue = child.getAttribute('generation')?.value ?? '';
+      final generation = int.tryParse(generationValue);
+      candidates.add(JingleIceCandidate(
+        foundation: foundation,
+        component: component,
+        protocol: protocol,
+        priority: priority,
+        ip: ip,
+        port: port,
+        type: type,
+        generation: generation,
+      ));
+    }
+    final fingerprint = _parseDtlsFingerprint(transport);
+    if (ufrag.isEmpty && password.isEmpty && candidates.isEmpty) {
+      return null;
+    }
+    return JingleIceTransport(
+      ufrag: ufrag,
+      password: password,
+      candidates: candidates,
+      fingerprint: fingerprint,
+    );
+  }
+
+  JingleDtlsFingerprint? _parseDtlsFingerprint(XmppElement transport) {
+    for (final child in transport.children) {
+      if (child.name != 'fingerprint') {
+        continue;
+      }
+      if (child.getAttribute('xmlns')?.value != dtlsNamespace) {
+        continue;
+      }
+      final hash = child.getAttribute('hash')?.value ?? '';
+      final fingerprint = child.textValue?.trim() ?? '';
+      if (hash.isEmpty || fingerprint.isEmpty) {
+        continue;
+      }
+      final setup = child.getAttribute('setup')?.value;
+      return JingleDtlsFingerprint(
+        hash: hash,
+        fingerprint: fingerprint,
+        setup: (setup == null || setup.isEmpty) ? null : setup,
+      );
+    }
+    return null;
   }
 
   JingleRtpDescription? _parseRtpDescription(XmppElement? description) {
@@ -385,6 +519,7 @@ class JingleManager {
     required String contentName,
     required String creator,
     required JingleRtpDescription description,
+    JingleIceTransport? transport,
   }) {
     final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
     stanza.toJid = to;
@@ -395,6 +530,7 @@ class JingleManager {
       contentName: contentName,
       creator: creator,
       description: description,
+      transport: transport,
     ));
     return stanza;
   }
@@ -405,6 +541,7 @@ class JingleManager {
     required String contentName,
     required String creator,
     required JingleRtpDescription description,
+    JingleIceTransport? transport,
   }) {
     final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
     stanza.toJid = to;
@@ -415,6 +552,7 @@ class JingleManager {
       contentName: contentName,
       creator: creator,
       description: description,
+      transport: transport,
     ));
     return stanza;
   }
@@ -474,6 +612,7 @@ class JingleManager {
     required String contentName,
     required String creator,
     required JingleRtpDescription description,
+    JingleIceTransport? transport,
   }) {
     final jingle = XmppElement()..name = 'jingle';
     jingle.addAttribute(XmppAttribute('xmlns', jingleNamespace));
@@ -484,6 +623,9 @@ class JingleManager {
     contentElement.addAttribute(XmppAttribute('creator', creator));
     contentElement.addAttribute(XmppAttribute('name', contentName));
     contentElement.addChild(_buildRtpDescription(description));
+    if (transport != null) {
+      contentElement.addChild(_buildIceTransport(transport));
+    }
     jingle.addChild(contentElement);
     return jingle;
   }
@@ -508,6 +650,51 @@ class JingleManager {
         payloadElement.addAttribute(XmppAttribute('channels', channels.toString()));
       }
       element.addChild(payloadElement);
+    }
+    return element;
+  }
+
+  XmppElement _buildIceTransport(JingleIceTransport transport) {
+    final element = XmppElement()..name = 'transport';
+    element.addAttribute(XmppAttribute('xmlns', iceUdpNamespace));
+    if (transport.ufrag.isNotEmpty) {
+      element.addAttribute(XmppAttribute('ufrag', transport.ufrag));
+    }
+    if (transport.password.isNotEmpty) {
+      element.addAttribute(XmppAttribute('pwd', transport.password));
+    }
+    final fingerprint = transport.fingerprint;
+    if (fingerprint != null) {
+      final fpElement = XmppElement()..name = 'fingerprint';
+      fpElement.addAttribute(XmppAttribute('xmlns', dtlsNamespace));
+      fpElement.addAttribute(XmppAttribute('hash', fingerprint.hash));
+      final setup = fingerprint.setup;
+      if (setup != null && setup.isNotEmpty) {
+        fpElement.addAttribute(XmppAttribute('setup', setup));
+      }
+      fpElement.textValue = fingerprint.fingerprint;
+      element.addChild(fpElement);
+    }
+    for (final candidate in transport.candidates) {
+      final candidateElement = XmppElement()..name = 'candidate';
+      candidateElement.addAttribute(
+          XmppAttribute('foundation', candidate.foundation));
+      candidateElement.addAttribute(
+          XmppAttribute('component', candidate.component.toString()));
+      candidateElement.addAttribute(
+          XmppAttribute('protocol', candidate.protocol));
+      candidateElement.addAttribute(
+          XmppAttribute('priority', candidate.priority.toString()));
+      candidateElement.addAttribute(XmppAttribute('ip', candidate.ip));
+      candidateElement.addAttribute(
+          XmppAttribute('port', candidate.port.toString()));
+      candidateElement.addAttribute(XmppAttribute('type', candidate.type));
+      final generation = candidate.generation;
+      if (generation != null) {
+        candidateElement.addAttribute(
+            XmppAttribute('generation', generation.toString()));
+      }
+      element.addChild(candidateElement);
     }
     return element;
   }

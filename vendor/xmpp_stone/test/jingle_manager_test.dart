@@ -124,6 +124,27 @@ void main() {
           JingleRtpPayloadType(id: 0, name: 'PCMU', clockRate: 8000),
         ],
       ),
+      transport: const JingleIceTransport(
+        ufrag: 'ufrag',
+        password: 'pwd',
+        fingerprint: JingleDtlsFingerprint(
+          hash: 'sha-256',
+          fingerprint: 'AB:CD',
+          setup: 'actpass',
+        ),
+        candidates: [
+          JingleIceCandidate(
+            foundation: '1',
+            component: 1,
+            protocol: 'udp',
+            priority: 123,
+            ip: '10.0.0.1',
+            port: 9999,
+            type: 'host',
+            generation: 0,
+          ),
+        ],
+      ),
     );
 
     final jingle = stanza.getChild('jingle');
@@ -133,6 +154,47 @@ void main() {
     expect(description?.getAttribute('xmlns')?.value,
         JingleManager.rtpNamespace);
     expect(description?.getAttribute('media')?.value, 'audio');
+    final transport = content?.getChild('transport');
+    expect(transport?.getAttribute('xmlns')?.value,
+        JingleManager.iceUdpNamespace);
+    expect(transport?.getChild('fingerprint')?.textValue, 'AB:CD');
+  });
+
+  test('Jingle session-initiate parses ICE transport and DTLS fingerprint',
+      () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+
+    final completer = Completer<JingleSessionEvent>();
+    manager.sessionStream.listen((event) {
+      completer.complete(event);
+    });
+
+    final iq = '<iq type="set" id="j4" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="session-initiate" sid="sid127">'
+        '<content creator="initiator" name="audio">'
+        '<description xmlns="urn:xmpp:jingle:apps:rtp:1" media="audio">'
+        '<payload-type id="111" name="opus" clockrate="48000" channels="2" />'
+        '</description>'
+        '<transport xmlns="urn:xmpp:jingle:transports:ice-udp:1" ufrag="uf" pwd="pw">'
+        '<fingerprint xmlns="urn:xmpp:jingle:apps:dtls:0" hash="sha-256" setup="actpass">AA:BB</fingerprint>'
+        '<candidate foundation="1" component="1" protocol="udp" priority="123" ip="10.0.0.2" port="9999" type="host" generation="0" />'
+        '</transport>'
+        '</content>'
+        '</jingle>'
+        '</iq>';
+
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final event = await completer.future.timeout(const Duration(seconds: 1));
+    expect(event.content?.iceTransport, isNotNull);
+    expect(event.content!.iceTransport!.ufrag, 'uf');
+    expect(event.content!.iceTransport!.password, 'pw');
+    expect(event.content!.iceTransport!.candidates, hasLength(1));
+    expect(event.content!.iceTransport!.fingerprint?.hash, 'sha-256');
+    expect(event.content!.iceTransport!.fingerprint?.fingerprint, 'AA:BB');
   });
 }
 
