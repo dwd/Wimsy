@@ -89,6 +89,8 @@ void main() {
         '<content creator="initiator" name="audio">'
         '<description xmlns="urn:xmpp:jingle:apps:rtp:1" media="audio">'
         '<payload-type id="111" name="opus" clockrate="48000" channels="2" />'
+        '<rtcp-fb xmlns="urn:xmpp:jingle:apps:rtp:rtcp-fb:0" type="nack" subtype="pli" />'
+        '<rtp-hdrext xmlns="urn:xmpp:jingle:apps:rtp:rtp-hdrext:0" id="1" uri="urn:ietf:params:rtp-hdrext:ssrc-audio-level" />'
         '</description>'
         '</content>'
         '</jingle>'
@@ -105,6 +107,11 @@ void main() {
     expect(event.content!.rtpDescription!.payloadTypes.first.name, 'opus');
     expect(event.content!.rtpDescription!.payloadTypes.first.clockRate, 48000);
     expect(event.content!.rtpDescription!.payloadTypes.first.channels, 2);
+    expect(event.content!.rtpDescription!.rtcpFeedback, hasLength(1));
+    expect(event.content!.rtpDescription!.rtcpFeedback.first.type, 'nack');
+    expect(event.content!.rtpDescription!.rtcpFeedback.first.subtype, 'pli');
+    expect(event.content!.rtpDescription!.headerExtensions, hasLength(1));
+    expect(event.content!.rtpDescription!.headerExtensions.first.id, 1);
   });
 
   test('Jingle manager builds RTP session-initiate', () {
@@ -122,6 +129,15 @@ void main() {
         media: 'audio',
         payloadTypes: [
           JingleRtpPayloadType(id: 0, name: 'PCMU', clockRate: 8000),
+        ],
+        rtcpFeedback: [
+          JingleRtpFeedback(type: 'nack', subtype: 'pli'),
+        ],
+        headerExtensions: [
+          JingleRtpHeaderExtension(
+            id: 1,
+            uri: 'urn:ietf:params:rtp-hdrext:ssrc-audio-level',
+          ),
         ],
       ),
       transport: const JingleIceTransport(
@@ -154,6 +170,10 @@ void main() {
     expect(description?.getAttribute('xmlns')?.value,
         JingleManager.rtpNamespace);
     expect(description?.getAttribute('media')?.value, 'audio');
+    expect(description?.getChild('rtcp-fb')?.getAttribute('xmlns')?.value,
+        JingleManager.rtcpFbNamespace);
+    expect(description?.getChild('rtp-hdrext')?.getAttribute('xmlns')?.value,
+        JingleManager.rtpHdrextNamespace);
     final transport = content?.getChild('transport');
     expect(transport?.getAttribute('xmlns')?.value,
         JingleManager.iceUdpNamespace);

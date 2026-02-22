@@ -101,14 +101,40 @@ class JingleRtpPayloadType {
   final int? channels;
 }
 
+class JingleRtpFeedback {
+  const JingleRtpFeedback({
+    required this.type,
+    this.subtype,
+  });
+
+  final String type;
+  final String? subtype;
+}
+
+class JingleRtpHeaderExtension {
+  const JingleRtpHeaderExtension({
+    required this.id,
+    required this.uri,
+    this.senders,
+  });
+
+  final int id;
+  final String uri;
+  final String? senders;
+}
+
 class JingleRtpDescription {
   const JingleRtpDescription({
     required this.media,
     required this.payloadTypes,
+    this.rtcpFeedback = const [],
+    this.headerExtensions = const [],
   });
 
   final String media;
   final List<JingleRtpPayloadType> payloadTypes;
+  final List<JingleRtpFeedback> rtcpFeedback;
+  final List<JingleRtpHeaderExtension> headerExtensions;
 }
 
 class JingleContent {
@@ -157,6 +183,9 @@ class JingleManager {
   static const String rtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
   static const String iceUdpNamespace = 'urn:xmpp:jingle:transports:ice-udp:1';
   static const String dtlsNamespace = 'urn:xmpp:jingle:apps:dtls:0';
+  static const String rtcpFbNamespace = 'urn:xmpp:jingle:apps:rtp:rtcp-fb:0';
+  static const String rtpHdrextNamespace =
+      'urn:xmpp:jingle:apps:rtp:rtp-hdrext:0';
 
   static final Map<Connection, JingleManager> _instances = {};
 
@@ -399,30 +428,64 @@ class JingleManager {
       return null;
     }
     final payloadTypes = <JingleRtpPayloadType>[];
+    final feedback = <JingleRtpFeedback>[];
+    final headerExtensions = <JingleRtpHeaderExtension>[];
     for (final child in description.children) {
-      if (child.name != 'payload-type') {
+      if (child.name == 'payload-type') {
+        final idValue = child.getAttribute('id')?.value ?? '';
+        final id = int.tryParse(idValue);
+        if (id == null) {
+          continue;
+        }
+        final name = child.getAttribute('name')?.value;
+        final clockRateValue = child.getAttribute('clockrate')?.value;
+        final clockRate =
+            clockRateValue == null ? null : int.tryParse(clockRateValue);
+        final channelsValue = child.getAttribute('channels')?.value;
+        final channels =
+            channelsValue == null ? null : int.tryParse(channelsValue);
+        payloadTypes.add(JingleRtpPayloadType(
+          id: id,
+          name: (name == null || name.isEmpty) ? null : name,
+          clockRate: clockRate,
+          channels: channels,
+        ));
         continue;
       }
-      final idValue = child.getAttribute('id')?.value ?? '';
-      final id = int.tryParse(idValue);
-      if (id == null) {
+      if (child.name == 'rtcp-fb' &&
+          child.getAttribute('xmlns')?.value == rtcpFbNamespace) {
+        final type = child.getAttribute('type')?.value ?? '';
+        if (type.isEmpty) {
+          continue;
+        }
+        final subtype = child.getAttribute('subtype')?.value;
+        feedback.add(JingleRtpFeedback(
+          type: type,
+          subtype: (subtype == null || subtype.isEmpty) ? null : subtype,
+        ));
         continue;
       }
-      final name = child.getAttribute('name')?.value;
-      final clockRateValue = child.getAttribute('clockrate')?.value;
-      final clockRate = clockRateValue == null ? null : int.tryParse(clockRateValue);
-      final channelsValue = child.getAttribute('channels')?.value;
-      final channels = channelsValue == null ? null : int.tryParse(channelsValue);
-      payloadTypes.add(JingleRtpPayloadType(
-        id: id,
-        name: (name == null || name.isEmpty) ? null : name,
-        clockRate: clockRate,
-        channels: channels,
-      ));
+      if (child.name == 'rtp-hdrext' &&
+          child.getAttribute('xmlns')?.value == rtpHdrextNamespace) {
+        final idValue = child.getAttribute('id')?.value ?? '';
+        final id = int.tryParse(idValue);
+        final uri = child.getAttribute('uri')?.value ?? '';
+        if (id == null || uri.isEmpty) {
+          continue;
+        }
+        final senders = child.getAttribute('senders')?.value;
+        headerExtensions.add(JingleRtpHeaderExtension(
+          id: id,
+          uri: uri,
+          senders: (senders == null || senders.isEmpty) ? null : senders,
+        ));
+      }
     }
     return JingleRtpDescription(
       media: media,
       payloadTypes: payloadTypes,
+      rtcpFeedback: feedback,
+      headerExtensions: headerExtensions,
     );
   }
 
@@ -650,6 +713,27 @@ class JingleManager {
         payloadElement.addAttribute(XmppAttribute('channels', channels.toString()));
       }
       element.addChild(payloadElement);
+    }
+    for (final feedback in description.rtcpFeedback) {
+      final fbElement = XmppElement()..name = 'rtcp-fb';
+      fbElement.addAttribute(XmppAttribute('xmlns', rtcpFbNamespace));
+      fbElement.addAttribute(XmppAttribute('type', feedback.type));
+      final subtype = feedback.subtype;
+      if (subtype != null && subtype.isNotEmpty) {
+        fbElement.addAttribute(XmppAttribute('subtype', subtype));
+      }
+      element.addChild(fbElement);
+    }
+    for (final extension in description.headerExtensions) {
+      final extElement = XmppElement()..name = 'rtp-hdrext';
+      extElement.addAttribute(XmppAttribute('xmlns', rtpHdrextNamespace));
+      extElement.addAttribute(XmppAttribute('id', extension.id.toString()));
+      extElement.addAttribute(XmppAttribute('uri', extension.uri));
+      final senders = extension.senders;
+      if (senders != null && senders.isNotEmpty) {
+        extElement.addAttribute(XmppAttribute('senders', senders));
+      }
+      element.addChild(extElement);
     }
     return element;
   }
