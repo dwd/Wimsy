@@ -25,4 +25,24 @@ void main() {
     expect(parsed, isNull);
   });
 
+  test('parseMucMediatedInvite extracts room and inviter', () {
+    final stanza = MessageStanza('m3', MessageStanzaType.NORMAL);
+    stanza.fromJid = Jid.fromFullJid('room@example.com');
+    final x = XmppElement()..name = 'x';
+    x.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/muc#user'));
+    final invite = XmppElement()..name = 'invite';
+    invite.addAttribute(XmppAttribute('from', 'juliet@example.com'));
+    final reason = XmppElement()..name = 'reason';
+    reason.textValue = 'Join us';
+    invite.addChild(reason);
+    x.addChild(invite);
+    stanza.addChild(x);
+
+    final parsed = parseMucMediatedInvite(stanza);
+    expect(parsed, isNotNull);
+    expect(parsed!.roomJid, 'room@example.com');
+    expect(parsed.inviterJid, 'juliet@example.com');
+    expect(parsed.reason, 'Join us');
+  });
+
 }

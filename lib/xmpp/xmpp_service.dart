@@ -74,6 +74,7 @@ class XmppService extends ChangeNotifier {
   StreamSubscription<MessageStanza?>? _messageStanzaSubscription;
   StreamSubscription<AbstractStanza>? _smDeliveredSubscription;
   StreamSubscription<AbstractStanza?>? _pepSubscription;
+  StreamSubscription<AbstractStanza?>? _mucPresenceSubscription;
   Timer? _pingTimer;
   Timer? _smAckTimeoutTimer;
   Timer? _csiIdleTimer;
@@ -1847,6 +1848,11 @@ class XmppService extends ChangeNotifier {
       if (stanza == null) {
         return;
       }
+      final mediatedInvite = parseMucMediatedInvite(stanza);
+      if (mediatedInvite != null) {
+        _handleMediatedInvite(stanza, mediatedInvite);
+        return;
+      }
       _handleMessageStanza(stanza);
     });
   }
@@ -1909,6 +1915,13 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _mucManager = connection.getMucModule();
+    _mucPresenceSubscription?.cancel();
+    _mucPresenceSubscription = connection.inStanzasStream.listen((stanza) {
+      if (stanza is! PresenceStanza) {
+        return;
+      }
+      _handleMucRoomCreatedPresence(stanza);
+    });
     _roomSubscriptions['message']?.cancel();
     _roomSubscriptions['message'] =
         _mucManager!.roomMessageStream.listen((message) {
@@ -3125,6 +3138,62 @@ class XmppService extends ChangeNotifier {
         _sendMarker(fromBare, messageId, 'displayed');
       }
     }
+  }
+
+  void _handleMediatedInvite(MessageStanza stanza, MucMediatedInvite invite) {
+    final inviter = invite.inviterJid ?? '';
+    if (inviter.isEmpty) {
+      return;
+    }
+    final current = _currentUserBareJid ?? '';
+    final rawXml = _serializeStanza(stanza);
+    _addMessage(
+      bareJid: inviter,
+      from: inviter,
+      to: current,
+      body: '',
+      rawXml: rawXml,
+      outgoing: false,
+      timestamp: DateTime.now(),
+      messageId: stanza.id,
+      inviteRoomJid: invite.roomJid,
+      inviteReason: invite.reason,
+      invitePassword: invite.password,
+    );
+  }
+
+  void _handleMucRoomCreatedPresence(PresenceStanza stanza) {
+    final from = stanza.fromJid;
+    if (from == null || from.resource == null || from.resource!.isEmpty) {
+      return;
+    }
+    final statusCodes = _mucStatusCodesFromPresence(stanza);
+    if (!statusCodes.contains('201') || !statusCodes.contains('110')) {
+      return;
+    }
+    final roomJid = from.userAtDomain;
+    if (roomJid.isEmpty || _mucDefaultConfigSent.contains(roomJid)) {
+      return;
+    }
+    _mucDefaultConfigSent.add(roomJid);
+    _sendMucDefaultConfig(roomJid);
+  }
+
+  Set<String> _mucStatusCodesFromPresence(PresenceStanza stanza) {
+    for (final child in stanza.children) {
+      if (child.name != 'x') {
+        continue;
+      }
+      if (child.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/muc#user') {
+        continue;
+      }
+      return child.children
+          .where((status) => status.name == 'status')
+          .map((status) => status.getAttribute('code')?.value ?? '')
+          .where((code) => code.isNotEmpty)
+          .toSet();
+    }
+    return <String>{};
   }
 
   void _noteRoomTraffic(String roomJid) {
@@ -5620,6 +5689,8 @@ class XmppService extends ChangeNotifier {
     _smDeliveredSubscription = null;
     _pepSubscription?.cancel();
     _pepSubscription = null;
+    _mucPresenceSubscription?.cancel();
+    _mucPresenceSubscription = null;
     _jingleSubscription?.cancel();
     _jingleSubscription = null;
     _ibbOpenSubscription?.cancel();
