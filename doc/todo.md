@@ -15,4 +15,5 @@ commit (but do not push) the result. Always test with flutter analyze, flutter t
 * ✓ Client State Indication - XEP-0352 (when client unfocused for some time or explicitly backgrounded)
 * Check over MAM and see if it can be optimized. In particular I think recording the last mam-id should allow us to elide or simplify the initial MAM catchup. You may need to update ./doc/mam-sync.md as well.
 * ✓ Similar with PEP (particularly with avatars) - we should rely on +notify most of the time, and rarely if ever explciitly subscribe.
+* MUC room configuration form support when creating new rooms (XEP-0045).
 * UX refresh - I like the compact nature of the message window now, but the contacts list and header/title bars are quite clunky.

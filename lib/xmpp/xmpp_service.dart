@@ -24,6 +24,7 @@ import 'blocking.dart';
 import 'http_upload.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
+import 'muc_config.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
@@ -151,6 +152,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, DateTime> _displayedAtByChat = {};
   final Map<String, DateTime> _roomLastTrafficAt = {};
   final Map<String, DateTime> _roomLastPingAt = {};
+  final Set<String> _mucDefaultConfigSent = {};
   PepManager? _pepManager;
   PepCapsManager? _pepCapsManager;
   BookmarksManager? _bookmarksManager;
@@ -816,6 +818,7 @@ class XmppService extends ChangeNotifier {
     _seededRoomMessageJids.clear();
     _rooms.clear();
     _roomOccupants.clear();
+    _mucDefaultConfigSent.clear();
     _mujiSessions.clear();
     _mujiSessions.clear();
     _presenceByBareJid.clear();
@@ -4020,6 +4023,7 @@ class XmppService extends ChangeNotifier {
       _pepCapsManager?.handleStanza(stanza);
       _bookmarksManager?.handleStanza(stanza);
       if (stanza is PresenceStanza) {
+        _handleMucRoomCreatedPresence(stanza);
         _handleVcardPresenceUpdate(stanza);
       }
     });
@@ -5650,6 +5654,7 @@ class XmppService extends ChangeNotifier {
     _chatStateSubscriptions.clear();
     _roomLastTrafficAt.clear();
     _roomLastPingAt.clear();
+    _mucDefaultConfigSent.clear();
     _blockingHandlerRegistered = false;
     _selfVcardPhotoHash = '';
     _selfVcardPhotoKnown = false;
@@ -6472,6 +6477,45 @@ class XmppService extends ChangeNotifier {
     _lastPingAt = DateTime.now();
     notifyListeners();
     _scheduleReconnect(immediate: true, shortTimeout: shortTimeout);
+  }
+
+  void _handleMucRoomCreatedPresence(PresenceStanza stanza) {
+    final from = stanza.fromJid;
+    if (from == null || from.resource == null || from.resource!.isEmpty) {
+      return;
+    }
+    final x = stanza.children.firstWhere(
+      (child) =>
+          child.name == 'x' &&
+          child.getAttribute('xmlns')?.value == 'http://jabber.org/protocol/muc#user',
+      orElse: () => XmppElement(),
+    );
+    if (x.name == null || x.name!.isEmpty) {
+      return;
+    }
+    final statusCodes = x.children
+        .where((child) => child.name == 'status')
+        .map((child) => child.getAttribute('code')?.value ?? '')
+        .where((code) => code.isNotEmpty)
+        .toSet();
+    if (!statusCodes.contains('201') || !statusCodes.contains('110')) {
+      return;
+    }
+    final roomJid = from.userAtDomain;
+    if (roomJid.isEmpty || _mucDefaultConfigSent.contains(roomJid)) {
+      return;
+    }
+    _mucDefaultConfigSent.add(roomJid);
+    _sendMucDefaultConfig(roomJid);
+  }
+
+  void _sendMucDefaultConfig(String roomJid) {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+    final iq = buildMucDefaultConfigIq(roomJid);
+    connection.writeStanza(iq);
   }
 
 
