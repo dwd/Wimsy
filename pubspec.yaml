@@ -55,6 +55,7 @@ dependencies:
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1
+  msix: ^3.16.8
   flutter_test:
     sdk: flutter
 
@@ -106,6 +107,15 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+msix_config:
+  display_name: Wimsy
+  publisher_display_name: Wimsy
+  identity_name: Wimsy
+  msix_version: 0.0.2.0
+  logo_path: web/icons/Icon-512.png
+  capabilities: internetClient
+  sign_msix: false
 
 sentry:
   upload_debug_symbols: true
