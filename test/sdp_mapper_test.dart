@@ -79,6 +79,7 @@ void main() {
     expect(sdp, contains('a=rtpmap:111 opus/48000/2'));
     expect(sdp, contains('a=fmtp:111 minptime=10'));
     expect(sdp, contains('a=rtcp-fb:* nack pli'));
+    expect(sdp, contains('a=rtcp-mux'));
     expect(sdp, contains('a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level'));
     expect(sdp, contains('a=ssrc:1234 cname:abcd'));
     expect(sdp, contains('a=ssrc-group:FID 1234 5678'));
@@ -155,6 +156,7 @@ void main() {
     expect(sdp, contains('a=group:BUNDLE audio0 video0'));
     expect(sdp, contains('a=mid:audio0'));
     expect(sdp, contains('a=mid:video0'));
+    expect(sdp, contains('a=rtcp-mux'));
     expect(sdp, contains('m=audio 9 UDP/TLS/RTP/SAVPF 111'));
     expect(sdp, contains('m=video 9 UDP/TLS/RTP/SAVPF 96'));
   });

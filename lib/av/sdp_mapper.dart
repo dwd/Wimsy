@@ -301,6 +301,7 @@ String buildMinimalSdpFromJingle({
     final fp = transport.fingerprint!;
     buffer.writeln('a=fingerprint:${fp.hash} ${fp.fingerprint}');
   }
+  buffer.writeln('a=rtcp-mux');
   final payloadIds = description.payloadTypes.map((p) => p.id).join(' ');
   buffer.writeln('m=${description.media} 9 UDP/TLS/RTP/SAVPF $payloadIds');
   buffer.writeln('c=IN IP4 0.0.0.0');
@@ -391,6 +392,7 @@ String _buildSdpSection({
     final fp = transport.fingerprint!;
     buffer.writeln('a=fingerprint:${fp.hash} ${fp.fingerprint}');
   }
+  buffer.writeln('a=rtcp-mux');
   final msid = description.sources
       .expand((source) => source.parameters.entries)
       .firstWhere(
