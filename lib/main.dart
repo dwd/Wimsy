@@ -1128,6 +1128,11 @@ class _WimsyHomeState extends State<WimsyHome> {
           if (activeChat != null && isBookmark && service.mujiSessionFor(activeChat) != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildMujiStatusBar(service, activeChat),
+            ),
+          if (activeChat != null && isBookmark && service.mujiSessionFor(activeChat) != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildMujiParticipantBar(service, activeChat),
             ),
           const Divider(height: 1),
@@ -1884,9 +1889,6 @@ class _WimsyHomeState extends State<WimsyHome> {
       return const SizedBox.shrink();
     }
     final participants = session.participants;
-    if (participants.isEmpty) {
-      return const SizedBox.shrink();
-    }
     final theme = Theme.of(context);
     return Card(
       elevation: 0,
@@ -1905,37 +1907,95 @@ class _WimsyHomeState extends State<WimsyHome> {
               style: theme.textTheme.labelLarge,
             ),
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: participants.map((participant) {
-                final icon = participant.muted ? Icons.mic_off : Icons.mic;
-                final speakerIcon =
-                    participant.speaking ? Icons.volume_up : Icons.volume_off;
-                return Chip(
-                  avatar: Icon(
-                    icon,
-                    size: 16,
-                    color: participant.muted
-                        ? theme.colorScheme.error
-                        : theme.colorScheme.primary,
+            if (participants.isEmpty)
+              Text(
+                'Waiting for participants…',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: participants.map((participant) {
+                  final icon = participant.muted ? Icons.mic_off : Icons.mic;
+                  final speakerIcon =
+                      participant.speaking ? Icons.volume_up : Icons.volume_off;
+                  return Chip(
+                    avatar: Icon(
+                      icon,
+                      size: 16,
+                      color: participant.muted
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.primary,
+                    ),
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(participant.nick),
+                        const SizedBox(width: 4),
+                        Icon(
+                          speakerIcon,
+                          size: 16,
+                          color: participant.speaking
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(growable: false),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMujiStatusBar(XmppService service, String roomJid) {
+    final session = service.mujiSessionFor(roomJid);
+    if (session == null) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      color: theme.colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.groups,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Muji call active',
+                    style: theme.textTheme.labelLarge,
                   ),
-                  label: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(participant.nick),
-                      const SizedBox(width: 4),
-                      Icon(
-                        speakerIcon,
-                        size: 16,
-                        color: participant.speaking
-                            ? theme.colorScheme.primary
-                            : theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ],
+                  const SizedBox(height: 2),
+                  Text(
+                    'Other participants can join from the room.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                );
-              }).toList(growable: false),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => service.leaveMujiRoom(roomJid),
+              child: const Text('Leave'),
             ),
           ],
         ),
