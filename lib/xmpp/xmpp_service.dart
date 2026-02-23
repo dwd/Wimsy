@@ -92,6 +92,7 @@ class XmppService extends ChangeNotifier {
   static const Duration _mucSelfPingIdle = Duration(minutes: 10);
   static const Duration _mucSelfPingCheckInterval = Duration(minutes: 1);
   static const Duration _mucSelfPingTimeout = Duration(seconds: 30);
+  static const Duration _keepaliveMaxTimeout = Duration(seconds: 30);
   final Map<String, StreamSubscription<Message>> _chatMessageSubscriptions = {};
   final Map<String, StreamSubscription<ChatState?>> _chatStateSubscriptions = {};
 
@@ -6479,7 +6480,8 @@ class XmppService extends ChangeNotifier {
     final multiplier = shortTimeout ? 5 : 10;
     final scaled = base * multiplier;
     final floor = Duration(seconds: shortTimeout ? 5 : 10);
-    return scaled > floor ? scaled : floor;
+    final candidate = scaled > floor ? scaled : floor;
+    return candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
   }
 
   Duration _pingTimeout({required bool shortTimeout}) {
@@ -6487,7 +6489,8 @@ class XmppService extends ChangeNotifier {
     final multiplier = shortTimeout ? 5 : 10;
     final scaled = base * multiplier;
     final floor = Duration(seconds: shortTimeout ? 5 : 10);
-    return scaled > floor ? scaled : floor;
+    final candidate = scaled > floor ? scaled : floor;
+    return candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
   }
 
   void _probeConnection({required bool shortTimeout}) {
