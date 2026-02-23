@@ -393,6 +393,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     _seedBookmarks();
     _seedMessages();
     _seedRoomMessages();
+    _loadMediaPreferences();
     _loadAccount();
   }
 
@@ -449,6 +450,18 @@ class _WimsyHomeState extends State<WimsyHome> {
       }
       _loadedAccount = true;
     });
+  }
+
+  Future<void> _loadMediaPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final audioInput = prefs.getString('wimsy_audio_input');
+    final videoInput = prefs.getString('wimsy_video_input');
+    if (audioInput != null && audioInput.isNotEmpty) {
+      widget.service.selectAudioInput(audioInput);
+    }
+    if (videoInput != null && videoInput.isNotEmpty) {
+      widget.service.selectVideoInput(videoInput);
+    }
   }
 
   @override
@@ -1440,6 +1453,96 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
   }
 
+  Future<void> _showAudioInputPicker() async {
+    final inputs = await widget.service.listAudioInputs();
+    if (!mounted) {
+      return;
+    }
+    if (inputs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No audio inputs available.')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(title: Text('Select microphone')),
+              for (var i = 0; i < inputs.length; i++)
+                ListTile(
+                  title: Text(_deviceLabel(inputs[i], i, 'Microphone')),
+                  subtitle: inputs[i].deviceId == widget.service.preferredAudioInputId
+                      ? const Text('Selected')
+                      : null,
+                  onTap: () async {
+                    widget.service.selectAudioInput(inputs[i].deviceId);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('wimsy_audio_input', inputs[i].deviceId);
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showVideoInputPicker() async {
+    final inputs = await widget.service.listVideoInputs();
+    if (!mounted) {
+      return;
+    }
+    if (inputs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No cameras available.')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(title: Text('Select camera')),
+              for (var i = 0; i < inputs.length; i++)
+                ListTile(
+                  title: Text(_deviceLabel(inputs[i], i, 'Camera')),
+                  subtitle: inputs[i].deviceId == widget.service.preferredVideoInputId
+                      ? const Text('Selected')
+                      : null,
+                  onTap: () async {
+                    widget.service.selectVideoInput(inputs[i].deviceId);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('wimsy_video_input', inputs[i].deviceId);
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _deviceLabel(MediaDeviceInfo device, int index, String fallbackPrefix) {
+    final label = device.label.trim();
+    if (label.isNotEmpty) {
+      return label;
+    }
+    return '$fallbackPrefix ${index + 1}';
+  }
+
   void _cancelEditing() {
     if (!mounted) {
       return;
@@ -1601,6 +1704,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                     tooltip: service.isCallMuted(bareJid) ? 'Unmute' : 'Mute',
                   ),
                   IconButton(
+                    onPressed: _showAudioInputPicker,
+                    icon: const Icon(Icons.settings_voice),
+                    tooltip: 'Select microphone',
+                  ),
+                  IconButton(
                     onPressed: () => service.toggleSpeakerphone(),
                     icon: Icon(
                       service.isSpeakerphoneOn ? Icons.volume_up : Icons.volume_down,
@@ -1623,6 +1731,12 @@ class _WimsyHomeState extends State<WimsyHome> {
                       tooltip: service.isCallVideoEnabled(bareJid)
                           ? 'Disable camera'
                           : 'Enable camera',
+                    ),
+                  if (session.video)
+                    IconButton(
+                      onPressed: _showVideoInputPicker,
+                      icon: const Icon(Icons.switch_camera),
+                      tooltip: 'Select camera',
                     ),
                 ],
               ),

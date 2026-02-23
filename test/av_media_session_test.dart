@@ -19,7 +19,7 @@ void main() {
   test('WebRtcMediaSession starts once and reuses active stream', () async {
     var createCount = 0;
     final session = WebRtcMediaSession(
-      createStream: ({required bool audio, required bool video}) async {
+      createStream: ({required bool audio, required bool video, String? audioDeviceId, String? videoDeviceId}) async {
         createCount += 1;
         return _FakeStreamHandle('stream-$createCount');
       },
@@ -37,7 +37,7 @@ void main() {
   test('WebRtcMediaSession stops and disposes stream', () async {
     final handle = _FakeStreamHandle('stream-1');
     final session = WebRtcMediaSession(
-      createStream: ({required bool audio, required bool video}) async => handle,
+      createStream: ({required bool audio, required bool video, String? audioDeviceId, String? videoDeviceId}) async => handle,
     );
 
     await session.start(audio: true, video: false);

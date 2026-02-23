@@ -10,6 +10,8 @@ abstract class MediaStreamHandle {
 typedef MediaStreamFactory = Future<MediaStreamHandle> Function({
   required bool audio,
   required bool video,
+  String? audioDeviceId,
+  String? videoDeviceId,
 });
 
 class WebRtcMediaStreamHandle implements MediaStreamHandle {
@@ -38,12 +40,21 @@ class WebRtcMediaSession {
   MediaStreamHandle? get activeStream => _activeStream;
   bool get isActive => _activeStream != null;
 
-  Future<MediaStreamHandle> start({required bool audio, required bool video})
-      async {
+  Future<MediaStreamHandle> start({
+    required bool audio,
+    required bool video,
+    String? audioDeviceId,
+    String? videoDeviceId,
+  }) async {
     if (_activeStream != null) {
       return _activeStream!;
     }
-    final stream = await _createStream(audio: audio, video: video);
+    final stream = await _createStream(
+      audio: audio,
+      video: video,
+      audioDeviceId: audioDeviceId,
+      videoDeviceId: videoDeviceId,
+    );
     _activeStream = stream;
     return stream;
   }
@@ -60,11 +71,19 @@ class WebRtcMediaSession {
   static Future<MediaStreamHandle> _defaultCreateStream({
     required bool audio,
     required bool video,
+    String? audioDeviceId,
+    String? videoDeviceId,
   }) async {
     await _ensurePermissions(audio: audio, video: video);
+    final audioConstraints = audio
+        ? _buildDeviceConstraint(audioDeviceId)
+        : false;
+    final videoConstraints = video
+        ? _buildDeviceConstraint(videoDeviceId)
+        : false;
     final stream = await navigator.mediaDevices.getUserMedia({
-      'audio': audio,
-      'video': video,
+      'audio': audioConstraints,
+      'video': videoConstraints,
     });
     return WebRtcMediaStreamHandle(stream);
   }
@@ -98,5 +117,14 @@ class WebRtcMediaSession {
     if (denied) {
       throw StateError('Media permissions denied');
     }
+  }
+
+  static dynamic _buildDeviceConstraint(String? deviceId) {
+    if (deviceId == null || deviceId.isEmpty) {
+      return true;
+    }
+    return {
+      'deviceId': deviceId,
+    };
   }
 }

@@ -195,6 +195,8 @@ class XmppService extends ChangeNotifier {
   final Map<String, String> _jingleInitiatedTargets = {};
   List<Map<String, dynamic>> _iceServers = const [];
   bool _speakerphoneOn = false;
+  String? _preferredAudioInputId;
+  String? _preferredVideoInputId;
   StreamSubscription<JingleSessionEvent>? _jingleSubscription;
   StreamSubscription<IbbOpen>? _ibbOpenSubscription;
   StreamSubscription<IbbData>? _ibbDataSubscription;
@@ -287,12 +289,39 @@ class XmppService extends ChangeNotifier {
     return Helper.audiooutputs;
   }
 
+  Future<List<MediaDeviceInfo>> listAudioInputs() async {
+    final devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+        .where((device) => device.kind == 'audioinput' || device.kind == 'audio')
+        .toList();
+  }
+
+  Future<List<MediaDeviceInfo>> listVideoInputs() async {
+    final devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+        .where((device) => device.kind == 'videoinput' || device.kind == 'video')
+        .toList();
+  }
+
   Future<void> selectAudioOutput(String deviceId) async {
     if (deviceId.isEmpty) {
       return;
     }
     await Helper.selectAudioOutput(deviceId);
   }
+
+  void selectAudioInput(String deviceId) {
+    final trimmed = deviceId.trim();
+    _preferredAudioInputId = trimmed.isEmpty ? null : trimmed;
+  }
+
+  void selectVideoInput(String deviceId) {
+    final trimmed = deviceId.trim();
+    _preferredVideoInputId = trimmed.isEmpty ? null : trimmed;
+  }
+
+  String? get preferredAudioInputId => _preferredAudioInputId;
+  String? get preferredVideoInputId => _preferredVideoInputId;
 
   Future<void> toggleSpeakerphone() async {
     _speakerphoneOn = !_speakerphoneOn;
@@ -2855,6 +2884,8 @@ class XmppService extends ChangeNotifier {
       handle = await _mediaSession.start(
         audio: true,
         video: kind == CallMediaKind.video,
+        audioDeviceId: _preferredAudioInputId,
+        videoDeviceId: _preferredVideoInputId,
       );
     } catch (error) {
       Log.w('XmppService', 'Unable to start media session: $error');
