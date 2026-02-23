@@ -12,6 +12,8 @@ class PepCapsManager {
   final PepManager pepManager;
 
   final Map<String, Set<String>> _capsFeatures = {};
+  final Map<String, Set<String>> _capsKeyBareJids = {};
+  final Map<String, Set<String>> _bareJidFeatures = {};
   final Map<String, _PendingCapsQuery> _pendingQueries = {};
 
   void handleStanza(AbstractStanza stanza) {
@@ -46,7 +48,10 @@ class PepCapsManager {
     }
     final bareJid = fromJid.userAtDomain;
     final features = _capsFeatures[capsKey];
+    final bareKey = bareJid.toLowerCase();
+    _capsKeyBareJids.putIfAbsent(capsKey, () => <String>{}).add(bareKey);
     if (features != null) {
+      _recordFeaturesForBareJid(bareKey, features);
       if (!_supportsPepNotify(features)) {
         pepManager.requestMetadataIfMissing(bareJid);
       }
@@ -66,7 +71,8 @@ class PepCapsManager {
     query.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#info'));
     query.addAttribute(XmppAttribute('node', capsKey));
     iq.addChild(query);
-    _pendingQueries[id] = _PendingCapsQuery(capsKey: capsKey, bareJid: bareJid);
+    _pendingQueries[id] =
+        _PendingCapsQuery(capsKey: capsKey, bareJid: bareJid.toLowerCase());
     connection.writeStanza(iq);
   }
 
@@ -92,9 +98,29 @@ class PepCapsManager {
       }
     }
     _capsFeatures[pending.capsKey] = features;
+    _recordFeaturesForBareJid(pending.bareJid, features);
+    final linkedBareJids = _capsKeyBareJids[pending.capsKey];
+    if (linkedBareJids != null) {
+      for (final bareJid in linkedBareJids) {
+        _recordFeaturesForBareJid(bareJid, features);
+      }
+    }
     if (!_supportsPepNotify(features)) {
       pepManager.requestMetadataIfMissing(pending.bareJid);
     }
+  }
+
+  Set<String>? featuresForBareJid(String bareJid) {
+    final features = _bareJidFeatures[bareJid.toLowerCase()];
+    if (features == null) {
+      return null;
+    }
+    return Set.unmodifiable(features);
+  }
+
+  void _recordFeaturesForBareJid(String bareJid, Set<String> features) {
+    final existing = _bareJidFeatures.putIfAbsent(bareJid, () => <String>{});
+    existing.addAll(features);
   }
 
   bool _supportsPepNotify(Set<String> features) {

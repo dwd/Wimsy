@@ -132,6 +132,8 @@ class XmppService extends ChangeNotifier {
   bool _carbonsEnabled = false;
   static const String _capsNode = 'https://wimsy.im/caps';
   static const String _capsHash = 'sha-1';
+  static const String _jingleNamespace = 'urn:xmpp:jingle:1';
+  static const String _jingleRtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
   String? _capsVer;
   bool _csiInactive = false;
   static const Duration _csiIdleDelay = Duration(minutes: 1);
@@ -476,6 +478,16 @@ class XmppService extends ChangeNotifier {
 
   PresenceData? presenceFor(String bareJid) {
     return _presenceByBareJid[_bareJid(bareJid)];
+  }
+
+  bool contactSupportsJingle(String bareJid) {
+    final features = _pepCapsManager?.featuresForBareJid(_bareJid(bareJid));
+    if (features == null || features.isEmpty) {
+      return true;
+    }
+    return features.contains(_jingleNamespace) ||
+        features.contains(jmiNamespace) ||
+        features.contains(_jingleRtpNamespace);
   }
 
   String presenceLabelFor(String bareJid) {

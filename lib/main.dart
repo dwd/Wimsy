@@ -1102,20 +1102,36 @@ class _WimsyHomeState extends State<WimsyHome> {
                         : 'Leave group call',
                   ),
                 if (activeChat != null && !isBookmark) ...[
-                  IconButton(
-                    onPressed: service.callSessionFor(activeChat) != null
-                        ? null
-                        : () => _startCall(activeChat, video: false),
-                    icon: const Icon(Icons.call),
-                    tooltip: 'Start voice call',
-                  ),
-                  IconButton(
-                    onPressed: service.callSessionFor(activeChat) != null
-                        ? null
-                        : () => _startCall(activeChat, video: true),
-                    icon: const Icon(Icons.videocam),
-                    tooltip: 'Start video call',
-                  ),
+                  Builder(builder: (context) {
+                    final presence = service.presenceFor(activeChat);
+                    final isOnline = presence != null &&
+                        (presence.status?.toLowerCase() != 'unavailable');
+                    final supportsJingle = service.contactSupportsJingle(activeChat);
+                    final callLikelyAvailable = isOnline && supportsJingle;
+                    final callEnabled = service.callSessionFor(activeChat) == null;
+                    final callIconColor = callEnabled && !callLikelyAvailable
+                        ? Theme.of(context).disabledColor
+                        : null;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: callEnabled
+                              ? () => _startCall(activeChat, video: false)
+                              : null,
+                          icon: Icon(Icons.call, color: callIconColor),
+                          tooltip: 'Start voice call',
+                        ),
+                        IconButton(
+                          onPressed: callEnabled
+                              ? () => _startCall(activeChat, video: true)
+                              : null,
+                          icon: Icon(Icons.videocam, color: callIconColor),
+                          tooltip: 'Start video call',
+                        ),
+                      ],
+                    );
+                  }),
                 ],
               ],
             ),

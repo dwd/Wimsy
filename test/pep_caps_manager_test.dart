@@ -105,4 +105,36 @@ void main() {
 
     expect(pep.requested, isEmpty);
   });
+
+  test('Caps features are tracked per bare JID', () {
+    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final connection = TestConnection(account);
+    final storage = FakeStorageService();
+    final pep = FakePepManager(
+      connection: connection,
+      storage: storage,
+      selfBareJid: 'user@example.com',
+      onUpdate: () {},
+    );
+    final caps = PepCapsManager(connection: connection, pepManager: pep);
+
+    final presence = _presenceWithCaps(
+      fromFullJid: 'alice@example.com/resource',
+      node: 'https://example.com/caps',
+      ver: 'XYZ999',
+    );
+    caps.handleStanza(presence);
+
+    final iq = connection.written.last as IqStanza;
+    final result = _discoInfoResult(
+      id: iq.id!,
+      capsKey: 'https://example.com/caps#XYZ999',
+      feature: 'urn:xmpp:jingle:1',
+    );
+    caps.handleStanza(result);
+
+    final features = caps.featuresForBareJid('alice@example.com');
+    expect(features, isNotNull);
+    expect(features!.contains('urn:xmpp:jingle:1'), isTrue);
+  });
 }
