@@ -3019,17 +3019,13 @@ class XmppService extends ChangeNotifier {
           _callContentNamesBySid[sid]?.first ??
           (kind == CallMediaKind.video ? 'video' : 'audio');
       final transport = transports[contentName] ?? transports.values.first;
+      final transportInfo = transportInfoTransport(transport, parsed);
       final info = jingle.buildTransportInfo(
         to: Jid.fromFullJid(peerBareJid),
         sid: sid,
         contentName: contentName,
         creator: 'initiator',
-        transport: JingleIceTransport(
-          ufrag: transport.ufrag,
-          password: transport.password,
-          candidates: [parsed],
-          fingerprint: transport.fingerprint,
-        ),
+        transport: transportInfo,
       );
       unawaited(_sendIqAndAwait(info));
     };
@@ -3068,6 +3064,21 @@ class XmppService extends ChangeNotifier {
       ip: ip,
       port: port,
       type: type,
+    );
+  }
+
+  @visibleForTesting
+  static JingleIceTransport transportInfoTransport(
+    JingleIceTransport base,
+    JingleIceCandidate candidate,
+  ) {
+    return JingleIceTransport(
+      ufrag: base.ufrag,
+      password: base.password,
+      candidates: [candidate],
+      // Fingerprints are exchanged during session-initiate/accept.
+      // Some clients treat fingerprints in transport-info as a change.
+      fingerprint: null,
     );
   }
 

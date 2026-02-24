@@ -52,4 +52,33 @@ void main() {
     expect(merged.candidates.first.foundation, '2');
     expect(merged.candidates.last.foundation, '1');
   });
+
+  test('transportInfoTransport strips fingerprint and keeps credentials', () {
+    const fingerprint = JingleDtlsFingerprint(
+      hash: 'sha-256',
+      fingerprint: '11:22:33',
+    );
+    const base = JingleIceTransport(
+      ufrag: 'uf',
+      password: 'pw',
+      candidates: [],
+      fingerprint: fingerprint,
+    );
+    const candidate = JingleIceCandidate(
+      foundation: '1',
+      component: 1,
+      protocol: 'udp',
+      priority: 100,
+      ip: '10.0.0.3',
+      port: 7000,
+      type: 'host',
+    );
+
+    final transport = XmppService.transportInfoTransport(base, candidate);
+
+    expect(transport.ufrag, 'uf');
+    expect(transport.password, 'pw');
+    expect(transport.fingerprint, isNull);
+    expect(transport.candidates, [candidate]);
+  });
 }
