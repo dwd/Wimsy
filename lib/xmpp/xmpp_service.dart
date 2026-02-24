@@ -189,6 +189,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, List<String>> _callContentNamesBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
+  final Map<String, String> _callPeerFullJidBySid = {};
   final Map<String, Timer> _callTimeoutTimers = {};
   final Map<String, Timer> _callStatsTimers = {};
   final Map<String, CallQualitySample> _callQualityBySid = {};
@@ -2150,6 +2151,7 @@ class XmppService extends ChangeNotifier {
     if (peerJid.isEmpty) {
       return;
     }
+    _storeCallPeerFullJid(event.sid, event.from);
     if (_callSessions.containsKey(event.sid)) {
       return;
     }
@@ -2381,7 +2383,7 @@ class XmppService extends ChangeNotifier {
     _callContentNamesBySid[session.sid] =
         mappings.map((mapping) => mapping.contentName).toList(growable: false);
     final iq = jingle.buildRtpSessionAcceptMulti(
-      to: Jid.fromFullJid(session.peerBareJid),
+      to: _callPeerJidForSid(session.sid, session.peerBareJid),
       sid: session.sid,
       contents: _buildCallContents(localDescriptions, localTransports),
     );
@@ -2409,7 +2411,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     await _sendJingleTerminate(
-      Jid.fromFullJid(session.peerBareJid),
+      _callPeerJidForSid(session.sid, session.peerBareJid),
       session.sid,
       'decline',
     );
@@ -2426,7 +2428,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     await _sendJingleTerminate(
-      Jid.fromFullJid(session.peerBareJid),
+      _callPeerJidForSid(session.sid, session.peerBareJid),
       session.sid,
       'success',
     );
@@ -2453,7 +2455,7 @@ class XmppService extends ChangeNotifier {
           }
         } else {
           unawaited(_sendJingleTerminate(
-            Jid.fromFullJid(session.peerBareJid),
+            _callPeerJidForSid(session.sid, session.peerBareJid),
             sid,
             'timeout',
           ));
@@ -2464,7 +2466,7 @@ class XmppService extends ChangeNotifier {
           _sendJmiRetract(Jid.fromFullJid(session.peerBareJid), sid);
         } else {
           unawaited(_sendJingleTerminate(
-            Jid.fromFullJid(session.peerBareJid),
+            _callPeerJidForSid(session.sid, session.peerBareJid),
             sid,
             'timeout',
           ));
@@ -2705,6 +2707,7 @@ class XmppService extends ChangeNotifier {
     _callStatsTimers.remove(session.sid)?.cancel();
     _callStatsBySid.remove(session.sid);
     _callQualityBySid.remove(session.sid);
+    _callPeerFullJidBySid.remove(session.sid);
     _jmiProceedTargetBySid.remove(session.sid);
     _jmiIncomingPending.remove(session.sid);
     _jmiAutoAcceptBySid.remove(session.sid);
@@ -2772,6 +2775,7 @@ class XmppService extends ChangeNotifier {
         if (sid == null) {
           return;
         }
+        _storeCallPeerFullJid(sid, fromJid);
         _jmiFallbackTimers.remove(sid)?.cancel();
         unawaited(_sendPendingJingleInitiate(sid, fromJid));
         return;
@@ -2837,6 +2841,7 @@ class XmppService extends ChangeNotifier {
     if (jingle == null) {
       return;
     }
+    _storeCallPeerFullJid(sid, to);
     final targetKey = to.fullJid ?? to.userAtDomain;
     if (targetKey.isEmpty) {
       return;
@@ -2855,7 +2860,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final iq = jingle.buildRtpSessionInitiateMulti(
-      to: to,
+      to: _callPeerJidForSid(sid, to.userAtDomain),
       sid: sid,
       contents: contents,
     );
@@ -3021,7 +3026,7 @@ class XmppService extends ChangeNotifier {
       final transport = transports[contentName] ?? transports.values.first;
       final transportInfo = transportInfoTransport(transport, parsed);
       final info = jingle.buildTransportInfo(
-        to: Jid.fromFullJid(peerBareJid),
+        to: _callPeerJidForSid(sid, peerBareJid),
         sid: sid,
         contentName: contentName,
         creator: 'initiator',
@@ -3080,6 +3085,26 @@ class XmppService extends ChangeNotifier {
       // Some clients treat fingerprints in transport-info as a change.
       fingerprint: null,
     );
+  }
+
+  void _storeCallPeerFullJid(String sid, Jid jid) {
+    final resource = jid.resource;
+    if (resource == null || resource.isEmpty) {
+      return;
+    }
+    final full = jid.fullJid;
+    if (full == null || full.isEmpty) {
+      return;
+    }
+    _callPeerFullJidBySid[sid] = full;
+  }
+
+  Jid _callPeerJidForSid(String sid, String fallbackJid) {
+    final full = _callPeerFullJidBySid[sid];
+    if (full != null && full.isNotEmpty) {
+      return Jid.fromFullJid(full);
+    }
+    return Jid.fromFullJid(fallbackJid);
   }
 
   void _handleIbbOpen(IbbOpen open) {
