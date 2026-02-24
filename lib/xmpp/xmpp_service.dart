@@ -118,6 +118,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, MujiSessionState> _mujiSessions = {};
   final Map<String, StreamSubscription> _roomSubscriptions = {};
   final Map<String, PresenceData> _presenceByBareJid = {};
+  final Map<String, PresenceData> _presenceByFullJid = {};
   final Map<String, DateTime> _lastSeenAt = {};
   final Set<String> _serverNotFound = {};
   final Map<String, ChatState?> _chatStates = {};
@@ -824,6 +825,7 @@ class XmppService extends ChangeNotifier {
     _mujiSessions.clear();
     _mujiSessions.clear();
     _presenceByBareJid.clear();
+    _presenceByFullJid.clear();
     _lastSeenAt.clear();
     _serverNotFound.clear();
     _chatStates.clear();
@@ -2382,8 +2384,14 @@ class XmppService extends ChangeNotifier {
     _callLocalTransportsBySid[session.sid] = localTransports;
     _callContentNamesBySid[session.sid] =
         mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
+    if (toJid == null) {
+      session.state = CallState.failed;
+      _removeCallSession(session);
+      return;
+    }
     final iq = jingle.buildRtpSessionAcceptMulti(
-      to: _callPeerJidForSid(session.sid, session.peerBareJid),
+      to: toJid,
       sid: session.sid,
       contents: _buildCallContents(localDescriptions, localTransports),
     );
@@ -2410,11 +2418,10 @@ class XmppService extends ChangeNotifier {
       _removeCallSession(session);
       return;
     }
-    await _sendJingleTerminate(
-      _callPeerJidForSid(session.sid, session.peerBareJid),
-      session.sid,
-      'decline',
-    );
+    final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
+    if (toJid != null) {
+      await _sendJingleTerminate(toJid, session.sid, 'decline');
+    }
     session.state = CallState.declined;
     _removeCallSession(session);
   }
@@ -2427,11 +2434,10 @@ class XmppService extends ChangeNotifier {
       _removeCallSession(session);
       return;
     }
-    await _sendJingleTerminate(
-      _callPeerJidForSid(session.sid, session.peerBareJid),
-      session.sid,
-      'success',
-    );
+    final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
+    if (toJid != null) {
+      await _sendJingleTerminate(toJid, session.sid, 'success');
+    }
     session.state = CallState.ended;
     _removeCallSession(session);
   }
@@ -2454,22 +2460,20 @@ class XmppService extends ChangeNotifier {
             _sendJmiReject(target, sid);
           }
         } else {
-          unawaited(_sendJingleTerminate(
-            _callPeerJidForSid(session.sid, session.peerBareJid),
-            sid,
-            'timeout',
-          ));
+          final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
+          if (toJid != null) {
+            unawaited(_sendJingleTerminate(toJid, sid, 'timeout'));
+          }
         }
         session.state = CallState.declined;
       } else {
         if (_jmiFallbackTimers.containsKey(sid)) {
           _sendJmiRetract(Jid.fromFullJid(session.peerBareJid), sid);
         } else {
-          unawaited(_sendJingleTerminate(
-            _callPeerJidForSid(session.sid, session.peerBareJid),
-            sid,
-            'timeout',
-          ));
+          final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
+          if (toJid != null) {
+            unawaited(_sendJingleTerminate(toJid, sid, 'timeout'));
+          }
         }
         session.state = CallState.failed;
       }
@@ -2859,12 +2863,17 @@ class XmppService extends ChangeNotifier {
     if (contents.isEmpty) {
       return;
     }
+    final toJid = _callPeerJidForSid(sid, to.userAtDomain);
+    if (toJid == null) {
+      _failCallSession(sid, CallState.failed);
+      return;
+    }
     final iq = jingle.buildRtpSessionInitiateMulti(
-      to: _callPeerJidForSid(sid, to.userAtDomain),
+      to: toJid,
       sid: sid,
       contents: contents,
     );
-    _jingleInitiatedTargets[sid] = targetKey;
+    _jingleInitiatedTargets[sid] = toJid.fullJid ?? toJid.userAtDomain;
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
       _failCallSession(sid, CallState.failed);
@@ -3025,8 +3034,12 @@ class XmppService extends ChangeNotifier {
           (kind == CallMediaKind.video ? 'video' : 'audio');
       final transport = transports[contentName] ?? transports.values.first;
       final transportInfo = transportInfoTransport(transport, parsed);
+      final toJid = _callPeerJidForSid(sid, peerBareJid);
+      if (toJid == null) {
+        return;
+      }
       final info = jingle.buildTransportInfo(
-        to: _callPeerJidForSid(sid, peerBareJid),
+        to: toJid,
         sid: sid,
         contentName: contentName,
         creator: 'initiator',
@@ -3099,12 +3112,59 @@ class XmppService extends ChangeNotifier {
     _callPeerFullJidBySid[sid] = full;
   }
 
-  Jid _callPeerJidForSid(String sid, String fallbackJid) {
+  List<String> _onlineFullJidsForBare(String bareJid) {
+    final normalized = _bareJid(bareJid).toLowerCase();
+    final candidates = <String>[];
+    for (final entry in _presenceByFullJid.entries) {
+      if (_bareJid(entry.key).toLowerCase() != normalized) {
+        continue;
+      }
+      final status = entry.value.status?.toLowerCase();
+      if (status == 'unavailable') {
+        continue;
+      }
+      candidates.add(entry.key);
+    }
+    candidates.sort();
+    return candidates;
+  }
+
+  bool _featuresSupportJingle(Set<String> features) {
+    return features.contains(_jingleNamespace) ||
+        features.contains(jmiNamespace) ||
+        features.contains(_jingleRtpNamespace);
+  }
+
+  String? _selectJinglePeerFullJid(String bareJid) {
+    final candidates = _onlineFullJidsForBare(bareJid);
+    if (candidates.isEmpty) {
+      return null;
+    }
+    for (final fullJid in candidates) {
+      final features = _pepCapsManager?.featuresForFullJid(fullJid);
+      if (features == null || features.isEmpty) {
+        continue;
+      }
+      if (_featuresSupportJingle(features)) {
+        return fullJid;
+      }
+    }
+    // If no caps info is available, fall back to the first online resource.
+    return candidates.first;
+  }
+
+  Jid? _callPeerJidForSid(String sid, String fallbackJid) {
     final full = _callPeerFullJidBySid[sid];
     if (full != null && full.isNotEmpty) {
       return Jid.fromFullJid(full);
     }
-    return Jid.fromFullJid(fallbackJid);
+    final bare = _bareJid(fallbackJid);
+    final selected = _selectJinglePeerFullJid(bare);
+    if (selected == null || selected.isEmpty) {
+      return null;
+    }
+    _callPeerFullJidBySid[sid] = selected;
+    return Jid.fromFullJid(selected);
   }
 
   void _handleIbbOpen(IbbOpen open) {
@@ -4110,9 +4170,17 @@ class XmppService extends ChangeNotifier {
       if (jid == null || jid.isEmpty) {
         return;
       }
+      final fullJid = presence.jid?.fullJid;
       final normalized = _bareJid(jid);
       _presenceByBareJid[normalized] = presence;
       final status = presence.status?.toLowerCase();
+      if (fullJid != null && fullJid.isNotEmpty) {
+        if (status == 'unavailable') {
+          _presenceByFullJid.remove(fullJid);
+        } else {
+          _presenceByFullJid[fullJid] = presence;
+        }
+      }
       if (status != 'unavailable') {
         _lastSeenAt[normalized] = DateTime.now();
         _serverNotFound.remove(normalized);
@@ -5823,6 +5891,7 @@ class XmppService extends ChangeNotifier {
       _rosterVersion = null;
     }
     _presenceByBareJid.clear();
+    _presenceByFullJid.clear();
     _roomMessages.clear();
     _rooms.clear();
     _roomOccupants.clear();

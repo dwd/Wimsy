@@ -14,6 +14,7 @@ class PepCapsManager {
   final Map<String, Set<String>> _capsFeatures = {};
   final Map<String, Set<String>> _capsKeyBareJids = {};
   final Map<String, Set<String>> _bareJidFeatures = {};
+  final Map<String, String> _capsKeyByFullJid = {};
   final Map<String, _PendingCapsQuery> _pendingQueries = {};
 
   void handleStanza(AbstractStanza stanza) {
@@ -26,6 +27,10 @@ class PepCapsManager {
 
   void _handlePresence(PresenceStanza stanza) {
     if (stanza.type == PresenceType.UNAVAILABLE) {
+      final fromJid = stanza.fromJid?.fullJid;
+      if (fromJid != null && fromJid.isNotEmpty) {
+        _capsKeyByFullJid.remove(fromJid.toLowerCase());
+      }
       return;
     }
     final caps = stanza.getChild('c');
@@ -47,9 +52,13 @@ class PepCapsManager {
       return;
     }
     final bareJid = fromJid.userAtDomain;
+    final fullJid = fromJid.fullJid;
     final features = _capsFeatures[capsKey];
     final bareKey = bareJid.toLowerCase();
     _capsKeyBareJids.putIfAbsent(capsKey, () => <String>{}).add(bareKey);
+    if (fullJid != null && fullJid.isNotEmpty) {
+      _capsKeyByFullJid[fullJid.toLowerCase()] = capsKey;
+    }
     if (features != null) {
       _recordFeaturesForBareJid(bareKey, features);
       if (!_supportsPepNotify(features)) {
@@ -112,6 +121,18 @@ class PepCapsManager {
 
   Set<String>? featuresForBareJid(String bareJid) {
     final features = _bareJidFeatures[bareJid.toLowerCase()];
+    if (features == null) {
+      return null;
+    }
+    return Set.unmodifiable(features);
+  }
+
+  Set<String>? featuresForFullJid(String fullJid) {
+    final capsKey = _capsKeyByFullJid[fullJid.toLowerCase()];
+    if (capsKey == null) {
+      return null;
+    }
+    final features = _capsFeatures[capsKey];
     if (features == null) {
       return null;
     }
