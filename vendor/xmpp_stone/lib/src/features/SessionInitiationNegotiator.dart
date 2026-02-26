@@ -33,8 +33,11 @@ class SessionInitiationNegotiator extends Negotiator {
     }
     final sessionNonza = matching.first;
     if (sessionNonza.getChild('optional') != null) {
-      _connection.sessionReady();
-      state = NegotiatorState.DONE;
+      state = NegotiatorState.NEGOTIATING;
+      scheduleMicrotask(() {
+        _connection.sessionReady();
+        state = NegotiatorState.DONE;
+      });
       return;
     }
     state = NegotiatorState.NEGOTIATING;

@@ -29,6 +29,8 @@ void main() {
 
       negotiator.negotiate([sessionNonza]);
 
+      await Future<void>.delayed(Duration.zero);
+
       await sub.cancel();
 
       expect(negotiator.state, NegotiatorState.DONE);
