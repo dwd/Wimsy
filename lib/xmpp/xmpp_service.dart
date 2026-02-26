@@ -211,6 +211,7 @@ class XmppService extends ChangeNotifier {
   final Set<String> _jmiIncomingPending = {};
   final Set<String> _jmiAutoAcceptBySid = {};
   final Map<String, Set<String>> _jmiProposedMediaBySid = {};
+  final Map<String, List<RTCIceCandidate>> _pendingIceCandidatesBySid = {};
   final Map<String, String> _jingleInitiatedTargets = {};
   List<Map<String, dynamic>> _iceServers = const [];
   bool _speakerphoneOn = false;
@@ -2384,6 +2385,7 @@ class XmppService extends ChangeNotifier {
     _callLocalTransportsBySid[sid] = localTransports;
     _callContentNamesBySid[sid] =
         mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    _flushPendingIceCandidates(sid);
     final session = CallSession(
       sid: sid,
       peerBareJid: bareJid,
@@ -2476,6 +2478,7 @@ class XmppService extends ChangeNotifier {
     _callLocalTransportsBySid[session.sid] = localTransports;
     _callContentNamesBySid[session.sid] =
         mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    _flushPendingIceCandidates(session.sid);
     final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
     if (toJid == null) {
       session.state = CallState.failed;
@@ -2818,6 +2821,7 @@ class XmppService extends ChangeNotifier {
     _jmiIncomingPending.remove(session.sid);
     _jmiAutoAcceptBySid.remove(session.sid);
     _jmiProposedMediaBySid.remove(session.sid);
+    _pendingIceCandidatesBySid.remove(session.sid);
     _jingleInitiatedTargets.remove(session.sid);
     final pc = _callPeerConnections.remove(session.sid);
     pc?.close();
@@ -3186,37 +3190,104 @@ class XmppService extends ChangeNotifier {
       }
     };
     pc.onIceCandidate = (candidate) {
+      if (candidate.candidate == null || candidate.candidate!.isEmpty) {
+        return;
+      }
       final transports = _callLocalTransportsBySid[sid];
       if (transports == null || transports.isEmpty) {
+        _queueIceCandidate(sid, candidate);
         return;
       }
-      final parsed = _parseIceCandidate(candidate.candidate);
-      if (parsed == null) {
-        return;
-      }
-      final jingle = _jingleManager;
-      if (jingle == null) {
-        return;
-      }
-      final contentName = candidate.sdpMid ??
-          _callContentNamesBySid[sid]?.first ??
-          (kind == CallMediaKind.video ? 'video' : 'audio');
-      final transport = transports[contentName] ?? transports.values.first;
-      final transportInfo = transportInfoTransport(transport, parsed);
-      final toJid = _callPeerJidForSid(sid, peerBareJid);
-      if (toJid == null) {
-        return;
-      }
-      final info = jingle.buildTransportInfo(
-        to: toJid,
+      _sendIceCandidate(
         sid: sid,
-        contentName: contentName,
-        creator: 'initiator',
-        transport: transportInfo,
+        candidate: candidate,
+        peerBareJid: peerBareJid,
+        defaultKind: kind,
       );
-      unawaited(_sendIqAndAwait(info));
     };
     return pc;
+  }
+
+  void _queueIceCandidate(String sid, RTCIceCandidate candidate) {
+    final pending = _pendingIceCandidatesBySid.putIfAbsent(sid, () => []);
+    pending.add(candidate);
+  }
+
+  void _flushPendingIceCandidates(String sid) {
+    final pending = _pendingIceCandidatesBySid.remove(sid);
+    if (pending == null || pending.isEmpty) {
+      return;
+    }
+    final session = _callSessions[sid];
+    final peerBare = session?.peerBareJid ?? '';
+    if (peerBare.isEmpty) {
+      return;
+    }
+    final defaultKind =
+        session?.video == true ? CallMediaKind.video : CallMediaKind.audio;
+    for (final candidate in pending) {
+      _sendIceCandidate(
+        sid: sid,
+        candidate: candidate,
+        peerBareJid: peerBare,
+        defaultKind: defaultKind,
+      );
+    }
+  }
+
+  void _sendIceCandidate({
+    required String sid,
+    required RTCIceCandidate candidate,
+    required String peerBareJid,
+    required CallMediaKind defaultKind,
+  }) {
+    final transports = _callLocalTransportsBySid[sid];
+    if (transports == null || transports.isEmpty) {
+      return;
+    }
+    final parsed = _parseIceCandidate(candidate.candidate);
+    if (parsed == null) {
+      return;
+    }
+    final jingle = _jingleManager;
+    if (jingle == null) {
+      return;
+    }
+    final contentName =
+        _candidateContentName(sid, candidate, defaultKind) ?? '';
+    final transport = transports[contentName] ?? transports.values.first;
+    final transportInfo = transportInfoTransport(transport, parsed);
+    final toJid = _callPeerJidForSid(sid, peerBareJid);
+    if (toJid == null) {
+      return;
+    }
+    final info = jingle.buildTransportInfo(
+      to: toJid,
+      sid: sid,
+      contentName:
+          contentName.isNotEmpty ? contentName : transports.keys.first,
+      creator: 'initiator',
+      transport: transportInfo,
+    );
+    unawaited(_sendIqAndAwait(info));
+  }
+
+  String? _candidateContentName(
+    String sid,
+    RTCIceCandidate candidate,
+    CallMediaKind defaultKind,
+  ) {
+    final byMid = candidate.sdpMid;
+    if (byMid != null && byMid.isNotEmpty) {
+      return byMid;
+    }
+    final index = candidate.sdpMLineIndex;
+    final names = _callContentNamesBySid[sid];
+    if (index != null && names != null && index >= 0 && index < names.length) {
+      return names[index];
+    }
+    return _callContentNamesBySid[sid]?.first ??
+        (defaultKind == CallMediaKind.video ? 'video' : 'audio');
   }
 
   JingleIceCandidate? _parseIceCandidate(String? candidateLine) {
