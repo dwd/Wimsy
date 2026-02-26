@@ -4897,6 +4897,15 @@ class XmppService extends ChangeNotifier {
     _smNonzaSubscription?.cancel();
     _smNonzaSubscription = connection.inNonzasStream.listen((nonza) {
       final xmlns = nonza.getAttribute('xmlns')?.value;
+      if (nonza.name == 'enabled' && xmlns == 'urn:xmpp:sm:3') {
+        _resetStreamManagementCounters();
+        return;
+      }
+      if (nonza.name == 'error' &&
+          xmlns == 'http://etherx.jabber.org/streams') {
+        _handleStreamError(nonza);
+        return;
+      }
       if (nonza.name == 'a' && xmlns == 'urn:xmpp:sm:3') {
         final startedAt = _pendingSmAckAt;
         if (startedAt != null) {
@@ -4947,6 +4956,28 @@ class XmppService extends ChangeNotifier {
 
     _restartKeepaliveTimer();
     _requestCarbons();
+  }
+
+  void _resetStreamManagementCounters() {
+    final streamManagement = _connection?.streamManagementModule;
+    if (streamManagement == null) {
+      return;
+    }
+    streamManagement.streamState.lastSentStanza = 0;
+    streamManagement.streamState.lastReceivedStanza = 0;
+    streamManagement.streamState.nonConfirmedSentStanzas.clear();
+    streamManagement.streamState.tryingToResume = false;
+    _pendingSmAckAt = null;
+    _lastSmAckRequestAt = null;
+    _smAckTimeoutTimer?.cancel();
+    _smAckTimeoutTimer = null;
+  }
+
+  Future<void> _handleStreamError(Nonza nonza) async {
+    Log.w('XmppService', 'Stream error received: ${nonza.name}');
+    await _safeClose(preserveCache: true);
+    _setError('Stream error');
+    _scheduleReconnect(immediate: true, shortTimeout: true);
   }
 
   Duration get _currentPingInterval =>
