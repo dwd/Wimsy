@@ -1673,6 +1673,8 @@ class _WimsyHomeState extends State<WimsyHome> {
             : 'Calling...';
     final localStream = service.callLocalStreamFor(bareJid);
     final remoteStream = service.callRemoteStreamFor(bareJid);
+    final localSpeaking = service.isCallLocalSpeaking(bareJid);
+    final remoteSpeaking = service.isCallRemoteSpeaking(bareJid);
     return Card(
       color: theme.colorScheme.surface,
       elevation: 0,
@@ -1721,18 +1723,26 @@ class _WimsyHomeState extends State<WimsyHome> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: _CallVideoView(
-                        stream: remoteStream ?? localStream,
-                        mirrored: false,
-                        placeholder: 'Remote video',
+                      child: _SpeakingFrame(
+                        active: remoteSpeaking,
+                        color: theme.colorScheme.primary,
+                        child: _CallVideoView(
+                          stream: remoteStream ?? localStream,
+                          mirrored: false,
+                          placeholder: 'Remote video',
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: _CallVideoView(
-                        stream: localStream,
-                        mirrored: true,
-                        placeholder: 'Local preview',
+                      child: _SpeakingFrame(
+                        active: localSpeaking,
+                        color: theme.colorScheme.tertiary,
+                        child: _CallVideoView(
+                          stream: localStream,
+                          mirrored: true,
+                          placeholder: 'Local preview',
+                        ),
                       ),
                     ),
                   ],
@@ -1740,6 +1750,22 @@ class _WimsyHomeState extends State<WimsyHome> {
               ),
             ],
             if (isActive) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _SpeakingPill(
+                    label: 'You',
+                    active: localSpeaking,
+                    color: theme.colorScheme.tertiary,
+                  ),
+                  const SizedBox(width: 8),
+                  _SpeakingPill(
+                    label: 'Them',
+                    active: remoteSpeaking,
+                    color: theme.colorScheme.primary,
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -4534,6 +4560,83 @@ class _CallVideoViewState extends State<_CallVideoView> {
         _renderer,
         mirror: widget.mirrored,
         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      ),
+    );
+  }
+}
+
+class _SpeakingFrame extends StatelessWidget {
+  const _SpeakingFrame({
+    required this.child,
+    required this.active,
+    required this.color,
+  });
+
+  final Widget child;
+  final bool active;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: active ? color : theme.colorScheme.outlineVariant,
+          width: active ? 2 : 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _SpeakingPill extends StatelessWidget {
+  const _SpeakingPill({
+    required this.label,
+    required this.active,
+    required this.color,
+  });
+
+  final String label;
+  final bool active;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: active ? color.withAlpha(31) : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: active ? color : theme.colorScheme.outlineVariant,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: active ? color : theme.colorScheme.outlineVariant,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall,
+          ),
+        ],
       ),
     );
   }

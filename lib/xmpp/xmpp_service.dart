@@ -192,6 +192,8 @@ class XmppService extends ChangeNotifier {
   final Map<String, List<String>> _callContentNamesBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
+  final Map<String, bool> _callLocalSpeakingBySid = {};
+  final Map<String, bool> _callRemoteSpeakingBySid = {};
   final Map<String, String> _callPeerFullJidBySid = {};
   ISentrySpan? _connectTransaction;
   ISentrySpan? _connectAwaitSpan;
@@ -298,6 +300,22 @@ class XmppService extends ChangeNotifier {
       return true;
     }
     return _callVideoEnabledBySid[key] ?? true;
+  }
+
+  bool isCallLocalSpeaking(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    if (key == null) {
+      return false;
+    }
+    return _callLocalSpeakingBySid[key] ?? false;
+  }
+
+  bool isCallRemoteSpeaking(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    if (key == null) {
+      return false;
+    }
+    return _callRemoteSpeakingBySid[key] ?? false;
   }
 
   bool get isSpeakerphoneOn => _speakerphoneOn;
@@ -2612,6 +2630,12 @@ class XmppService extends ChangeNotifier {
     int? packetsReceived;
     double? jitterMs;
     double? rttMs;
+    double? localAudioLevel;
+    double? remoteAudioLevel;
+    double? localAudioEnergy;
+    double? localSamplesDuration;
+    double? remoteAudioEnergy;
+    double? remoteSamplesDuration;
 
     for (final report in reports) {
       final values = report.values;
@@ -2620,6 +2644,20 @@ class XmppService extends ChangeNotifier {
         if (_statString(values, 'kind') == 'video' ||
             _statString(values, 'mediaType') == 'video') {
           outboundBytes = (outboundBytes ?? 0) + (_statInt(values, 'bytesSent') ?? 0);
+        }
+        if (_statString(values, 'kind') == 'audio' ||
+            _statString(values, 'mediaType') == 'audio') {
+          final audioLevel = _statDouble(values, 'audioLevel');
+          if (audioLevel != null) {
+            final current = localAudioLevel;
+            if (current == null || audioLevel > current) {
+              localAudioLevel = audioLevel;
+            }
+          }
+          localAudioEnergy =
+              (localAudioEnergy ?? 0) + (_statDouble(values, 'totalAudioEnergy') ?? 0);
+          localSamplesDuration =
+              (localSamplesDuration ?? 0) + (_statDouble(values, 'totalSamplesDuration') ?? 0);
         }
       }
       if (type == 'inbound-rtp') {
@@ -2633,6 +2671,20 @@ class XmppService extends ChangeNotifier {
           if (jitter != null) {
             jitterMs = jitter * 1000;
           }
+        }
+        if (_statString(values, 'kind') == 'audio' ||
+            _statString(values, 'mediaType') == 'audio') {
+          final audioLevel = _statDouble(values, 'audioLevel');
+          if (audioLevel != null) {
+            final current = remoteAudioLevel;
+            if (current == null || audioLevel > current) {
+              remoteAudioLevel = audioLevel;
+            }
+          }
+          remoteAudioEnergy =
+              (remoteAudioEnergy ?? 0) + (_statDouble(values, 'totalAudioEnergy') ?? 0);
+          remoteSamplesDuration =
+              (remoteSamplesDuration ?? 0) + (_statDouble(values, 'totalSamplesDuration') ?? 0);
         }
       }
       if (type == 'candidate-pair') {
@@ -2689,6 +2741,16 @@ class XmppService extends ChangeNotifier {
       ..lastInboundBytes = inboundBytes
       ..lastPacketsLost = packetsLost
       ..lastPacketsReceived = packetsReceived;
+    _updateSpeakingState(
+      sid: sid,
+      tracker: tracker,
+      localLevel: localAudioLevel,
+      localEnergy: localAudioEnergy,
+      localDuration: localSamplesDuration,
+      remoteLevel: remoteAudioLevel,
+      remoteEnergy: remoteAudioEnergy,
+      remoteDuration: remoteSamplesDuration,
+    );
     await _applyAdaptiveBitrate(sid, sample, tracker);
     notifyListeners();
   }
@@ -2772,6 +2834,79 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
+  void _updateSpeakingState({
+    required String sid,
+    required _CallStatsTracker tracker,
+    required double? localLevel,
+    required double? localEnergy,
+    required double? localDuration,
+    required double? remoteLevel,
+    required double? remoteEnergy,
+    required double? remoteDuration,
+  }) {
+    const threshold = 0.02;
+    final nextLocal =
+        _resolveAudioLevel(tracker, localLevel, localEnergy, localDuration, true);
+    final nextRemote =
+        _resolveAudioLevel(tracker, remoteLevel, remoteEnergy, remoteDuration, false);
+
+    bool didChange = false;
+    if (nextLocal != null) {
+      final speaking = nextLocal > threshold;
+      if (_callLocalSpeakingBySid[sid] != speaking) {
+        _callLocalSpeakingBySid[sid] = speaking;
+        didChange = true;
+      }
+    }
+    if (nextRemote != null) {
+      final speaking = nextRemote > threshold;
+      if (_callRemoteSpeakingBySid[sid] != speaking) {
+        _callRemoteSpeakingBySid[sid] = speaking;
+        didChange = true;
+      }
+    }
+    if (didChange) {
+      notifyListeners();
+    }
+  }
+
+  double? _resolveAudioLevel(
+    _CallStatsTracker tracker,
+    double? level,
+    double? totalEnergy,
+    double? totalDuration,
+    bool isLocal,
+  ) {
+    if (level != null) {
+      return level;
+    }
+    if (totalEnergy == null || totalDuration == null) {
+      return null;
+    }
+    final lastEnergy =
+        isLocal ? tracker.lastLocalAudioEnergy : tracker.lastRemoteAudioEnergy;
+    final lastDuration = isLocal
+        ? tracker.lastLocalSamplesDuration
+        : tracker.lastRemoteSamplesDuration;
+    tracker
+      ..lastLocalAudioEnergy = isLocal ? totalEnergy : tracker.lastLocalAudioEnergy
+      ..lastRemoteAudioEnergy = isLocal ? tracker.lastRemoteAudioEnergy : totalEnergy
+      ..lastLocalSamplesDuration =
+          isLocal ? totalDuration : tracker.lastLocalSamplesDuration
+      ..lastRemoteSamplesDuration =
+          isLocal ? tracker.lastRemoteSamplesDuration : totalDuration;
+    if (lastEnergy == null || lastDuration == null) {
+      return null;
+    }
+    final deltaEnergy = totalEnergy - lastEnergy;
+    final deltaDuration = totalDuration - lastDuration;
+    if (deltaEnergy <= 0 || deltaDuration <= 0) {
+      return null;
+    }
+    final rms = (deltaEnergy / deltaDuration).clamp(0.0, 1.0);
+    return rms.toDouble();
+  }
+
   void toggleCallMute(String bareJid) {
     final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
     if (key == null) {
@@ -2838,6 +2973,8 @@ class XmppService extends ChangeNotifier {
     _callContentNamesBySid.remove(session.sid);
     _callMutedBySid.remove(session.sid);
     _callVideoEnabledBySid.remove(session.sid);
+    _callLocalSpeakingBySid.remove(session.sid);
+    _callRemoteSpeakingBySid.remove(session.sid);
     _callSessions.remove(session.sid);
     _callSessionByPeerKey.remove(_callPeerKeyForJid(session.peerBareJid));
     unawaited(_mediaSession.stop());
@@ -7428,6 +7565,10 @@ class _CallStatsTracker {
   int? lastPacketsLost;
   int? lastPacketsReceived;
   int? videoBitrateTargetBps;
+  double? lastLocalAudioEnergy;
+  double? lastLocalSamplesDuration;
+  double? lastRemoteAudioEnergy;
+  double? lastRemoteSamplesDuration;
 }
 
 enum _JingleFileSendStatus { ok, unsupported, failed }
