@@ -173,6 +173,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, Uint8List> _vcardAvatarBytes = {};
   final Map<String, String> _vcardAvatarState = {};
   final Set<String> _vcardRequests = {};
+  final Set<String> _vcardUnavailable = {};
   static const _vcardNoAvatar = 'none';
   String _selfVcardPhotoHash = '';
   bool _selfVcardPhotoKnown = false;
@@ -890,6 +891,8 @@ class XmppService extends ChangeNotifier {
     _bookmarksManager?.clearCache();
     _vcardAvatarBytes.clear();
     _vcardAvatarState.clear();
+    _vcardRequests.clear();
+    _vcardUnavailable.clear();
     _messagePersistor?.call('', const []);
     _roomMessagePersistor?.call('', const []);
     _rosterPersistor?.call(const []);
@@ -6416,6 +6419,7 @@ class XmppService extends ChangeNotifier {
     _blockedJids.clear();
     _vcardAvatarBytes.clear();
     _vcardRequests.clear();
+    _vcardUnavailable.clear();
     _fileTransfers.clear();
 
     try {
@@ -6903,6 +6907,9 @@ class XmppService extends ChangeNotifier {
     if (connection == null || storage == null) {
       return;
     }
+    if (_vcardUnavailable.contains(bareJid)) {
+      return;
+    }
     if (_vcardRequests.contains(bareJid)) {
       return;
     }
@@ -6911,8 +6918,10 @@ class XmppService extends ChangeNotifier {
     manager.getVCardFor(Jid.fromFullJid(bareJid)).then((vcard) async {
       _vcardRequests.remove(bareJid);
       if (vcard is InvalidVCard) {
+        _vcardUnavailable.add(bareJid);
         return;
       }
+      _vcardUnavailable.remove(bareJid);
       _applyVcardToContact(bareJid, vcard, preferName: preferName);
       final bytes = vcard.imageData;
       if (bytes is List<int> && bytes.isNotEmpty) {
@@ -6972,6 +6981,7 @@ class XmppService extends ChangeNotifier {
     if (update.name != 'x') {
       return;
     }
+    _vcardUnavailable.remove(bareJid);
     final photo = update.getChild('photo');
     final hash = photo?.textValue?.trim() ?? '';
     final existing = _vcardAvatarState[bareJid];
