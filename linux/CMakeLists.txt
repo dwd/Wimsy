@@ -2,6 +2,10 @@
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
+# Force sentry-native to use the in-process backend on Linux.
+# This avoids crashpad handler execution issues during development.
+set(ENV{SENTRY_NATIVE_BACKEND} "inproc")
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "wimsy")

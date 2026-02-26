@@ -232,7 +232,8 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
             colorScheme: colorScheme,
             useMaterial3: true,
             scaffoldBackgroundColor: colorScheme.surface,
-          fontFamily: 'Georgia',
+            fontFamily: 'Droid Sans',
+            fontFamilyFallback: const ['Roboto', 'Arial', 'sans-serif'],
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
             fillColor: const Color(0xFFFDFBF6),
