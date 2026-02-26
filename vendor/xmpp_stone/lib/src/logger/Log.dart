@@ -4,7 +4,7 @@ class Log {
   static LogLevel logLevel = LogLevel.VERBOSE;
 
   static bool logXmpp = true;
-  static bool logToConsole = true;
+  static bool logToConsole = false;
 
   static String _timestamp() {
     return DateTime.now().toUtc().toIso8601String();
