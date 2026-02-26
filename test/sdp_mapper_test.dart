@@ -119,6 +119,48 @@ void main() {
     expect(videoMapping.description.payloadTypes.first.name, 'VP8');
   });
 
+  test('mapSdpToJingle captures DTLS setup attribute', () {
+    const sdp = 'v=0\n'
+        'o=- 0 0 IN IP4 127.0.0.1\n'
+        's=-\n'
+        't=0 0\n'
+        'a=setup:actpass\n'
+        'a=fingerprint:sha-256 AA:BB\n'
+        'm=audio 9 UDP/TLS/RTP/SAVPF 111\n'
+        'a=rtpmap:111 opus/48000/2\n';
+
+    final mapping = mapSdpToJingle(
+      sdp: sdp,
+      mediaKind: CallMediaKind.audio,
+    );
+
+    expect(mapping.transport.fingerprint?.setup, 'actpass');
+  });
+
+  test('buildMinimalSdpFromJingle includes DTLS setup attribute', () {
+    final sdp = buildMinimalSdpFromJingle(
+      description: const JingleRtpDescription(
+        media: 'audio',
+        payloadTypes: [
+          JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
+        ],
+      ),
+      transport: const JingleIceTransport(
+        ufrag: 'uf',
+        password: 'pw',
+        candidates: [],
+        fingerprint: JingleDtlsFingerprint(
+          hash: 'sha-256',
+          fingerprint: 'AA:BB',
+          setup: 'actpass',
+        ),
+      ),
+      contentName: 'audio',
+    );
+
+    expect(sdp, contains('a=setup:actpass'));
+  });
+
   test('buildMinimalSdpFromJingleContents includes bundle and mids', () {
     final sdp = buildMinimalSdpFromJingleContents(contents: const [
       JingleContent(

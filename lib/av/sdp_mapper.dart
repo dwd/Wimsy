@@ -32,6 +32,7 @@ JingleSdpMapping mapSdpToJingle({
   String? pwd;
   String? mid;
   String? msid;
+  String? setup;
   JingleDtlsFingerprint? fingerprint;
   final payloadTypes = <int, JingleRtpPayloadType>{};
   final feedback = <JingleRtpFeedback>[];
@@ -63,6 +64,18 @@ JingleSdpMapping mapSdpToJingle({
         fingerprint = JingleDtlsFingerprint(
           hash: parts[0].toLowerCase(),
           fingerprint: parts.sublist(1).join(' '),
+          setup: setup,
+        );
+      }
+      continue;
+    }
+    if (line.startsWith('a=setup:')) {
+      setup = line.substring('a=setup:'.length).trim();
+      if (fingerprint != null) {
+        fingerprint = JingleDtlsFingerprint(
+          hash: fingerprint.hash,
+          fingerprint: fingerprint.fingerprint,
+          setup: setup,
         );
       }
       continue;
@@ -300,6 +313,9 @@ String buildMinimalSdpFromJingle({
   if (transport.fingerprint != null) {
     final fp = transport.fingerprint!;
     buffer.writeln('a=fingerprint:${fp.hash} ${fp.fingerprint}');
+    if (fp.setup != null && fp.setup!.isNotEmpty) {
+      buffer.writeln('a=setup:${fp.setup}');
+    }
   }
   buffer.writeln('a=rtcp-mux');
   final payloadIds = description.payloadTypes.map((p) => p.id).join(' ');
@@ -391,6 +407,9 @@ String _buildSdpSection({
   if (transport.fingerprint != null) {
     final fp = transport.fingerprint!;
     buffer.writeln('a=fingerprint:${fp.hash} ${fp.fingerprint}');
+    if (fp.setup != null && fp.setup!.isNotEmpty) {
+      buffer.writeln('a=setup:${fp.setup}');
+    }
   }
   buffer.writeln('a=rtcp-mux');
   final msid = description.sources
@@ -480,6 +499,7 @@ JingleSdpMapping? _mapLinesToJingle({
   String? pwd;
   String? mid;
   String? msid;
+  String? setup;
   JingleDtlsFingerprint? fingerprint;
   final payloadTypes = <int, JingleRtpPayloadType>{};
   final feedback = <JingleRtpFeedback>[];
@@ -511,6 +531,18 @@ JingleSdpMapping? _mapLinesToJingle({
         fingerprint = JingleDtlsFingerprint(
           hash: parts[0].toLowerCase(),
           fingerprint: parts.sublist(1).join(' '),
+          setup: setup,
+        );
+      }
+      continue;
+    }
+    if (line.startsWith('a=setup:')) {
+      setup = line.substring('a=setup:'.length).trim();
+      if (fingerprint != null) {
+        fingerprint = JingleDtlsFingerprint(
+          hash: fingerprint.hash,
+          fingerprint: fingerprint.fingerprint,
+          setup: setup,
         );
       }
       continue;
