@@ -194,6 +194,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, bool> _callVideoEnabledBySid = {};
   final Map<String, bool> _callLocalSpeakingBySid = {};
   final Map<String, bool> _callRemoteSpeakingBySid = {};
+  final Set<String> _callAcceptedBySid = {};
   final Map<String, String> _callPeerFullJidBySid = {};
   ISentrySpan? _connectTransaction;
   ISentrySpan? _connectAwaitSpan;
@@ -2195,6 +2196,8 @@ class XmppService extends ChangeNotifier {
   void _handleJingleSessionAccept(JingleSessionEvent event) {
     final callSession = _callSessions[event.sid];
     if (callSession != null && callSession.direction == CallDirection.outgoing) {
+      _callAcceptedBySid.add(event.sid);
+      _flushPendingIceCandidates(event.sid);
       callSession.state = CallState.active;
       _cancelCallTimeout(callSession.sid);
       _startCallStatsTimer(callSession.sid);
@@ -2957,6 +2960,7 @@ class XmppService extends ChangeNotifier {
     _callStatsBySid.remove(session.sid);
     _callQualityBySid.remove(session.sid);
     _callPeerFullJidBySid.remove(session.sid);
+    _callAcceptedBySid.remove(session.sid);
     final jingleSpan = _jingleSetupTransactions.remove(session.sid);
     if (jingleSpan != null) {
       final status = switch (session.state) {
@@ -3118,7 +3122,14 @@ class XmppService extends ChangeNotifier {
       if (media.isEmpty || byMedia.containsKey(media)) {
         continue;
       }
-      byMedia[media] = mapping.description;
+      byMedia[media] = JingleRtpDescription(
+        media: media,
+        payloadTypes: const [],
+        rtcpFeedback: const [],
+        headerExtensions: const [],
+        sources: const [],
+        sourceGroups: const [],
+      );
     }
     if (byMedia.isEmpty) {
       return const [];
@@ -3396,7 +3407,7 @@ class XmppService extends ChangeNotifier {
     final session = _callSessions[sid];
     if (session != null &&
         session.direction == CallDirection.outgoing &&
-        !_jingleInitiatedTargets.containsKey(sid)) {
+        !_callAcceptedBySid.contains(sid)) {
       _queueIceCandidate(sid, candidate);
       return;
     }
