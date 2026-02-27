@@ -195,6 +195,8 @@ class XmppService extends ChangeNotifier {
   final Map<String, bool> _callLocalSpeakingBySid = {};
   final Map<String, bool> _callRemoteSpeakingBySid = {};
   final Set<String> _callAcceptedBySid = {};
+  final Set<String> _callLoggedIceQueueBySid = {};
+  final Map<String, String> _callSelectedCandidateSummaryBySid = {};
   final Map<String, String> _callPeerFullJidBySid = {};
   ISentrySpan? _connectTransaction;
   ISentrySpan? _connectAwaitSpan;
@@ -2638,6 +2640,9 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final reports = await pc.getStats();
+    final candidateReports = <String, Map<dynamic, dynamic>>{};
+    Map<dynamic, dynamic>? selectedPairValues;
+    String? selectedPairId;
     int? outboundBytes;
     int? inboundBytes;
     int? packetsLost;
@@ -2654,6 +2659,11 @@ class XmppService extends ChangeNotifier {
     for (final report in reports) {
       final values = report.values;
       final type = report.type;
+      if (type == 'local-candidate' || type == 'remote-candidate') {
+        final reportId = report.id;
+        candidateReports[reportId] = values;
+        continue;
+      }
       if (type == 'outbound-rtp') {
         if (_statString(values, 'kind') == 'video' ||
             _statString(values, 'mediaType') == 'video') {
@@ -2705,6 +2715,8 @@ class XmppService extends ChangeNotifier {
         final state = _statString(values, 'state');
         final nominated = values['nominated'] == true || values['selected'] == true;
         if (state == 'succeeded' && nominated) {
+          selectedPairValues = values;
+          selectedPairId = report.id;
           final rtt = _statDouble(values, 'currentRoundTripTime');
           if (rtt != null) {
             rttMs = rtt * 1000;
@@ -2712,6 +2724,13 @@ class XmppService extends ChangeNotifier {
         }
       }
     }
+
+    _logSelectedCandidatePair(
+      sid: sid,
+      pairId: selectedPairId,
+      values: selectedPairValues,
+      candidateReports: candidateReports,
+    );
 
     final tracker = _callStatsBySid[sid] ?? _CallStatsTracker();
     final now = DateTime.now();
@@ -2884,6 +2903,48 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  void _logSelectedCandidatePair({
+    required String sid,
+    required String? pairId,
+    required Map<dynamic, dynamic>? values,
+    required Map<String, Map<dynamic, dynamic>> candidateReports,
+  }) {
+    if (values == null) {
+      return;
+    }
+    final localId = _statString(values, 'localCandidateId');
+    final remoteId = _statString(values, 'remoteCandidateId');
+    final local = localId == null ? null : candidateReports[localId];
+    final remote = remoteId == null ? null : candidateReports[remoteId];
+    final localDesc = local == null ? 'unknown' : _describeIceCandidate(local);
+    final remoteDesc = remote == null ? 'unknown' : _describeIceCandidate(remote);
+    final rtt = _statDouble(values, 'currentRoundTripTime');
+    final rttMs = rtt == null ? '' : ' rtt=${(rtt * 1000).toStringAsFixed(1)}ms';
+    final summary = 'pair=${pairId ?? 'unknown'} local=[$localDesc] remote=[$remoteDesc]$rttMs';
+    if (_callSelectedCandidateSummaryBySid[sid] == summary) {
+      return;
+    }
+    _callSelectedCandidateSummaryBySid[sid] = summary;
+    Log.d('XmppService', 'Call $sid selected ICE $summary');
+  }
+
+  String _describeIceCandidate(Map<dynamic, dynamic> values) {
+    final type = _statString(values, 'candidateType') ?? 'unknown';
+    final protocol = _statString(values, 'protocol') ?? 'unknown';
+    final ip = _statString(values, 'ip') ?? _statString(values, 'address') ?? '?';
+    final port = _statInt(values, 'port');
+    final network = _statString(values, 'networkType');
+    final relayProto = _statString(values, 'relayProtocol');
+    final details = <String>[
+      type,
+      protocol,
+      '$ip:${port ?? 0}',
+      if (network != null && network.isNotEmpty) 'net=$network',
+      if (relayProto != null && relayProto.isNotEmpty) 'relay=$relayProto',
+    ];
+    return details.join(' ');
+  }
+
   double? _resolveAudioLevel(
     _CallStatsTracker tracker,
     double? level,
@@ -2961,6 +3022,8 @@ class XmppService extends ChangeNotifier {
     _callQualityBySid.remove(session.sid);
     _callPeerFullJidBySid.remove(session.sid);
     _callAcceptedBySid.remove(session.sid);
+    _callLoggedIceQueueBySid.remove(session.sid);
+    _callSelectedCandidateSummaryBySid.remove(session.sid);
     final jingleSpan = _jingleSetupTransactions.remove(session.sid);
     if (jingleSpan != null) {
       final status = switch (session.state) {
@@ -3265,6 +3328,12 @@ class XmppService extends ChangeNotifier {
     }
     final mid = contentName;
     for (final candidate in transport.candidates) {
+      Log.d(
+        'XmppService',
+        'Call ${event.sid} remote ICE candidate ${candidate.type} '
+        '${candidate.protocol} ${candidate.ip}:${candidate.port} '
+        'comp=${candidate.component} content=$contentName',
+      );
       final candidateLine = _buildCandidateLine(candidate);
       pc.addCandidate(RTCIceCandidate(candidateLine, mid, null));
     }
@@ -3352,9 +3421,29 @@ class XmppService extends ChangeNotifier {
         notifyListeners();
       }
     };
+    pc.onSignalingState = (state) {
+      Log.d('XmppService', 'Call $sid signaling state: $state');
+    };
+    pc.onIceGatheringState = (state) {
+      Log.d('XmppService', 'Call $sid ICE gathering state: $state');
+    };
+    pc.onIceConnectionState = (state) {
+      Log.d('XmppService', 'Call $sid ICE connection state: $state');
+    };
+    pc.onConnectionState = (state) {
+      Log.d('XmppService', 'Call $sid connection state: $state');
+    };
     pc.onIceCandidate = (candidate) {
       if (candidate.candidate == null || candidate.candidate!.isEmpty) {
         return;
+      }
+      final parsed = _parseIceCandidate(candidate.candidate);
+      if (parsed != null) {
+        Log.d(
+          'XmppService',
+          'Call $sid local ICE candidate ${parsed.type} ${parsed.protocol} '
+          '${parsed.ip}:${parsed.port} comp=${parsed.component}',
+        );
       }
       final transports = _callLocalTransportsBySid[sid];
       if (transports == null || transports.isEmpty) {
@@ -3409,6 +3498,12 @@ class XmppService extends ChangeNotifier {
         session.direction == CallDirection.outgoing &&
         !_callAcceptedBySid.contains(sid)) {
       _queueIceCandidate(sid, candidate);
+      if (_callLoggedIceQueueBySid.add(sid)) {
+        Log.d(
+          'XmppService',
+          'Call $sid delaying ICE until session-accept.',
+        );
+      }
       return;
     }
     final transports = _callLocalTransportsBySid[sid];
@@ -3425,11 +3520,22 @@ class XmppService extends ChangeNotifier {
     }
     final contentName =
         _candidateContentName(sid, candidate, defaultKind) ?? '';
+    Log.d(
+      'XmppService',
+      'Call $sid send ICE candidate ${parsed.type} ${parsed.protocol} '
+      '${parsed.ip}:${parsed.port} comp=${parsed.component} content=$contentName',
+    );
     final transport = transports[contentName] ?? transports.values.first;
     final transportInfo = transportInfoTransport(transport, parsed);
     final toJid = _callPeerJidForSid(sid, peerBareJid);
     if (toJid == null) {
       _queueIceCandidate(sid, candidate);
+      if (_callLoggedIceQueueBySid.add(sid)) {
+        Log.d(
+          'XmppService',
+          'Call $sid delaying ICE until peer full JID is known.',
+        );
+      }
       return;
     }
     final info = jingle.buildTransportInfo(
