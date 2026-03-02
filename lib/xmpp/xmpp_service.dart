@@ -144,11 +144,11 @@ class XmppService extends ChangeNotifier {
   static const Duration _csiIdleDelay = Duration(minutes: 1);
   final Map<String, DateTime> _mamBackfillAt = {};
   final Map<String, DateTime> _mamPageRequestAt = {};
+  final Map<String, DateTime> _mamCatchUpAt = {};
   final Map<String, int> _mamPrependOffset = {};
   final Map<String, Timer> _mamPrependReset = {};
+  final Map<String, Timer> _mamCatchUpTimers = {};
   DateTime? _lastGlobalMamSyncAt;
-  bool _globalBackfillInProgress = false;
-  Timer? _globalBackfillTimer;
   StorageService? _storage;
   String? _rosterVersion;
   final Map<String, String> _displayedStanzaIdByChat = {};
@@ -442,12 +442,17 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    final withMam = messages.where((m) => m.mamId != null).toList();
-    if (withMam.isEmpty) {
-      return null;
+    ChatMessage? oldest;
+    for (final message in messages) {
+      final mamId = message.mamId;
+      if (mamId == null || mamId.isEmpty) {
+        continue;
+      }
+      if (oldest == null || message.timestamp.isBefore(oldest.timestamp)) {
+        oldest = message;
+      }
     }
-    withMam.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    return withMam.first.mamId;
+    return oldest?.mamId;
   }
 
   String? _oldestRoomMamIdFor(String roomJid) {
@@ -455,12 +460,17 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    final withMam = messages.where((m) => m.mamId != null && m.mamId!.isNotEmpty).toList();
-    if (withMam.isEmpty) {
-      return null;
+    ChatMessage? oldest;
+    for (final message in messages) {
+      final mamId = message.mamId;
+      if (mamId == null || mamId.isEmpty) {
+        continue;
+      }
+      if (oldest == null || message.timestamp.isBefore(oldest.timestamp)) {
+        oldest = message;
+      }
     }
-    withMam.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    return withMam.first.mamId;
+    return oldest?.mamId;
   }
 
   String? latestMamIdFor(String bareJid) {
@@ -468,53 +478,37 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    final withMam = messages.where((m) => m.mamId != null).toList();
-    if (withMam.isEmpty) {
-      return null;
-    }
-    withMam.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    return withMam.first.mamId;
-  }
-
-  String? _latestGlobalMamId({required bool includeRooms}) {
     ChatMessage? latest;
-    for (final entry in _messages.entries) {
-      final bareJid = _bareJid(entry.key);
-      if (!includeRooms && isBookmark(bareJid)) {
+    for (final message in messages) {
+      final mamId = message.mamId;
+      if (mamId == null || mamId.isEmpty) {
         continue;
       }
-      for (final message in entry.value) {
-        final mamId = message.mamId;
-        if (mamId == null || mamId.isEmpty) {
-          continue;
-        }
-        if (latest == null || message.timestamp.isAfter(latest.timestamp)) {
-          latest = message;
-        }
+      if (latest == null || message.timestamp.isAfter(latest.timestamp)) {
+        latest = message;
       }
     }
     return latest?.mamId;
   }
 
-  String? _oldestGlobalMamId({required bool includeRooms}) {
-    ChatMessage? oldest;
-    for (final entry in _messages.entries) {
-      final bareJid = _bareJid(entry.key);
-      if (!includeRooms && isBookmark(bareJid)) {
+  String? _latestRoomMamIdFor(String roomJid) {
+    final messages = _roomMessages[_bareJid(roomJid)];
+    if (messages == null || messages.isEmpty) {
+      return null;
+    }
+    ChatMessage? latest;
+    for (final message in messages) {
+      final mamId = message.mamId;
+      if (mamId == null || mamId.isEmpty) {
         continue;
       }
-      for (final message in entry.value) {
-        final mamId = message.mamId;
-        if (mamId == null || mamId.isEmpty) {
-          continue;
-        }
-        if (oldest == null || message.timestamp.isBefore(oldest.timestamp)) {
-          oldest = message;
-        }
+      if (latest == null || message.timestamp.isAfter(latest.timestamp)) {
+        latest = message;
       }
     }
-    return oldest?.mamId;
+    return latest?.mamId;
   }
+
 
   PresenceData? presenceFor(String bareJid) {
     return _presenceByBareJid[_bareJid(bareJid)];
@@ -914,6 +908,18 @@ class XmppService extends ChangeNotifier {
     _vcardAvatarState.clear();
     _vcardRequests.clear();
     _vcardUnavailable.clear();
+    _mamBackfillAt.clear();
+    _mamPageRequestAt.clear();
+    _mamCatchUpAt.clear();
+    _mamPrependOffset.clear();
+    for (final timer in _mamPrependReset.values) {
+      timer.cancel();
+    }
+    _mamPrependReset.clear();
+    for (final timer in _mamCatchUpTimers.values) {
+      timer.cancel();
+    }
+    _mamCatchUpTimers.clear();
     _messagePersistor?.call('', const []);
     _roomMessagePersistor?.call('', const []);
     _rosterPersistor?.call(const []);
@@ -929,12 +935,13 @@ class XmppService extends ChangeNotifier {
     _activeChatBareJid = bareJid;
     if (bareJid != null && !isBookmark(bareJid)) {
       setMyChatState(bareJid, ChatState.ACTIVE);
-      _requestMamBackfill(bareJid);
+      _requestMamOnOpen(bareJid);
       _sendDisplayedForChat(bareJid);
       _publishDisplayedState(bareJid);
     }
     if (bareJid != null && isBookmark(bareJid)) {
       _ensureRoom(_bareJid(bareJid));
+      _requestRoomMamOnOpen(bareJid);
       _publishDisplayedState(bareJid);
     }
     notifyListeners();
@@ -979,7 +986,7 @@ class XmppService extends ChangeNotifier {
     }
     final oldest = oldestMamIdFor(normalized);
     if (oldest == null || oldest.isEmpty) {
-      _requestMamBackfill(normalized);
+      _requestMamInitial(normalized);
       return;
     }
     _startMamPrepend(normalized);
@@ -3699,7 +3706,7 @@ class XmppService extends ChangeNotifier {
     if (_mamSyncTransaction == null) {
       return;
     }
-    if (_globalBackfillInProgress) {
+    if (_mamCatchUpTimers.isNotEmpty) {
       return;
     }
     _finishSpan(_mamSyncTransaction);
@@ -6475,7 +6482,14 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
-  void _requestRoomMam(String roomJid, {String? before}) {
+  void _requestRoomMam(
+    String roomJid, {
+    int max = 25,
+    String? before,
+    String? after,
+    String? beforeId,
+    String? afterId,
+  }) {
     final connection = _connection;
     if (connection == null) {
       return;
@@ -6486,8 +6500,11 @@ class XmppService extends ChangeNotifier {
     }
     mam.queryById(
       toJid: Jid.fromFullJid(roomJid),
-      max: 25,
+      max: max,
       before: before,
+      after: after,
+      beforeId: beforeId,
+      afterId: afterId,
     );
   }
 
@@ -6675,15 +6692,17 @@ class XmppService extends ChangeNotifier {
     _carbonsRequestId = null;
     _mamBackfillAt.clear();
     _mamPageRequestAt.clear();
+    _mamCatchUpAt.clear();
     _mamPrependOffset.clear();
     for (final timer in _mamPrependReset.values) {
       timer.cancel();
     }
     _mamPrependReset.clear();
+    for (final timer in _mamCatchUpTimers.values) {
+      timer.cancel();
+    }
+    _mamCatchUpTimers.clear();
     _lastGlobalMamSyncAt = null;
-    _globalBackfillTimer?.cancel();
-    _globalBackfillTimer = null;
-    _globalBackfillInProgress = false;
     _pepManager = null;
     _pepCapsManager = null;
     _bookmarksManager = null;
@@ -6729,6 +6748,11 @@ class XmppService extends ChangeNotifier {
       return trimmed;
     }
     return trimmed.substring(0, slashIndex);
+  }
+
+  String _mamScopeKey(String bareJid, {required bool isRoom}) {
+    final normalized = _bareJid(bareJid);
+    return isRoom ? 'room:$normalized' : normalized;
   }
 
   String _callPeerKeyForJid(String jid) {
@@ -7041,7 +7065,31 @@ class XmppService extends ChangeNotifier {
     );
   }
 
-  void _requestMamBackfill(String bareJid) {
+  void _requestMamOnOpen(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    final existingMessages = _messages[normalized];
+    if (existingMessages == null || existingMessages.isEmpty) {
+      _requestMamInitial(normalized);
+      return;
+    }
+    _startMamCatchUp(normalized, isRoom: false);
+  }
+
+  void _requestRoomMamOnOpen(String roomJid) {
+    final normalized = _bareJid(roomJid);
+    final existingMessages = _roomMessages[normalized];
+    if (existingMessages == null || existingMessages.isEmpty) {
+      _requestRoomMam(
+        normalized,
+        max: 25,
+        before: '',
+      );
+      return;
+    }
+    _startMamCatchUp(normalized, isRoom: true);
+  }
+
+  void _requestMamInitial(String bareJid) {
     final connection = _connection;
     if (connection == null) {
       return;
@@ -7065,6 +7113,76 @@ class XmppService extends ChangeNotifier {
       max: 50,
       before: '',
     );
+  }
+
+  void _startMamCatchUp(String bareJid, {required bool isRoom}) {
+    _runMamCatchUpStep(bareJid, isRoom: isRoom);
+  }
+
+  void _runMamCatchUpStep(String bareJid, {required bool isRoom}) {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+    final mam = connection.getMamModule();
+    if (!mam.enabled) {
+      return;
+    }
+    final normalized = _bareJid(bareJid);
+    final latest = isRoom ? _latestRoomMamIdFor(normalized) : latestMamIdFor(normalized);
+    if (latest == null || latest.isEmpty) {
+      if (isRoom) {
+        _requestRoomMam(normalized, max: 25, before: '');
+      } else {
+        _requestMamInitial(normalized);
+      }
+      return;
+    }
+    final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
+    final lastRequest = _mamCatchUpAt[scopeKey];
+    if (lastRequest != null && DateTime.now().difference(lastRequest).inSeconds < 5) {
+      return;
+    }
+    _mamCatchUpAt[scopeKey] = DateTime.now();
+    if (isRoom) {
+      if (_seededRoomMessageJids.contains(normalized)) {
+        mam.queryById(
+          toJid: Jid.fromFullJid(normalized),
+          max: 50,
+          afterId: latest,
+        );
+      } else {
+        mam.queryById(
+          toJid: Jid.fromFullJid(normalized),
+          max: 50,
+          after: latest,
+        );
+      }
+    } else {
+      if (_seededMessageJids.contains(normalized)) {
+        mam.queryById(
+          jid: Jid.fromFullJid(normalized),
+          max: 50,
+          afterId: latest,
+        );
+      } else {
+        mam.queryById(
+          jid: Jid.fromFullJid(normalized),
+          max: 50,
+          after: latest,
+        );
+      }
+    }
+    _mamCatchUpTimers[scopeKey]?.cancel();
+    _mamCatchUpTimers[scopeKey] = Timer(const Duration(seconds: 2), () {
+      final nextLatest = isRoom ? _latestRoomMamIdFor(normalized) : latestMamIdFor(normalized);
+      if (nextLatest != null && nextLatest.isNotEmpty && nextLatest != latest) {
+        _runMamCatchUpStep(normalized, isRoom: isRoom);
+      } else {
+        _mamCatchUpTimers.remove(scopeKey);
+        _finishMamSyncIfIdle();
+      }
+    });
   }
 
   void _startMamPrepend(String bareJid) {
@@ -7098,61 +7216,31 @@ class XmppService extends ChangeNotifier {
     }
     _lastGlobalMamSyncAt = now;
 
-    final latestGlobalMamId = _latestGlobalMamId(includeRooms: false);
-    if (latestGlobalMamId != null) {
-      mam.queryAll(after: latestGlobalMamId, max: 50);
-      mam.queryAll(before: '', max: 50);
-      _startGlobalBackfill();
-    } else {
-      mam.queryAll(before: '', max: 50);
+    for (final entry in _messages.entries) {
+      final bareJid = _bareJid(entry.key);
+      if (isBookmark(bareJid)) {
+        continue;
+      }
+      if (entry.value.isEmpty) {
+        continue;
+      }
+      _startMamCatchUp(bareJid, isRoom: false);
     }
 
     for (final bookmark in _bookmarks) {
-      mam.queryById(
-        toJid: Jid.fromFullJid(bookmark.jid),
-        max: 25,
-        before: '',
-      );
+      final roomJid = _bareJid(bookmark.jid);
+      final roomMessages = _roomMessages[roomJid];
+      if (roomMessages == null || roomMessages.isEmpty) {
+        _requestRoomMam(
+          roomJid,
+          max: 25,
+          before: '',
+        );
+      } else {
+        _startMamCatchUp(roomJid, isRoom: true);
+      }
     }
     _finishMamSyncIfIdle();
-  }
-
-  void _startGlobalBackfill() {
-    if (_globalBackfillInProgress) {
-      return;
-    }
-    _globalBackfillInProgress = true;
-    _runGlobalBackfillStep();
-  }
-
-  void _runGlobalBackfillStep() {
-    final connection = _connection;
-    if (connection == null) {
-      _globalBackfillInProgress = false;
-      return;
-    }
-    final mam = connection.getMamModule();
-    if (!mam.enabled) {
-      _globalBackfillInProgress = false;
-      return;
-    }
-    final oldest = _oldestGlobalMamId(includeRooms: false);
-    if (oldest == null) {
-      _globalBackfillInProgress = false;
-      _finishMamSyncIfIdle();
-      return;
-    }
-    mam.queryAll(before: oldest, max: 50);
-    _globalBackfillTimer?.cancel();
-    _globalBackfillTimer = Timer(const Duration(seconds: 2), () {
-      final nextOldest = _oldestGlobalMamId(includeRooms: false);
-      if (nextOldest != null && nextOldest != oldest) {
-        _runGlobalBackfillStep();
-      } else {
-        _globalBackfillInProgress = false;
-        _finishMamSyncIfIdle();
-      }
-    });
   }
 
   void _seedVcardAvatars(Map<String, String> base64ByJid) {

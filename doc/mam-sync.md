@@ -2,36 +2,67 @@
 
 This document describes how Wimsy syncs Message Archive Management (MAM) history, how it de-dupes messages, and when fetches occur.
 
+Nomenclature follows `doc/ids-sync-dedupe.md`:
+- mam-id: XEP-0359 stanza-id scoped by the archive jid.
+- stanza-id: XEP-0359 stanza-id scoped by the sender jid.
+- attr-id: the stanza `id` attribute scoped by the sender jid.
+
+## MAM scope
+
+- 1:1 scope: the bare JID of the peer.
+- Room scope: the bare JID of the room.
+
+All MAM queries and MAM-bound identifiers are scoped by these bare JIDs.
+
 ## When MAM requests happen
 
-- Global sync on connect: a global MAM query is issued when the connection becomes ready (rate-limited to once every 30 seconds).
-- Per-conversation only when empty: MAM requests are issued when a 1:1 chat is opened and there are no cached messages for that JID.
-- Requests are rate-limited per JID: a 1:1 backfill for the same JID will not run more than once every 30 seconds.
-- Rooms: joining a room triggers a MAM request for recent history in that room.
+- On connect (catch-up): for any scope with cached messages, Wimsy runs a catch-up request.
+- On chat open:
+  - If no cached messages exist for that scope, Wimsy runs an initial fetch.
+  - If cached messages exist, Wimsy runs a catch-up request.
+- On scroll-to-top (backfill): older history is fetched using the earliest mam-id.
+- Rooms: joining a room triggers an initial fetch if no cached room messages exist.
 
-## Initial fetch strategy (per conversation)
+## Fetch cases
 
-When a chat is opened and there are no cached messages, Wimsy queries MAM for that JID with `max = 50`.
-The query uses the `with` field set to the JID for the chat and `before = ''` (most recent page).
+### Initial
 
-If there are already cached messages, MAM is not queried for that JID on open.
+Used when we have no cached messages for a scope.
 
-## Initial global fetch strategy
+- 1:1: query the most recent page with `max = 50` and `before = ''`.
+- Room: query the most recent page with `max = 25` and `before = ''`.
 
-On connection ready, Wimsy primes the archive with a global fetch:
+### Catch-up
 
-- 1:1 messages: if there is any cached MAM ID, request messages after the newest one (`max = 50`) and also request the most recent page (`before = ''`, `max = 50`).
-- 1:1 messages: if there is no cached MAM ID, request only the most recent page (`before = ''`, `max = 50`).
-- Bookmarked rooms: query most recent 25 messages per bookmarked room JID (`before = ''`).
+Used when we already have cached messages for a scope.
+
+- Use the latest mam-id as an RSM `after` cursor.
+- Request `max = 50` per batch.
+- If more than 50 messages exist, we currently issue additional batches in order
+  by re-querying with the newest mam-id observed so far.
+
+### Backfill
+
+Used when the user scrolls to the top of the chat window.
+
+- Use the earliest mam-id as an RSM `before` cursor.
+- Request `max = 50` for 1:1 and `max = 25` for rooms.
+
+## Tracking mam-id bounds
+
+Wimsy tracks the earliest and latest mam-id per scope in cache. These bounds are
+used for:
+- Catch-up (`after = latestMamId`)
+- Backfill (`before = earliestMamId`)
 
 ## De-duplication strategy
 
 Wimsy de-dupes messages on insertion using identifiers provided by the server:
 
-- If a MAM `result` has an ID (`mamId`), it is a de-dupe key.
-- If a `stanza-id` is present, it is also a de-dupe key.
-- If an incoming message has a matching `messageId`, Wimsy merges missing `mamId`/`stanza-id` onto the existing message.
-- Empty IDs are ignored (they are not valid keys).
+- mam-id is a primary de-dupe key.
+- stanza-id is also a de-dupe key.
+- attr-id is used to merge missing mam-id / stanza-id onto existing messages.
+- Empty IDs are ignored.
 
 This prevents duplicate messages when:
 - MAM backfill overlaps with previously cached history.
@@ -40,20 +71,22 @@ This prevents duplicate messages when:
 ## Sent messages vs MAM copies
 
 - Sent messages appear immediately via the local chat flow.
-- When the server later returns the same message via MAM, Wimsy merges `mamId`/`stanza-id` onto the existing message where possible.
-- Merge uses the stanza `id` when available; otherwise it falls back to a short body/from/to/time heuristic.
+- When the server later returns the same message via MAM, Wimsy merges mam-id / stanza-id
+  onto the existing message where possible.
+- Merge uses the attr-id when available; otherwise it falls back to a short
+  body/from/to/time heuristic.
 
-## Paging / older history
+## Notifications and unread state
 
-Per-conversation paging is not automatic beyond the initial 50 for empty chats.
-
-For global sync after reconnect:
-
-- If there is a latest cached 1:1 MAM ID, Wimsy requests all messages after it (`max = 50`).
-- When a cached MAM ID exists, Wimsy starts a background backfill loop that requests older pages using `before = oldestSeenMamId` (`max = 50`) every ~2 seconds.
-- The loop stops when the oldest known MAM ID stops changing (i.e., no older messages arrive).
+- Unread state is derived from the displayed sync store (XEP-0490) when available,
+  falling back to the last-read timestamp in the UI session.
+- The chat list displays a per-scope unread counter for incoming messages after
+  that displayed timestamp.
+- Notifications are raised only for incoming messages without a mam-id (live
+  delivery). MAM results with a mam-id do not notify; MAM results without a
+  mam-id can notify.
 
 ## Notes and limitations
 
-- Global MAM sync excludes bookmarked rooms when calculating newest/oldest MAM IDs.
-- Bookmarked rooms are queried for recent messages on connect and when the room is joined.
+- Catch-up currently uses repeated `after` batches instead of server counts.
+- Room history is fetched even if the room is not currently joined.

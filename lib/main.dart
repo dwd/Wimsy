@@ -814,16 +814,22 @@ class _WimsyHomeState extends State<WimsyHome> {
                         final messages = isBookmark
                             ? service.roomMessagesFor(jid)
                             : service.messagesFor(jid);
-                        DateTime? lastIncomingTime;
-                        for (var i = messages.length - 1; i >= 0; i--) {
-                          if (!messages[i].outgoing) {
-                            lastIncomingTime = messages[i].timestamp;
-                            break;
+                        final lastReadAt = service.displayedAtFor(jid) ?? _lastReadAtByChat[jid];
+                        var unreadCount = 0;
+                        if (lastReadAt == null) {
+                          for (final message in messages) {
+                            if (!message.outgoing) {
+                              unreadCount += 1;
+                            }
+                          }
+                        } else {
+                          for (final message in messages) {
+                            if (!message.outgoing && message.timestamp.isAfter(lastReadAt)) {
+                              unreadCount += 1;
+                            }
                           }
                         }
-                        final lastReadAt = service.displayedAtFor(jid) ?? _lastReadAtByChat[jid];
-                        final isUnread = lastIncomingTime != null &&
-                            (lastReadAt == null || lastIncomingTime.isAfter(lastReadAt));
+                        final isUnread = unreadCount > 0;
                         final bookmarkStatusText = contact.bookmarkNick?.isNotEmpty == true
                             ? 'Nickname: ${contact.bookmarkNick}'
                             : (contact.bookmarkAutoJoin ? 'Auto-join room' : 'Room bookmark');
@@ -967,6 +973,23 @@ class _WimsyHomeState extends State<WimsyHome> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
+                                  if (unreadCount > 0)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.primary,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        unreadCount > 99 ? '99+' : unreadCount.toString(),
+                                        style: theme.textTheme.labelSmall?.copyWith(
+                                          color: theme.colorScheme.onPrimary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  if (unreadCount > 0)
+                                    const SizedBox(width: 8),
                                   _ContactActionsMenu(
                                     isBookmark: isBookmark,
                                     isBlocked: service.isBlocked(jid),
