@@ -145,6 +145,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, DateTime> _mamBackfillAt = {};
   final Map<String, DateTime> _mamPageRequestAt = {};
   final Map<String, DateTime> _mamCatchUpAt = {};
+  final Set<String> _mamCatchUpPending = {};
   final Map<String, int> _mamPrependOffset = {};
   final Map<String, Timer> _mamPrependReset = {};
   final Map<String, Timer> _mamCatchUpTimers = {};
@@ -391,6 +392,12 @@ class XmppService extends ChangeNotifier {
 
   DateTime? displayedAtFor(String bareJid) {
     return _displayedAtByChat[_bareJid(bareJid)];
+  }
+
+  bool isMamCatchUpCompleteFor(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    final isRoom = _roomMessages.containsKey(normalized) || isBookmark(normalized);
+    return _isMamCatchUpComplete(normalized, isRoom: isRoom);
   }
 
   bool isMessageUnseen(String bareJid, ChatMessage message) {
@@ -911,6 +918,7 @@ class XmppService extends ChangeNotifier {
     _mamBackfillAt.clear();
     _mamPageRequestAt.clear();
     _mamCatchUpAt.clear();
+    _mamCatchUpPending.clear();
     _mamPrependOffset.clear();
     for (final timer in _mamPrependReset.values) {
       timer.cancel();
@@ -5123,6 +5131,8 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     _displayedAtByChat[normalized] = matched.timestamp;
+    final isRoom = _roomMessages.containsKey(normalized) || isBookmark(normalized);
+    _markMamCatchUpCompleted(normalized, isRoom: isRoom);
     return true;
   }
 
@@ -5717,7 +5727,9 @@ class XmppService extends ChangeNotifier {
     }
     notifyListeners();
     _messagePersistor?.call(normalized, List.unmodifiable(list));
-    if (!outgoing && (mamId == null || mamId.isEmpty)) {
+    if (!outgoing &&
+        (mamId == null || mamId.isEmpty) &&
+        _isMamCatchUpComplete(normalized, isRoom: false)) {
       _incomingMessageHandler?.call(normalized, newMessage);
     }
   }
@@ -5844,7 +5856,9 @@ class XmppService extends ChangeNotifier {
     _insertMessageOrdered(list, newMessage);
     notifyListeners();
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
-    if (!outgoing && (mamId == null || mamId.isEmpty)) {
+    if (!outgoing &&
+        (mamId == null || mamId.isEmpty) &&
+        _isMamCatchUpComplete(normalized, isRoom: true)) {
       _incomingRoomMessageHandler?.call(normalized, newMessage);
     }
   }
@@ -6693,6 +6707,7 @@ class XmppService extends ChangeNotifier {
     _mamBackfillAt.clear();
     _mamPageRequestAt.clear();
     _mamCatchUpAt.clear();
+    _mamCatchUpPending.clear();
     _mamPrependOffset.clear();
     for (final timer in _mamPrependReset.values) {
       timer.cancel();
@@ -6753,6 +6768,33 @@ class XmppService extends ChangeNotifier {
   String _mamScopeKey(String bareJid, {required bool isRoom}) {
     final normalized = _bareJid(bareJid);
     return isRoom ? 'room:$normalized' : normalized;
+  }
+
+  bool _isMamCatchUpComplete(String bareJid, {required bool isRoom}) {
+    final scopeKey = _mamScopeKey(bareJid, isRoom: isRoom);
+    return !_mamCatchUpPending.contains(scopeKey);
+  }
+
+  void _markMamCatchUpStarted(String bareJid, {required bool isRoom}) {
+    final normalized = _bareJid(bareJid);
+    final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
+    final displayedId = _displayedStanzaIdByChat[normalized];
+    if (displayedId == null || displayedId.isEmpty) {
+      _mamCatchUpPending.remove(scopeKey);
+      return;
+    }
+    if (_displayedAtByChat.containsKey(normalized)) {
+      _mamCatchUpPending.remove(scopeKey);
+      return;
+    }
+    _mamCatchUpPending.add(scopeKey);
+  }
+
+  void _markMamCatchUpCompleted(String bareJid, {required bool isRoom}) {
+    final scopeKey = _mamScopeKey(bareJid, isRoom: isRoom);
+    if (_mamCatchUpPending.remove(scopeKey)) {
+      notifyListeners();
+    }
   }
 
   String _callPeerKeyForJid(String jid) {
@@ -7116,6 +7158,7 @@ class XmppService extends ChangeNotifier {
   }
 
   void _startMamCatchUp(String bareJid, {required bool isRoom}) {
+    _markMamCatchUpStarted(bareJid, isRoom: isRoom);
     _runMamCatchUpStep(bareJid, isRoom: isRoom);
   }
 

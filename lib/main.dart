@@ -816,16 +816,18 @@ class _WimsyHomeState extends State<WimsyHome> {
                             : service.messagesFor(jid);
                         final lastReadAt = service.displayedAtFor(jid) ?? _lastReadAtByChat[jid];
                         var unreadCount = 0;
-                        if (lastReadAt == null) {
-                          for (final message in messages) {
-                            if (!message.outgoing) {
-                              unreadCount += 1;
+                        if (service.isMamCatchUpCompleteFor(jid)) {
+                          if (lastReadAt == null) {
+                            for (final message in messages) {
+                              if (!message.outgoing) {
+                                unreadCount += 1;
+                              }
                             }
-                          }
-                        } else {
-                          for (final message in messages) {
-                            if (!message.outgoing && message.timestamp.isAfter(lastReadAt)) {
-                              unreadCount += 1;
+                          } else {
+                            for (final message in messages) {
+                              if (!message.outgoing && message.timestamp.isAfter(lastReadAt)) {
+                                unreadCount += 1;
+                              }
                             }
                           }
                         }

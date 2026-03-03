@@ -82,6 +82,8 @@ This prevents duplicate messages when:
   falling back to the last-read timestamp in the UI session.
 - The chat list displays a per-scope unread counter for incoming messages after
   that displayed timestamp.
+- Unread counters and notifications are suppressed during catch-up until the
+  displayed stanza-id for that scope is present in cache.
 - Notifications are raised only for incoming messages without a mam-id (live
   delivery). MAM results with a mam-id do not notify; MAM results without a
   mam-id can notify.
