@@ -204,6 +204,12 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0338.html"/>
+        <xmpp:status>complete</xmpp:status>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0352.html"/>
         <xmpp:status>complete</xmpp:status>
       </xmpp:SupportedXep>

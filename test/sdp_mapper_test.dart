@@ -193,7 +193,7 @@ void main() {
           candidates: [],
         ),
       ),
-    ]);
+    ], bundle: true);
 
     expect(sdp, contains('a=group:BUNDLE audio0 video0'));
     expect(sdp, contains('a=mid:audio0'));
@@ -201,5 +201,42 @@ void main() {
     expect(sdp, contains('a=rtcp-mux'));
     expect(sdp, contains('m=audio 9 UDP/TLS/RTP/SAVPF 111'));
     expect(sdp, contains('m=video 9 UDP/TLS/RTP/SAVPF 96'));
+  });
+
+  test('buildMinimalSdpFromJingleContents omits bundle when disabled', () {
+    final sdp = buildMinimalSdpFromJingleContents(contents: const [
+      JingleContent(
+        name: 'audio0',
+        creator: 'initiator',
+        rtpDescription: JingleRtpDescription(
+          media: 'audio',
+          payloadTypes: [
+            JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
+          ],
+        ),
+        iceTransport: JingleIceTransport(
+          ufrag: 'uf',
+          password: 'pw',
+          candidates: [],
+        ),
+      ),
+      JingleContent(
+        name: 'video0',
+        creator: 'initiator',
+        rtpDescription: JingleRtpDescription(
+          media: 'video',
+          payloadTypes: [
+            JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
+          ],
+        ),
+        iceTransport: JingleIceTransport(
+          ufrag: 'uf',
+          password: 'pw',
+          candidates: [],
+        ),
+      ),
+    ], bundle: false);
+
+    expect(sdp, isNot(contains('a=group:BUNDLE')));
   });
 }

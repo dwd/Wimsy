@@ -139,6 +139,8 @@ class XmppService extends ChangeNotifier {
   static const String _capsHash = 'sha-1';
   static const String _jingleNamespace = 'urn:xmpp:jingle:1';
   static const String _jingleRtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
+  static const String _jingleGroupingNamespace = 'urn:xmpp:jingle:apps:grouping:0';
+  static const String _jingleGroupingBundle = 'BUNDLE';
   String? _capsVer;
   bool _csiInactive = false;
   static const Duration _csiIdleDelay = Duration(minutes: 1);
@@ -191,6 +193,9 @@ class XmppService extends ChangeNotifier {
   final Map<String, Map<String, JingleIceTransport>> _callLocalTransportsBySid = {};
   final Map<String, Map<String, JingleIceTransport>> _callRemoteTransportsBySid = {};
   final Map<String, List<String>> _callContentNamesBySid = {};
+  final Map<String, bool> _callLocalBundleBySid = {};
+  final Map<String, bool> _callRemoteBundleBySid = {};
+  final Map<String, String> _callBundleTransportNameBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
   final Map<String, bool> _callLocalSpeakingBySid = {};
@@ -626,6 +631,7 @@ class XmppService extends ChangeNotifier {
     if (!_backgroundMode) {
       _reconnectTimer?.cancel();
     }
+    Log.i('XmppService', 'Background mode changed to $enabled');
     _applyClientState();
     _restartKeepaliveTimer();
     if (_backgroundMode && !_networkOnline) {
@@ -634,6 +640,7 @@ class XmppService extends ChangeNotifier {
     if (_backgroundMode && !isConnected && !isConnecting) {
       _scheduleReconnect();
     }
+    Log.i('XmppService', 'Background mode change complete');
   }
 
   void handleConnectivityChange(bool online) {
@@ -2157,6 +2164,16 @@ class XmppService extends ChangeNotifier {
         .where((content) => content.rtpDescription != null)
         .toList(growable: false);
     if (rtpContents.isNotEmpty) {
+      final bundleGroup = _extractBundleGroupNames(event.stanza);
+      if (bundleGroup.isNotEmpty) {
+        _callRemoteBundleBySid[event.sid] = true;
+        _callLocalBundleBySid[event.sid] = true;
+        _callBundleTransportNameBySid[event.sid] = bundleGroup.first;
+      } else {
+        _callRemoteBundleBySid[event.sid] = false;
+        _callLocalBundleBySid[event.sid] = false;
+        _callBundleTransportNameBySid.remove(event.sid);
+      }
       if (_callSessions.containsKey(event.sid)) {
         _storeRemoteCallContents(event.sid, rtpContents);
         _updateIncomingCallMedia(event.sid, rtpContents);
@@ -2213,6 +2230,16 @@ class XmppService extends ChangeNotifier {
   void _handleJingleSessionAccept(JingleSessionEvent event) {
     final callSession = _callSessions[event.sid];
     if (callSession != null && callSession.direction == CallDirection.outgoing) {
+      final bundleGroup = _extractBundleGroupNames(event.stanza);
+      if (bundleGroup.isNotEmpty) {
+        _callRemoteBundleBySid[event.sid] = true;
+        _callBundleTransportNameBySid.putIfAbsent(
+          event.sid,
+          () => bundleGroup.first,
+        );
+      } else {
+        _callRemoteBundleBySid[event.sid] = false;
+      }
       _callAcceptedBySid.add(event.sid);
       _flushPendingIceCandidates(event.sid);
       callSession.state = CallState.active;
@@ -2344,6 +2371,136 @@ class XmppService extends ChangeNotifier {
     return names;
   }
 
+  bool _shouldBundleForPeer(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    if (normalized.isEmpty) {
+      return true;
+    }
+    final full = _selectJinglePeerFullJid(normalized);
+    if (full == null || full.isEmpty) {
+      return true;
+    }
+    final features = _pepCapsManager?.featuresForFullJid(full);
+    if (features == null || features.isEmpty) {
+      return true;
+    }
+    return features.contains(_jingleGroupingNamespace);
+  }
+
+  List<String> _extractBundleGroupNames(IqStanza stanza) {
+    final jingle = stanza.getChild('jingle');
+    if (jingle == null) {
+      return const [];
+    }
+    for (final child in jingle.children) {
+      if (child.name != 'group') {
+        continue;
+      }
+      if (child.getAttribute('xmlns')?.value != _jingleGroupingNamespace) {
+        continue;
+      }
+      final semantics = child.getAttribute('semantics')?.value ?? '';
+      if (semantics != _jingleGroupingBundle) {
+        continue;
+      }
+      final names = <String>[];
+      for (final content in child.children) {
+        if (content.name != 'content') {
+          continue;
+        }
+        final name = content.getAttribute('name')?.value ?? '';
+        if (name.isNotEmpty && !names.contains(name)) {
+          names.add(name);
+        }
+      }
+      return names;
+    }
+    return const [];
+  }
+
+  List<String> _bundleGroupNamesForContents(List<JingleContent> contents) {
+    String? audioName;
+    String? videoName;
+    final extras = <String>[];
+    for (final content in contents) {
+      final description = content.rtpDescription;
+      if (description == null) {
+        continue;
+      }
+      final name = content.name.isEmpty ? description.media : content.name;
+      if (name.isEmpty) {
+        continue;
+      }
+      final media = description.media.toLowerCase();
+      if (media == 'audio') {
+        audioName ??= name;
+        continue;
+      }
+      if (media == 'video') {
+        videoName ??= name;
+        continue;
+      }
+      if (!extras.contains(name)) {
+        extras.add(name);
+      }
+    }
+    final names = <String>[];
+    if (audioName != null) {
+      names.add(audioName);
+    }
+    if (videoName != null) {
+      names.add(videoName);
+    }
+    names.addAll(extras);
+    return names;
+  }
+
+  String? _bundleTransportNameForMappings(List<JingleSdpMapping> mappings) {
+    for (final mapping in mappings) {
+      if (mapping.description.media.toLowerCase() == 'audio' &&
+          mapping.contentName.isNotEmpty) {
+        return mapping.contentName;
+      }
+    }
+    for (final mapping in mappings) {
+      if (mapping.contentName.isNotEmpty) {
+        return mapping.contentName;
+      }
+    }
+    return null;
+  }
+
+  void _attachBundleGroup(IqStanza stanza, List<String> names) {
+    if (names.length < 2) {
+      return;
+    }
+    final jingle = stanza.getChild('jingle');
+    if (jingle == null) {
+      return;
+    }
+    for (final child in jingle.children) {
+      if (child.name == 'group' &&
+          child.getAttribute('xmlns')?.value == _jingleGroupingNamespace) {
+        return;
+      }
+    }
+    final group = XmppElement()..name = 'group';
+    group.addAttribute(XmppAttribute('xmlns', _jingleGroupingNamespace));
+    group.addAttribute(XmppAttribute('semantics', _jingleGroupingBundle));
+    for (final name in names) {
+      if (name.isEmpty) {
+        continue;
+      }
+      final content = XmppElement()..name = 'content';
+      content.addAttribute(XmppAttribute('name', name));
+      group.addChild(content);
+    }
+    if (group.children.isEmpty) {
+      return;
+    }
+    jingle.addChild(group);
+  }
+
   void _storeRemoteCallContents(String sid, List<JingleContent> contents) {
     final descriptions = <String, JingleRtpDescription>{};
     final transports = <String, JingleIceTransport>{};
@@ -2402,10 +2559,13 @@ class XmppService extends ChangeNotifier {
     final sid = AbstractStanza.getRandomId();
     final kind = video ? CallMediaKind.video : CallMediaKind.audio;
     _callMediaKindBySid[sid] = kind;
+    final bundle = _shouldBundleForPeer(bareJid);
+    _callLocalBundleBySid[sid] = bundle;
     final pc = await _createPeerConnection(
       sid: sid,
       peerBareJid: bareJid,
       kind: kind,
+      bundle: bundle,
     );
     if (pc == null) {
       return 'Unable to initialize WebRTC.';
@@ -2434,6 +2594,12 @@ class XmppService extends ChangeNotifier {
     _callLocalTransportsBySid[sid] = localTransports;
     _callContentNamesBySid[sid] =
         mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    if (bundle) {
+      final bundleName = _bundleTransportNameForMappings(mappings);
+      if (bundleName != null && bundleName.isNotEmpty) {
+        _callBundleTransportNameBySid[sid] = bundleName;
+      }
+    }
     _flushPendingIceCandidates(sid);
     final session = CallSession(
       sid: sid,
@@ -2496,10 +2662,13 @@ class XmppService extends ChangeNotifier {
     }
     final kind = session.video ? CallMediaKind.video : CallMediaKind.audio;
     _callMediaKindBySid[session.sid] = kind;
+    final bundle = _callRemoteBundleBySid[session.sid] ?? false;
+    _callLocalBundleBySid[session.sid] = bundle;
     final pc = await _createPeerConnection(
       sid: session.sid,
       peerBareJid: session.peerBareJid,
       kind: kind,
+      bundle: bundle,
     );
     if (pc == null) {
       session.state = CallState.failed;
@@ -2511,6 +2680,7 @@ class XmppService extends ChangeNotifier {
     if (remoteDescriptions.isNotEmpty && remoteTransports.isNotEmpty) {
       final sdp = buildMinimalSdpFromJingleContents(
         contents: _buildCallContents(remoteDescriptions, remoteTransports),
+        bundle: bundle,
       );
       await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
     }
@@ -2530,6 +2700,12 @@ class XmppService extends ChangeNotifier {
     _callLocalTransportsBySid[session.sid] = localTransports;
     _callContentNamesBySid[session.sid] =
         mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    if (bundle && !_callBundleTransportNameBySid.containsKey(session.sid)) {
+      final bundleName = _bundleTransportNameForMappings(mappings);
+      if (bundleName != null && bundleName.isNotEmpty) {
+        _callBundleTransportNameBySid[session.sid] = bundleName;
+      }
+    }
     _flushPendingIceCandidates(session.sid);
     final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
     if (toJid == null) {
@@ -2537,11 +2713,15 @@ class XmppService extends ChangeNotifier {
       _removeCallSession(session);
       return;
     }
+    final localContents = _buildCallContents(localDescriptions, localTransports);
     final iq = jingle.buildRtpSessionAcceptMulti(
       to: toJid,
       sid: session.sid,
-      contents: _buildCallContents(localDescriptions, localTransports),
+      contents: localContents,
     );
+    if (bundle) {
+      _attachBundleGroup(iq, _bundleGroupNamesForContents(localContents));
+    }
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
       session.state = CallState.failed;
@@ -3064,6 +3244,9 @@ class XmppService extends ChangeNotifier {
     _callLocalTransportsBySid.remove(session.sid);
     _callRemoteTransportsBySid.remove(session.sid);
     _callContentNamesBySid.remove(session.sid);
+    _callLocalBundleBySid.remove(session.sid);
+    _callRemoteBundleBySid.remove(session.sid);
+    _callBundleTransportNameBySid.remove(session.sid);
     _callMutedBySid.remove(session.sid);
     _callVideoEnabledBySid.remove(session.sid);
     _callLocalSpeakingBySid.remove(session.sid);
@@ -3286,6 +3469,9 @@ class XmppService extends ChangeNotifier {
       sid: sid,
       contents: filteredContents,
     );
+    if (_callLocalBundleBySid[sid] == true) {
+      _attachBundleGroup(iq, _bundleGroupNamesForContents(filteredContents));
+    }
     _jingleInitiatedTargets[sid] = toJid.fullJid ?? toJid.userAtDomain;
     _flushPendingIceCandidates(sid);
     final result = await _sendIqAndAwait(iq);
@@ -3318,6 +3504,7 @@ class XmppService extends ChangeNotifier {
     }
     final sdp = buildMinimalSdpFromJingleContents(
       contents: _buildCallContents(remoteDescriptions, remoteTransports),
+      bundle: _callRemoteBundleBySid[sid] ?? false,
     );
     await pc.setRemoteDescription(RTCSessionDescription(sdp, sdpType));
   }
@@ -3406,8 +3593,12 @@ class XmppService extends ChangeNotifier {
     required String sid,
     required String peerBareJid,
     required CallMediaKind kind,
+    required bool bundle,
   }) async {
-    final config = <String, dynamic>{'iceServers': _iceServers};
+    final config = <String, dynamic>{
+      'iceServers': _iceServers,
+      'bundlePolicy': bundle ? 'max-bundle' : 'max-compat',
+    };
     final pc = await createPeerConnection(config);
     _callPeerConnections[sid] = pc;
     MediaStreamHandle handle;
@@ -3533,8 +3724,10 @@ class XmppService extends ChangeNotifier {
     if (jingle == null) {
       return;
     }
-    final contentName =
-        _candidateContentName(sid, candidate, defaultKind) ?? '';
+    final bundleContent =
+        _callLocalBundleBySid[sid] == true ? _callBundleTransportNameBySid[sid] : null;
+    final contentName = bundleContent ??
+        (_candidateContentName(sid, candidate, defaultKind) ?? '');
     Log.d(
       'XmppService',
       'Call $sid send ICE candidate ${parsed.type} ${parsed.protocol} '

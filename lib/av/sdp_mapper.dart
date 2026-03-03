@@ -314,13 +314,14 @@ String buildMinimalSdpFromJingle({
 
 String buildMinimalSdpFromJingleContents({
   required List<JingleContent> contents,
+  bool bundle = false,
 }) {
   final buffer = StringBuffer();
   buffer.writeln('v=0');
   buffer.writeln('o=- 0 0 IN IP4 127.0.0.1');
   buffer.writeln('s=-');
   buffer.writeln('t=0 0');
-  if (contents.length > 1) {
+  if (bundle && contents.length > 1) {
     final bundle = contents
         .map((content) =>
             content.name.isEmpty ? content.rtpDescription?.media ?? '' : content.name)
