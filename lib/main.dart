@@ -368,6 +368,7 @@ class _WimsyHomeState extends State<WimsyHome> {
   ChatState? _lastSentChatState;
   String? _lastFocusedChat;
   int _lastMessageCount = 0;
+  final Map<String, bool> _roomSubjectExpanded = {};
   bool _wasAtBottom = true;
   String? _editingMessageId;
   String? _editingChatBareJid;
@@ -1100,6 +1101,12 @@ class _WimsyHomeState extends State<WimsyHome> {
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      if (activeChat != null && isBookmark)
+                        _buildRoomSubjectHeader(
+                          roomEntry: roomEntry,
+                          roomJid: activeChat,
+                          theme: theme,
+                        ),
                     ],
                   ),
                 ),
@@ -1108,24 +1115,6 @@ class _WimsyHomeState extends State<WimsyHome> {
                     onPressed: () => _showInviteDialog(activeChat),
                     icon: const Icon(Icons.person_add),
                     tooltip: 'Invite to room',
-                  ),
-                if (isBookmark && (roomEntry?.joined ?? false))
-                  IconButton(
-                    onPressed: () {
-                      if (service.mujiSessionFor(activeChat) == null) {
-                        service.joinMujiRoom(activeChat);
-                      } else {
-                        service.leaveMujiRoom(activeChat);
-                      }
-                    },
-                    icon: Icon(
-                      service.mujiSessionFor(activeChat) == null
-                          ? Icons.group
-                          : Icons.call_end,
-                    ),
-                    tooltip: service.mujiSessionFor(activeChat) == null
-                        ? 'Start group call'
-                        : 'Leave group call',
                   ),
                 if (activeChat != null && !isBookmark) ...[
                   Builder(builder: (context) {
@@ -1171,14 +1160,6 @@ class _WimsyHomeState extends State<WimsyHome> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildMujiStatusBar(service, activeChat),
-            ),
-          if (activeChat != null &&
-              isBookmark &&
-              (roomEntry?.joined ?? false) &&
-              service.mujiSessionFor(activeChat) == null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _buildMujiJoinBar(service, activeChat),
             ),
           if (activeChat != null && isBookmark && service.mujiSessionFor(activeChat) != null)
             Padding(
@@ -1959,6 +1940,118 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
   }
 
+  Widget _buildRoomSubjectHeader({
+    required RoomEntry? roomEntry,
+    required String roomJid,
+    required ThemeData theme,
+  }) {
+    final subject = roomEntry?.subject?.trim() ?? '';
+    if (subject.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final expanded = _roomSubjectExpanded[roomJid] ?? false;
+    final baseStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final linkStyle = baseStyle?.copyWith(
+      color: theme.colorScheme.primary,
+      decoration: TextDecoration.underline,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Subject',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 0),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _roomSubjectExpanded[roomJid] = !expanded;
+                  });
+                },
+                child: Text(expanded ? 'Collapse' : 'Expand'),
+              ),
+            ],
+          ),
+          RichText(
+            text: TextSpan(
+              style: baseStyle,
+              children: _linkifyText(subject, baseStyle, linkStyle),
+            ),
+            maxLines: expanded ? null : 2,
+            overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<TextSpan> _linkifyText(String input, TextStyle? baseStyle, TextStyle? linkStyle) {
+    final regex = RegExp(r'((https?:\/\/)|(www\.))[^\s<]+', caseSensitive: false);
+    final matches = regex.allMatches(input).toList();
+    if (matches.isEmpty) {
+      return [TextSpan(text: input, style: baseStyle)];
+    }
+
+    final spans = <TextSpan>[];
+    var lastIndex = 0;
+    for (final match in matches) {
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(text: input.substring(lastIndex, match.start), style: baseStyle));
+      }
+      final raw = input.substring(match.start, match.end);
+      final normalized = _normalizeUrl(raw);
+      spans.add(TextSpan(
+        text: raw,
+        style: linkStyle ?? baseStyle,
+        recognizer: TapGestureRecognizer()
+          ..onTap = () async {
+            final uri = Uri.tryParse(normalized);
+            if (uri == null) {
+              return;
+            }
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          },
+      ));
+      lastIndex = match.end;
+    }
+    if (lastIndex < input.length) {
+      spans.add(TextSpan(text: input.substring(lastIndex), style: baseStyle));
+    }
+    return spans;
+  }
+
+  String _normalizeUrl(String raw) {
+    final stripped = _stripTrailingPunctuation(raw);
+    final lower = stripped.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) {
+      return stripped;
+    }
+    return 'https://$stripped';
+  }
+
+  String _stripTrailingPunctuation(String input) {
+    var result = input;
+    while (result.isNotEmpty && RegExp(r'[\\).,!?;:\\]]').hasMatch(result[result.length - 1])) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result;
+  }
+
   Widget _buildMujiParticipantBar(XmppService service, String roomJid) {
     final session = service.mujiSessionFor(roomJid);
     if (session == null) {
@@ -2072,52 +2165,6 @@ class _WimsyHomeState extends State<WimsyHome> {
             TextButton(
               onPressed: () => service.leaveMujiRoom(roomJid),
               child: const Text('Leave'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMujiJoinBar(XmppService service, String roomJid) {
-    final theme = Theme.of(context);
-    return Card(
-      elevation: 0,
-      color: theme.colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              Icons.groups,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Muji group call',
-                    style: theme.textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Start or join a group call in this room.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            FilledButton(
-              onPressed: () => service.joinMujiRoom(roomJid),
-              child: const Text('Join'),
             ),
           ],
         ),
@@ -3887,9 +3934,6 @@ String _roomSubtitle(RoomEntry? entry) {
     return 'Room';
   }
   final parts = <String>[];
-  if (entry.subject != null && entry.subject!.isNotEmpty) {
-    parts.add(entry.subject!);
-  }
   parts.add(entry.joined ? 'Joined' : 'Not joined');
   if (entry.occupantCount > 0) {
     parts.add('${entry.occupantCount} online');
