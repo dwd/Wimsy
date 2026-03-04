@@ -697,6 +697,7 @@ class _WimsyHomeState extends State<WimsyHome> {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth > 900;
         final activeChat = service.activeChatBareJid;
+        _noteActiveChatRead(service, activeChat);
 
         return Scaffold(
           appBar: AppBar(
@@ -2809,6 +2810,20 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     _lastReadAtByChat[bareJid] = messages.last.timestamp;
+  }
+
+  void _noteActiveChatRead(XmppService service, String? activeChat) {
+    if (activeChat == null) {
+      return;
+    }
+    final isBookmark = service.isBookmark(activeChat);
+    if (isBookmark && (service.roomFor(activeChat)?.joined ?? false) == false) {
+      return;
+    }
+    final messages = isBookmark
+        ? service.roomMessagesFor(activeChat)
+        : service.messagesFor(activeChat);
+    _markChatRead(activeChat, messages);
   }
 
   Future<void> _confirmClearCacheAndExit() async {
