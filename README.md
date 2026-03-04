@@ -24,13 +24,18 @@ Builds, but untested on:
 - Stream Management (XEP-0198) with resumable sessions and ack handling
 - MAM history sync and paging (XEP-0313 + XEP-0059)
 - MUC join/leave + bookmarks (XEP-0045 + XEP-0048/Bookmarks 2)
+- Audio/video calling over WebRTC (Jingle XEP-0166/0167 + JMI XEP-0353)
+- MUJI group calls (XEP-0272)
 - Chat states, receipts, and chat markers (XEP-0085, XEP-0184, XEP-0333)
 - Message carbons (XEP-0280)
+- Message corrections (XEP-0308)
+- Message reactions (XEP-0444)
 - Roster versioning (XEP-0237)
 - Client State Indication (XEP-0352)
 - PEP avatars (XEP-0084) with +notify; vcard-temp fallback (XEP-0054)
 - Message Displayed Sync (XEP-0490) for unread tracking and notifications
 - Blocking via privacy lists (XEP-0016)
+- File transfer via HTTP Upload (XEP-0363) and IBB (XEP-0047)
 - XEP-0066 OOB image rendering (partial)
 - Presence state + custom status message
 - Native notifications for incoming messages (desktop + Android)
