@@ -1357,6 +1357,18 @@ class _WimsyHomeState extends State<WimsyHome> {
                       tooltip: 'Send file',
                     ),
                     const SizedBox(width: 4),
+                    IconButton(
+                      onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
+                          ? null
+                          : () => _sendPhotoMessage(
+                                activeChat,
+                                isBookmark: isBookmark,
+                                roomEntry: roomEntry,
+                              ),
+                      icon: const Icon(Icons.photo_camera),
+                      tooltip: 'Send photo',
+                    ),
+                    const SizedBox(width: 4),
                     FilledButton(
                       onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
                           ? null
@@ -1450,6 +1462,141 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
     }
+  }
+
+  Future<void> _sendPhotoMessage(
+    String? activeChat, {
+    required bool isBookmark,
+    RoomEntry? roomEntry,
+  }) async {
+    if (activeChat == null) {
+      return;
+    }
+    if (isBookmark && !(roomEntry?.joined ?? false)) {
+      return;
+    }
+    final isDesktop = !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+    final supportsPickerCamera = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final useWebRtcCamera = kIsWeb || isDesktop;
+    final supportsCamera = useWebRtcCamera || supportsPickerCamera;
+    if (!supportsCamera) {
+      _showSnack('Camera not available.');
+      return;
+    }
+    final selection = await _capturePhotoForMessage(
+      useWebRtcCamera: useWebRtcCamera,
+      supportsPickerCamera: supportsPickerCamera,
+    );
+    if (!mounted || selection == null) {
+      return;
+    }
+    final confirmed = await _confirmUsePhoto(selection.bytes);
+    if (!mounted || !confirmed) {
+      return;
+    }
+    final caption = _messageController.text.trim();
+    _messageController.clear();
+    final error = isBookmark
+        ? await widget.service.sendRoomPhotoMessage(
+            roomJid: activeChat,
+            bytes: selection.bytes,
+            fileName: selection.fileName,
+            contentType: selection.mimeType,
+            body: caption.isEmpty ? null : caption,
+          )
+        : await widget.service.sendPhotoMessage(
+            toBareJid: activeChat,
+            bytes: selection.bytes,
+            fileName: selection.fileName,
+            contentType: selection.mimeType,
+            body: caption.isEmpty ? null : caption,
+          );
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      _showSnack(error);
+    } else if (!isBookmark) {
+      _setChatState(activeChat, ChatState.ACTIVE);
+    }
+    if (_messageFocusNode.canRequestFocus) {
+      _messageFocusNode.requestFocus();
+    }
+  }
+
+  Future<_PhotoSelection?> _capturePhotoForMessage({
+    required bool useWebRtcCamera,
+    required bool supportsPickerCamera,
+  }) async {
+    try {
+      if (useWebRtcCamera) {
+        final bytes = await _capturePhotoViaWebRtc(context);
+        if (!mounted || bytes == null || bytes.isEmpty) {
+          return null;
+        }
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        return _PhotoSelection(
+          bytes: bytes,
+          fileName: 'photo-$timestamp.png',
+          mimeType: 'image/png',
+        );
+      }
+      if (!supportsPickerCamera) {
+        return null;
+      }
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(source: ImageSource.camera);
+      if (picked == null) {
+        return null;
+      }
+      final bytes = await picked.readAsBytes();
+      if (bytes.isEmpty) {
+        return null;
+      }
+      final fileName = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
+      return _PhotoSelection(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: _guessImageMimeType(picked.path) ?? _guessImageMimeType(fileName),
+      );
+    } catch (_) {
+      if (mounted) {
+        _showSnack('Camera not available.');
+      }
+      return null;
+    }
+  }
+
+  Future<bool> _confirmUsePhoto(Uint8List bytes) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Use this photo?'),
+          content: SizedBox(
+            width: 360,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Use photo'),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
   }
 
   Future<void> _startCall(String bareJid, {required bool video}) async {
@@ -2258,21 +2405,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
   }
 
-  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
-    if (file.bytes != null) {
-      return file.bytes;
-    }
-    final path = file.path;
-    if (path == null || path.isEmpty) {
-      return null;
-    }
-    try {
-      return await File(path).readAsBytes();
-    } catch (_) {
-      return null;
-    }
-  }
-
   String? _guessContentType(String fileName) {
     final parts = fileName.toLowerCase().split('.');
     if (parts.length < 2) {
@@ -3031,6 +3163,18 @@ String _messagePreviewText(XmppService service, ChatMessage message) {
   final uri = Uri.tryParse(oob);
   final name = uri == null || uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
   return name.isEmpty ? oob : 'File: ${Uri.decodeComponent(name)}';
+}
+
+class _PhotoSelection {
+  const _PhotoSelection({
+    required this.bytes,
+    required this.fileName,
+    this.mimeType,
+  });
+
+  final Uint8List bytes;
+  final String fileName;
+  final String? mimeType;
 }
 
 class _MessageBubble extends StatelessWidget {
@@ -4171,286 +4315,6 @@ class _PresenceMenu extends StatelessWidget {
     );
   }
 
-  Future<Uint8List?> _capturePhotoViaWebRtc(BuildContext context) async {
-    final renderer = RTCVideoRenderer();
-    MediaStream? stream;
-    try {
-      await renderer.initialize();
-      stream = await navigator.mediaDevices.getUserMedia({
-        'audio': false,
-        'video': true,
-      });
-      renderer.srcObject = stream;
-      if (!context.mounted) {
-        return null;
-      }
-      Rect? cropRect;
-      Size? previewSize;
-      var cropScale = 0.7;
-      final boundaryKey = GlobalKey();
-      final result = await showDialog<Uint8List?>(
-        context: context,
-        builder: (context) {
-          return StatefulBuilder(builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Take photo'),
-              content: SizedBox(
-                width: 360,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 4 / 3,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final size = constraints.biggest;
-                          if (previewSize != size) {
-                            previewSize = size;
-                            final side = math.min(size.width, size.height) * cropScale;
-                            cropRect ??= Rect.fromCenter(
-                              center: Offset(size.width / 2, size.height / 2),
-                              width: side,
-                              height: side,
-                            );
-                          }
-                          final rect = cropRect;
-                          return RepaintBoundary(
-                            key: boundaryKey,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  RTCVideoView(renderer, mirror: true),
-                                  if (rect != null)
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: _CropMaskPainter(rect),
-                                      ),
-                                    ),
-                                  if (rect != null)
-                                    Positioned.fromRect(
-                                      rect: rect,
-                                      child: GestureDetector(
-                                        onPanUpdate: (details) {
-                                          final current = cropRect;
-                                          if (current == null || previewSize == null) {
-                                            return;
-                                          }
-                                          final next = current.shift(details.delta);
-                                          final bounds =
-                                              Rect.fromLTWH(0, 0, previewSize!.width, previewSize!.height);
-                                          final clamped = Rect.fromLTWH(
-                                            next.left.clamp(bounds.left, bounds.right - next.width),
-                                            next.top.clamp(bounds.top, bounds.bottom - next.height),
-                                            next.width,
-                                            next.height,
-                                          );
-                                          setState(() {
-                                            cropRect = clamped;
-                                          });
-                                        },
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            border: Border.all(
-                                              color: Colors.white,
-                                              width: 2,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Text('Crop'),
-                        Expanded(
-                          child: Slider(
-                            value: cropScale,
-                            min: 0.4,
-                            max: 1.0,
-                            divisions: 6,
-                            onChanged: (value) {
-                              if (previewSize == null) {
-                                return;
-                              }
-                              final size = previewSize!;
-                              final center = cropRect?.center ?? Offset(size.width / 2, size.height / 2);
-                              final side = math.min(size.width, size.height) * value;
-                              final rect = Rect.fromCenter(
-                                center: center,
-                                width: side,
-                                height: side,
-                              );
-                              final bounds = Rect.fromLTWH(0, 0, size.width, size.height);
-                              final clamped = Rect.fromLTWH(
-                                rect.left.clamp(bounds.left, bounds.right - rect.width),
-                                rect.top.clamp(bounds.top, bounds.bottom - rect.height),
-                                rect.width,
-                                rect.height,
-                              );
-                              setState(() {
-                                cropScale = value;
-                                cropRect = clamped;
-                              });
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () async {
-                    final bytes = await _captureBoundaryPng(boundaryKey);
-                    if (!context.mounted) {
-                      return;
-                    }
-                    if (bytes == null || bytes.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Unable to capture photo.')),
-                      );
-                      return;
-                    }
-                    final rect = cropRect;
-                    final size = previewSize;
-                    if (rect != null && size != null) {
-                      final cropped = await _cropPngBytes(bytes, rect, size);
-                      if (!context.mounted) {
-                        return;
-                      }
-                      if (cropped != null && cropped.isNotEmpty) {
-                        Navigator.of(context).pop(cropped);
-                        return;
-                      }
-                    }
-                    if (!context.mounted) {
-                      return;
-                    }
-                    Navigator.of(context).pop(bytes);
-                  },
-                  child: const Text('Capture'),
-                ),
-              ],
-            );
-          });
-        },
-      );
-      return result;
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera not available.')),
-        );
-      }
-      return null;
-    } finally {
-      renderer.srcObject = null;
-      if (stream != null) {
-        for (final track in stream.getTracks()) {
-          track.stop();
-        }
-        await stream.dispose();
-      }
-      await renderer.dispose();
-    }
-  }
-
-  Future<Uint8List?> _captureBoundaryPng(GlobalKey boundaryKey) async {
-    final context = boundaryKey.currentContext;
-    if (context == null) {
-      return null;
-    }
-    final boundary = context.findRenderObject();
-    if (boundary is! RenderRepaintBoundary) {
-      return null;
-    }
-    final image = await boundary.toImage(pixelRatio: 2.0);
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return data?.buffer.asUint8List();
-  }
-
-  Future<Uint8List?> _cropPngBytes(
-    Uint8List bytes,
-    Rect cropRect,
-    Size renderSize,
-  ) async {
-    if (bytes.isEmpty || renderSize.width == 0 || renderSize.height == 0) {
-      return null;
-    }
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
-    final scaleX = image.width / renderSize.width;
-    final scaleY = image.height / renderSize.height;
-    final src = Rect.fromLTRB(
-      cropRect.left * scaleX,
-      cropRect.top * scaleY,
-      cropRect.right * scaleX,
-      cropRect.bottom * scaleY,
-    ).intersect(Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()));
-    if (src.width <= 0 || src.height <= 0) {
-      return null;
-    }
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    final dst = Rect.fromLTWH(0, 0, src.width, src.height);
-    canvas.drawImageRect(image, src, dst, Paint());
-    final picture = recorder.endRecording();
-    final cropped =
-        await picture.toImage(src.width.round(), src.height.round());
-    final data = await cropped.toByteData(format: ui.ImageByteFormat.png);
-    return data?.buffer.asUint8List();
-  }
-
-  Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
-    if (file.bytes != null) {
-      return file.bytes;
-    }
-    final path = file.path;
-    if (path == null || path.isEmpty) {
-      return null;
-    }
-    try {
-      return await File(path).readAsBytes();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  String? _guessImageMimeType(String fileName) {
-    final parts = fileName.toLowerCase().split('.');
-    if (parts.length < 2) {
-      return null;
-    }
-    switch (parts.last) {
-      case 'png':
-        return 'image/png';
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      default:
-        return null;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -4539,6 +4403,285 @@ class _PresenceMenu extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+Future<Uint8List?> _capturePhotoViaWebRtc(BuildContext context) async {
+  final renderer = RTCVideoRenderer();
+  MediaStream? stream;
+  try {
+    await renderer.initialize();
+    stream = await navigator.mediaDevices.getUserMedia({
+      'audio': false,
+      'video': true,
+    });
+    renderer.srcObject = stream;
+    if (!context.mounted) {
+      return null;
+    }
+    Rect? cropRect;
+    Size? previewSize;
+    var cropScale = 0.7;
+    final boundaryKey = GlobalKey();
+    final result = await showDialog<Uint8List?>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            title: const Text('Take photo'),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final size = constraints.biggest;
+                        if (previewSize != size) {
+                          previewSize = size;
+                          final side = math.min(size.width, size.height) * cropScale;
+                          cropRect ??= Rect.fromCenter(
+                            center: Offset(size.width / 2, size.height / 2),
+                            width: side,
+                            height: side,
+                          );
+                        }
+                        final rect = cropRect;
+                        return RepaintBoundary(
+                          key: boundaryKey,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                RTCVideoView(renderer, mirror: true),
+                                if (rect != null)
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _CropMaskPainter(rect),
+                                    ),
+                                  ),
+                                if (rect != null)
+                                  Positioned.fromRect(
+                                    rect: rect,
+                                    child: GestureDetector(
+                                      onPanUpdate: (details) {
+                                        final current = cropRect;
+                                        if (current == null || previewSize == null) {
+                                          return;
+                                        }
+                                        final next = current.shift(details.delta);
+                                        final bounds =
+                                            Rect.fromLTWH(0, 0, previewSize!.width, previewSize!.height);
+                                        final clamped = Rect.fromLTWH(
+                                          next.left.clamp(bounds.left, bounds.right - next.width),
+                                          next.top.clamp(bounds.top, bounds.bottom - next.height),
+                                          next.width,
+                                          next.height,
+                                        );
+                                        setState(() {
+                                          cropRect = clamped;
+                                        });
+                                      },
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text('Crop'),
+                      Expanded(
+                        child: Slider(
+                          value: cropScale,
+                          min: 0.4,
+                          max: 1.0,
+                          divisions: 6,
+                          onChanged: (value) {
+                            if (previewSize == null) {
+                              return;
+                            }
+                            final size = previewSize!;
+                            final center = cropRect?.center ?? Offset(size.width / 2, size.height / 2);
+                            final side = math.min(size.width, size.height) * value;
+                            final rect = Rect.fromCenter(
+                              center: center,
+                              width: side,
+                              height: side,
+                            );
+                            final bounds = Rect.fromLTWH(0, 0, size.width, size.height);
+                            final clamped = Rect.fromLTWH(
+                              rect.left.clamp(bounds.left, bounds.right - rect.width),
+                              rect.top.clamp(bounds.top, bounds.bottom - rect.height),
+                              rect.width,
+                              rect.height,
+                            );
+                            setState(() {
+                              cropScale = value;
+                              cropRect = clamped;
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final bytes = await _captureBoundaryPng(boundaryKey);
+                  if (!context.mounted) {
+                    return;
+                  }
+                  if (bytes == null || bytes.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Unable to capture photo.')),
+                    );
+                    return;
+                  }
+                  final rect = cropRect;
+                  final size = previewSize;
+                  if (rect != null && size != null) {
+                    final cropped = await _cropPngBytes(bytes, rect, size);
+                    if (!context.mounted) {
+                      return;
+                    }
+                    if (cropped != null && cropped.isNotEmpty) {
+                      Navigator.of(context).pop(cropped);
+                      return;
+                    }
+                  }
+                  if (!context.mounted) {
+                    return;
+                  }
+                  Navigator.of(context).pop(bytes);
+                },
+                child: const Text('Capture'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+    return result;
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Camera not available.')),
+      );
+    }
+    return null;
+  } finally {
+    renderer.srcObject = null;
+    if (stream != null) {
+      for (final track in stream.getTracks()) {
+        track.stop();
+      }
+      await stream.dispose();
+    }
+    await renderer.dispose();
+  }
+}
+
+Future<Uint8List?> _captureBoundaryPng(GlobalKey boundaryKey) async {
+  final context = boundaryKey.currentContext;
+  if (context == null) {
+    return null;
+  }
+  final boundary = context.findRenderObject();
+  if (boundary is! RenderRepaintBoundary) {
+    return null;
+  }
+  final image = await boundary.toImage(pixelRatio: 2.0);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  return data?.buffer.asUint8List();
+}
+
+Future<Uint8List?> _cropPngBytes(
+  Uint8List bytes,
+  Rect cropRect,
+  Size renderSize,
+) async {
+  if (bytes.isEmpty || renderSize.width == 0 || renderSize.height == 0) {
+    return null;
+  }
+  final codec = await ui.instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  final image = frame.image;
+  final scaleX = image.width / renderSize.width;
+  final scaleY = image.height / renderSize.height;
+  final src = Rect.fromLTRB(
+    cropRect.left * scaleX,
+    cropRect.top * scaleY,
+    cropRect.right * scaleX,
+    cropRect.bottom * scaleY,
+  ).intersect(Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()));
+  if (src.width <= 0 || src.height <= 0) {
+    return null;
+  }
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final dst = Rect.fromLTWH(0, 0, src.width, src.height);
+  canvas.drawImageRect(image, src, dst, Paint());
+  final picture = recorder.endRecording();
+  final cropped = await picture.toImage(src.width.round(), src.height.round());
+  final data = await cropped.toByteData(format: ui.ImageByteFormat.png);
+  return data?.buffer.asUint8List();
+}
+
+Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
+  if (file.bytes != null) {
+    return file.bytes;
+  }
+  final path = file.path;
+  if (path == null || path.isEmpty) {
+    return null;
+  }
+  try {
+    return await File(path).readAsBytes();
+  } catch (_) {
+    return null;
+  }
+}
+
+String? _guessImageMimeType(String fileName) {
+  final parts = fileName.toLowerCase().split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  switch (parts.last) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    default:
+      return null;
   }
 }
 

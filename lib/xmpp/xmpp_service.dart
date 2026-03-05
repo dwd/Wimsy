@@ -1525,6 +1525,40 @@ class XmppService extends ChangeNotifier {
     );
   }
 
+  Future<String?> sendPhotoMessage({
+    required String toBareJid,
+    required Uint8List bytes,
+    required String fileName,
+    String? contentType,
+    String? body,
+  }) async {
+    return _sendHttpUploadMessage(
+      targetJid: toBareJid,
+      bytes: bytes,
+      fileName: fileName,
+      contentType: contentType,
+      isRoom: false,
+      body: body,
+    );
+  }
+
+  Future<String?> sendRoomPhotoMessage({
+    required String roomJid,
+    required Uint8List bytes,
+    required String fileName,
+    String? contentType,
+    String? body,
+  }) async {
+    return _sendHttpUploadMessage(
+      targetJid: roomJid,
+      bytes: bytes,
+      fileName: fileName,
+      contentType: contentType,
+      isRoom: true,
+      body: body,
+    );
+  }
+
   Future<String?> _sendFileInternal({
     required String targetJid,
     required Uint8List bytes,
@@ -1578,6 +1612,7 @@ class XmppService extends ChangeNotifier {
     required String fileName,
     required bool isRoom,
     String? contentType,
+    String? body,
   }) async {
     if (bytes.isEmpty) {
       return 'File is empty.';
@@ -1614,12 +1649,14 @@ class XmppService extends ChangeNotifier {
     final messageId = AbstractStanza.getRandomId();
     final url = slot.getUrl.toString();
     final description = fileName.trim();
+    final bodyText = (body != null && body.trim().isNotEmpty) ? body.trim() : url;
     final stanza = _buildOobMessageStanza(
       targetJid: normalized,
       messageId: messageId,
       url: url,
       description: description.isEmpty ? null : description,
       isRoom: isRoom,
+      body: bodyText,
     );
     connection.writeStanza(stanza);
     final rawXml = _serializeStanza(stanza);
@@ -1629,7 +1666,7 @@ class XmppService extends ChangeNotifier {
       _addRoomMessage(
         roomJid: normalized,
         from: nick,
-        body: url,
+        body: bodyText,
         rawXml: rawXml,
         outgoing: true,
         timestamp: now,
@@ -1650,7 +1687,7 @@ class XmppService extends ChangeNotifier {
       bareJid: normalized,
       from: _currentUserBareJid ?? '',
       to: normalized,
-      body: url,
+      body: bodyText,
       rawXml: rawXml,
       oobUrl: url,
       oobDescription: description.isEmpty ? null : description,
@@ -4946,6 +4983,7 @@ class XmppService extends ChangeNotifier {
     required String url,
     String? description,
     required bool isRoom,
+    String? body,
   }) {
     final stanza = MessageStanza(
       messageId,
@@ -4955,7 +4993,7 @@ class XmppService extends ChangeNotifier {
     if (!isRoom) {
       stanza.fromJid = _connection?.fullJid;
     }
-    stanza.body = url;
+    stanza.body = (body != null && body.trim().isNotEmpty) ? body.trim() : url;
     final oob = XmppElement()..name = 'x';
     oob.addAttribute(XmppAttribute('xmlns', 'jabber:x:oob'));
     final urlElement = XmppElement()..name = 'url';
