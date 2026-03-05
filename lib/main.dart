@@ -4184,48 +4184,169 @@ class _PresenceMenu extends StatelessWidget {
       if (!context.mounted) {
         return null;
       }
+      Rect? cropRect;
+      Size? previewSize;
+      var cropScale = 0.7;
       final boundaryKey = GlobalKey();
       final result = await showDialog<Uint8List?>(
         context: context,
         builder: (context) {
-          return AlertDialog(
-            title: const Text('Take photo'),
-            content: SizedBox(
-              width: 360,
-              child: AspectRatio(
-                aspectRatio: 4 / 3,
-                child: RepaintBoundary(
-                  key: boundaryKey,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: RTCVideoView(renderer, mirror: true),
-                  ),
+          return StatefulBuilder(builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Take photo'),
+              content: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 4 / 3,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final size = constraints.biggest;
+                          if (previewSize != size) {
+                            previewSize = size;
+                            final side = math.min(size.width, size.height) * cropScale;
+                            cropRect ??= Rect.fromCenter(
+                              center: Offset(size.width / 2, size.height / 2),
+                              width: side,
+                              height: side,
+                            );
+                          }
+                          final rect = cropRect;
+                          return RepaintBoundary(
+                            key: boundaryKey,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  RTCVideoView(renderer, mirror: true),
+                                  if (rect != null)
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _CropMaskPainter(rect),
+                                      ),
+                                    ),
+                                  if (rect != null)
+                                    Positioned.fromRect(
+                                      rect: rect,
+                                      child: GestureDetector(
+                                        onPanUpdate: (details) {
+                                          final current = cropRect;
+                                          if (current == null || previewSize == null) {
+                                            return;
+                                          }
+                                          final next = current.shift(details.delta);
+                                          final bounds =
+                                              Rect.fromLTWH(0, 0, previewSize!.width, previewSize!.height);
+                                          final clamped = Rect.fromLTWH(
+                                            next.left.clamp(bounds.left, bounds.right - next.width),
+                                            next.top.clamp(bounds.top, bounds.bottom - next.height),
+                                            next.width,
+                                            next.height,
+                                          );
+                                          setState(() {
+                                            cropRect = clamped;
+                                          });
+                                        },
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              color: Colors.white,
+                                              width: 2,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text('Crop'),
+                        Expanded(
+                          child: Slider(
+                            value: cropScale,
+                            min: 0.4,
+                            max: 1.0,
+                            divisions: 6,
+                            onChanged: (value) {
+                              if (previewSize == null) {
+                                return;
+                              }
+                              final size = previewSize!;
+                              final center = cropRect?.center ?? Offset(size.width / 2, size.height / 2);
+                              final side = math.min(size.width, size.height) * value;
+                              final rect = Rect.fromCenter(
+                                center: center,
+                                width: side,
+                                height: side,
+                              );
+                              final bounds = Rect.fromLTWH(0, 0, size.width, size.height);
+                              final clamped = Rect.fromLTWH(
+                                rect.left.clamp(bounds.left, bounds.right - rect.width),
+                                rect.top.clamp(bounds.top, bounds.bottom - rect.height),
+                                rect.width,
+                                rect.height,
+                              );
+                              setState(() {
+                                cropScale = value;
+                                cropRect = clamped;
+                              });
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  final bytes = await _captureBoundaryPng(boundaryKey);
-                  if (!context.mounted) {
-                    return;
-                  }
-                  if (bytes == null || bytes.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Unable to capture photo.')),
-                    );
-                    return;
-                  }
-                  Navigator.of(context).pop(bytes);
-                },
-                child: const Text('Capture'),
-              ),
-            ],
-          );
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final bytes = await _captureBoundaryPng(boundaryKey);
+                    if (!context.mounted) {
+                      return;
+                    }
+                    if (bytes == null || bytes.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Unable to capture photo.')),
+                      );
+                      return;
+                    }
+                    final rect = cropRect;
+                    final size = previewSize;
+                    if (rect != null && size != null) {
+                      final cropped = await _cropPngBytes(bytes, rect, size);
+                      if (!context.mounted) {
+                        return;
+                      }
+                      if (cropped != null && cropped.isNotEmpty) {
+                        Navigator.of(context).pop(cropped);
+                        return;
+                      }
+                    }
+                    if (!context.mounted) {
+                      return;
+                    }
+                    Navigator.of(context).pop(bytes);
+                  },
+                  child: const Text('Capture'),
+                ),
+              ],
+            );
+          });
         },
       );
       return result;
@@ -4259,6 +4380,39 @@ class _PresenceMenu extends StatelessWidget {
     }
     final image = await boundary.toImage(pixelRatio: 2.0);
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
+  }
+
+  Future<Uint8List?> _cropPngBytes(
+    Uint8List bytes,
+    Rect cropRect,
+    Size renderSize,
+  ) async {
+    if (bytes.isEmpty || renderSize.width == 0 || renderSize.height == 0) {
+      return null;
+    }
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+    final scaleX = image.width / renderSize.width;
+    final scaleY = image.height / renderSize.height;
+    final src = Rect.fromLTRB(
+      cropRect.left * scaleX,
+      cropRect.top * scaleY,
+      cropRect.right * scaleX,
+      cropRect.bottom * scaleY,
+    ).intersect(Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()));
+    if (src.width <= 0 || src.height <= 0) {
+      return null;
+    }
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final dst = Rect.fromLTWH(0, 0, src.width, src.height);
+    canvas.drawImageRect(image, src, dst, Paint());
+    final picture = recorder.endRecording();
+    final cropped =
+        await picture.toImage(src.width.round(), src.height.round());
+    final data = await cropped.toByteData(format: ui.ImageByteFormat.png);
     return data?.buffer.asUint8List();
   }
 
@@ -4441,6 +4595,27 @@ class _SplashScreen extends StatelessWidget {
     return const Scaffold(
       body: Center(child: CircularProgressIndicator()),
     );
+  }
+}
+
+class _CropMaskPainter extends CustomPainter {
+  _CropMaskPainter(this.cropRect);
+
+  final Rect cropRect;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final overlay = Paint()..color = Colors.black.withValues(alpha: 0.45);
+    final clear = Paint()..blendMode = BlendMode.clear;
+    canvas.saveLayer(Offset.zero & size, Paint());
+    canvas.drawRect(Offset.zero & size, overlay);
+    canvas.drawRect(cropRect, clear);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _CropMaskPainter oldDelegate) {
+    return oldDelegate.cropRect != cropRect;
   }
 }
 
