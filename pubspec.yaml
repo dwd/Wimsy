@@ -110,6 +110,7 @@ flutter:
 
 msix_config:
   display_name: Wimsy
+  publisher: Extensible Messaging Ltd
   publisher_display_name: Wimsy
   identity_name: Wimsy
   msix_version: 0.0.2.0
