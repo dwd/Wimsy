@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -4003,7 +4005,10 @@ class _PresenceMenu extends StatelessWidget {
     if (selfJid == null || selfJid.isEmpty) {
       return;
     }
-    final supportsCamera = !kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
+    final isDesktop = !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+    final supportsPickerCamera = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final useWebRtcCamera = kIsWeb || isDesktop;
+    final supportsCamera = useWebRtcCamera || supportsPickerCamera;
     final nameController = TextEditingController(text: service.displayNameFor(selfJid));
     Uint8List? avatarBytes = service.avatarBytesFor(selfJid);
     String? avatarMimeType;
@@ -4068,19 +4073,30 @@ class _PresenceMenu extends StatelessWidget {
                                 ? () async {
                                     final messenger = ScaffoldMessenger.of(context);
                                     try {
-                                      final picker = ImagePicker();
-                                      final picked =
-                                          await picker.pickImage(source: ImageSource.camera);
-                                      if (picked == null) {
-                                        return;
+                                      Uint8List? bytes;
+                                      String? mimeType;
+                                      if (useWebRtcCamera) {
+                                        bytes = await _capturePhotoViaWebRtc(context);
+                                        mimeType = bytes == null ? null : 'image/png';
+                                      } else if (supportsPickerCamera) {
+                                        final picker = ImagePicker();
+                                        final picked =
+                                            await picker.pickImage(source: ImageSource.camera);
+                                        if (picked == null) {
+                                          return;
+                                        }
+                                        bytes = await picked.readAsBytes();
+                                        if (bytes.isEmpty) {
+                                          return;
+                                        }
+                                        mimeType = _guessImageMimeType(picked.path);
                                       }
-                                      final bytes = await picked.readAsBytes();
-                                      if (bytes.isEmpty) {
+                                      if (bytes == null || bytes.isEmpty) {
                                         return;
                                       }
                                       setState(() {
                                         avatarBytes = bytes;
-                                        avatarMimeType = _guessImageMimeType(picked.path);
+                                        avatarMimeType = mimeType;
                                         clearAvatar = false;
                                       });
                                     } catch (_) {
@@ -4153,6 +4169,97 @@ class _PresenceMenu extends StatelessWidget {
         });
       },
     );
+  }
+
+  Future<Uint8List?> _capturePhotoViaWebRtc(BuildContext context) async {
+    final renderer = RTCVideoRenderer();
+    MediaStream? stream;
+    try {
+      await renderer.initialize();
+      stream = await navigator.mediaDevices.getUserMedia({
+        'audio': false,
+        'video': true,
+      });
+      renderer.srcObject = stream;
+      if (!context.mounted) {
+        return null;
+      }
+      final boundaryKey = GlobalKey();
+      final result = await showDialog<Uint8List?>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Take photo'),
+            content: SizedBox(
+              width: 360,
+              child: AspectRatio(
+                aspectRatio: 4 / 3,
+                child: RepaintBoundary(
+                  key: boundaryKey,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: RTCVideoView(renderer, mirror: true),
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final bytes = await _captureBoundaryPng(boundaryKey);
+                  if (!context.mounted) {
+                    return;
+                  }
+                  if (bytes == null || bytes.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Unable to capture photo.')),
+                    );
+                    return;
+                  }
+                  Navigator.of(context).pop(bytes);
+                },
+                child: const Text('Capture'),
+              ),
+            ],
+          );
+        },
+      );
+      return result;
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera not available.')),
+        );
+      }
+      return null;
+    } finally {
+      renderer.srcObject = null;
+      if (stream != null) {
+        for (final track in stream.getTracks()) {
+          track.stop();
+        }
+        await stream.dispose();
+      }
+      await renderer.dispose();
+    }
+  }
+
+  Future<Uint8List?> _captureBoundaryPng(GlobalKey boundaryKey) async {
+    final context = boundaryKey.currentContext;
+    if (context == null) {
+      return null;
+    }
+    final boundary = context.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) {
+      return null;
+    }
+    final image = await boundary.toImage(pixelRatio: 2.0);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
   }
 
   Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
