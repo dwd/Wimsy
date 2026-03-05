@@ -110,8 +110,8 @@ flutter:
 
 msix_config:
   display_name: Wimsy
-  publisher: Extensible Messaging Ltd
-  publisher_display_name: Wimsy
+  publisher: C=GB, O="Extensible Messaging Ltd"
+  publisher_display_name: Extensible Messaging Ltd
   identity_name: Wimsy
   msix_version: 0.0.2.0
   logo_path: web/icons/Icon-512.png
