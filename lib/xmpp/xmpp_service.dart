@@ -2121,13 +2121,14 @@ class XmppService extends ChangeNotifier {
         );
         return;
       }
+      final isSelfReflection = _isRoomSelfReflection(message.roomJid, message.nick);
       _addRoomMessage(
         roomJid: message.roomJid,
         from: message.nick,
         body: message.body,
         oobUrl: message.oobUrl,
         rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
-        outgoing: false,
+        outgoing: isSelfReflection,
         timestamp: message.timestamp,
         messageId: message.messageId ?? message.stanzaId,
         mamId: message.mamResultId,
@@ -4307,6 +4308,17 @@ class XmppService extends ChangeNotifier {
     }
     _roomLastTrafficAt[normalized] = DateTime.now();
     _roomLastPingAt.remove(normalized);
+  }
+
+  bool _isRoomSelfReflection(String roomJid, String senderNick) {
+    final normalized = _bareJid(roomJid);
+    final nick = _rooms[normalized]?.nick ?? _roomNickFor(normalized);
+    final trimmedNick = nick.trim();
+    final trimmedSender = senderNick.trim();
+    if (trimmedNick.isEmpty || trimmedSender.isEmpty) {
+      return false;
+    }
+    return trimmedNick == trimmedSender;
   }
 
   Future<void> _refreshExternalServices() async {
