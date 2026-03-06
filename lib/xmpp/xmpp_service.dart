@@ -158,6 +158,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, DateTime> _displayedAtByChat = {};
   final Map<String, DateTime> _roomLastTrafficAt = {};
   final Map<String, DateTime> _roomLastPingAt = {};
+  final Map<String, DateTime> _roomHistoryCutoffAt = {};
   final Set<String> _mucDefaultConfigSent = {};
   PepManager? _pepManager;
   PepCapsManager? _pepCapsManager;
@@ -915,6 +916,7 @@ class XmppService extends ChangeNotifier {
     _lastSeenAt.clear();
     _serverNotFound.clear();
     _chatStates.clear();
+    _roomHistoryCutoffAt.clear();
     _rosterVersion = null;
     _pepManager?.clearCache();
     _bookmarksManager?.clearCache();
@@ -1332,7 +1334,14 @@ class XmppService extends ChangeNotifier {
     final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
     _rooms[normalized] = existing.copyWith(joined: true, nick: resolvedNick);
     notifyListeners();
-    _requestRoomMam(normalized, before: '');
+    final latestRoomTs = _latestRoomTimestamp(normalized);
+    _roomHistoryCutoffAt[normalized] = latestRoomTs ?? DateTime.now();
+    final latestRoomMamId = _latestRoomMamIdFor(normalized);
+    if (latestRoomMamId != null && latestRoomMamId.isNotEmpty) {
+      _startMamCatchUp(normalized, isRoom: true);
+    } else {
+      _requestRoomMam(normalized, max: 25, before: '');
+    }
     _roomLastTrafficAt[normalized] = DateTime.now();
     _roomLastPingAt.remove(normalized);
     _sendDirectedPresenceToRoom(normalized, resolvedNick);
@@ -6089,9 +6098,18 @@ class XmppService extends ChangeNotifier {
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
-        _isMamCatchUpComplete(normalized, isRoom: true)) {
+        _isMamCatchUpComplete(normalized, isRoom: true) &&
+        _shouldNotifyRoomMessage(normalized, timestamp)) {
       _incomingRoomMessageHandler?.call(normalized, newMessage);
     }
+  }
+
+  bool _shouldNotifyRoomMessage(String roomJid, DateTime timestamp) {
+    final cutoff = _roomHistoryCutoffAt[_bareJid(roomJid)];
+    if (cutoff == null) {
+      return true;
+    }
+    return timestamp.isAfter(cutoff);
   }
 
   void _applyAckByMessageId(String messageId) {
@@ -6818,6 +6836,14 @@ class XmppService extends ChangeNotifier {
     return messages.last.timestamp;
   }
 
+  DateTime? _latestRoomTimestamp(String roomJid) {
+    final messages = _roomMessages[_bareJid(roomJid)];
+    if (messages == null || messages.isEmpty) {
+      return null;
+    }
+    return messages.last.timestamp;
+  }
+
   bool _listEquals(List<String> a, List<String> b) {
     if (a.length != b.length) {
       return false;
@@ -6927,6 +6953,7 @@ class XmppService extends ChangeNotifier {
     _lastSeenAt.clear();
     _serverNotFound.clear();
     _chatStates.clear();
+    _roomHistoryCutoffAt.clear();
     _lastDisplayedMarkerIdByChat.clear();
     _displayedStanzaIdByChat.clear();
     _displayedAtByChat.clear();
