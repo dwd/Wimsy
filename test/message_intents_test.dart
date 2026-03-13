@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
+import 'package:wimsy/xmpp/message_intent_builder.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 import 'package:wimsy/xmpp/jmi.dart';
 
@@ -52,8 +53,7 @@ void main() {
     request.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
     stanza.addChild(request);
     final markable = XmppElement()..name = 'markable';
-    markable.addAttribute(
-        XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
+    markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
     stanza.addChild(markable);
 
     final intents = service.buildMessageIntentsForTesting(stanza);
@@ -97,8 +97,7 @@ void main() {
       to: 'bob@example.com/desktop',
     );
     final displayed = XmppElement()..name = 'displayed';
-    displayed.addAttribute(
-        XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
+    displayed.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
     displayed.addAttribute(XmppAttribute('id', 'd1'));
     stanza.addChild(displayed);
 

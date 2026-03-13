@@ -26,6 +26,7 @@ import 'http_upload.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
+import 'message_intent_builder.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
@@ -55,14 +56,29 @@ class _ReconnectConfig {
   final List<String> wsProtocols;
 }
 
-enum XmppStatus {
-  disconnected,
-  connecting,
-  connected,
-  error,
-}
+enum XmppStatus { disconnected, connecting, connected, error }
 
 class XmppService extends ChangeNotifier {
+  XmppService() {
+    _messageIntentBuilder = MessageIntentBuilder(
+      currentUserBareJid: () => _currentUserBareJid,
+      activeChatBareJid: () => _activeChatBareJid,
+      parseJmiAction: parseJmiAction,
+      extractReceiptsId: _extractReceiptsId,
+      extractMarkerId: _extractMarkerId,
+      extractReactionUpdate: _extractReactionUpdate,
+      reactionChatTarget: _reactionChatTarget,
+      extractOobInfoFromStanza: _extractOobInfoFromStanza,
+      isArchivedStanza: _isArchivedStanza,
+      bareJid: _bareJid,
+      hasReceiptRequest: _hasReceiptRequest,
+      hasMarkable: _hasMarkable,
+      serializeStanza: _serializeStanza,
+      now: DateTime.now,
+    );
+  }
+
+  late final MessageIntentBuilder _messageIntentBuilder;
   Connection? _connection;
   ChatManager? _chatManager;
   StreamSubscription<XmppConnectionState>? _connectionStateSubscription;
@@ -97,7 +113,8 @@ class XmppService extends ChangeNotifier {
   static const Duration _mucSelfPingTimeout = Duration(seconds: 30);
   static const Duration _keepaliveMaxTimeout = Duration(seconds: 30);
   final Map<String, StreamSubscription<Message>> _chatMessageSubscriptions = {};
-  final Map<String, StreamSubscription<ChatState?>> _chatStateSubscriptions = {};
+  final Map<String, StreamSubscription<ChatState?>> _chatStateSubscriptions =
+      {};
 
   XmppStatus _status = XmppStatus.disconnected;
   String? _errorMessage;
@@ -126,12 +143,18 @@ class XmppService extends ChangeNotifier {
   final Map<String, String> _lastDisplayedMarkerIdByChat = {};
   String? _activeChatBareJid;
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
-  void Function(String roomJid, ChatMessage message)? _incomingRoomMessageHandler;
+  void Function(String roomJid, ChatMessage message)?
+  _incomingRoomMessageHandler;
   void Function(List<ContactEntry> roster)? _rosterPersistor;
   void Function(List<ContactEntry> bookmarks)? _bookmarkPersistor;
   void Function(String bareJid, List<ChatMessage> messages)? _messagePersistor;
-  void Function(String roomJid, List<ChatMessage> messages)? _roomMessagePersistor;
-  PresenceData _selfPresence = PresenceData(PresenceShowElement.CHAT, 'Online', null);
+  void Function(String roomJid, List<ChatMessage> messages)?
+  _roomMessagePersistor;
+  PresenceData _selfPresence = PresenceData(
+    PresenceShowElement.CHAT,
+    'Online',
+    null,
+  );
   Duration? _lastPingLatency;
   DateTime? _lastPingAt;
   bool _carbonsEnabled = false;
@@ -139,7 +162,8 @@ class XmppService extends ChangeNotifier {
   static const String _capsHash = 'sha-1';
   static const String _jingleNamespace = 'urn:xmpp:jingle:1';
   static const String _jingleRtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
-  static const String _jingleGroupingNamespace = 'urn:xmpp:jingle:apps:grouping:0';
+  static const String _jingleGroupingNamespace =
+      'urn:xmpp:jingle:apps:grouping:0';
   static const String _jingleGroupingBundle = 'BUNDLE';
   String? _capsVer;
   bool _csiInactive = false;
@@ -184,15 +208,19 @@ class XmppService extends ChangeNotifier {
   final Map<String, _FileTransferSession> _fileTransfers = {};
   final Map<String, CallSession> _callSessions = {};
   final Map<String, String> _callSessionByPeerKey = {};
-  final Map<String, Map<String, JingleRtpDescription>> _callLocalDescriptionsBySid = {};
-  final Map<String, Map<String, JingleRtpDescription>> _callRemoteDescriptionsBySid = {};
+  final Map<String, Map<String, JingleRtpDescription>>
+  _callLocalDescriptionsBySid = {};
+  final Map<String, Map<String, JingleRtpDescription>>
+  _callRemoteDescriptionsBySid = {};
   final WebRtcMediaSession _mediaSession = WebRtcMediaSession();
   final Map<String, RTCPeerConnection> _callPeerConnections = {};
   final Map<String, CallMediaKind> _callMediaKindBySid = {};
   final Map<String, MediaStream> _callLocalStreamBySid = {};
   final Map<String, MediaStream> _callRemoteStreamBySid = {};
-  final Map<String, Map<String, JingleIceTransport>> _callLocalTransportsBySid = {};
-  final Map<String, Map<String, JingleIceTransport>> _callRemoteTransportsBySid = {};
+  final Map<String, Map<String, JingleIceTransport>> _callLocalTransportsBySid =
+      {};
+  final Map<String, Map<String, JingleIceTransport>>
+  _callRemoteTransportsBySid = {};
   final Map<String, List<String>> _callContentNamesBySid = {};
   final Map<String, bool> _callLocalBundleBySid = {};
   final Map<String, bool> _callRemoteBundleBySid = {};
@@ -218,7 +246,8 @@ class XmppService extends ChangeNotifier {
   final Map<String, Timer> _callStatsTimers = {};
   final Map<String, CallQualitySample> _callQualityBySid = {};
   final Map<String, _CallStatsTracker> _callStatsBySid = {};
-  final CallQualityController _callQualityController = const CallQualityController();
+  final CallQualityController _callQualityController =
+      const CallQualityController();
   final Map<String, Timer> _jmiFallbackTimers = {};
   final Map<String, Jid> _jmiProceedTargetBySid = {};
   final Set<String> _jmiIncomingPending = {};
@@ -251,13 +280,11 @@ class XmppService extends ChangeNotifier {
   String? get currentUserBareJid => _currentUserBareJid;
   XmppConnectionState? get lastConnectionState => _lastConnectionState;
   List<ContactEntry> get contacts {
-    final combined = <ContactEntry>[
-      ..._bookmarks,
-      ..._contacts,
-    ];
+    final combined = <ContactEntry>[..._bookmarks, ..._contacts];
     combined.sort(_contactSort);
     return List.unmodifiable(combined);
   }
+
   String? get activeChatBareJid => _activeChatBareJid;
   RoomEntry? roomFor(String bareJid) => _rooms[_bareJid(bareJid)];
   Duration? get lastPingLatency => _lastPingLatency;
@@ -341,14 +368,18 @@ class XmppService extends ChangeNotifier {
   Future<List<MediaDeviceInfo>> listAudioInputs() async {
     final devices = await navigator.mediaDevices.enumerateDevices();
     return devices
-        .where((device) => device.kind == 'audioinput' || device.kind == 'audio')
+        .where(
+          (device) => device.kind == 'audioinput' || device.kind == 'audio',
+        )
         .toList();
   }
 
   Future<List<MediaDeviceInfo>> listVideoInputs() async {
     final devices = await navigator.mediaDevices.enumerateDevices();
     return devices
-        .where((device) => device.kind == 'videoinput' || device.kind == 'video')
+        .where(
+          (device) => device.kind == 'videoinput' || device.kind == 'video',
+        )
         .toList();
   }
 
@@ -402,7 +433,8 @@ class XmppService extends ChangeNotifier {
 
   bool isMamCatchUpCompleteFor(String bareJid) {
     final normalized = _bareJid(bareJid);
-    final isRoom = _roomMessages.containsKey(normalized) || isBookmark(normalized);
+    final isRoom =
+        _roomMessages.containsKey(normalized) || isBookmark(normalized);
     return _isMamCatchUpComplete(normalized, isRoom: isRoom);
   }
 
@@ -420,8 +452,7 @@ class XmppService extends ChangeNotifier {
 
   String displayNameFor(String bareJid) {
     final normalized = _bareJid(bareJid);
-    final contact = _findContact(normalized) ??
-        ContactEntry(jid: normalized);
+    final contact = _findContact(normalized) ?? ContactEntry(jid: normalized);
     return contact.displayName;
   }
 
@@ -521,7 +552,6 @@ class XmppService extends ChangeNotifier {
     }
     return latest?.mamId;
   }
-
 
   PresenceData? presenceFor(String bareJid) {
     return _presenceByBareJid[_bareJid(bareJid)];
@@ -697,7 +727,9 @@ class XmppService extends ChangeNotifier {
     }
 
     final bareJid = _bareJid(normalized);
-    final fullJid = normalized.contains('/') ? normalized : '$bareJid/$resource';
+    final fullJid = normalized.contains('/')
+        ? normalized
+        : '$bareJid/$resource';
     var resolvedHost = host?.trim().isNotEmpty == true ? host!.trim() : '';
     var resolvedPort = port;
     var resolvedDirectTls = directTls;
@@ -759,8 +791,12 @@ class XmppService extends ChangeNotifier {
 
     try {
       final normalizedHost = resolvedHost.isNotEmpty ? resolvedHost : 'auto';
-      debugPrint('XMPP TLS: directTls=$resolvedDirectTls useWebSocket=$shouldUseWebSocket');
-      debugPrint('XMPP connect: bareJid=$bareJid host=$normalizedHost port=$resolvedPort resource=$resource');
+      debugPrint(
+        'XMPP TLS: directTls=$resolvedDirectTls useWebSocket=$shouldUseWebSocket',
+      );
+      debugPrint(
+        'XMPP connect: bareJid=$bareJid host=$normalizedHost port=$resolvedPort resource=$resource',
+      );
       final account = XmppAccountSettings.fromJid(fullJid, password);
       account.host = resolvedHost.isNotEmpty ? resolvedHost : null;
       account.port = resolvedPort;
@@ -791,8 +827,9 @@ class XmppService extends ChangeNotifier {
       );
 
       final completer = Completer<void>();
-      _connectionStateSubscription =
-          connection.connectionStateStream.listen((state) {
+      _connectionStateSubscription = connection.connectionStateStream.listen((
+        state,
+      ) {
         debugPrint('XMPP state: $state');
         Log.i('XmppService', 'Connection state: $state');
         _lastConnectionState = state;
@@ -855,9 +892,15 @@ class XmppService extends ChangeNotifier {
           if (!completer.isCompleted) {
             completer.completeError(message);
           }
-          _finishSpan(_connectAwaitSpan, status: const SpanStatus.internalError());
+          _finishSpan(
+            _connectAwaitSpan,
+            status: const SpanStatus.internalError(),
+          );
           _connectAwaitSpan = null;
-          _finishSpan(_connectTransaction, status: const SpanStatus.internalError());
+          _finishSpan(
+            _connectTransaction,
+            status: const SpanStatus.internalError(),
+          );
           _connectTransaction = null;
           _setError(message);
           _scheduleReconnect();
@@ -874,9 +917,15 @@ class XmppService extends ChangeNotifier {
 
       await completer.future.timeout(const Duration(seconds: 20));
     } catch (error) {
-      _finishSpan(_connectAwaitSpan, status: const SpanStatus.deadlineExceeded());
+      _finishSpan(
+        _connectAwaitSpan,
+        status: const SpanStatus.deadlineExceeded(),
+      );
       _connectAwaitSpan = null;
-      _finishSpan(_connectTransaction, status: const SpanStatus.internalError());
+      _finishSpan(
+        _connectTransaction,
+        status: const SpanStatus.internalError(),
+      );
       _connectTransaction = null;
       await _safeClose(preserveCache: true);
       if (_status != XmppStatus.error) {
@@ -975,7 +1024,8 @@ class XmppService extends ChangeNotifier {
     }
     final normalized = _bareJid(bareJid);
     final lastRequest = _mamPageRequestAt[normalized];
-    if (lastRequest != null && DateTime.now().difference(lastRequest).inSeconds < 5) {
+    if (lastRequest != null &&
+        DateTime.now().difference(lastRequest).inSeconds < 5) {
       return;
     }
     _mamPageRequestAt[normalized] = DateTime.now();
@@ -1014,11 +1064,7 @@ class XmppService extends ChangeNotifier {
         beforeId: oldest,
       );
     } else {
-      mam.queryById(
-        jid: Jid.fromFullJid(normalized),
-        max: 50,
-        before: oldest,
-      );
+      mam.queryById(jid: Jid.fromFullJid(normalized), max: 50, before: oldest);
     }
   }
 
@@ -1027,26 +1073,32 @@ class XmppService extends ChangeNotifier {
   }
 
   void setIncomingMessageHandler(
-      void Function(String bareJid, ChatMessage message)? handler) {
+    void Function(String bareJid, ChatMessage message)? handler,
+  ) {
     _incomingMessageHandler = handler;
   }
 
   void setIncomingRoomMessageHandler(
-      void Function(String roomJid, ChatMessage message)? handler) {
+    void Function(String roomJid, ChatMessage message)? handler,
+  ) {
     _incomingRoomMessageHandler = handler;
   }
 
-  void setBookmarkPersistor(void Function(List<ContactEntry> bookmarks)? persistor) {
+  void setBookmarkPersistor(
+    void Function(List<ContactEntry> bookmarks)? persistor,
+  ) {
     _bookmarkPersistor = persistor;
   }
 
   void setMessagePersistor(
-      void Function(String bareJid, List<ChatMessage> messages)? persistor) {
+    void Function(String bareJid, List<ChatMessage> messages)? persistor,
+  ) {
     _messagePersistor = persistor;
   }
 
   void setRoomMessagePersistor(
-      void Function(String roomJid, List<ChatMessage> messages)? persistor) {
+    void Function(String roomJid, List<ChatMessage> messages)? persistor,
+  ) {
     _roomMessagePersistor = persistor;
   }
 
@@ -1065,7 +1117,10 @@ class XmppService extends ChangeNotifier {
     _bookmarks
       ..clear()
       ..addAll(
-        bookmarks.map((entry) => entry.isBookmark ? entry : entry.copyWith(isBookmark: true)),
+        bookmarks.map(
+          (entry) =>
+              entry.isBookmark ? entry : entry.copyWith(isBookmark: true),
+        ),
       );
     notifyListeners();
   }
@@ -1112,10 +1167,7 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
-  void sendMessage({
-    required String toBareJid,
-    required String text,
-  }) {
+  void sendMessage({required String toBareJid, required String text}) {
     if (isBookmark(toBareJid)) {
       _setError('Joining bookmarked rooms is not supported yet.');
       return;
@@ -1151,7 +1203,10 @@ class XmppService extends ChangeNotifier {
     if (trimmed.isEmpty || replaceId.isEmpty) {
       return;
     }
-    final stanza = MessageStanza(AbstractStanza.getRandomId(), MessageStanzaType.CHAT);
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.CHAT,
+    );
     stanza.toJid = Jid.fromFullJid(toBareJid);
     stanza.fromJid = connection.fullJid;
     stanza.body = trimmed;
@@ -1195,7 +1250,11 @@ class XmppService extends ChangeNotifier {
     selectChat(normalized);
   }
 
-  Future<bool> upsertRosterContact(String bareJid, {String? name, List<String>? groups}) async {
+  Future<bool> upsertRosterContact(
+    String bareJid, {
+    String? name,
+    List<String>? groups,
+  }) async {
     final connection = _connection;
     if (connection == null) {
       return false;
@@ -1216,14 +1275,18 @@ class XmppService extends ChangeNotifier {
     if (result.type == IqStanzaType.ERROR) {
       return false;
     }
-    final existingIndex = _contacts.indexWhere((entry) => entry.jid == normalized);
+    final existingIndex = _contacts.indexWhere(
+      (entry) => entry.jid == normalized,
+    );
     if (existingIndex == -1) {
-      _contacts.add(ContactEntry(
-        jid: normalized,
-        name: buddy.name,
-        groups: buddy.groups,
-        subscriptionType: null,
-      ));
+      _contacts.add(
+        ContactEntry(
+          jid: normalized,
+          name: buddy.name,
+          groups: buddy.groups,
+          subscriptionType: null,
+        ),
+      );
     } else {
       final existing = _contacts[existingIndex];
       _contacts[existingIndex] = existing.copyWith(
@@ -1234,7 +1297,10 @@ class XmppService extends ChangeNotifier {
     _contacts.sort((a, b) => a.displayName.compareTo(b.displayName));
     notifyListeners();
     _rosterPersistor?.call(List.unmodifiable(_contacts));
-    _requestVcardDetails(normalized, preferName: name == null || name.trim().isEmpty);
+    _requestVcardDetails(
+      normalized,
+      preferName: name == null || name.trim().isEmpty,
+    );
     return true;
   }
 
@@ -1324,13 +1390,20 @@ class XmppService extends ChangeNotifier {
     final resolvedPassword = (password != null && password.trim().isNotEmpty)
         ? password.trim()
         : _roomPasswordFor(normalized);
-    final mucSpan =
-        _startLinkedTransaction('xmpp.muc.join', 'xmpp.muc', _connectTransaction);
+    final mucSpan = _startLinkedTransaction(
+      'xmpp.muc.join',
+      'xmpp.muc',
+      _connectTransaction,
+    );
     if (mucSpan != null) {
       mucSpan.setTag('xmpp.room', normalized);
       _mucJoinTransactions[normalized] = mucSpan;
     }
-    muc.joinRoom(Jid.fromFullJid(normalized), resolvedNick, password: resolvedPassword);
+    muc.joinRoom(
+      Jid.fromFullJid(normalized),
+      resolvedNick,
+      password: resolvedPassword,
+    );
     final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
     _rooms[normalized] = existing.copyWith(joined: true, nick: resolvedNick);
     notifyListeners();
@@ -1383,7 +1456,11 @@ class XmppService extends ChangeNotifier {
     }
     final normalized = _bareJid(roomJid);
     final messageId = AbstractStanza.getRandomId();
-    muc.sendGroupMessage(Jid.fromFullJid(normalized), trimmed, messageId: messageId);
+    muc.sendGroupMessage(
+      Jid.fromFullJid(normalized),
+      trimmed,
+      messageId: messageId,
+    );
     final rawXml = _buildOutgoingGroupStanzaXml(normalized, messageId, trimmed);
     final nick = _roomNickFor(normalized);
     _addRoomMessage(
@@ -1412,7 +1489,10 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final normalized = _bareJid(roomJid);
-    final stanza = MessageStanza(AbstractStanza.getRandomId(), MessageStanzaType.GROUPCHAT);
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.GROUPCHAT,
+    );
     stanza.toJid = Jid.fromFullJid(normalized);
     stanza.body = trimmed;
     stanza.addChild(_buildReplaceElement(replaceId));
@@ -1483,7 +1563,9 @@ class XmppService extends ChangeNotifier {
       final mediated = MessageStanza(mediatedId, MessageStanzaType.NORMAL);
       mediated.toJid = Jid.fromFullJid(normalizedRoom);
       final mucUser = XmppElement()..name = 'x';
-      mucUser.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/muc#user'));
+      mucUser.addAttribute(
+        XmppAttribute('xmlns', 'http://jabber.org/protocol/muc#user'),
+      );
       final invite = XmppElement()..name = 'invite';
       invite.addAttribute(XmppAttribute('to', normalizedInvitee));
       if (inviteReason != null && inviteReason.isNotEmpty) {
@@ -1658,7 +1740,9 @@ class XmppService extends ChangeNotifier {
     final messageId = AbstractStanza.getRandomId();
     final url = slot.getUrl.toString();
     final description = fileName.trim();
-    final bodyText = (body != null && body.trim().isNotEmpty) ? body.trim() : url;
+    final bodyText = (body != null && body.trim().isNotEmpty)
+        ? body.trim()
+        : url;
     final stanza = _buildOobMessageStanza(
       targetJid: normalized,
       messageId: messageId,
@@ -1785,8 +1869,11 @@ class XmppService extends ChangeNotifier {
       bytes: bytes,
     );
     _fileTransfers[sid] = session;
-    final transferSpan =
-        _startLinkedTransaction('xmpp.file_transfer', 'xmpp.file', _connectTransaction);
+    final transferSpan = _startLinkedTransaction(
+      'xmpp.file_transfer',
+      'xmpp.file',
+      _connectTransaction,
+    );
     if (transferSpan != null) {
       transferSpan.setTag('xmpp.direction', 'outgoing');
       _fileTransferTransactions[sid] = transferSpan;
@@ -1883,9 +1970,7 @@ class XmppService extends ChangeNotifier {
     );
   }
 
-  Future<void> declineFileTransfer({
-    required String transferId,
-  }) async {
+  Future<void> declineFileTransfer({required String transferId}) async {
     final session = _fileTransfers[transferId];
     if (session == null) {
       return;
@@ -1944,7 +2029,11 @@ class XmppService extends ChangeNotifier {
     if (isRoom) {
       _applyRoomReactionUpdate(_bareJid(bareJid), sender, targetId, [trimmed]);
     } else {
-      _applyReactionUpdate(_bareJid(bareJid), sender, ReactionUpdate(targetId, [trimmed]));
+      _applyReactionUpdate(
+        _bareJid(bareJid),
+        sender,
+        ReactionUpdate(targetId, [trimmed]),
+      );
     }
   }
 
@@ -1966,7 +2055,11 @@ class XmppService extends ChangeNotifier {
       for (final buddy in buddies) {
         final jid = buddy.jid?.userAtDomain;
         if (jid != null && jid.isNotEmpty) {
-          final subscriptionType = buddy.subscriptionType?.toString().split('.').last.toLowerCase();
+          final subscriptionType = buddy.subscriptionType
+              ?.toString()
+              .split('.')
+              .last
+              .toLowerCase();
           _ensureContact(
             jid,
             name: buddy.name,
@@ -1974,7 +2067,10 @@ class XmppService extends ChangeNotifier {
             subscriptionType: subscriptionType,
           );
           _pepManager?.requestMetadataIfMissing(jid);
-          _requestVcardDetails(jid, preferName: buddy.name == null || buddy.name!.trim().isEmpty);
+          _requestVcardDetails(
+            jid,
+            preferName: buddy.name == null || buddy.name!.trim().isEmpty,
+          );
         }
       }
       final nextVersion = rosterManager.rosterVersion;
@@ -2032,7 +2128,9 @@ class XmppService extends ChangeNotifier {
     }
     _jingleManager = JingleManager.getInstance(connection);
     _jingleSubscription?.cancel();
-    _jingleSubscription = _jingleManager!.sessionStream.listen(_handleJingleEvent);
+    _jingleSubscription = _jingleManager!.sessionStream.listen(
+      _handleJingleEvent,
+    );
   }
 
   void _setupIbb() {
@@ -2059,7 +2157,9 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _smDeliveredSubscription?.cancel();
-    _smDeliveredSubscription = streamManagement.deliveredStanzasStream.listen((stanza) {
+    _smDeliveredSubscription = streamManagement.deliveredStanzasStream.listen((
+      stanza,
+    ) {
       if (stanza is! MessageStanza) {
         return;
       }
@@ -2091,8 +2191,9 @@ class XmppService extends ChangeNotifier {
       _handleMucRoomCreatedPresence(stanza);
     });
     _roomSubscriptions['message']?.cancel();
-    _roomSubscriptions['message'] =
-        _mucManager!.roomMessageStream.listen((message) {
+    _roomSubscriptions['message'] = _mucManager!.roomMessageStream.listen((
+      message,
+    ) {
       _noteRoomTraffic(message.roomJid);
       final mujiSession = _mujiSessions[_bareJid(message.roomJid)];
       if (mujiSession != null && message.nick.isNotEmpty) {
@@ -2121,7 +2222,10 @@ class XmppService extends ChangeNotifier {
         );
         return;
       }
-      final isSelfReflection = _isRoomSelfReflection(message.roomJid, message.nick);
+      final isSelfReflection = _isRoomSelfReflection(
+        message.roomJid,
+        message.nick,
+      );
       _addRoomMessage(
         roomJid: message.roomJid,
         from: message.nick,
@@ -2136,8 +2240,9 @@ class XmppService extends ChangeNotifier {
       );
     });
     _roomSubscriptions['presence']?.cancel();
-    _roomSubscriptions['presence'] =
-        _mucManager!.roomPresenceStream.listen((presence) {
+    _roomSubscriptions['presence'] = _mucManager!.roomPresenceStream.listen((
+      presence,
+    ) {
       _noteRoomTraffic(presence.roomJid);
       final roomJid = _bareJid(presence.roomJid);
       if (presence.isSelf &&
@@ -2176,8 +2281,9 @@ class XmppService extends ChangeNotifier {
       notifyListeners();
     });
     _roomSubscriptions['subject']?.cancel();
-    _roomSubscriptions['subject'] =
-        _mucManager!.roomSubjectStream.listen((subject) {
+    _roomSubscriptions['subject'] = _mucManager!.roomSubjectStream.listen((
+      subject,
+    ) {
       _noteRoomTraffic(subject.roomJid);
       final roomJid = _bareJid(subject.roomJid);
       final existing = _rooms[roomJid] ?? RoomEntry(roomJid: roomJid);
@@ -2259,8 +2365,11 @@ class XmppService extends ChangeNotifier {
       fileMime: offer.mediaType,
     );
     _fileTransfers[event.sid] = session;
-    final transferSpan =
-        _startLinkedTransaction('xmpp.file_transfer', 'xmpp.file', _connectTransaction);
+    final transferSpan = _startLinkedTransaction(
+      'xmpp.file_transfer',
+      'xmpp.file',
+      _connectTransaction,
+    );
     if (transferSpan != null) {
       transferSpan.setTag('xmpp.direction', 'incoming');
       _fileTransferTransactions[event.sid] = transferSpan;
@@ -2276,7 +2385,8 @@ class XmppService extends ChangeNotifier {
 
   void _handleJingleSessionAccept(JingleSessionEvent event) {
     final callSession = _callSessions[event.sid];
-    if (callSession != null && callSession.direction == CallDirection.outgoing) {
+    if (callSession != null &&
+        callSession.direction == CallDirection.outgoing) {
       final bundleGroup = _extractBundleGroupNames(event.stanza);
       if (bundleGroup.isNotEmpty) {
         _callRemoteBundleBySid[event.sid] = true;
@@ -2296,12 +2406,14 @@ class XmppService extends ChangeNotifier {
       final rtpContents = event.contents
           .where((content) => content.rtpDescription != null)
           .toList(growable: false);
-      unawaited(_applyRemoteDescriptionsForCall(
-        sid: callSession.sid,
-        contents: rtpContents,
-        direction: callSession.direction,
-        sdpType: 'answer',
-      ));
+      unawaited(
+        _applyRemoteDescriptionsForCall(
+          sid: callSession.sid,
+          contents: rtpContents,
+          direction: callSession.direction,
+          sdpType: 'answer',
+        ),
+      );
       notifyListeners();
       return;
     }
@@ -2338,7 +2450,9 @@ class XmppService extends ChangeNotifier {
     final reason = event.reason ?? '';
     final nextState = reason == 'success'
         ? _fileTransferStateCompleted
-        : (reason == 'decline' ? _fileTransferStateDeclined : _fileTransferStateFailed);
+        : (reason == 'decline'
+              ? _fileTransferStateDeclined
+              : _fileTransferStateFailed);
     _updateFileTransferMessage(
       bareJid: session.peerBareJid,
       transferId: session.sid,
@@ -2347,7 +2461,10 @@ class XmppService extends ChangeNotifier {
     _finalizeTransfer(session);
   }
 
-  void _handleIncomingCall(JingleSessionEvent event, List<JingleContent> contents) {
+  void _handleIncomingCall(
+    JingleSessionEvent event,
+    List<JingleContent> contents,
+  ) {
     final peerJid = event.from.fullJid ?? event.from.userAtDomain;
     if (peerJid.isEmpty) {
       return;
@@ -2357,9 +2474,13 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _storeRemoteCallContents(event.sid, contents);
-    final hasVideo = contents.any((content) =>
-        (content.rtpDescription?.media.toLowerCase() ?? '') == 'video');
-    _callMediaKindBySid[event.sid] = hasVideo ? CallMediaKind.video : CallMediaKind.audio;
+    final hasVideo = contents.any(
+      (content) =>
+          (content.rtpDescription?.media.toLowerCase() ?? '') == 'video',
+    );
+    _callMediaKindBySid[event.sid] = hasVideo
+        ? CallMediaKind.video
+        : CallMediaKind.audio;
     final session = CallSession(
       sid: event.sid,
       peerBareJid: peerJid,
@@ -2385,8 +2506,10 @@ class XmppService extends ChangeNotifier {
     if (session == null || session.direction != CallDirection.incoming) {
       return;
     }
-    final hasVideo = contents.any((content) =>
-        (content.rtpDescription?.media.toLowerCase() ?? '') == 'video');
+    final hasVideo = contents.any(
+      (content) =>
+          (content.rtpDescription?.media.toLowerCase() ?? '') == 'video',
+    );
     final nextVideo = hasVideo;
     if (session.video != nextVideo) {
       _callSessions[sid] = CallSession(
@@ -2397,7 +2520,9 @@ class XmppService extends ChangeNotifier {
         state: session.state,
       );
     }
-    _callMediaKindBySid[sid] = nextVideo ? CallMediaKind.video : CallMediaKind.audio;
+    _callMediaKindBySid[sid] = nextVideo
+        ? CallMediaKind.video
+        : CallMediaKind.audio;
     _callVideoEnabledBySid[sid] = nextVideo;
     _callContentNamesBySid[sid] = _contentNamesFor(contents);
     notifyListeners();
@@ -2578,12 +2703,14 @@ class XmppService extends ChangeNotifier {
   ) {
     final contents = <JingleContent>[];
     for (final entry in descriptions.entries) {
-      contents.add(JingleContent(
-        name: entry.key,
-        creator: 'initiator',
-        rtpDescription: entry.value,
-        iceTransport: transports[entry.key],
-      ));
+      contents.add(
+        JingleContent(
+          name: entry.key,
+          creator: 'initiator',
+          rtpDescription: entry.value,
+          iceTransport: transports[entry.key],
+        ),
+      );
     }
     return contents;
   }
@@ -2639,8 +2766,9 @@ class XmppService extends ChangeNotifier {
     }
     _callLocalDescriptionsBySid[sid] = localDescriptions;
     _callLocalTransportsBySid[sid] = localTransports;
-    _callContentNamesBySid[sid] =
-        mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    _callContentNamesBySid[sid] = mappings
+        .map((mapping) => mapping.contentName)
+        .toList(growable: false);
     if (bundle) {
       final bundleName = _bundleTransportNameForMappings(mappings);
       if (bundleName != null && bundleName.isNotEmpty) {
@@ -2665,8 +2793,11 @@ class XmppService extends ChangeNotifier {
       incoming: false,
     );
     notifyListeners();
-    final jingleSpan =
-        _startLinkedTransaction('xmpp.jingle.setup', 'xmpp.jingle', _connectTransaction);
+    final jingleSpan = _startLinkedTransaction(
+      'xmpp.jingle.setup',
+      'xmpp.jingle',
+      _connectTransaction,
+    );
     if (jingleSpan != null) {
       jingleSpan.setTag('xmpp.call.direction', 'outgoing');
       _jingleSetupTransactions[sid] = jingleSpan;
@@ -2677,8 +2808,9 @@ class XmppService extends ChangeNotifier {
       final target = _bareJid(bareJid);
       final descriptions = _buildJmiProposeDescriptions(mappings);
       if (descriptions.isNotEmpty) {
-        _jmiProposedMediaBySid[sid] =
-            descriptions.map((desc) => desc.media).toSet();
+        _jmiProposedMediaBySid[sid] = descriptions
+            .map((desc) => desc.media)
+            .toSet();
       }
       _sendJmiPropose(target, sid, descriptions);
       _startJmiFallbackTimer(sid, target);
@@ -2696,8 +2828,11 @@ class XmppService extends ChangeNotifier {
       }
     }
     if (!_jingleSetupTransactions.containsKey(session.sid)) {
-      final jingleSpan =
-          _startLinkedTransaction('xmpp.jingle.setup', 'xmpp.jingle', _connectTransaction);
+      final jingleSpan = _startLinkedTransaction(
+        'xmpp.jingle.setup',
+        'xmpp.jingle',
+        _connectTransaction,
+      );
       if (jingleSpan != null) {
         jingleSpan.setTag('xmpp.call.direction', 'incoming');
         _jingleSetupTransactions[session.sid] = jingleSpan;
@@ -2745,8 +2880,9 @@ class XmppService extends ChangeNotifier {
     }
     _callLocalDescriptionsBySid[session.sid] = localDescriptions;
     _callLocalTransportsBySid[session.sid] = localTransports;
-    _callContentNamesBySid[session.sid] =
-        mappings.map((mapping) => mapping.contentName).toList(growable: false);
+    _callContentNamesBySid[session.sid] = mappings
+        .map((mapping) => mapping.contentName)
+        .toList(growable: false);
     if (bundle && !_callBundleTransportNameBySid.containsKey(session.sid)) {
       final bundleName = _bundleTransportNameForMappings(mappings);
       if (bundleName != null && bundleName.isNotEmpty) {
@@ -2760,7 +2896,10 @@ class XmppService extends ChangeNotifier {
       _removeCallSession(session);
       return;
     }
-    final localContents = _buildCallContents(localDescriptions, localTransports);
+    final localContents = _buildCallContents(
+      localDescriptions,
+      localTransports,
+    );
     final iq = jingle.buildRtpSessionAcceptMulti(
       to: toJid,
       sid: session.sid,
@@ -2909,7 +3048,8 @@ class XmppService extends ChangeNotifier {
       if (type == 'outbound-rtp') {
         if (_statString(values, 'kind') == 'video' ||
             _statString(values, 'mediaType') == 'video') {
-          outboundBytes = (outboundBytes ?? 0) + (_statInt(values, 'bytesSent') ?? 0);
+          outboundBytes =
+              (outboundBytes ?? 0) + (_statInt(values, 'bytesSent') ?? 0);
         }
         if (_statString(values, 'kind') == 'audio' ||
             _statString(values, 'mediaType') == 'audio') {
@@ -2921,18 +3061,23 @@ class XmppService extends ChangeNotifier {
             }
           }
           localAudioEnergy =
-              (localAudioEnergy ?? 0) + (_statDouble(values, 'totalAudioEnergy') ?? 0);
+              (localAudioEnergy ?? 0) +
+              (_statDouble(values, 'totalAudioEnergy') ?? 0);
           localSamplesDuration =
-              (localSamplesDuration ?? 0) + (_statDouble(values, 'totalSamplesDuration') ?? 0);
+              (localSamplesDuration ?? 0) +
+              (_statDouble(values, 'totalSamplesDuration') ?? 0);
         }
       }
       if (type == 'inbound-rtp') {
         if (_statString(values, 'kind') == 'video' ||
             _statString(values, 'mediaType') == 'video') {
-          inboundBytes = (inboundBytes ?? 0) + (_statInt(values, 'bytesReceived') ?? 0);
-          packetsLost = (packetsLost ?? 0) + (_statInt(values, 'packetsLost') ?? 0);
+          inboundBytes =
+              (inboundBytes ?? 0) + (_statInt(values, 'bytesReceived') ?? 0);
+          packetsLost =
+              (packetsLost ?? 0) + (_statInt(values, 'packetsLost') ?? 0);
           packetsReceived =
-              (packetsReceived ?? 0) + (_statInt(values, 'packetsReceived') ?? 0);
+              (packetsReceived ?? 0) +
+              (_statInt(values, 'packetsReceived') ?? 0);
           final jitter = _statDouble(values, 'jitter');
           if (jitter != null) {
             jitterMs = jitter * 1000;
@@ -2948,14 +3093,17 @@ class XmppService extends ChangeNotifier {
             }
           }
           remoteAudioEnergy =
-              (remoteAudioEnergy ?? 0) + (_statDouble(values, 'totalAudioEnergy') ?? 0);
+              (remoteAudioEnergy ?? 0) +
+              (_statDouble(values, 'totalAudioEnergy') ?? 0);
           remoteSamplesDuration =
-              (remoteSamplesDuration ?? 0) + (_statDouble(values, 'totalSamplesDuration') ?? 0);
+              (remoteSamplesDuration ?? 0) +
+              (_statDouble(values, 'totalSamplesDuration') ?? 0);
         }
       }
       if (type == 'candidate-pair') {
         final state = _statString(values, 'state');
-        final nominated = values['nominated'] == true || values['selected'] == true;
+        final nominated =
+            values['nominated'] == true || values['selected'] == true;
         if (state == 'succeeded' && nominated) {
           selectedPairValues = values;
           selectedPairId = report.id;
@@ -3120,10 +3268,20 @@ class XmppService extends ChangeNotifier {
     required double? remoteDuration,
   }) {
     const threshold = 0.02;
-    final nextLocal =
-        _resolveAudioLevel(tracker, localLevel, localEnergy, localDuration, true);
-    final nextRemote =
-        _resolveAudioLevel(tracker, remoteLevel, remoteEnergy, remoteDuration, false);
+    final nextLocal = _resolveAudioLevel(
+      tracker,
+      localLevel,
+      localEnergy,
+      localDuration,
+      true,
+    );
+    final nextRemote = _resolveAudioLevel(
+      tracker,
+      remoteLevel,
+      remoteEnergy,
+      remoteDuration,
+      false,
+    );
 
     bool didChange = false;
     if (nextLocal != null) {
@@ -3159,10 +3317,15 @@ class XmppService extends ChangeNotifier {
     final local = localId == null ? null : candidateReports[localId];
     final remote = remoteId == null ? null : candidateReports[remoteId];
     final localDesc = local == null ? 'unknown' : _describeIceCandidate(local);
-    final remoteDesc = remote == null ? 'unknown' : _describeIceCandidate(remote);
+    final remoteDesc = remote == null
+        ? 'unknown'
+        : _describeIceCandidate(remote);
     final rtt = _statDouble(values, 'currentRoundTripTime');
-    final rttMs = rtt == null ? '' : ' rtt=${(rtt * 1000).toStringAsFixed(1)}ms';
-    final summary = 'pair=${pairId ?? 'unknown'} local=[$localDesc] remote=[$remoteDesc]$rttMs';
+    final rttMs = rtt == null
+        ? ''
+        : ' rtt=${(rtt * 1000).toStringAsFixed(1)}ms';
+    final summary =
+        'pair=${pairId ?? 'unknown'} local=[$localDesc] remote=[$remoteDesc]$rttMs';
     if (_callSelectedCandidateSummaryBySid[sid] == summary) {
       return;
     }
@@ -3173,7 +3336,8 @@ class XmppService extends ChangeNotifier {
   String _describeIceCandidate(Map<dynamic, dynamic> values) {
     final type = _statString(values, 'candidateType') ?? 'unknown';
     final protocol = _statString(values, 'protocol') ?? 'unknown';
-    final ip = _statString(values, 'ip') ?? _statString(values, 'address') ?? '?';
+    final ip =
+        _statString(values, 'ip') ?? _statString(values, 'address') ?? '?';
     final port = _statInt(values, 'port');
     final network = _statString(values, 'networkType');
     final relayProto = _statString(values, 'relayProtocol');
@@ -3200,18 +3364,25 @@ class XmppService extends ChangeNotifier {
     if (totalEnergy == null || totalDuration == null) {
       return null;
     }
-    final lastEnergy =
-        isLocal ? tracker.lastLocalAudioEnergy : tracker.lastRemoteAudioEnergy;
+    final lastEnergy = isLocal
+        ? tracker.lastLocalAudioEnergy
+        : tracker.lastRemoteAudioEnergy;
     final lastDuration = isLocal
         ? tracker.lastLocalSamplesDuration
         : tracker.lastRemoteSamplesDuration;
     tracker
-      ..lastLocalAudioEnergy = isLocal ? totalEnergy : tracker.lastLocalAudioEnergy
-      ..lastRemoteAudioEnergy = isLocal ? tracker.lastRemoteAudioEnergy : totalEnergy
-      ..lastLocalSamplesDuration =
-          isLocal ? totalDuration : tracker.lastLocalSamplesDuration
-      ..lastRemoteSamplesDuration =
-          isLocal ? tracker.lastRemoteSamplesDuration : totalDuration;
+      ..lastLocalAudioEnergy = isLocal
+          ? totalEnergy
+          : tracker.lastLocalAudioEnergy
+      ..lastRemoteAudioEnergy = isLocal
+          ? tracker.lastRemoteAudioEnergy
+          : totalEnergy
+      ..lastLocalSamplesDuration = isLocal
+          ? totalDuration
+          : tracker.lastLocalSamplesDuration
+      ..lastRemoteSamplesDuration = isLocal
+          ? tracker.lastRemoteSamplesDuration
+          : totalDuration;
     if (lastEnergy == null || lastDuration == null) {
       return null;
     }
@@ -3369,8 +3540,9 @@ class XmppService extends ChangeNotifier {
         }
         final session = _callSessions[sid];
         if (session != null) {
-          session.state =
-              action == JmiAction.reject ? CallState.declined : CallState.ended;
+          session.state = action == JmiAction.reject
+              ? CallState.declined
+              : CallState.ended;
           _removeCallSession(session);
         }
         return;
@@ -3489,12 +3661,11 @@ class XmppService extends ChangeNotifier {
     final filteredContents = proposedMedia == null
         ? contents
         : contents
-            .where(
-              (content) => proposedMedia.contains(
-                content.rtpDescription?.media ?? '',
-              ),
-            )
-            .toList(growable: false);
+              .where(
+                (content) =>
+                    proposedMedia.contains(content.rtpDescription?.media ?? ''),
+              )
+              .toList(growable: false);
     if (proposedMedia != null && filteredContents.isEmpty) {
       Log.w(
         'XmppService',
@@ -3568,8 +3739,9 @@ class XmppService extends ChangeNotifier {
     final remoteTransports =
         _callRemoteTransportsBySid[event.sid] ?? <String, JingleIceTransport>{};
     final existing = remoteTransports[contentName];
-    remoteTransports[contentName] =
-        existing == null ? transport : mergeIceTransports(existing, transport);
+    remoteTransports[contentName] = existing == null
+        ? transport
+        : mergeIceTransports(existing, transport);
     _callRemoteTransportsBySid[event.sid] = remoteTransports;
     final pc = _callPeerConnections[event.sid];
     if (pc == null) {
@@ -3580,8 +3752,8 @@ class XmppService extends ChangeNotifier {
       Log.d(
         'XmppService',
         'Call ${event.sid} remote ICE candidate ${candidate.type} '
-        '${candidate.protocol} ${candidate.ip}:${candidate.port} '
-        'comp=${candidate.component} content=$contentName',
+            '${candidate.protocol} ${candidate.ip}:${candidate.port} '
+            'comp=${candidate.component} content=$contentName',
       );
       final candidateLine = _buildCandidateLine(candidate);
       pc.addCandidate(RTCIceCandidate(candidateLine, mid, null));
@@ -3596,7 +3768,8 @@ class XmppService extends ChangeNotifier {
     final mergedCandidates = <JingleIceCandidate>[];
     final candidateKeys = <String>{};
     void addCandidate(JingleIceCandidate candidate) {
-      final key = '${candidate.foundation}|${candidate.component}|'
+      final key =
+          '${candidate.foundation}|${candidate.component}|'
           '${candidate.protocol}|${candidate.priority}|${candidate.ip}|'
           '${candidate.port}|${candidate.type}|${candidate.generation ?? ''}';
       if (candidateKeys.add(key)) {
@@ -3612,8 +3785,9 @@ class XmppService extends ChangeNotifier {
     }
 
     final ufrag = update.ufrag.isNotEmpty ? update.ufrag : existing.ufrag;
-    final password =
-        update.password.isNotEmpty ? update.password : existing.password;
+    final password = update.password.isNotEmpty
+        ? update.password
+        : existing.password;
     final fingerprint = update.fingerprint ?? existing.fingerprint;
 
     return JingleIceTransport(
@@ -3695,7 +3869,7 @@ class XmppService extends ChangeNotifier {
         Log.d(
           'XmppService',
           'Call $sid local ICE candidate ${parsed.type} ${parsed.protocol} '
-          '${parsed.ip}:${parsed.port} comp=${parsed.component}',
+              '${parsed.ip}:${parsed.port} comp=${parsed.component}',
         );
       }
       final transports = _callLocalTransportsBySid[sid];
@@ -3728,8 +3902,9 @@ class XmppService extends ChangeNotifier {
     if (peerBare.isEmpty) {
       return;
     }
-    final defaultKind =
-        session?.video == true ? CallMediaKind.video : CallMediaKind.audio;
+    final defaultKind = session?.video == true
+        ? CallMediaKind.video
+        : CallMediaKind.audio;
     for (final candidate in pending) {
       _sendIceCandidate(
         sid: sid,
@@ -3752,10 +3927,7 @@ class XmppService extends ChangeNotifier {
         !_callAcceptedBySid.contains(sid)) {
       _queueIceCandidate(sid, candidate);
       if (_callLoggedIceQueueBySid.add(sid)) {
-        Log.d(
-          'XmppService',
-          'Call $sid delaying ICE until session-accept.',
-        );
+        Log.d('XmppService', 'Call $sid delaying ICE until session-accept.');
       }
       return;
     }
@@ -3771,14 +3943,16 @@ class XmppService extends ChangeNotifier {
     if (jingle == null) {
       return;
     }
-    final bundleContent =
-        _callLocalBundleBySid[sid] == true ? _callBundleTransportNameBySid[sid] : null;
-    final contentName = bundleContent ??
+    final bundleContent = _callLocalBundleBySid[sid] == true
+        ? _callBundleTransportNameBySid[sid]
+        : null;
+    final contentName =
+        bundleContent ??
         (_candidateContentName(sid, candidate, defaultKind) ?? '');
     Log.d(
       'XmppService',
       'Call $sid send ICE candidate ${parsed.type} ${parsed.protocol} '
-      '${parsed.ip}:${parsed.port} comp=${parsed.component} content=$contentName',
+          '${parsed.ip}:${parsed.port} comp=${parsed.component} content=$contentName',
     );
     final transport = transports[contentName] ?? transports.values.first;
     final transportInfo = transportInfoTransport(transport, parsed);
@@ -3796,8 +3970,7 @@ class XmppService extends ChangeNotifier {
     final info = jingle.buildTransportInfo(
       to: toJid,
       sid: sid,
-      contentName:
-          contentName.isNotEmpty ? contentName : transports.keys.first,
+      contentName: contentName.isNotEmpty ? contentName : transports.keys.first,
       creator: 'initiator',
       transport: transportInfo,
     );
@@ -4070,124 +4243,7 @@ class XmppService extends ChangeNotifier {
   }
 
   List<MessageIntent> _buildMessageIntents(MessageStanza stanza) {
-    final fromBare = stanza.fromJid?.userAtDomain ?? '';
-    if (fromBare.isEmpty) {
-      return const [
-        UnhandledMessageIntent(reason: 'missing-from'),
-      ];
-    }
-    final jmiAction = parseJmiAction(stanza);
-    if (jmiAction != null) {
-      return [
-        HandleJmiIntent(action: jmiAction),
-      ];
-    }
-    final receiptId = _extractReceiptsId(stanza);
-    if (receiptId != null) {
-      return [
-        ApplyReceiptIntent(
-          scopedId: MessageScopedId(scopeJid: fromBare, id: receiptId),
-        ),
-      ];
-    }
-    final displayedId = _extractMarkerId(stanza, 'displayed');
-    if (displayedId != null) {
-      return [
-        ApplyDisplayedIntent(
-          scopedId: MessageScopedId(scopeJid: fromBare, id: displayedId),
-        ),
-      ];
-    }
-    final reaction = _extractReactionUpdate(stanza);
-    if (reaction != null) {
-      final targetBare = _reactionChatTarget(
-        fromBare,
-        stanza.toJid?.userAtDomain ?? '',
-      );
-      if (targetBare.isEmpty) {
-        return const [
-          UnhandledMessageIntent(reason: 'reaction-target-empty'),
-        ];
-      }
-      return [
-        ApplyReactionIntent(
-          targetBareJid: targetBare,
-          senderBareJid: fromBare,
-          update: reaction,
-        ),
-      ];
-    }
-    final body = stanza.body ?? '';
-    final oobInfo = _extractOobInfoFromStanza(stanza);
-    final oobUrl = oobInfo?.url;
-    if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
-      return const [
-        UnhandledMessageIntent(reason: 'empty-body'),
-      ];
-    }
-    if (_isArchivedStanza(stanza)) {
-      return const [
-        UnhandledMessageIntent(reason: 'archived'),
-      ];
-    }
-    if (_currentUserBareJid != null && _bareJid(fromBare) == _currentUserBareJid) {
-      return const [
-        UnhandledMessageIntent(reason: 'self-message'),
-      ];
-    }
-    final messageId = stanza.id;
-    if (messageId == null || messageId.isEmpty) {
-      return const [
-        UnhandledMessageIntent(reason: 'missing-message-id'),
-      ];
-    }
-    final intents = <MessageIntent>[];
-    if (_hasReceiptRequest(stanza)) {
-      intents.add(
-        SendReceiptIntent(
-          toBareJid: fromBare,
-          scopedId: MessageScopedId(scopeJid: fromBare, id: messageId),
-        ),
-      );
-    }
-    if (_hasMarkable(stanza)) {
-      intents.add(
-        SendMarkerIntent(
-          toBareJid: fromBare,
-          scopedId: MessageScopedId(scopeJid: fromBare, id: messageId),
-          name: 'received',
-        ),
-      );
-      if (_activeChatBareJid != null &&
-          _bareJid(_activeChatBareJid!) == _bareJid(fromBare)) {
-        intents.add(
-          SendMarkerIntent(
-            toBareJid: fromBare,
-            scopedId: MessageScopedId(scopeJid: fromBare, id: messageId),
-            name: 'displayed',
-          ),
-        );
-      }
-    }
-    intents.add(
-      AddMessageIntent(
-        bareJid: fromBare,
-        from: fromBare,
-        to: stanza.toJid?.userAtDomain ?? '',
-        body: body,
-        timestamp: DateTime.now(),
-        messageId: messageId,
-        rawXml: _serializeStanza(stanza),
-        oobUrl: oobUrl,
-        oobDescription: oobInfo?.description,
-      ),
-    );
-    if (intents.isEmpty) {
-      return const [
-        UnhandledMessageIntent(reason: 'no-action'),
-      ];
-    }
-    return intents;
+    return _messageIntentBuilder.build(stanza);
   }
 
   @visibleForTesting
@@ -4289,7 +4345,8 @@ class XmppService extends ChangeNotifier {
       if (child.name != 'x') {
         continue;
       }
-      if (child.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/muc#user') {
+      if (child.getAttribute('xmlns')?.value !=
+          'http://jabber.org/protocol/muc#user') {
         continue;
       }
       return child.children
@@ -4422,8 +4479,10 @@ class XmppService extends ChangeNotifier {
     connection.writeStanza(stanza);
     _pendingMucSelfPings[id] = _bareJid(roomJid);
     _mucSelfPingTimeouts[id]?.cancel();
-    _mucSelfPingTimeouts[id] =
-        Timer(_mucSelfPingTimeout, () => _handleMucSelfPingTimeout(id));
+    _mucSelfPingTimeouts[id] = Timer(
+      _mucSelfPingTimeout,
+      () => _handleMucSelfPingTimeout(id),
+    );
   }
 
   void _handleMucSelfPingTimeout(String id) {
@@ -4470,12 +4529,20 @@ class XmppService extends ChangeNotifier {
   }
 
   String? _extractReceiptsId(MessageStanza stanza) {
-    final element = _findChildWithXmlns(stanza, 'received', 'urn:xmpp:receipts');
+    final element = _findChildWithXmlns(
+      stanza,
+      'received',
+      'urn:xmpp:receipts',
+    );
     return element?.getAttribute('id')?.value;
   }
 
   String? _extractMarkerId(MessageStanza stanza, String name) {
-    final element = _findChildWithXmlns(stanza, name, 'urn:xmpp:chat-markers:0');
+    final element = _findChildWithXmlns(
+      stanza,
+      name,
+      'urn:xmpp:chat-markers:0',
+    );
     return element?.getAttribute('id')?.value;
   }
 
@@ -4483,7 +4550,11 @@ class XmppService extends ChangeNotifier {
     return _findChildWithXmlns(stanza, name, xmlns) != null;
   }
 
-  XmppElement? _findChildWithXmlns(XmppElement stanza, String name, String xmlns) {
+  XmppElement? _findChildWithXmlns(
+    XmppElement stanza,
+    String name,
+    String xmlns,
+  ) {
     for (final child in stanza.children) {
       if (child.name == name && child.getAttribute('xmlns')?.value == xmlns) {
         return child;
@@ -4492,10 +4563,12 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
-  _OobInfo? _extractOobInfoFromStanza(XmppElement stanza) {
+  OobInfo? _extractOobInfoFromStanza(XmppElement stanza) {
     final candidates = <XmppElement>[stanza];
     for (final child in stanza.children) {
-      if (child.name != 'result' && child.name != 'sent' && child.name != 'received') {
+      if (child.name != 'result' &&
+          child.name != 'sent' &&
+          child.name != 'received') {
         continue;
       }
       final forwarded = child.getChild('forwarded');
@@ -4522,7 +4595,7 @@ class XmppService extends ChangeNotifier {
           continue;
         }
         final description = child.getChild('desc')?.textValue?.trim();
-        return _OobInfo(url: url, description: description);
+        return OobInfo(url: url, description: description);
       }
     }
     return null;
@@ -4531,7 +4604,9 @@ class XmppService extends ChangeNotifier {
   ReactionUpdate? _extractReactionUpdate(XmppElement stanza) {
     final candidates = <XmppElement>[stanza];
     for (final child in stanza.children) {
-      if (child.name != 'result' && child.name != 'sent' && child.name != 'received') {
+      if (child.name != 'result' &&
+          child.name != 'sent' &&
+          child.name != 'received') {
         continue;
       }
       final forwarded = child.getChild('forwarded');
@@ -4569,7 +4644,9 @@ class XmppService extends ChangeNotifier {
   String? _extractReplaceIdFromStanza(XmppElement stanza) {
     final candidates = <XmppElement>[stanza];
     for (final child in stanza.children) {
-      if (child.name != 'result' && child.name != 'sent' && child.name != 'received') {
+      if (child.name != 'result' &&
+          child.name != 'sent' &&
+          child.name != 'received') {
         continue;
       }
       final forwarded = child.getChild('forwarded');
@@ -4586,7 +4663,8 @@ class XmppService extends ChangeNotifier {
     for (final candidate in candidates) {
       for (final child in candidate.children) {
         if (child.name != 'replace' ||
-            child.getAttribute('xmlns')?.value != 'urn:xmpp:message-correct:0') {
+            child.getAttribute('xmlns')?.value !=
+                'urn:xmpp:message-correct:0') {
           continue;
         }
         final id = child.getAttribute('id')?.value;
@@ -4606,7 +4684,11 @@ class XmppService extends ChangeNotifier {
     return _bareJid(fromBare);
   }
 
-  void _applyReactionUpdate(String bareJid, String sender, ReactionUpdate update) {
+  void _applyReactionUpdate(
+    String bareJid,
+    String sender,
+    ReactionUpdate update,
+  ) {
     final normalized = _bareJid(bareJid);
     final list = _messages[normalized];
     if (list == null || list.isEmpty) {
@@ -4711,9 +4793,12 @@ class XmppService extends ChangeNotifier {
           continue;
         }
       }
-      final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
+      final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty)
+          ? oobUrl
+          : existing.oobUrl;
       final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
-      final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+      final nextOobDescription =
+          (oobDescription != null && oobDescription.isNotEmpty)
           ? oobDescription
           : existing.oobDescription;
       final nextEditedAt = timestamp;
@@ -4795,9 +4880,12 @@ class XmppService extends ChangeNotifier {
           existing.messageId != update.targetId) {
         continue;
       }
-    final nextReactions =
-        _nextReactions(existing.reactions ?? const {}, sender, update.reactions);
-    if (_reactionsEqual(existing.reactions ?? const {}, nextReactions)) {
+      final nextReactions = _nextReactions(
+        existing.reactions ?? const {},
+        sender,
+        update.reactions,
+      );
+      if (_reactionsEqual(existing.reactions ?? const {}, nextReactions)) {
         return true;
       }
       list[i] = ChatMessage(
@@ -4837,7 +4925,9 @@ class XmppService extends ChangeNotifier {
   ) {
     final next = <String, Set<String>>{};
     existing.forEach((emoji, senders) {
-      final filtered = senders.where((value) => value.isNotEmpty && value != sender).toSet();
+      final filtered = senders
+          .where((value) => value.isNotEmpty && value != sender)
+          .toSet();
       if (filtered.isNotEmpty) {
         next[emoji] = filtered;
       }
@@ -4919,7 +5009,9 @@ class XmppService extends ChangeNotifier {
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(targetJid);
     final query = XmppElement()..name = 'query';
-    query.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#items'));
+    query.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#items'),
+    );
     iqStanza.addChild(query);
     final result = await _sendIqAndAwait(iqStanza);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -4927,7 +5019,8 @@ class XmppService extends ChangeNotifier {
     }
     final resultQuery = result.getChild('query');
     if (resultQuery == null ||
-        resultQuery.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/disco#items') {
+        resultQuery.getAttribute('xmlns')?.value !=
+            'http://jabber.org/protocol/disco#items') {
       return const [];
     }
     final items = <String>[];
@@ -4948,7 +5041,9 @@ class XmppService extends ChangeNotifier {
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(targetJid);
     final query = XmppElement()..name = 'query';
-    query.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#info'));
+    query.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/disco#info'),
+    );
     iqStanza.addChild(query);
     return _sendIqAndAwait(iqStanza);
   }
@@ -4962,11 +5057,13 @@ class XmppService extends ChangeNotifier {
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(uploadService);
-    iqStanza.addChild(buildHttpUploadRequest(
-      fileName: fileName,
-      size: size,
-      contentType: contentType,
-    ));
+    iqStanza.addChild(
+      buildHttpUploadRequest(
+        fileName: fileName,
+        size: size,
+        contentType: contentType,
+      ),
+    );
     final result = await _sendIqAndAwait(iqStanza);
     if (result == null) {
       return null;
@@ -4986,7 +5083,11 @@ class XmppService extends ChangeNotifier {
       headers['Content-Type'] = contentType;
     }
     try {
-      final response = await http.put(slot.putUrl, headers: headers, body: bytes);
+      final response = await http.put(
+        slot.putUrl,
+        headers: headers,
+        body: bytes,
+      );
       return response.statusCode >= 200 && response.statusCode < 300;
     } catch (_) {
       return false;
@@ -5034,14 +5135,10 @@ class XmppService extends ChangeNotifier {
     stanza.addChild(fallback);
     if (!isRoom) {
       final receiptRequest = XmppElement()..name = 'request';
-      receiptRequest.addAttribute(
-        XmppAttribute('xmlns', 'urn:xmpp:receipts'),
-      );
+      receiptRequest.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
       stanza.addChild(receiptRequest);
       final markable = XmppElement()..name = 'markable';
-      markable.addAttribute(
-        XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'),
-      );
+      markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
       stanza.addChild(markable);
     }
     return stanza;
@@ -5075,7 +5172,11 @@ class XmppService extends ChangeNotifier {
     return completer.future;
   }
 
-  String _buildOutgoingGroupStanzaXml(String roomJid, String messageId, String body) {
+  String _buildOutgoingGroupStanzaXml(
+    String roomJid,
+    String messageId,
+    String body,
+  ) {
     final stanza = MessageStanza(messageId, MessageStanzaType.GROUPCHAT);
     stanza.toJid = Jid.fromFullJid(roomJid);
     stanza.body = body;
@@ -5090,7 +5191,8 @@ class XmppService extends ChangeNotifier {
   }
 
   String _buildIncomingGroupFallbackXml(MucMessage message) {
-    final id = message.messageId ?? message.stanzaId ?? AbstractStanza.getRandomId();
+    final id =
+        message.messageId ?? message.stanzaId ?? AbstractStanza.getRandomId();
     final stanza = MessageStanza(id, MessageStanzaType.GROUPCHAT);
     stanza.fromJid = Jid.fromFullJid('${message.roomJid}/${message.nick}');
     stanza.body = message.body;
@@ -5102,7 +5204,8 @@ class XmppService extends ChangeNotifier {
       if (child.name == 'result') {
         return true;
       }
-      if (child.name == 'delay' && child.getAttribute('xmlns')?.value == 'urn:xmpp:delay') {
+      if (child.name == 'delay' &&
+          child.getAttribute('xmlns')?.value == 'urn:xmpp:delay') {
         return true;
       }
     }
@@ -5114,8 +5217,10 @@ class XmppService extends ChangeNotifier {
     if (connection == null) {
       return;
     }
-    final stanza =
-        MessageStanza(AbstractStanza.getRandomId(), MessageStanzaType.CHAT);
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.CHAT,
+    );
     stanza.toJid = Jid.fromFullJid(toBareJid);
     stanza.fromJid = connection.fullJid;
     final receipt = XmppElement()..name = 'received';
@@ -5130,8 +5235,10 @@ class XmppService extends ChangeNotifier {
     if (connection == null) {
       return;
     }
-    final stanza =
-        MessageStanza(AbstractStanza.getRandomId(), MessageStanzaType.CHAT);
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.CHAT,
+    );
     stanza.toJid = Jid.fromFullJid(toBareJid);
     stanza.fromJid = connection.fullJid;
     final marker = XmppElement()..name = name;
@@ -5179,9 +5286,12 @@ class XmppService extends ChangeNotifier {
       }
       final normalized = _bareJid(jid);
       final errorElement = stanza?.getChild('error');
-      final hasServerNotFound = errorElement?.children.any((child) =>
-              child.name == 'remote-server-not-found' ||
-              child.name == 'server-not-found') ??
+      final hasServerNotFound =
+          errorElement?.children.any(
+            (child) =>
+                child.name == 'remote-server-not-found' ||
+                child.name == 'server-not-found',
+          ) ??
           false;
       if (hasServerNotFound) {
         _serverNotFound.add(normalized);
@@ -5263,7 +5373,9 @@ class XmppService extends ChangeNotifier {
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(_currentUserBareJid!);
     final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
     final items = XmppElement()..name = 'items';
     items.addAttribute(XmppAttribute('node', 'urn:xmpp:mds:displayed:0'));
     pubsub.addChild(items);
@@ -5298,14 +5410,18 @@ class XmppService extends ChangeNotifier {
 
   void _handleDisplayedSyncEvent(MessageStanza stanza) {
     final event = stanza.children.firstWhere(
-      (child) => child.name == 'event' && child.getAttribute('xmlns')?.value == 'http://jabber.org/protocol/pubsub#event',
+      (child) =>
+          child.name == 'event' &&
+          child.getAttribute('xmlns')?.value ==
+              'http://jabber.org/protocol/pubsub#event',
       orElse: () => XmppElement(),
     );
     if (event.name != 'event') {
       return;
     }
     final items = event.getChild('items');
-    if (items == null || items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
+    if (items == null ||
+        items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
       return;
     }
     _applyDisplayedSyncItems(items);
@@ -5316,11 +5432,14 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final pubsub = stanza.getChild('pubsub');
-    if (pubsub == null || pubsub.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/pubsub') {
+    if (pubsub == null ||
+        pubsub.getAttribute('xmlns')?.value !=
+            'http://jabber.org/protocol/pubsub') {
       return;
     }
     final items = pubsub.getChild('items');
-    if (items == null || items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
+    if (items == null ||
+        items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
       return;
     }
     _applyDisplayedSyncItems(items);
@@ -5352,7 +5471,9 @@ class XmppService extends ChangeNotifier {
       }
     }
     if (updated) {
-      _storage?.storeDisplayedSync(Map<String, String>.from(_displayedStanzaIdByChat));
+      _storage?.storeDisplayedSync(
+        Map<String, String>.from(_displayedStanzaIdByChat),
+      );
       notifyListeners();
     }
   }
@@ -5383,7 +5504,8 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     _displayedAtByChat[normalized] = matched.timestamp;
-    final isRoom = _roomMessages.containsKey(normalized) || isBookmark(normalized);
+    final isRoom =
+        _roomMessages.containsKey(normalized) || isBookmark(normalized);
     _markMamCatchUpCompleted(normalized, isRoom: isRoom);
     return true;
   }
@@ -5530,10 +5652,16 @@ class XmppService extends ChangeNotifier {
       final items = await manager.getListByName(_blockListName);
       _blockedJids
         ..clear()
-        ..addAll(items
-            .where((item) => item.type == PrivacyType.JID && item.action == PrivacyAction.DENY)
-            .map((item) => item.value ?? '')
-            .where((jid) => jid.isNotEmpty));
+        ..addAll(
+          items
+              .where(
+                (item) =>
+                    item.type == PrivacyType.JID &&
+                    item.action == PrivacyAction.DENY,
+              )
+              .map((item) => item.value ?? '')
+              .where((jid) => jid.isNotEmpty),
+        );
       notifyListeners();
     } catch (_) {
       // Ignore privacy list failures.
@@ -5549,18 +5677,20 @@ class XmppService extends ChangeNotifier {
       final items = <PrivacyListItem>[];
       var order = 1;
       for (final jid in _blockedJids) {
-        items.add(PrivacyListItem(
-          type: PrivacyType.JID,
-          value: jid,
-          action: PrivacyAction.DENY,
-          order: order++,
-          controlStanzas: const [
-            PrivacyControlStanza.MESSAGE,
-            PrivacyControlStanza.IQ,
-            PrivacyControlStanza.PRESENCE_IN,
-            PrivacyControlStanza.PRESENCE_OUT,
-          ],
-        ));
+        items.add(
+          PrivacyListItem(
+            type: PrivacyType.JID,
+            value: jid,
+            action: PrivacyAction.DENY,
+            order: order++,
+            controlStanzas: const [
+              PrivacyControlStanza.MESSAGE,
+              PrivacyControlStanza.IQ,
+              PrivacyControlStanza.PRESENCE_IN,
+              PrivacyControlStanza.PRESENCE_OUT,
+            ],
+          ),
+        );
       }
       final list = PrivacyList(_blockListName, items);
       await manager.createPrivacyList(list);
@@ -5623,7 +5753,8 @@ class XmppService extends ChangeNotifier {
         if (id == null || !_pendingPings.containsKey(id)) {
           return;
         }
-        if (stanza.type == IqStanzaType.RESULT || stanza.type == IqStanzaType.ERROR) {
+        if (stanza.type == IqStanzaType.RESULT ||
+            stanza.type == IqStanzaType.ERROR) {
           final startedAt = _pendingPings.remove(id);
           final timer = _pingTimeoutTimers.remove(id);
           timer?.cancel();
@@ -5718,7 +5849,9 @@ class XmppService extends ChangeNotifier {
         }
         final outgoing = from == (_currentUserBareJid ?? '');
         final targetBare = outgoing ? to : from;
-        if (replaceId != null && replaceId.isNotEmpty && targetBare.isNotEmpty) {
+        if (replaceId != null &&
+            replaceId.isNotEmpty &&
+            targetBare.isNotEmpty) {
           final applied = _applyMessageCorrection(
             bareJid: targetBare,
             sender: from,
@@ -5749,8 +5882,9 @@ class XmppService extends ChangeNotifier {
         );
       }
     }
-    _chatMessageSubscriptions[buddyJid] =
-        chat.newMessageStream.listen((message) {
+    _chatMessageSubscriptions[buddyJid] = chat.newMessageStream.listen((
+      message,
+    ) {
       final from = message.from?.userAtDomain ?? 'unknown';
       final to = message.to?.userAtDomain ?? '';
       final body = message.text ?? '';
@@ -5810,8 +5944,7 @@ class XmppService extends ChangeNotifier {
     });
 
     _chatStateSubscriptions[buddyJid]?.cancel();
-    _chatStateSubscriptions[buddyJid] =
-        chat.remoteStateStream.listen((state) {
+    _chatStateSubscriptions[buddyJid] = chat.remoteStateStream.listen((state) {
       _chatStates[buddyJid] = state;
       notifyListeners();
     });
@@ -5839,24 +5972,39 @@ class XmppService extends ChangeNotifier {
 
     final list = _messages.putIfAbsent(normalized, () => <ChatMessage>[]);
     if (messageId != null && messageId.isNotEmpty) {
-      final existingIndex = list.indexWhere((message) =>
-          message.messageId == messageId && _bareJid(message.from) == _bareJid(from));
+      final existingIndex = list.indexWhere(
+        (message) =>
+            message.messageId == messageId &&
+            _bareJid(message.from) == _bareJid(from),
+      );
       if (existingIndex != -1) {
         final existing = list[existingIndex];
-        final nextMamId = (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId;
-        final nextStanzaId =
-            (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId;
-        final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
+        final nextMamId = (mamId != null && mamId.isNotEmpty)
+            ? mamId
+            : existing.mamId;
+        final nextStanzaId = (stanzaId != null && stanzaId.isNotEmpty)
+            ? stanzaId
+            : existing.stanzaId;
+        final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty)
+            ? oobUrl
+            : existing.oobUrl;
         final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
-        final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+        final nextOobDescription =
+            (oobDescription != null && oobDescription.isNotEmpty)
             ? oobDescription
             : existing.oobDescription;
         final nextInviteRoomJid =
-            (inviteRoomJid != null && inviteRoomJid.isNotEmpty) ? inviteRoomJid : existing.inviteRoomJid;
+            (inviteRoomJid != null && inviteRoomJid.isNotEmpty)
+            ? inviteRoomJid
+            : existing.inviteRoomJid;
         final nextInviteReason =
-            (inviteReason != null && inviteReason.isNotEmpty) ? inviteReason : existing.inviteReason;
+            (inviteReason != null && inviteReason.isNotEmpty)
+            ? inviteReason
+            : existing.inviteReason;
         final nextInvitePassword =
-            (invitePassword != null && invitePassword.isNotEmpty) ? invitePassword : existing.invitePassword;
+            (invitePassword != null && invitePassword.isNotEmpty)
+            ? invitePassword
+            : existing.invitePassword;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
@@ -5899,17 +6047,23 @@ class XmppService extends ChangeNotifier {
         return;
       }
     }
-    if (mamId != null && mamId.isNotEmpty && list.any((message) => message.mamId == mamId)) {
+    if (mamId != null &&
+        mamId.isNotEmpty &&
+        list.any((message) => message.mamId == mamId)) {
       return;
     }
     if (stanzaId != null &&
         stanzaId.isNotEmpty &&
-        list.any((message) =>
-            message.stanzaId == stanzaId && _bareJid(message.from) == _bareJid(from))) {
+        list.any(
+          (message) =>
+              message.stanzaId == stanzaId &&
+              _bareJid(message.from) == _bareJid(from),
+        )) {
       return;
     }
     final hasIncomingIds =
-        (mamId != null && mamId.isNotEmpty) || (stanzaId != null && stanzaId.isNotEmpty);
+        (mamId != null && mamId.isNotEmpty) ||
+        (stanzaId != null && stanzaId.isNotEmpty);
     if (hasIncomingIds) {
       final merged = _mergeMamIdsIntoExisting(
         list,
@@ -6002,19 +6156,31 @@ class XmppService extends ChangeNotifier {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
     if (messageId != null && messageId.isNotEmpty) {
-      final existingIndex = list.indexWhere((message) =>
-          message.messageId == messageId && _bareJid(message.from) == _bareJid(from));
+      final existingIndex = list.indexWhere(
+        (message) =>
+            message.messageId == messageId &&
+            _bareJid(message.from) == _bareJid(from),
+      );
       if (existingIndex != -1) {
         final existing = list[existingIndex];
-        final nextMamId = (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId;
-        final nextStanzaId =
-            (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId;
-        final nextReceiptReceived =
-            (!outgoing && existing.outgoing) ? true : existing.receiptReceived;
-        final nextTimestamp = (!outgoing && existing.outgoing) ? timestamp : existing.timestamp;
-        final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty) ? oobUrl : existing.oobUrl;
+        final nextMamId = (mamId != null && mamId.isNotEmpty)
+            ? mamId
+            : existing.mamId;
+        final nextStanzaId = (stanzaId != null && stanzaId.isNotEmpty)
+            ? stanzaId
+            : existing.stanzaId;
+        final nextReceiptReceived = (!outgoing && existing.outgoing)
+            ? true
+            : existing.receiptReceived;
+        final nextTimestamp = (!outgoing && existing.outgoing)
+            ? timestamp
+            : existing.timestamp;
+        final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty)
+            ? oobUrl
+            : existing.oobUrl;
         final nextRawXml = rawXml.isNotEmpty ? rawXml : existing.rawXml;
-        final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+        final nextOobDescription =
+            (oobDescription != null && oobDescription.isNotEmpty)
             ? oobDescription
             : existing.oobDescription;
         if (nextMamId != existing.mamId ||
@@ -6057,10 +6223,14 @@ class XmppService extends ChangeNotifier {
         return;
       }
     }
-    if (mamId != null && mamId.isNotEmpty && list.any((message) => message.mamId == mamId)) {
+    if (mamId != null &&
+        mamId.isNotEmpty &&
+        list.any((message) => message.mamId == mamId)) {
       return;
     }
-    if (stanzaId != null && stanzaId.isNotEmpty && list.any((message) => message.stanzaId == stanzaId)) {
+    if (stanzaId != null &&
+        stanzaId.isNotEmpty &&
+        list.any((message) => message.stanzaId == stanzaId)) {
       return;
     }
     final prependOffset = _mamPrependOffset[normalized];
@@ -6157,8 +6327,9 @@ class XmppService extends ChangeNotifier {
       list.add(message);
       return;
     }
-    final insertIndex = list.indexWhere((existing) =>
-        message.timestamp.isBefore(existing.timestamp));
+    final insertIndex = list.indexWhere(
+      (existing) => message.timestamp.isBefore(existing.timestamp),
+    );
     if (insertIndex == -1) {
       list.add(message);
     } else {
@@ -6516,7 +6687,9 @@ class XmppService extends ChangeNotifier {
     }
     for (var i = list.length - 1; i >= 0; i--) {
       final message = list[i];
-      if (message.outgoing || message.messageId == null || message.messageId!.isEmpty) {
+      if (message.outgoing ||
+          message.messageId == null ||
+          message.messageId!.isEmpty) {
         continue;
       }
       final lastSent = _lastDisplayedMarkerIdByChat[normalized];
@@ -6543,7 +6716,9 @@ class XmppService extends ChangeNotifier {
     }
     ChatMessage? latest;
     for (final message in list.reversed) {
-      if (!message.outgoing && message.stanzaId != null && message.stanzaId!.isNotEmpty) {
+      if (!message.outgoing &&
+          message.stanzaId != null &&
+          message.stanzaId!.isNotEmpty) {
         latest = message;
         break;
       }
@@ -6557,12 +6732,16 @@ class XmppService extends ChangeNotifier {
     }
     _displayedStanzaIdByChat[normalized] = stanzaId;
     _displayedAtByChat[normalized] = latest.timestamp;
-    _storage?.storeDisplayedSync(Map<String, String>.from(_displayedStanzaIdByChat));
+    _storage?.storeDisplayedSync(
+      Map<String, String>.from(_displayedStanzaIdByChat),
+    );
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.SET);
     iqStanza.toJid = Jid.fromFullJid(_currentUserBareJid!);
     final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
     final publish = XmppElement()..name = 'publish';
     publish.addAttribute(XmppAttribute('node', 'urn:xmpp:mds:displayed:0'));
     final item = XmppElement()..name = 'item';
@@ -6572,7 +6751,9 @@ class XmppService extends ChangeNotifier {
     final stanzaIdElement = XmppElement()..name = 'stanza-id';
     stanzaIdElement.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sid:0'));
     stanzaIdElement.addAttribute(XmppAttribute('id', stanzaId));
-    final byValue = isBookmark(normalized) ? normalized : (_currentUserBareJid ?? '');
+    final byValue = isBookmark(normalized)
+        ? normalized
+        : (_currentUserBareJid ?? '');
     if (byValue.isNotEmpty) {
       stanzaIdElement.addAttribute(XmppAttribute('by', byValue));
     }
@@ -6605,9 +6786,13 @@ class XmppService extends ChangeNotifier {
       if (messageId != null &&
           messageId.isNotEmpty &&
           existing.messageId == messageId &&
-          ((existing.mamId ?? '').isEmpty || (existing.stanzaId ?? '').isEmpty)) {
-        final nextRawXml = (rawXml != null && rawXml.isNotEmpty) ? rawXml : existing.rawXml;
-        final nextOobDescription = (oobDescription != null && oobDescription.isNotEmpty)
+          ((existing.mamId ?? '').isEmpty ||
+              (existing.stanzaId ?? '').isEmpty)) {
+        final nextRawXml = (rawXml != null && rawXml.isNotEmpty)
+            ? rawXml
+            : existing.rawXml;
+        final nextOobDescription =
+            (oobDescription != null && oobDescription.isNotEmpty)
             ? oobDescription
             : existing.oobDescription;
         list[i] = ChatMessage(
@@ -6618,7 +6803,9 @@ class XmppService extends ChangeNotifier {
           timestamp: existing.timestamp,
           messageId: existing.messageId,
           mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
-          stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
+          stanzaId: (stanzaId != null && stanzaId.isNotEmpty)
+              ? stanzaId
+              : existing.stanzaId,
           oobUrl: existing.oobUrl,
           oobDescription: nextOobDescription,
           rawXml: nextRawXml,
@@ -6648,7 +6835,8 @@ class XmppService extends ChangeNotifier {
       if (timeDelta > mergeWindow) {
         continue;
       }
-      if ((existing.mamId ?? '').isNotEmpty || (existing.stanzaId ?? '').isNotEmpty) {
+      if ((existing.mamId ?? '').isNotEmpty ||
+          (existing.stanzaId ?? '').isNotEmpty) {
         continue;
       }
       list[i] = ChatMessage(
@@ -6658,7 +6846,9 @@ class XmppService extends ChangeNotifier {
         outgoing: existing.outgoing,
         timestamp: existing.timestamp,
         mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
-        stanzaId: (stanzaId != null && stanzaId.isNotEmpty) ? stanzaId : existing.stanzaId,
+        stanzaId: (stanzaId != null && stanzaId.isNotEmpty)
+            ? stanzaId
+            : existing.stanzaId,
         oobUrl: existing.oobUrl,
         oobDescription: existing.oobDescription,
         rawXml: existing.rawXml,
@@ -6680,7 +6870,12 @@ class XmppService extends ChangeNotifier {
     return false;
   }
 
-  void _ensureContact(String bareJid, {String? name, List<String>? groups, String? subscriptionType}) {
+  void _ensureContact(
+    String bareJid, {
+    String? name,
+    List<String>? groups,
+    String? subscriptionType,
+  }) {
     final normalized = _bareJid(bareJid);
     if (isBookmark(normalized)) {
       return;
@@ -6702,9 +6897,14 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final existing = _contacts[index];
-    final nextName = (name != null && name.trim().isNotEmpty) ? name : existing.name;
-    final nextGroups = (groups != null && groups.isNotEmpty) ? groups : existing.groups;
-    final nextSubscription = (subscriptionType != null && subscriptionType.isNotEmpty)
+    final nextName = (name != null && name.trim().isNotEmpty)
+        ? name
+        : existing.name;
+    final nextGroups = (groups != null && groups.isNotEmpty)
+        ? groups
+        : existing.groups;
+    final nextSubscription =
+        (subscriptionType != null && subscriptionType.isNotEmpty)
         ? subscriptionType
         : existing.subscriptionType;
     if (nextName != existing.name ||
@@ -6751,7 +6951,8 @@ class XmppService extends ChangeNotifier {
       (entry) => entry.jid == roomJid,
       orElse: () => ContactEntry(jid: ''),
     );
-    if (bookmark.jid.isNotEmpty && bookmark.bookmarkPassword?.isNotEmpty == true) {
+    if (bookmark.jid.isNotEmpty &&
+        bookmark.bookmarkPassword?.isNotEmpty == true) {
       return bookmark.bookmarkPassword;
     }
     return null;
@@ -7147,7 +7348,9 @@ class XmppService extends ChangeNotifier {
     if (connection == null) {
       return;
     }
-    debugPrint('XMPP sending presence ${presence.showElement} ${presence.status ?? ''}');
+    debugPrint(
+      'XMPP sending presence ${presence.showElement} ${presence.status ?? ''}',
+    );
     final stanza = PresenceStanza();
     stanza.show = presence.showElement;
     stanza.status = presence.status;
@@ -7159,7 +7362,9 @@ class XmppService extends ChangeNotifier {
 
   XmppElement _buildCapsElement() {
     final caps = XmppElement()..name = 'c';
-    caps.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/caps'));
+    caps.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/caps'),
+    );
     caps.addAttribute(XmppAttribute('hash', _capsHash));
     caps.addAttribute(XmppAttribute('node', _capsNode));
     caps.addAttribute(XmppAttribute('ver', _capsVerValue()));
@@ -7212,23 +7417,23 @@ class XmppService extends ChangeNotifier {
       return cached;
     }
     final buffer = StringBuffer();
-    final identities = SERVICE_DISCOVERY_IDENTITIES.map((identity) {
-      return [
-        identity['category'] ?? '',
-        identity['type'] ?? '',
-        identity['lang'] ?? '',
-        identity['name'] ?? '',
-      ];
-    }).toList()
-      ..sort((a, b) {
-        for (var i = 0; i < 4; i += 1) {
-          final cmp = a[i].compareTo(b[i]);
-          if (cmp != 0) {
-            return cmp;
+    final identities =
+        SERVICE_DISCOVERY_IDENTITIES.map((identity) {
+          return [
+            identity['category'] ?? '',
+            identity['type'] ?? '',
+            identity['lang'] ?? '',
+            identity['name'] ?? '',
+          ];
+        }).toList()..sort((a, b) {
+          for (var i = 0; i < 4; i += 1) {
+            final cmp = a[i].compareTo(b[i]);
+            if (cmp != 0) {
+              return cmp;
+            }
           }
-        }
-        return 0;
-      });
+          return 0;
+        });
     for (final identity in identities) {
       buffer.write(identity[0]);
       buffer.write('/');
@@ -7318,7 +7523,9 @@ class XmppService extends ChangeNotifier {
     }
     final backoffSeconds = immediate
         ? 0
-        : (shortTimeout ? _shortReconnectBackoffSeconds() : _nextReconnectBackoffSeconds());
+        : (shortTimeout
+              ? _shortReconnectBackoffSeconds()
+              : _nextReconnectBackoffSeconds());
     if (!immediate && !shortTimeout) {
       _reconnectAttempt = (_reconnectAttempt + 1).clamp(0, 10);
     }
@@ -7391,11 +7598,7 @@ class XmppService extends ChangeNotifier {
     final normalized = _bareJid(roomJid);
     final existingMessages = _roomMessages[normalized];
     if (existingMessages == null || existingMessages.isEmpty) {
-      _requestRoomMam(
-        normalized,
-        max: 25,
-        before: '',
-      );
+      _requestRoomMam(normalized, max: 25, before: '');
       return;
     }
     _startMamCatchUp(normalized, isRoom: true);
@@ -7416,15 +7619,12 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final lastRequest = _mamBackfillAt[normalized];
-    if (lastRequest != null && DateTime.now().difference(lastRequest).inSeconds < 30) {
+    if (lastRequest != null &&
+        DateTime.now().difference(lastRequest).inSeconds < 30) {
       return;
     }
     _mamBackfillAt[normalized] = DateTime.now();
-    mam.queryById(
-      jid: Jid.fromFullJid(normalized),
-      max: 50,
-      before: '',
-    );
+    mam.queryById(jid: Jid.fromFullJid(normalized), max: 50, before: '');
   }
 
   void _startMamCatchUp(String bareJid, {required bool isRoom}) {
@@ -7442,7 +7642,9 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final normalized = _bareJid(bareJid);
-    final latest = isRoom ? _latestRoomMamIdFor(normalized) : latestMamIdFor(normalized);
+    final latest = isRoom
+        ? _latestRoomMamIdFor(normalized)
+        : latestMamIdFor(normalized);
     if (latest == null || latest.isEmpty) {
       if (isRoom) {
         _requestRoomMam(normalized, max: 25, before: '');
@@ -7453,7 +7655,8 @@ class XmppService extends ChangeNotifier {
     }
     final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
     final lastRequest = _mamCatchUpAt[scopeKey];
-    if (lastRequest != null && DateTime.now().difference(lastRequest).inSeconds < 5) {
+    if (lastRequest != null &&
+        DateTime.now().difference(lastRequest).inSeconds < 5) {
       return;
     }
     _mamCatchUpAt[scopeKey] = DateTime.now();
@@ -7479,16 +7682,14 @@ class XmppService extends ChangeNotifier {
           afterId: latest,
         );
       } else {
-        mam.queryById(
-          jid: Jid.fromFullJid(normalized),
-          max: 50,
-          after: latest,
-        );
+        mam.queryById(jid: Jid.fromFullJid(normalized), max: 50, after: latest);
       }
     }
     _mamCatchUpTimers[scopeKey]?.cancel();
     _mamCatchUpTimers[scopeKey] = Timer(const Duration(seconds: 2), () {
-      final nextLatest = isRoom ? _latestRoomMamIdFor(normalized) : latestMamIdFor(normalized);
+      final nextLatest = isRoom
+          ? _latestRoomMamIdFor(normalized)
+          : latestMamIdFor(normalized);
       if (nextLatest != null && nextLatest.isNotEmpty && nextLatest != latest) {
         _runMamCatchUpStep(normalized, isRoom: isRoom);
       } else {
@@ -7544,11 +7745,7 @@ class XmppService extends ChangeNotifier {
       final roomJid = _bareJid(bookmark.jid);
       final roomMessages = _roomMessages[roomJid];
       if (roomMessages == null || roomMessages.isEmpty) {
-        _requestRoomMam(
-          roomJid,
-          max: 25,
-          before: '',
-        );
+        _requestRoomMam(roomJid, max: 25, before: '');
       } else {
         _startMamCatchUp(roomJid, isRoom: true);
       }
@@ -7593,36 +7790,43 @@ class XmppService extends ChangeNotifier {
     }
     _vcardRequests.add(bareJid);
     final manager = VCardManager.getInstance(connection);
-    manager.getVCardFor(Jid.fromFullJid(bareJid)).then((vcard) async {
-      _vcardRequests.remove(bareJid);
-      if (vcard is InvalidVCard) {
-        _vcardUnavailable.add(bareJid);
-        return;
-      }
-      _vcardUnavailable.remove(bareJid);
-      _applyVcardToContact(bareJid, vcard, preferName: preferName);
-      final bytes = vcard.imageData;
-      if (bytes is List<int> && bytes.isNotEmpty) {
-        final data = base64Encode(bytes);
-        _vcardAvatarBytes[bareJid] = Uint8List.fromList(bytes);
-        storage.storeVcardAvatar(bareJid, data);
-        final hash = await vcardPhotoHash(Uint8List.fromList(bytes));
-        _vcardAvatarState[bareJid] = hash;
-        storage.storeVcardAvatarState(bareJid, hash);
-        notifyListeners();
-      } else {
-        _vcardAvatarBytes.remove(bareJid);
-        _vcardAvatarState[bareJid] = _vcardNoAvatar;
-        storage.storeVcardAvatarState(bareJid, _vcardNoAvatar);
-        storage.removeVcardAvatar(bareJid);
-        notifyListeners();
-      }
-    }).catchError((_) {
-      _vcardRequests.remove(bareJid);
-    });
+    manager
+        .getVCardFor(Jid.fromFullJid(bareJid))
+        .then((vcard) async {
+          _vcardRequests.remove(bareJid);
+          if (vcard is InvalidVCard) {
+            _vcardUnavailable.add(bareJid);
+            return;
+          }
+          _vcardUnavailable.remove(bareJid);
+          _applyVcardToContact(bareJid, vcard, preferName: preferName);
+          final bytes = vcard.imageData;
+          if (bytes is List<int> && bytes.isNotEmpty) {
+            final data = base64Encode(bytes);
+            _vcardAvatarBytes[bareJid] = Uint8List.fromList(bytes);
+            storage.storeVcardAvatar(bareJid, data);
+            final hash = await vcardPhotoHash(Uint8List.fromList(bytes));
+            _vcardAvatarState[bareJid] = hash;
+            storage.storeVcardAvatarState(bareJid, hash);
+            notifyListeners();
+          } else {
+            _vcardAvatarBytes.remove(bareJid);
+            _vcardAvatarState[bareJid] = _vcardNoAvatar;
+            storage.storeVcardAvatarState(bareJid, _vcardNoAvatar);
+            storage.removeVcardAvatar(bareJid);
+            notifyListeners();
+          }
+        })
+        .catchError((_) {
+          _vcardRequests.remove(bareJid);
+        });
   }
 
-  void _applyVcardToContact(String bareJid, VCard vcard, {required bool preferName}) {
+  void _applyVcardToContact(
+    String bareJid,
+    VCard vcard, {
+    required bool preferName,
+  }) {
     if (!preferName) {
       return;
     }
@@ -7757,7 +7961,8 @@ class XmppService extends ChangeNotifier {
     XmppElement? mucUser;
     for (final child in stanza.children) {
       if (child.name == 'x' &&
-          child.getAttribute('xmlns')?.value == 'http://jabber.org/protocol/muc#user') {
+          child.getAttribute('xmlns')?.value ==
+              'http://jabber.org/protocol/muc#user') {
         mucUser = child;
         break;
       }
@@ -7832,13 +8037,20 @@ class XmppService extends ChangeNotifier {
   }
 
   bool _isStreamManagementEnabled() {
-    return _connection?.streamManagementModule?.streamState.streamManagementEnabled == true;
+    return _connection
+            ?.streamManagementModule
+            ?.streamState
+            .streamManagementEnabled ==
+        true;
   }
 
   void _scheduleSmAckTimeout({required bool shortTimeout}) {
     _smAckTimeoutTimer?.cancel();
     final timeout = _smAckTimeout(shortTimeout: shortTimeout);
-    _smAckTimeoutTimer = Timer(timeout, () => _handleSmAckTimeout(shortTimeout: shortTimeout));
+    _smAckTimeoutTimer = Timer(
+      timeout,
+      () => _handleSmAckTimeout(shortTimeout: shortTimeout),
+    );
   }
 
   void _handleSmAckTimeout({required bool shortTimeout}) {
@@ -7889,7 +8101,6 @@ class XmppService extends ChangeNotifier {
     final iq = buildMucDefaultConfigIq(roomJid);
     connection.writeStanza(iq);
   }
-
 
   Duration _smAckTimeout({required bool shortTimeout}) {
     final base = _lastPingLatency ?? Duration.zero;
@@ -7990,113 +8201,6 @@ class _FileTransferSession {
   int bytesTransferred = 0;
   String? savePath;
   IOSink? sink;
-}
-
-class ReactionUpdate {
-  ReactionUpdate(this.targetId, this.reactions);
-
-  final String targetId;
-  final List<String> reactions;
-}
-
-class MessageScopedId {
-  const MessageScopedId({required this.scopeJid, required this.id});
-
-  final String scopeJid;
-  final String id;
-}
-
-abstract class MessageIntent {
-  const MessageIntent();
-}
-
-class HandleJmiIntent extends MessageIntent {
-  const HandleJmiIntent({required this.action});
-
-  final JmiAction action;
-}
-
-class ApplyReceiptIntent extends MessageIntent {
-  const ApplyReceiptIntent({required this.scopedId});
-
-  final MessageScopedId scopedId;
-}
-
-class ApplyDisplayedIntent extends MessageIntent {
-  const ApplyDisplayedIntent({required this.scopedId});
-
-  final MessageScopedId scopedId;
-}
-
-class ApplyReactionIntent extends MessageIntent {
-  const ApplyReactionIntent({
-    required this.targetBareJid,
-    required this.senderBareJid,
-    required this.update,
-  });
-
-  final String targetBareJid;
-  final String senderBareJid;
-  final ReactionUpdate update;
-}
-
-class SendReceiptIntent extends MessageIntent {
-  const SendReceiptIntent({
-    required this.toBareJid,
-    required this.scopedId,
-  });
-
-  final String toBareJid;
-  final MessageScopedId scopedId;
-}
-
-class SendMarkerIntent extends MessageIntent {
-  const SendMarkerIntent({
-    required this.toBareJid,
-    required this.scopedId,
-    required this.name,
-  });
-
-  final String toBareJid;
-  final MessageScopedId scopedId;
-  final String name;
-}
-
-class AddMessageIntent extends MessageIntent {
-  const AddMessageIntent({
-    required this.bareJid,
-    required this.from,
-    required this.to,
-    required this.body,
-    required this.timestamp,
-    required this.messageId,
-    required this.rawXml,
-    this.oobUrl,
-    this.oobDescription,
-  });
-
-  final String bareJid;
-  final String from;
-  final String to;
-  final String body;
-  final DateTime timestamp;
-  final String messageId;
-  final String rawXml;
-  final String? oobUrl;
-  final String? oobDescription;
-}
-
-class UnhandledMessageIntent extends MessageIntent {
-  const UnhandledMessageIntent({required this.reason});
-
-  final String reason;
-}
-
-class _OobInfo {
-  _OobInfo({required this.url, this.description});
-
-  final String url;
-  final String? description;
 }
 
 class _CallStatsTracker {
