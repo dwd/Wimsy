@@ -24,6 +24,7 @@ import 'extdisco.dart';
 import 'jmi.dart';
 import 'blocking.dart';
 import 'http_upload.dart';
+import 'jingle_grouping.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
@@ -2322,7 +2323,11 @@ class XmppService extends ChangeNotifier {
         .where((content) => content.rtpDescription != null)
         .toList(growable: false);
     if (rtpContents.isNotEmpty) {
-      final bundleGroup = _extractBundleGroupNames(event.stanza);
+      final bundleGroup = extractBundleGroupNames(
+        event.stanza,
+        groupingNamespace: _jingleGroupingNamespace,
+        groupingBundle: _jingleGroupingBundle,
+      );
       if (bundleGroup.isNotEmpty) {
         _callRemoteBundleBySid[event.sid] = true;
         _callLocalBundleBySid[event.sid] = true;
@@ -2392,7 +2397,11 @@ class XmppService extends ChangeNotifier {
     final callSession = _callSessions[event.sid];
     if (callSession != null &&
         callSession.direction == CallDirection.outgoing) {
-      final bundleGroup = _extractBundleGroupNames(event.stanza);
+      final bundleGroup = extractBundleGroupNames(
+        event.stanza,
+        groupingNamespace: _jingleGroupingNamespace,
+        groupingBundle: _jingleGroupingBundle,
+      );
       if (bundleGroup.isNotEmpty) {
         _callRemoteBundleBySid[event.sid] = true;
         _callBundleTransportNameBySid.putIfAbsent(
@@ -2495,7 +2504,7 @@ class XmppService extends ChangeNotifier {
     );
     _callSessions[event.sid] = session;
     _callSessionByPeerKey[_callPeerKeyForJid(peerJid)] = event.sid;
-    _callContentNamesBySid[event.sid] = _contentNamesFor(contents);
+    _callContentNamesBySid[event.sid] = contentNamesFor(contents);
     _callMutedBySid[event.sid] = false;
     _callVideoEnabledBySid[event.sid] = session.video;
     _startCallTimeout(
@@ -2529,23 +2538,8 @@ class XmppService extends ChangeNotifier {
         ? CallMediaKind.video
         : CallMediaKind.audio;
     _callVideoEnabledBySid[sid] = nextVideo;
-    _callContentNamesBySid[sid] = _contentNamesFor(contents);
+    _callContentNamesBySid[sid] = contentNamesFor(contents);
     notifyListeners();
-  }
-
-  List<String> _contentNamesFor(List<JingleContent> contents) {
-    final names = <String>[];
-    for (final content in contents) {
-      final description = content.rtpDescription;
-      if (description == null) {
-        continue;
-      }
-      final name = content.name.isEmpty ? description.media : content.name;
-      if (name.isNotEmpty && !names.contains(name)) {
-        names.add(name);
-      }
-    }
-    return names;
   }
 
   bool _shouldBundleForPeer(String bareJid) {
@@ -2562,120 +2556,6 @@ class XmppService extends ChangeNotifier {
       return true;
     }
     return features.contains(_jingleGroupingNamespace);
-  }
-
-  List<String> _extractBundleGroupNames(IqStanza stanza) {
-    final jingle = stanza.getChild('jingle');
-    if (jingle == null) {
-      return const [];
-    }
-    for (final child in jingle.children) {
-      if (child.name != 'group') {
-        continue;
-      }
-      if (child.getAttribute('xmlns')?.value != _jingleGroupingNamespace) {
-        continue;
-      }
-      final semantics = child.getAttribute('semantics')?.value ?? '';
-      if (semantics != _jingleGroupingBundle) {
-        continue;
-      }
-      final names = <String>[];
-      for (final content in child.children) {
-        if (content.name != 'content') {
-          continue;
-        }
-        final name = content.getAttribute('name')?.value ?? '';
-        if (name.isNotEmpty && !names.contains(name)) {
-          names.add(name);
-        }
-      }
-      return names;
-    }
-    return const [];
-  }
-
-  List<String> _bundleGroupNamesForContents(List<JingleContent> contents) {
-    String? audioName;
-    String? videoName;
-    final extras = <String>[];
-    for (final content in contents) {
-      final description = content.rtpDescription;
-      if (description == null) {
-        continue;
-      }
-      final name = content.name.isEmpty ? description.media : content.name;
-      if (name.isEmpty) {
-        continue;
-      }
-      final media = description.media.toLowerCase();
-      if (media == 'audio') {
-        audioName ??= name;
-        continue;
-      }
-      if (media == 'video') {
-        videoName ??= name;
-        continue;
-      }
-      if (!extras.contains(name)) {
-        extras.add(name);
-      }
-    }
-    final names = <String>[];
-    if (audioName != null) {
-      names.add(audioName);
-    }
-    if (videoName != null) {
-      names.add(videoName);
-    }
-    names.addAll(extras);
-    return names;
-  }
-
-  String? _bundleTransportNameForMappings(List<JingleSdpMapping> mappings) {
-    for (final mapping in mappings) {
-      if (mapping.description.media.toLowerCase() == 'audio' &&
-          mapping.contentName.isNotEmpty) {
-        return mapping.contentName;
-      }
-    }
-    for (final mapping in mappings) {
-      if (mapping.contentName.isNotEmpty) {
-        return mapping.contentName;
-      }
-    }
-    return null;
-  }
-
-  void _attachBundleGroup(IqStanza stanza, List<String> names) {
-    if (names.length < 2) {
-      return;
-    }
-    final jingle = stanza.getChild('jingle');
-    if (jingle == null) {
-      return;
-    }
-    for (final child in jingle.children) {
-      if (child.name == 'group' &&
-          child.getAttribute('xmlns')?.value == _jingleGroupingNamespace) {
-        return;
-      }
-    }
-    final group = XmppElement()..name = 'group';
-    group.addAttribute(XmppAttribute('xmlns', _jingleGroupingNamespace));
-    group.addAttribute(XmppAttribute('semantics', _jingleGroupingBundle));
-    for (final name in names) {
-      if (name.isEmpty) {
-        continue;
-      }
-      final content = XmppElement()..name = 'content';
-      content.addAttribute(XmppAttribute('name', name));
-      group.addChild(content);
-    }
-    if (group.children.isEmpty) {
-      return;
-    }
-    jingle.addChild(group);
   }
 
   void _storeRemoteCallContents(String sid, List<JingleContent> contents) {
@@ -2695,7 +2575,7 @@ class XmppService extends ChangeNotifier {
     }
     if (descriptions.isNotEmpty) {
       _callRemoteDescriptionsBySid[sid] = descriptions;
-      _callContentNamesBySid[sid] = _contentNamesFor(contents);
+      _callContentNamesBySid[sid] = contentNamesFor(contents);
     }
     if (transports.isNotEmpty) {
       _callRemoteTransportsBySid[sid] = transports;
@@ -2775,7 +2655,7 @@ class XmppService extends ChangeNotifier {
         .map((mapping) => mapping.contentName)
         .toList(growable: false);
     if (bundle) {
-      final bundleName = _bundleTransportNameForMappings(mappings);
+      final bundleName = bundleTransportNameForMappings(mappings);
       if (bundleName != null && bundleName.isNotEmpty) {
         _callBundleTransportNameBySid[sid] = bundleName;
       }
@@ -2889,7 +2769,7 @@ class XmppService extends ChangeNotifier {
         .map((mapping) => mapping.contentName)
         .toList(growable: false);
     if (bundle && !_callBundleTransportNameBySid.containsKey(session.sid)) {
-      final bundleName = _bundleTransportNameForMappings(mappings);
+      final bundleName = bundleTransportNameForMappings(mappings);
       if (bundleName != null && bundleName.isNotEmpty) {
         _callBundleTransportNameBySid[session.sid] = bundleName;
       }
@@ -2911,7 +2791,12 @@ class XmppService extends ChangeNotifier {
       contents: localContents,
     );
     if (bundle) {
-      _attachBundleGroup(iq, _bundleGroupNamesForContents(localContents));
+      attachBundleGroup(
+        iq,
+        bundleGroupNamesForContents(localContents),
+        groupingNamespace: _jingleGroupingNamespace,
+        groupingBundle: _jingleGroupingBundle,
+      );
     }
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -3693,7 +3578,12 @@ class XmppService extends ChangeNotifier {
       contents: filteredContents,
     );
     if (_callLocalBundleBySid[sid] == true) {
-      _attachBundleGroup(iq, _bundleGroupNamesForContents(filteredContents));
+      attachBundleGroup(
+        iq,
+        bundleGroupNamesForContents(filteredContents),
+        groupingNamespace: _jingleGroupingNamespace,
+        groupingBundle: _jingleGroupingBundle,
+      );
     }
     _jingleInitiatedTargets[sid] = toJid.fullJid ?? toJid.userAtDomain;
     _flushPendingIceCandidates(sid);
