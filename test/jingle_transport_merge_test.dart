@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:wimsy/xmpp/xmpp_service.dart';
+import 'package:wimsy/xmpp/call_ice.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 void main() {
@@ -43,7 +43,7 @@ void main() {
       ],
     );
 
-    final merged = XmppService.mergeIceTransports(existing, update);
+    final merged = mergeIceTransports(existing, update);
 
     expect(merged.ufrag, 'oldUfrag');
     expect(merged.password, 'oldPwd');
@@ -74,11 +74,39 @@ void main() {
       type: 'host',
     );
 
-    final transport = XmppService.transportInfoTransport(base, candidate);
+    final transport = transportInfoTransport(base, candidate);
 
     expect(transport.ufrag, 'uf');
     expect(transport.password, 'pw');
     expect(transport.fingerprint, isNull);
     expect(transport.candidates, [candidate]);
+  });
+
+  test(
+    'parseIceCandidate parses candidate line and buildCandidateLine round-trips',
+    () {
+      const line =
+          'candidate:1 1 udp 2122260223 192.168.1.10 54545 typ host generation 0';
+
+      final parsed = parseIceCandidate(line);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.foundation, '1');
+      expect(parsed.component, 1);
+      expect(parsed.protocol, 'udp');
+      expect(parsed.priority, 2122260223);
+      expect(parsed.ip, '192.168.1.10');
+      expect(parsed.port, 54545);
+      expect(parsed.type, 'host');
+      expect(
+        buildCandidateLine(parsed),
+        'candidate:1 1 udp 2122260223 192.168.1.10 54545 typ host',
+      );
+    },
+  );
+
+  test('parseIceCandidate returns null for malformed input', () {
+    expect(parseIceCandidate('candidate:bad line'), isNull);
+    expect(parseIceCandidate(null), isNull);
   });
 }
