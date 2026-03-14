@@ -27,6 +27,7 @@ import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
 import 'message_intent_builder.dart';
+import 'message_stanza_parser.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
@@ -59,20 +60,22 @@ class _ReconnectConfig {
 enum XmppStatus { disconnected, connecting, connected, error }
 
 class XmppService extends ChangeNotifier {
+  final MessageStanzaParser _messageStanzaParser = const MessageStanzaParser();
+
   XmppService() {
     _messageIntentBuilder = MessageIntentBuilder(
       currentUserBareJid: () => _currentUserBareJid,
       activeChatBareJid: () => _activeChatBareJid,
       parseJmiAction: parseJmiAction,
-      extractReceiptsId: _extractReceiptsId,
-      extractMarkerId: _extractMarkerId,
-      extractReactionUpdate: _extractReactionUpdate,
+      extractReceiptsId: _messageStanzaParser.extractReceiptsId,
+      extractMarkerId: _messageStanzaParser.extractMarkerId,
+      extractReactionUpdate: _messageStanzaParser.extractReactionUpdate,
       reactionChatTarget: _reactionChatTarget,
-      extractOobInfoFromStanza: _extractOobInfoFromStanza,
+      extractOobInfoFromStanza: _messageStanzaParser.extractOobInfo,
       isArchivedStanza: _isArchivedStanza,
       bareJid: _bareJid,
-      hasReceiptRequest: _hasReceiptRequest,
-      hasMarkable: _hasMarkable,
+      hasReceiptRequest: _messageStanzaParser.hasReceiptRequest,
+      hasMarkable: _messageStanzaParser.hasMarkable,
       serializeStanza: _serializeStanza,
       now: DateTime.now,
     );
@@ -4520,162 +4523,6 @@ class XmppService extends ChangeNotifier {
     joinRoom(entry.roomJid, nick: entry.nick);
   }
 
-  bool _hasReceiptRequest(MessageStanza stanza) {
-    return _hasChildWithXmlns(stanza, 'request', 'urn:xmpp:receipts');
-  }
-
-  bool _hasMarkable(MessageStanza stanza) {
-    return _hasChildWithXmlns(stanza, 'markable', 'urn:xmpp:chat-markers:0');
-  }
-
-  String? _extractReceiptsId(MessageStanza stanza) {
-    final element = _findChildWithXmlns(
-      stanza,
-      'received',
-      'urn:xmpp:receipts',
-    );
-    return element?.getAttribute('id')?.value;
-  }
-
-  String? _extractMarkerId(MessageStanza stanza, String name) {
-    final element = _findChildWithXmlns(
-      stanza,
-      name,
-      'urn:xmpp:chat-markers:0',
-    );
-    return element?.getAttribute('id')?.value;
-  }
-
-  bool _hasChildWithXmlns(XmppElement stanza, String name, String xmlns) {
-    return _findChildWithXmlns(stanza, name, xmlns) != null;
-  }
-
-  XmppElement? _findChildWithXmlns(
-    XmppElement stanza,
-    String name,
-    String xmlns,
-  ) {
-    for (final child in stanza.children) {
-      if (child.name == name && child.getAttribute('xmlns')?.value == xmlns) {
-        return child;
-      }
-    }
-    return null;
-  }
-
-  OobInfo? _extractOobInfoFromStanza(XmppElement stanza) {
-    final candidates = <XmppElement>[stanza];
-    for (final child in stanza.children) {
-      if (child.name != 'result' &&
-          child.name != 'sent' &&
-          child.name != 'received') {
-        continue;
-      }
-      final forwarded = child.getChild('forwarded');
-      final message = forwarded?.getChild('message');
-      if (message != null) {
-        candidates.add(message);
-      }
-    }
-    final directForwarded = stanza.getChild('forwarded');
-    final forwardedMessage = directForwarded?.getChild('message');
-    if (forwardedMessage != null) {
-      candidates.add(forwardedMessage);
-    }
-    for (final candidate in candidates) {
-      for (final child in candidate.children) {
-        if (child.name != 'x') {
-          continue;
-        }
-        if (child.getAttribute('xmlns')?.value != 'jabber:x:oob') {
-          continue;
-        }
-        final url = child.getChild('url')?.textValue?.trim();
-        if (url == null || url.isEmpty) {
-          continue;
-        }
-        final description = child.getChild('desc')?.textValue?.trim();
-        return OobInfo(url: url, description: description);
-      }
-    }
-    return null;
-  }
-
-  ReactionUpdate? _extractReactionUpdate(XmppElement stanza) {
-    final candidates = <XmppElement>[stanza];
-    for (final child in stanza.children) {
-      if (child.name != 'result' &&
-          child.name != 'sent' &&
-          child.name != 'received') {
-        continue;
-      }
-      final forwarded = child.getChild('forwarded');
-      final message = forwarded?.getChild('message');
-      if (message != null) {
-        candidates.add(message);
-      }
-    }
-    final directForwarded = stanza.getChild('forwarded');
-    final forwardedMessage = directForwarded?.getChild('message');
-    if (forwardedMessage != null) {
-      candidates.add(forwardedMessage);
-    }
-    for (final candidate in candidates) {
-      for (final child in candidate.children) {
-        if (child.name != 'reactions' ||
-            child.getAttribute('xmlns')?.value != 'urn:xmpp:reactions:0') {
-          continue;
-        }
-        final targetId = child.getAttribute('id')?.value ?? '';
-        if (targetId.isEmpty) {
-          return null;
-        }
-        final reactions = child.children
-            .where((reaction) => reaction.name == 'reaction')
-            .map((reaction) => reaction.textValue?.trim() ?? '')
-            .where((value) => value.isNotEmpty)
-            .toList();
-        return ReactionUpdate(targetId, reactions);
-      }
-    }
-    return null;
-  }
-
-  String? _extractReplaceIdFromStanza(XmppElement stanza) {
-    final candidates = <XmppElement>[stanza];
-    for (final child in stanza.children) {
-      if (child.name != 'result' &&
-          child.name != 'sent' &&
-          child.name != 'received') {
-        continue;
-      }
-      final forwarded = child.getChild('forwarded');
-      final message = forwarded?.getChild('message');
-      if (message != null) {
-        candidates.add(message);
-      }
-    }
-    final directForwarded = stanza.getChild('forwarded');
-    final forwardedMessage = directForwarded?.getChild('message');
-    if (forwardedMessage != null) {
-      candidates.add(forwardedMessage);
-    }
-    for (final candidate in candidates) {
-      for (final child in candidate.children) {
-        if (child.name != 'replace' ||
-            child.getAttribute('xmlns')?.value !=
-                'urn:xmpp:message-correct:0') {
-          continue;
-        }
-        final id = child.getAttribute('id')?.value;
-        if (id != null && id.isNotEmpty) {
-          return id;
-        }
-      }
-    }
-    return null;
-  }
-
   String _reactionChatTarget(String fromBare, String toBare) {
     final selfBare = _currentUserBareJid;
     if (selfBare != null && _bareJid(fromBare) == selfBare) {
@@ -5831,12 +5678,18 @@ class XmppService extends ChangeNotifier {
         final from = message.from?.userAtDomain ?? 'unknown';
         final to = message.to?.userAtDomain ?? '';
         final body = message.text ?? '';
-        final oobInfo = _extractOobInfoFromStanza(message.messageStanza);
+        final oobInfo = _messageStanzaParser.extractOobInfo(
+          message.messageStanza,
+        );
         final oobUrl = oobInfo?.url;
         final oobDescription = oobInfo?.description;
         final rawXml = _serializeStanza(message.messageStanza);
-        final replaceId = _extractReplaceIdFromStanza(message.messageStanza);
-        final reaction = _extractReactionUpdate(message.messageStanza);
+        final replaceId = _messageStanzaParser.extractReplaceId(
+          message.messageStanza,
+        );
+        final reaction = _messageStanzaParser.extractReactionUpdate(
+          message.messageStanza,
+        );
         if (reaction != null) {
           final targetBare = _reactionChatTarget(from, to);
           if (targetBare.isNotEmpty) {
@@ -5888,12 +5741,18 @@ class XmppService extends ChangeNotifier {
       final from = message.from?.userAtDomain ?? 'unknown';
       final to = message.to?.userAtDomain ?? '';
       final body = message.text ?? '';
-      final oobInfo = _extractOobInfoFromStanza(message.messageStanza);
+      final oobInfo = _messageStanzaParser.extractOobInfo(
+        message.messageStanza,
+      );
       final oobUrl = oobInfo?.url;
       final oobDescription = oobInfo?.description;
       final rawXml = _serializeStanza(message.messageStanza);
-      final replaceId = _extractReplaceIdFromStanza(message.messageStanza);
-      final reaction = _extractReactionUpdate(message.messageStanza);
+      final replaceId = _messageStanzaParser.extractReplaceId(
+        message.messageStanza,
+      );
+      final reaction = _messageStanzaParser.extractReactionUpdate(
+        message.messageStanza,
+      );
       final invite = parseMucDirectInvite(message.messageStanza);
       final outgoing = from == (_currentUserBareJid ?? '');
       final targetBare = outgoing ? to : from;
