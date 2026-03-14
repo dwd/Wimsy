@@ -25,6 +25,7 @@ import 'jmi.dart';
 import 'blocking.dart';
 import 'http_upload.dart';
 import 'jingle_grouping.dart';
+import 'mam_cursor.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
@@ -492,17 +493,7 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    ChatMessage? oldest;
-    for (final message in messages) {
-      final mamId = message.mamId;
-      if (mamId == null || mamId.isEmpty) {
-        continue;
-      }
-      if (oldest == null || message.timestamp.isBefore(oldest.timestamp)) {
-        oldest = message;
-      }
-    }
-    return oldest?.mamId;
+    return oldestMamIdByTimestamp(messages);
   }
 
   String? _oldestRoomMamIdFor(String roomJid) {
@@ -510,17 +501,7 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    ChatMessage? oldest;
-    for (final message in messages) {
-      final mamId = message.mamId;
-      if (mamId == null || mamId.isEmpty) {
-        continue;
-      }
-      if (oldest == null || message.timestamp.isBefore(oldest.timestamp)) {
-        oldest = message;
-      }
-    }
-    return oldest?.mamId;
+    return oldestMamIdByTimestamp(messages);
   }
 
   String? latestMamIdFor(String bareJid) {
@@ -528,17 +509,7 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    ChatMessage? latest;
-    for (final message in messages) {
-      final mamId = message.mamId;
-      if (mamId == null || mamId.isEmpty) {
-        continue;
-      }
-      if (latest == null || message.timestamp.isAfter(latest.timestamp)) {
-        latest = message;
-      }
-    }
-    return latest?.mamId;
+    return latestMamIdByTimestamp(messages);
   }
 
   String? _latestRoomMamIdFor(String roomJid) {
@@ -546,17 +517,7 @@ class XmppService extends ChangeNotifier {
     if (messages == null || messages.isEmpty) {
       return null;
     }
-    ChatMessage? latest;
-    for (final message in messages) {
-      final mamId = message.mamId;
-      if (mamId == null || mamId.isEmpty) {
-        continue;
-      }
-      if (latest == null || message.timestamp.isAfter(latest.timestamp)) {
-        latest = message;
-      }
-    }
-    return latest?.mamId;
+    return latestMamIdByTimestamp(messages);
   }
 
   PresenceData? presenceFor(String bareJid) {
