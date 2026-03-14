@@ -1,4 +1,7 @@
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
+
+import '../av/call_session.dart';
 
 JingleIceTransport mergeIceTransports(
   JingleIceTransport existing,
@@ -98,4 +101,24 @@ JingleIceTransport transportInfoTransport(
     // Some clients treat fingerprints in transport-info as a change.
     fingerprint: null,
   );
+}
+
+String resolveCandidateContentName({
+  required RTCIceCandidate candidate,
+  required List<String>? contentNames,
+  required CallMediaKind defaultKind,
+}) {
+  final byMid = candidate.sdpMid;
+  if (byMid != null && byMid.isNotEmpty) {
+    return byMid;
+  }
+  final index = candidate.sdpMLineIndex;
+  if (index != null &&
+      contentNames != null &&
+      index >= 0 &&
+      index < contentNames.length) {
+    return contentNames[index];
+  }
+  return contentNames?.first ??
+      (defaultKind == CallMediaKind.video ? 'video' : 'audio');
 }

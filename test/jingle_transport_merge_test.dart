@@ -1,4 +1,6 @@
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wimsy/av/call_session.dart';
 import 'package:wimsy/xmpp/call_ice.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
@@ -109,4 +111,30 @@ void main() {
     expect(parseIceCandidate('candidate:bad line'), isNull);
     expect(parseIceCandidate(null), isNull);
   });
+
+  test(
+    'resolveCandidateContentName prefers sdpMid then index then fallback',
+    () {
+      final byMid = resolveCandidateContentName(
+        candidate: RTCIceCandidate('candidate:x', 'video0', 1),
+        contentNames: const ['audio0', 'video0'],
+        defaultKind: CallMediaKind.audio,
+      );
+      expect(byMid, 'video0');
+
+      final byIndex = resolveCandidateContentName(
+        candidate: RTCIceCandidate('candidate:y', null, 1),
+        contentNames: const ['audio0', 'video0'],
+        defaultKind: CallMediaKind.audio,
+      );
+      expect(byIndex, 'video0');
+
+      final fallback = resolveCandidateContentName(
+        candidate: RTCIceCandidate('candidate:z', null, null),
+        contentNames: null,
+        defaultKind: CallMediaKind.video,
+      );
+      expect(fallback, 'video');
+    },
+  );
 }

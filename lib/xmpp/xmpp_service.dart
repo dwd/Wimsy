@@ -3793,7 +3793,11 @@ class XmppService extends ChangeNotifier {
         : null;
     final contentName =
         bundleContent ??
-        (_candidateContentName(sid, candidate, defaultKind) ?? '');
+        resolveCandidateContentName(
+          candidate: candidate,
+          contentNames: _callContentNamesBySid[sid],
+          defaultKind: defaultKind,
+        );
     Log.d(
       'XmppService',
       'Call $sid send ICE candidate ${parsed.type} ${parsed.protocol} '
@@ -3820,24 +3824,6 @@ class XmppService extends ChangeNotifier {
       transport: transportInfo,
     );
     unawaited(_sendIqAndAwait(info));
-  }
-
-  String? _candidateContentName(
-    String sid,
-    RTCIceCandidate candidate,
-    CallMediaKind defaultKind,
-  ) {
-    final byMid = candidate.sdpMid;
-    if (byMid != null && byMid.isNotEmpty) {
-      return byMid;
-    }
-    final index = candidate.sdpMLineIndex;
-    final names = _callContentNamesBySid[sid];
-    if (index != null && names != null && index >= 0 && index < names.length) {
-      return names[index];
-    }
-    return _callContentNamesBySid[sid]?.first ??
-        (defaultKind == CallMediaKind.video ? 'video' : 'audio');
   }
 
   void _storeCallPeerFullJid(String sid, Jid jid) {
