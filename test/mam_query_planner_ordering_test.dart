@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wimsy/xmpp/mam_query_planner.dart';
 
 void main() {
-  test('seeded older query includes before-id and RSM before empty cursor', () {
+  test('seeded older query includes before-id and matching RSM before', () {
     final plan = MamQueryPlanner.older(
       isRoom: false,
       seeded: true,
@@ -11,7 +11,7 @@ void main() {
 
     expect(plan, isNotNull);
     expect(plan!.beforeId, 'm-older');
-    expect(plan.before, '');
+    expect(plan.before, 'm-older');
   });
 
   test('unseeded older query keeps explicit before anchor', () {
