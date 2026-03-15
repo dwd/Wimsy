@@ -26,6 +26,7 @@ import 'blocking.dart';
 import 'http_upload.dart';
 import 'jingle_grouping.dart';
 import 'mam_cursor.dart';
+import 'mam_coordinator.dart';
 import 'mam_cursor_store.dart';
 import 'mam_merge_engine.dart';
 import 'mam_query_planner.dart';
@@ -86,9 +87,14 @@ class XmppService extends ChangeNotifier {
       serializeStanza: _serializeStanza,
       now: DateTime.now,
     );
+    _mamCoordinator = MamCoordinator(
+      cursorStore: _mamCursorStore,
+      adapter: CallbackMamQueryAdapter(_dispatchMamPlan),
+    );
   }
 
   late final MessageIntentBuilder _messageIntentBuilder;
+  late final MamCoordinator _mamCoordinator;
   Connection? _connection;
   ChatManager? _chatManager;
   StreamSubscription<XmppConnectionState>? _connectionStateSubscription;
@@ -980,52 +986,16 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final normalized = _bareJid(bareJid);
-    if (_mamCursorStore.shouldThrottlePageRequest(normalized)) {
-      return;
-    }
-    _mamCursorStore.markPageRequest(normalized);
-    if (isBookmark(normalized)) {
-      final plan = MamQueryPlanner.older(
-        isRoom: true,
-        seeded: _seededRoomMessageJids.contains(normalized),
-        oldestMamId: _oldestRoomMamIdFor(normalized),
-      );
-      if (plan == null) {
-        final initial = MamQueryPlanner.initial(isRoom: true);
-        _requestRoomMam(
-          normalized,
-          max: initial.max,
-          before: initial.before,
-          after: initial.after,
-          beforeId: initial.beforeId,
-          afterId: initial.afterId,
-        );
-        return;
-      }
-      _startMamPrepend(normalized);
-      mam.queryById(
-        toJid: Jid.fromFullJid(normalized),
-        max: plan.max,
-        before: plan.before,
-        beforeId: plan.beforeId,
-      );
-      return;
-    }
-    final plan = MamQueryPlanner.older(
-      isRoom: false,
-      seeded: _seededMessageJids.contains(normalized),
-      oldestMamId: oldestMamIdFor(normalized),
-    );
-    if (plan == null) {
-      _requestMamInitial(normalized);
-      return;
-    }
-    _startMamPrepend(normalized);
-    mam.queryById(
-      jid: Jid.fromFullJid(normalized),
-      max: plan.max,
-      before: plan.before,
-      beforeId: plan.beforeId,
+    _mamCoordinator.requestOlder(
+      bareJid: normalized,
+      isRoom: isBookmark(normalized),
+      seeded: isBookmark(normalized)
+          ? _seededRoomMessageJids.contains(normalized)
+          : _seededMessageJids.contains(normalized),
+      oldestMamId: isBookmark(normalized)
+          ? _oldestRoomMamIdFor(normalized)
+          : oldestMamIdFor(normalized),
+      onDmInitialFallback: () => _requestMamInitial(normalized),
     );
   }
 
@@ -6304,6 +6274,24 @@ class XmppService extends ChangeNotifier {
     String? beforeId,
     String? afterId,
   }) {
+    _dispatchMamPlan(
+      isRoom: true,
+      jid: roomJid,
+      plan: MamQueryPlan(
+        max: max,
+        before: before,
+        after: after,
+        beforeId: beforeId,
+        afterId: afterId,
+      ),
+    );
+  }
+
+  void _dispatchMamPlan({
+    required bool isRoom,
+    required String jid,
+    required MamQueryPlan plan,
+  }) {
     final connection = _connection;
     if (connection == null) {
       return;
@@ -6313,12 +6301,13 @@ class XmppService extends ChangeNotifier {
       return;
     }
     mam.queryById(
-      toJid: Jid.fromFullJid(roomJid),
-      max: max,
-      before: before,
-      after: after,
-      beforeId: beforeId,
-      afterId: afterId,
+      jid: isRoom ? null : Jid.fromFullJid(jid),
+      toJid: isRoom ? Jid.fromFullJid(jid) : null,
+      max: plan.max,
+      before: plan.before,
+      after: plan.after,
+      beforeId: plan.beforeId,
+      afterId: plan.afterId,
     );
   }
 
@@ -6945,18 +6934,9 @@ class XmppService extends ChangeNotifier {
     }
     final normalized = _bareJid(bareJid);
     final existingMessages = _messages[normalized];
-    if (existingMessages != null && existingMessages.isNotEmpty) {
-      return;
-    }
-    if (_mamCursorStore.shouldThrottleBackfill(normalized)) {
-      return;
-    }
-    _mamCursorStore.markBackfill(normalized);
-    final plan = MamQueryPlanner.initial(isRoom: false);
-    mam.queryById(
-      jid: Jid.fromFullJid(normalized),
-      max: plan.max,
-      before: plan.before,
+    _mamCoordinator.requestDmInitial(
+      bareJid: normalized,
+      hasMessages: existingMessages != null && existingMessages.isNotEmpty,
     );
   }
 
@@ -6978,66 +6958,44 @@ class XmppService extends ChangeNotifier {
     final latest = isRoom
         ? _latestRoomMamIdFor(normalized)
         : latestMamIdFor(normalized);
-    final plan = MamQueryPlanner.catchUp(
+    final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
+    final requestedLatest = _mamCoordinator.requestCatchUpStep(
+      bareJid: normalized,
       isRoom: isRoom,
       seeded: isRoom
           ? _seededRoomMessageJids.contains(normalized)
           : _seededMessageJids.contains(normalized),
       latestMamId: latest,
+      scopeKey: scopeKey,
+      onFallback: () {
+        if (isRoom) {
+          _dispatchMamPlan(
+            isRoom: true,
+            jid: normalized,
+            plan: MamQueryPlanner.initial(isRoom: true),
+          );
+        } else {
+          _requestMamInitial(normalized);
+        }
+      },
     );
-    if (plan == null) {
-      if (isRoom) {
-        final initial = MamQueryPlanner.initial(isRoom: true);
-        _requestRoomMam(
-          normalized,
-          max: initial.max,
-          before: initial.before,
-          after: initial.after,
-          beforeId: initial.beforeId,
-          afterId: initial.afterId,
-        );
-      } else {
-        _requestMamInitial(normalized);
-      }
+    if (requestedLatest == null || requestedLatest.isEmpty) {
       return;
-    }
-    final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
-    if (_mamCursorStore.shouldThrottleCatchUp(scopeKey)) {
-      return;
-    }
-    _mamCursorStore.markCatchUp(scopeKey);
-    if (isRoom) {
-      mam.queryById(
-        toJid: Jid.fromFullJid(normalized),
-        max: plan.max,
-        after: plan.after,
-        afterId: plan.afterId,
-      );
-    } else {
-      mam.queryById(
-        jid: Jid.fromFullJid(normalized),
-        max: plan.max,
-        after: plan.after,
-        afterId: plan.afterId,
-      );
     }
     _mamCatchUpTimers[scopeKey]?.cancel();
     _mamCatchUpTimers[scopeKey] = Timer(const Duration(seconds: 2), () {
       final nextLatest = isRoom
           ? _latestRoomMamIdFor(normalized)
           : latestMamIdFor(normalized);
-      if (nextLatest != null && nextLatest.isNotEmpty && nextLatest != latest) {
+      if (nextLatest != null &&
+          nextLatest.isNotEmpty &&
+          nextLatest != requestedLatest) {
         _runMamCatchUpStep(normalized, isRoom: isRoom);
       } else {
         _mamCatchUpTimers.remove(scopeKey);
         _finishMamSyncIfIdle();
       }
     });
-  }
-
-  void _startMamPrepend(String bareJid) {
-    final normalized = _bareJid(bareJid);
-    _mamCursorStore.startPrepend(normalized);
   }
 
   void _primeMamSync() {
