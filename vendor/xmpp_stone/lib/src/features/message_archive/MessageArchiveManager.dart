@@ -29,11 +29,14 @@ class MessageArchiveManager {
 
   bool? get hasExtended => MAMNegotiator.getInstance(_connection).hasExtended;
 
-  bool get isQueryByDateSupported => MAMNegotiator.getInstance(_connection).isQueryByDateSupported;
+  bool get isQueryByDateSupported =>
+      MAMNegotiator.getInstance(_connection).isQueryByDateSupported;
 
-  bool get isQueryByIdSupported => MAMNegotiator.getInstance(_connection).isQueryByIdSupported;
+  bool get isQueryByIdSupported =>
+      MAMNegotiator.getInstance(_connection).isQueryByIdSupported;
 
-  bool get isQueryByJidSupported => MAMNegotiator.getInstance(_connection).isQueryByJidSupported;
+  bool get isQueryByJidSupported =>
+      MAMNegotiator.getInstance(_connection).isQueryByJidSupported;
 
   MessageArchiveManager(this._connection);
 
@@ -86,7 +89,8 @@ class MessageArchiveManager {
         x.addField(FieldElement.build(varAttr: 'end', value: endStr));
       }
       if (jid != null) {
-        x.addField(FieldElement.build(varAttr: 'with', value: jid.userAtDomain));
+        x.addField(
+            FieldElement.build(varAttr: 'with', value: jid.userAtDomain));
       }
       _addRsm(query, max: max, before: before, after: after);
       _connection.writeStanza(iqStanza);
@@ -119,13 +123,14 @@ class MessageArchiveManager {
       x.addField(FieldElement.build(
           varAttr: 'FORM_TYPE', typeAttr: 'hidden', value: 'urn:xmpp:mam:2'));
       if (beforeId != null) {
-        x.addField(FieldElement.build(varAttr: 'beforeId', value: beforeId));
+        x.addField(FieldElement.build(varAttr: 'before-id', value: beforeId));
       }
       if (afterId != null) {
-        x.addField(FieldElement.build(varAttr: 'afterId', value: afterId));
+        x.addField(FieldElement.build(varAttr: 'after-id', value: afterId));
       }
       if (jid != null) {
-        x.addField(FieldElement.build(varAttr: 'with', value: jid.userAtDomain));
+        x.addField(
+            FieldElement.build(varAttr: 'with', value: jid.userAtDomain));
       }
       _addRsm(query, max: max, before: before, after: after);
       _connection.writeStanza(iqStanza);
