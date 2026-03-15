@@ -26,6 +26,7 @@ import 'blocking.dart';
 import 'http_upload.dart';
 import 'jingle_grouping.dart';
 import 'mam_cursor.dart';
+import 'mam_cursor_store.dart';
 import 'mam_merge_engine.dart';
 import 'mam_query_planner.dart';
 import 'muc_invite.dart';
@@ -177,12 +178,7 @@ class XmppService extends ChangeNotifier {
   String? _capsVer;
   bool _csiInactive = false;
   static const Duration _csiIdleDelay = Duration(minutes: 1);
-  final Map<String, DateTime> _mamBackfillAt = {};
-  final Map<String, DateTime> _mamPageRequestAt = {};
-  final Map<String, DateTime> _mamCatchUpAt = {};
-  final Set<String> _mamCatchUpPending = {};
-  final Map<String, int> _mamPrependOffset = {};
-  final Map<String, Timer> _mamPrependReset = {};
+  final MamCursorStore _mamCursorStore = MamCursorStore();
   final Map<String, Timer> _mamCatchUpTimers = {};
   DateTime? _lastGlobalMamSyncAt;
   StorageService? _storage;
@@ -942,15 +938,7 @@ class XmppService extends ChangeNotifier {
     _vcardAvatarState.clear();
     _vcardRequests.clear();
     _vcardUnavailable.clear();
-    _mamBackfillAt.clear();
-    _mamPageRequestAt.clear();
-    _mamCatchUpAt.clear();
-    _mamCatchUpPending.clear();
-    _mamPrependOffset.clear();
-    for (final timer in _mamPrependReset.values) {
-      timer.cancel();
-    }
-    _mamPrependReset.clear();
+    _mamCursorStore.clear();
     for (final timer in _mamCatchUpTimers.values) {
       timer.cancel();
     }
@@ -992,12 +980,10 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final normalized = _bareJid(bareJid);
-    final lastRequest = _mamPageRequestAt[normalized];
-    if (lastRequest != null &&
-        DateTime.now().difference(lastRequest).inSeconds < 5) {
+    if (_mamCursorStore.shouldThrottlePageRequest(normalized)) {
       return;
     }
-    _mamPageRequestAt[normalized] = DateTime.now();
+    _mamCursorStore.markPageRequest(normalized);
     if (isBookmark(normalized)) {
       final plan = MamQueryPlanner.older(
         isRoom: true,
@@ -5541,7 +5527,7 @@ class XmppService extends ChangeNotifier {
         return;
       }
     }
-    final prependOffset = _mamPrependOffset[normalized];
+    final prependOffset = _mamCursorStore.prependOffsetFor(normalized);
     if (mamId != null && mamId.isNotEmpty && prependOffset != null) {
       final insertIndex = prependOffset.clamp(0, list.length);
       list.insert(
@@ -5561,7 +5547,7 @@ class XmppService extends ChangeNotifier {
           reactions: const {},
         ),
       );
-      _mamPrependOffset[normalized] = prependOffset + 1;
+      _mamCursorStore.incrementPrependOffset(normalized);
       if (!outgoing) {
         _lastSeenAt[normalized] ??= timestamp;
       }
@@ -5689,7 +5675,7 @@ class XmppService extends ChangeNotifier {
         list.any((message) => message.stanzaId == stanzaId)) {
       return;
     }
-    final prependOffset = _mamPrependOffset[normalized];
+    final prependOffset = _mamCursorStore.prependOffsetFor(normalized);
     if (mamId != null && mamId.isNotEmpty && prependOffset != null) {
       final insertIndex = prependOffset.clamp(0, list.length);
       list.insert(
@@ -5709,7 +5695,7 @@ class XmppService extends ChangeNotifier {
           reactions: const {},
         ),
       );
-      _mamPrependOffset[normalized] = prependOffset + 1;
+      _mamCursorStore.incrementPrependOffset(normalized);
       notifyListeners();
       _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
       if (!outgoing) {
@@ -6527,15 +6513,7 @@ class XmppService extends ChangeNotifier {
     _carbonsEnabled = false;
     _csiInactive = false;
     _carbonsRequestId = null;
-    _mamBackfillAt.clear();
-    _mamPageRequestAt.clear();
-    _mamCatchUpAt.clear();
-    _mamCatchUpPending.clear();
-    _mamPrependOffset.clear();
-    for (final timer in _mamPrependReset.values) {
-      timer.cancel();
-    }
-    _mamPrependReset.clear();
+    _mamCursorStore.clear();
     for (final timer in _mamCatchUpTimers.values) {
       timer.cancel();
     }
@@ -6595,7 +6573,7 @@ class XmppService extends ChangeNotifier {
 
   bool _isMamCatchUpComplete(String bareJid, {required bool isRoom}) {
     final scopeKey = _mamScopeKey(bareJid, isRoom: isRoom);
-    return !_mamCatchUpPending.contains(scopeKey);
+    return _mamCursorStore.isCatchUpComplete(scopeKey);
   }
 
   void _markMamCatchUpStarted(String bareJid, {required bool isRoom}) {
@@ -6603,19 +6581,19 @@ class XmppService extends ChangeNotifier {
     final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
     final displayedId = _displayedStanzaIdByChat[normalized];
     if (displayedId == null || displayedId.isEmpty) {
-      _mamCatchUpPending.remove(scopeKey);
+      _mamCursorStore.clearCatchUpPending(scopeKey);
       return;
     }
     if (_displayedAtByChat.containsKey(normalized)) {
-      _mamCatchUpPending.remove(scopeKey);
+      _mamCursorStore.clearCatchUpPending(scopeKey);
       return;
     }
-    _mamCatchUpPending.add(scopeKey);
+    _mamCursorStore.markCatchUpPending(scopeKey);
   }
 
   void _markMamCatchUpCompleted(String bareJid, {required bool isRoom}) {
     final scopeKey = _mamScopeKey(bareJid, isRoom: isRoom);
-    if (_mamCatchUpPending.remove(scopeKey)) {
+    if (_mamCursorStore.clearCatchUpPending(scopeKey)) {
       notifyListeners();
     }
   }
@@ -6970,12 +6948,10 @@ class XmppService extends ChangeNotifier {
     if (existingMessages != null && existingMessages.isNotEmpty) {
       return;
     }
-    final lastRequest = _mamBackfillAt[normalized];
-    if (lastRequest != null &&
-        DateTime.now().difference(lastRequest).inSeconds < 30) {
+    if (_mamCursorStore.shouldThrottleBackfill(normalized)) {
       return;
     }
-    _mamBackfillAt[normalized] = DateTime.now();
+    _mamCursorStore.markBackfill(normalized);
     final plan = MamQueryPlanner.initial(isRoom: false);
     mam.queryById(
       jid: Jid.fromFullJid(normalized),
@@ -7026,12 +7002,10 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
-    final lastRequest = _mamCatchUpAt[scopeKey];
-    if (lastRequest != null &&
-        DateTime.now().difference(lastRequest).inSeconds < 5) {
+    if (_mamCursorStore.shouldThrottleCatchUp(scopeKey)) {
       return;
     }
-    _mamCatchUpAt[scopeKey] = DateTime.now();
+    _mamCursorStore.markCatchUp(scopeKey);
     if (isRoom) {
       mam.queryById(
         toJid: Jid.fromFullJid(normalized),
@@ -7063,12 +7037,7 @@ class XmppService extends ChangeNotifier {
 
   void _startMamPrepend(String bareJid) {
     final normalized = _bareJid(bareJid);
-    _mamPrependOffset[normalized] = 0;
-    _mamPrependReset[normalized]?.cancel();
-    _mamPrependReset[normalized] = Timer(const Duration(seconds: 2), () {
-      _mamPrependOffset.remove(normalized);
-      _mamPrependReset.remove(normalized);
-    });
+    _mamCursorStore.startPrepend(normalized);
   }
 
   void _primeMamSync() {
