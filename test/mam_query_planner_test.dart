@@ -13,6 +13,9 @@ void main() {
     final room = MamQueryPlanner.initial(isRoom: true);
     expect(room.max, 25);
     expect(room.before, '');
+    expect(room.beforeId, isNull);
+    expect(room.after, isNull);
+    expect(room.afterId, isNull);
   });
 
   test('older plans switch between before and beforeId by seeded mode', () {
