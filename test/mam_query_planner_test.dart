@@ -27,7 +27,7 @@ void main() {
     expect(seeded, isNotNull);
     expect(seeded!.max, 50);
     expect(seeded.beforeId, 'm-1');
-    expect(seeded.before, isNull);
+    expect(seeded.before, '');
 
     final unseeded = MamQueryPlanner.older(
       isRoom: true,

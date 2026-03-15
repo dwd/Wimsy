@@ -31,8 +31,8 @@ class MamQueryPlanner {
     }
     return MamQueryPlan(
       max: isRoom ? 25 : 50,
+      before: seeded ? '' : oldestMamId,
       beforeId: seeded ? oldestMamId : null,
-      before: seeded ? null : oldestMamId,
     );
   }
 
