@@ -31,6 +31,14 @@ import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 const String _sentryOptInKey = 'sentry_opt_in';
+const List<String> _defaultReactionOptions = [
+  '👍',
+  '❤️',
+  '😂',
+  '😮',
+  '😢',
+  '👎',
+];
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,7 +55,8 @@ Future<void> _startApp({required bool sentryEnabled}) async {
   if (sentryEnabled) {
     await SentryFlutter.init(
       (options) {
-        options.dsn = 'https://7d58998fe2d0e488aa5f11020778c9f6@sentry.cridland.io/8';
+        options.dsn =
+            'https://7d58998fe2d0e488aa5f11020778c9f6@sentry.cridland.io/8';
         options.tracesSampleRate = 1.0;
       },
       appRunner: () {
@@ -105,9 +114,12 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       _service.setIncomingRoomMessageHandler(_handleIncomingRoomMessage);
       if (!kIsWeb && Platform.isAndroid) {
         _startAndroidForegroundService();
-        _connectivitySubscription =
-            _connectivity.onConnectivityChanged.listen((results) {
-          final online = results.any((result) => result != ConnectivityResult.none);
+        _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
+          results,
+        ) {
+          final online = results.any(
+            (result) => result != ConnectivityResult.none,
+          );
           _service.handleConnectivityChange(online);
         });
       }
@@ -236,24 +248,27 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
             scaffoldBackgroundColor: colorScheme.surface,
             fontFamily: 'Droid Sans',
             fontFamilyFallback: const ['Roboto', 'Arial', 'sans-serif'],
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: const Color(0xFFFDFBF6),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.outline),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: const Color(0xFFFDFBF6),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colorScheme.outline),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colorScheme.outlineVariant),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.outlineVariant),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
-        ),
           home: FutureBuilder<void>(
             future: _initFuture,
             builder: (context, snapshot) {
@@ -347,8 +362,12 @@ class _WimsyHomeState extends State<WimsyHome> {
   final TextEditingController _jidController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _hostController = TextEditingController();
-  final TextEditingController _portController = TextEditingController(text: '5222');
-  final TextEditingController _resourceController = TextEditingController(text: 'wimsy');
+  final TextEditingController _portController = TextEditingController(
+    text: '5222',
+  );
+  final TextEditingController _resourceController = TextEditingController(
+    text: 'wimsy',
+  );
   final TextEditingController _wsEndpointController = TextEditingController();
   final TextEditingController _wsProtocolsController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
@@ -385,13 +404,19 @@ class _WimsyHomeState extends State<WimsyHome> {
     _messageScrollController.addListener(_handleScrollPosition);
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     widget.service.attachStorage(widget.storage);
-    widget.service.setRosterPersistor((roster) => widget.storage.storeRoster(roster));
-    widget.service.setBookmarkPersistor((bookmarks) => widget.storage.storeBookmarks(bookmarks));
+    widget.service.setRosterPersistor(
+      (roster) => widget.storage.storeRoster(roster),
+    );
+    widget.service.setBookmarkPersistor(
+      (bookmarks) => widget.storage.storeBookmarks(bookmarks),
+    );
     widget.service.setMessagePersistor(
-      (bareJid, messages) => widget.storage.storeMessagesForJid(bareJid, messages),
+      (bareJid, messages) =>
+          widget.storage.storeMessagesForJid(bareJid, messages),
     );
     widget.service.setRoomMessagePersistor(
-      (roomJid, messages) => widget.storage.storeRoomMessagesForJid(roomJid, messages),
+      (roomJid, messages) =>
+          widget.storage.storeRoomMessagesForJid(roomJid, messages),
     );
     _seedRoster();
     _seedBookmarks();
@@ -549,7 +574,9 @@ class _WimsyHomeState extends State<WimsyHome> {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
           child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: size.width > 640 ? 520 : double.infinity),
+              constraints: BoxConstraints(
+                maxWidth: size.width > 640 ? 520 : double.infinity,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -560,13 +587,19 @@ class _WimsyHomeState extends State<WimsyHome> {
                       letterSpacing: 1.2,
                       color: const Color(0xFFA97BFF),
                       fontFamily: 'SF Pro Display',
-                      fontFamilyFallback: const ['Helvetica Neue', 'Arial', 'Roboto'],
+                      fontFamilyFallback: const [
+                        'Helvetica Neue',
+                        'Arial',
+                        'Roboto',
+                      ],
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'A modern XMPP client built for secure servers.',
-                    style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   Container(
@@ -594,9 +627,12 @@ class _WimsyHomeState extends State<WimsyHome> {
                             labelText: 'JID',
                             hintText: 'user@domain',
                           ),
-                          onChanged: (value) => _scheduleEndpointDiscovery(value),
-                          onEditingComplete: () =>
-                              _scheduleEndpointDiscovery(_jidController.text.trim(), immediate: true),
+                          onChanged: (value) =>
+                              _scheduleEndpointDiscovery(value),
+                          onEditingComplete: () => _scheduleEndpointDiscovery(
+                            _jidController.text.trim(),
+                            immediate: true,
+                          ),
                         ),
                         if (_endpointDiscoveryMessage != null) ...[
                           const SizedBox(height: 6),
@@ -606,9 +642,12 @@ class _WimsyHomeState extends State<WimsyHome> {
                                 const SizedBox(
                                   width: 14,
                                   height: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 ),
-                              if (_endpointDiscoveryBusy) const SizedBox(width: 8),
+                              if (_endpointDiscoveryBusy)
+                                const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   _endpointDiscoveryMessage!,
@@ -653,8 +692,14 @@ class _WimsyHomeState extends State<WimsyHome> {
                           children: [
                             Expanded(
                               child: FilledButton(
-                                onPressed: service.isConnecting ? null : _handleConnect,
-                                child: Text(service.isConnecting ? 'Connecting...' : 'Connect'),
+                                onPressed: service.isConnecting
+                                    ? null
+                                    : _handleConnect,
+                                child: Text(
+                                  service.isConnecting
+                                      ? 'Connecting...'
+                                      : 'Connect',
+                                ),
                               ),
                             ),
                           ],
@@ -679,9 +724,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                           const SizedBox(height: 16),
                           Text(
                             service.errorMessage!,
-                            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.error,
+                            ),
                           ),
-                        ]
+                        ],
                       ],
                     ),
                   ),
@@ -707,7 +754,9 @@ class _WimsyHomeState extends State<WimsyHome> {
             actions: [
               _PresenceMenu(
                 service: service,
-                onClearCacheExit: _clearingCache ? null : _confirmClearCacheAndExit,
+                onClearCacheExit: _clearingCache
+                    ? null
+                    : _confirmClearCacheAndExit,
                 onExit: _handleExit,
               ),
               const SizedBox(width: 12),
@@ -740,20 +789,19 @@ class _WimsyHomeState extends State<WimsyHome> {
                     ],
                   )
                 : activeChat == null
-                    ? _buildRosterPane(context, service, isWide: false)
-                    : _buildChatPane(
-                        context,
-                        service,
-                        activeChat,
-                        showBack: true,
-                      ),
+                ? _buildRosterPane(context, service, isWide: false)
+                : _buildChatPane(context, service, activeChat, showBack: true),
           ),
         );
       },
     );
   }
 
-  Widget _buildRosterPane(BuildContext context, XmppService service, {required bool isWide}) {
+  Widget _buildRosterPane(
+    BuildContext context,
+    XmppService service, {
+    required bool isWide,
+  }) {
     final theme = Theme.of(context);
     final contacts = service.contacts;
 
@@ -790,12 +838,15 @@ class _WimsyHomeState extends State<WimsyHome> {
                   ? Center(
                       child: Text(
                         'No contacts yet. Add one above.',
-                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     )
                   : ListView.separated(
                       itemCount: contacts.length,
-                      separatorBuilder: (context, index) => const SizedBox(height: 8),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final contact = contacts[index];
                         final jid = contact.jid;
@@ -807,18 +858,26 @@ class _WimsyHomeState extends State<WimsyHome> {
                         final presence = service.presenceFor(jid);
                         final statusText = presence?.status?.trim();
                         final effectiveStatusText =
-                            statusText != null && statusText.toLowerCase() == 'unavailable'
-                                ? null
-                                : statusText;
-                        final show = (statusText != null && statusText.toLowerCase() == 'unavailable')
+                            statusText != null &&
+                                statusText.toLowerCase() == 'unavailable'
                             ? null
-                            : (presence?.showElement ?? (presence != null ? PresenceShowElement.CHAT : null));
+                            : statusText;
+                        final show =
+                            (statusText != null &&
+                                statusText.toLowerCase() == 'unavailable')
+                            ? null
+                            : (presence?.showElement ??
+                                  (presence != null
+                                      ? PresenceShowElement.CHAT
+                                      : null));
                         final dotColor = _presenceDotColor(theme, show);
                         final avatarBytes = service.avatarBytesFor(jid);
                         final messages = isBookmark
                             ? service.roomMessagesFor(jid)
                             : service.messagesFor(jid);
-                        final lastReadAt = service.displayedAtFor(jid) ?? _lastReadAtByChat[jid];
+                        final lastReadAt =
+                            service.displayedAtFor(jid) ??
+                            _lastReadAtByChat[jid];
                         var unreadCount = 0;
                         if (service.isMamCatchUpCompleteFor(jid)) {
                           if (lastReadAt == null) {
@@ -829,26 +888,35 @@ class _WimsyHomeState extends State<WimsyHome> {
                             }
                           } else {
                             for (final message in messages) {
-                              if (!message.outgoing && message.timestamp.isAfter(lastReadAt)) {
+                              if (!message.outgoing &&
+                                  message.timestamp.isAfter(lastReadAt)) {
                                 unreadCount += 1;
                               }
                             }
                           }
                         }
                         final isUnread = unreadCount > 0;
-                        final bookmarkStatusText = contact.bookmarkNick?.isNotEmpty == true
+                        final bookmarkStatusText =
+                            contact.bookmarkNick?.isNotEmpty == true
                             ? 'Nickname: ${contact.bookmarkNick}'
-                            : (contact.bookmarkAutoJoin ? 'Auto-join room' : 'Room bookmark');
+                            : (contact.bookmarkAutoJoin
+                                  ? 'Auto-join room'
+                                  : 'Room bookmark');
                         return InkWell(
                           onTap: () => service.selectChat(jid),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
                               color: theme.colorScheme.surface,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: isBookmark
-                                    ? theme.colorScheme.primary.withValues(alpha: 0.35)
+                                    ? theme.colorScheme.primary.withValues(
+                                        alpha: 0.35,
+                                      )
                                     : theme.colorScheme.outlineVariant,
                               ),
                             ),
@@ -858,7 +926,10 @@ class _WimsyHomeState extends State<WimsyHome> {
                                 children: [
                                   Stack(
                                     children: [
-                                      _AvatarPlaceholder(label: contact.displayName, bytes: avatarBytes),
+                                      _AvatarPlaceholder(
+                                        label: contact.displayName,
+                                        bytes: avatarBytes,
+                                      ),
                                       if (isBookmark)
                                         Positioned(
                                           right: 0,
@@ -868,7 +939,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             decoration: BoxDecoration(
                                               color: theme.colorScheme.surface,
                                               shape: BoxShape.circle,
-                                              border: Border.all(color: theme.colorScheme.primary, width: 1.2),
+                                              border: Border.all(
+                                                color:
+                                                    theme.colorScheme.primary,
+                                                width: 1.2,
+                                              ),
                                             ),
                                             child: Icon(
                                               Icons.meeting_room,
@@ -887,7 +962,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             decoration: BoxDecoration(
                                               color: dotColor,
                                               shape: BoxShape.circle,
-                                              border: Border.all(color: theme.colorScheme.surface, width: 2),
+                                              border: Border.all(
+                                                color:
+                                                    theme.colorScheme.surface,
+                                                width: 2,
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -896,33 +975,52 @@ class _WimsyHomeState extends State<WimsyHome> {
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Row(
                                           children: [
                                             Flexible(
                                               child: Text(
                                                 contact.displayName,
-                                                style: theme.textTheme.titleMedium?.copyWith(
-                                                  fontWeight: isUnread ? FontWeight.w600 : null,
-                                                ),
+                                                style: theme
+                                                    .textTheme
+                                                    .titleMedium
+                                                    ?.copyWith(
+                                                      fontWeight: isUnread
+                                                          ? FontWeight.w600
+                                                          : null,
+                                                    ),
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                             if (isBookmark) ...[
                                               const SizedBox(width: 6),
                                               Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
                                                 decoration: BoxDecoration(
-                                                color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                                                  borderRadius: BorderRadius.circular(10),
+                                                  color: theme
+                                                      .colorScheme
+                                                      .primary
+                                                      .withValues(alpha: 0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
                                                 ),
                                                 child: Text(
                                                   'ROOM',
-                                                  style: theme.textTheme.labelSmall?.copyWith(
-                                                    color: theme.colorScheme.primary,
-                                                    letterSpacing: 0.6,
-                                                  ),
+                                                  style: theme
+                                                      .textTheme
+                                                      .labelSmall
+                                                      ?.copyWith(
+                                                        color: theme
+                                                            .colorScheme
+                                                            .primary,
+                                                        letterSpacing: 0.6,
+                                                      ),
                                                 ),
                                               ),
                                             ],
@@ -934,45 +1032,68 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             jid,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodySmall?.copyWith(
-                                              color: theme.colorScheme.onSurfaceVariant,
-                                            ),
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
                                           ),
                                         ],
                                         const SizedBox(height: 2),
                                         Text(
                                           isBookmark
                                               ? bookmarkStatusText
-                                              : ((effectiveStatusText?.isNotEmpty == true)
-                                                  ? effectiveStatusText!
-                                                  : service.presenceLabelFor(jid)),
+                                              : ((effectiveStatusText
+                                                            ?.isNotEmpty ==
+                                                        true)
+                                                    ? effectiveStatusText!
+                                                    : service.presenceLabelFor(
+                                                        jid,
+                                                      )),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall?.copyWith(
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: theme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
                                         ),
                                         if (latest != null) ...[
                                           const SizedBox(height: 2),
                                           Text(
-                                            _messagePreviewText(service, latest),
+                                            _messagePreviewText(
+                                              service,
+                                              latest,
+                                            ),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodySmall?.copyWith(
-                                              color: theme.colorScheme.onSurfaceVariant,
-                                            ),
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
                                           ),
                                         ],
-                                        if (!isBookmark && contact.groups.isNotEmpty) ...[
+                                        if (!isBookmark &&
+                                            contact.groups.isNotEmpty) ...[
                                           const SizedBox(height: 2),
                                           Text(
-                                            contact.groups.map((group) => '#${group.trim()}').join(' '),
+                                            contact.groups
+                                                .map(
+                                                  (group) => '#${group.trim()}',
+                                                )
+                                                .join(' '),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.labelSmall?.copyWith(
-                                              color: theme.colorScheme.primary,
-                                              letterSpacing: 0.2,
-                                            ),
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color:
+                                                      theme.colorScheme.primary,
+                                                  letterSpacing: 0.2,
+                                                ),
                                           ),
                                         ],
                                       ],
@@ -981,30 +1102,42 @@ class _WimsyHomeState extends State<WimsyHome> {
                                   const SizedBox(width: 8),
                                   if (unreadCount > 0)
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: theme.colorScheme.primary,
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
-                                        unreadCount > 99 ? '99+' : unreadCount.toString(),
-                                        style: theme.textTheme.labelSmall?.copyWith(
-                                          color: theme.colorScheme.onPrimary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                        unreadCount > 99
+                                            ? '99+'
+                                            : unreadCount.toString(),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color:
+                                                  theme.colorScheme.onPrimary,
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                       ),
                                     ),
-                                  if (unreadCount > 0)
-                                    const SizedBox(width: 8),
+                                  if (unreadCount > 0) const SizedBox(width: 8),
                                   _ContactActionsMenu(
                                     isBookmark: isBookmark,
                                     isBlocked: service.isBlocked(jid),
-                                    onEditContact: () => _showContactDialog(contact: contact),
-                                    onRemoveContact: () => _confirmRemoveContact(contact),
-                                    onBlockContact: () => _blockContact(contact),
-                                    onUnblockContact: () => _unblockContact(contact),
-                                    onEditBookmark: () => _showBookmarkDialog(contact),
-                                    onRemoveBookmark: () => _confirmRemoveBookmark(contact),
+                                    onEditContact: () =>
+                                        _showContactDialog(contact: contact),
+                                    onRemoveContact: () =>
+                                        _confirmRemoveContact(contact),
+                                    onBlockContact: () =>
+                                        _blockContact(contact),
+                                    onUnblockContact: () =>
+                                        _unblockContact(contact),
+                                    onEditBookmark: () =>
+                                        _showBookmarkDialog(contact),
+                                    onRemoveBookmark: () =>
+                                        _confirmRemoveBookmark(contact),
                                   ),
                                 ],
                               ),
@@ -1018,9 +1151,11 @@ class _WimsyHomeState extends State<WimsyHome> {
               const SizedBox(height: 12),
               Text(
                 service.errorMessage!,
-                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
               ),
-            ]
+            ],
           ],
         ),
       ),
@@ -1030,8 +1165,7 @@ class _WimsyHomeState extends State<WimsyHome> {
   Widget _buildChatPane(
     BuildContext context,
     XmppService service,
-    String? activeChat,
-    {
+    String? activeChat, {
     required bool showBack,
   }) {
     final theme = Theme.of(context);
@@ -1039,8 +1173,8 @@ class _WimsyHomeState extends State<WimsyHome> {
     final messages = activeChat == null
         ? const <ChatMessage>[]
         : isBookmark
-            ? service.roomMessagesFor(activeChat)
-            : service.messagesFor(activeChat);
+        ? service.roomMessagesFor(activeChat)
+        : service.messagesFor(activeChat);
     final roomEntry = activeChat == null ? null : service.roomFor(activeChat);
     _activeChatForKeyHandler = activeChat;
     _activeChatIsBookmark = isBookmark;
@@ -1096,10 +1230,10 @@ class _WimsyHomeState extends State<WimsyHome> {
                         activeChat == null
                             ? 'Secure connection active'
                             : isBookmark
-                                ? _roomSubtitle(roomEntry)
-                                : service.chatStateLabelFor(activeChat).isNotEmpty
-                                    ? service.chatStateLabelFor(activeChat)
-                                    : 'Secure connection active',
+                            ? _roomSubtitle(roomEntry)
+                            : service.chatStateLabelFor(activeChat).isNotEmpty
+                            ? service.chatStateLabelFor(activeChat)
+                            : 'Secure connection active',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -1120,36 +1254,42 @@ class _WimsyHomeState extends State<WimsyHome> {
                     tooltip: 'Invite to room',
                   ),
                 if (activeChat != null && !isBookmark) ...[
-                  Builder(builder: (context) {
-                    final presence = service.presenceFor(activeChat);
-                    final isOnline = presence != null &&
-                        (presence.status?.toLowerCase() != 'unavailable');
-                    final supportsJingle = service.contactSupportsJingle(activeChat);
-                    final callLikelyAvailable = isOnline && supportsJingle;
-                    final callEnabled = service.callSessionFor(activeChat) == null;
-                    final callIconColor = callEnabled && !callLikelyAvailable
-                        ? Theme.of(context).disabledColor
-                        : null;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          onPressed: callEnabled
-                              ? () => _startCall(activeChat, video: false)
-                              : null,
-                          icon: Icon(Icons.call, color: callIconColor),
-                          tooltip: 'Start voice call',
-                        ),
-                        IconButton(
-                          onPressed: callEnabled
-                              ? () => _startCall(activeChat, video: true)
-                              : null,
-                          icon: Icon(Icons.videocam, color: callIconColor),
-                          tooltip: 'Start video call',
-                        ),
-                      ],
-                    );
-                  }),
+                  Builder(
+                    builder: (context) {
+                      final presence = service.presenceFor(activeChat);
+                      final isOnline =
+                          presence != null &&
+                          (presence.status?.toLowerCase() != 'unavailable');
+                      final supportsJingle = service.contactSupportsJingle(
+                        activeChat,
+                      );
+                      final callLikelyAvailable = isOnline && supportsJingle;
+                      final callEnabled =
+                          service.callSessionFor(activeChat) == null;
+                      final callIconColor = callEnabled && !callLikelyAvailable
+                          ? Theme.of(context).disabledColor
+                          : null;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            onPressed: callEnabled
+                                ? () => _startCall(activeChat, video: false)
+                                : null,
+                            icon: Icon(Icons.call, color: callIconColor),
+                            tooltip: 'Start voice call',
+                          ),
+                          IconButton(
+                            onPressed: callEnabled
+                                ? () => _startCall(activeChat, video: true)
+                                : null,
+                            icon: Icon(Icons.videocam, color: callIconColor),
+                            tooltip: 'Start video call',
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ],
               ],
             ),
@@ -1159,12 +1299,16 @@ class _WimsyHomeState extends State<WimsyHome> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildCallBanner(service, activeChat),
             ),
-          if (activeChat != null && isBookmark && service.mujiSessionFor(activeChat) != null)
+          if (activeChat != null &&
+              isBookmark &&
+              service.mujiSessionFor(activeChat) != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildMujiStatusBar(service, activeChat),
             ),
-          if (activeChat != null && isBookmark && service.mujiSessionFor(activeChat) != null)
+          if (activeChat != null &&
+              isBookmark &&
+              service.mujiSessionFor(activeChat) != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildMujiParticipantBar(service, activeChat),
@@ -1175,7 +1319,9 @@ class _WimsyHomeState extends State<WimsyHome> {
                 ? Center(
                     child: Text(
                       'Pick a contact to start messaging.',
-                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   )
                 : ListView.builder(
@@ -1187,21 +1333,29 @@ class _WimsyHomeState extends State<WimsyHome> {
                       final senderName = isBookmark
                           ? (message.outgoing ? 'You' : message.from)
                           : message.outgoing
-                              ? 'You'
-                              : service.displayNameFor(message.from);
+                          ? 'You'
+                          : service.displayNameFor(message.from);
                       final timestamp = _formatTimestamp(message.timestamp);
-                      final avatarBytes = isBookmark ? null : service.avatarBytesFor(message.from);
+                      final avatarBytes = isBookmark
+                          ? null
+                          : service.avatarBytesFor(message.from);
                       final inviteRoomJid = message.inviteRoomJid;
-                      final inviteRoomName = inviteRoomJid == null || inviteRoomJid.isEmpty
+                      final inviteRoomName =
+                          inviteRoomJid == null || inviteRoomJid.isEmpty
                           ? null
                           : service.displayNameFor(inviteRoomJid);
-                      final inviteAvatarBytes = inviteRoomJid == null || inviteRoomJid.isEmpty
+                      final inviteAvatarBytes =
+                          inviteRoomJid == null || inviteRoomJid.isEmpty
                           ? null
                           : service.avatarBytesFor(inviteRoomJid);
-                      final joinRoom = (inviteRoomJid != null &&
+                      final joinRoom =
+                          (inviteRoomJid != null &&
                               inviteRoomJid.isNotEmpty &&
                               !message.outgoing)
-                          ? () => service.joinRoom(inviteRoomJid, password: message.invitePassword)
+                          ? () => service.joinRoom(
+                              inviteRoomJid,
+                              password: message.invitePassword,
+                            )
                           : null;
                       return _MessageBubble(
                         message: message,
@@ -1213,6 +1367,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                         inviteAvatarBytes: inviteAvatarBytes,
                         inviteReason: message.inviteReason,
                         onJoinInvite: joinRoom,
+                        selfReactionSenderId: service.reactionSenderForChat(
+                          activeChat,
+                          isRoom: isBookmark,
+                        ),
+                        recentReactionOptions: service.recentReactionEmojis,
                         onReact: (emoji) {
                           service.sendReaction(
                             bareJid: activeChat,
@@ -1221,29 +1380,36 @@ class _WimsyHomeState extends State<WimsyHome> {
                             isRoom: isBookmark,
                           );
                         },
-                        onEdit: (message.outgoing && (message.messageId ?? '').isNotEmpty)
+                        onEdit:
+                            (message.outgoing &&
+                                (message.messageId ?? '').isNotEmpty)
                             ? () => _startEditingMessage(
-                                  activeChat: activeChat,
-                                  message: message,
-                                  isRoom: isBookmark,
-                                )
+                                activeChat: activeChat,
+                                message: message,
+                                isRoom: isBookmark,
+                              )
                             : null,
-                        onAcceptFile: (!isBookmark &&
+                        onAcceptFile:
+                            (!isBookmark &&
                                 !message.outgoing &&
                                 (message.fileTransferId ?? '').isNotEmpty &&
                                 message.fileState == 'offered')
-                            ? () => _promptAcceptFileTransfer(activeChat, message)
+                            ? () =>
+                                  _promptAcceptFileTransfer(activeChat, message)
                             : null,
-                        onDeclineFile: (!isBookmark &&
+                        onDeclineFile:
+                            (!isBookmark &&
                                 !message.outgoing &&
                                 (message.fileTransferId ?? '').isNotEmpty &&
                                 message.fileState == 'offered')
                             ? () => _declineFileTransfer(message)
                             : null,
-                        onFallbackUpload: (!isBookmark &&
+                        onFallbackUpload:
+                            (!isBookmark &&
                                 message.outgoing &&
                                 (message.fileTransferId ?? '').isNotEmpty &&
-                                (message.fileState == 'failed' || message.fileState == 'declined'))
+                                (message.fileState == 'failed' ||
+                                    message.fileState == 'declined'))
                             ? () => _fallbackFileTransfer(message)
                             : null,
                       );
@@ -1254,7 +1420,9 @@ class _WimsyHomeState extends State<WimsyHome> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
-              border: Border(top: BorderSide(color: theme.colorScheme.outlineVariant)),
+              border: Border(
+                top: BorderSide(color: theme.colorScheme.outlineVariant),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1330,11 +1498,13 @@ class _WimsyHomeState extends State<WimsyHome> {
                       child: TextField(
                         controller: _messageController,
                         focusNode: _messageFocusNode,
-                        autofocus: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
-                        enabled: activeChat != null && (!isBookmark || (roomEntry?.joined ?? false)),
-                        decoration: const InputDecoration(
-                          labelText: 'Message',
-                        ),
+                        autofocus:
+                            activeChat != null &&
+                            (!isBookmark || (roomEntry?.joined ?? false)),
+                        enabled:
+                            activeChat != null &&
+                            (!isBookmark || (roomEntry?.joined ?? false)),
+                        decoration: const InputDecoration(labelText: 'Message'),
                         onChanged: (value) {
                           if (activeChat == null || isBookmark) {
                             return;
@@ -1346,31 +1516,37 @@ class _WimsyHomeState extends State<WimsyHome> {
                     ),
                     const SizedBox(width: 12),
                     IconButton(
-                      onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
+                      onPressed:
+                          activeChat == null ||
+                              (isBookmark && !(roomEntry?.joined ?? false))
                           ? null
                           : () => _sendAttachment(
-                                activeChat,
-                                isBookmark: isBookmark,
-                                roomEntry: roomEntry,
-                              ),
+                              activeChat,
+                              isBookmark: isBookmark,
+                              roomEntry: roomEntry,
+                            ),
                       icon: const Icon(Icons.attach_file),
                       tooltip: 'Send file',
                     ),
                     const SizedBox(width: 4),
                     IconButton(
-                      onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
+                      onPressed:
+                          activeChat == null ||
+                              (isBookmark && !(roomEntry?.joined ?? false))
                           ? null
                           : () => _sendPhotoMessage(
-                                activeChat,
-                                isBookmark: isBookmark,
-                                roomEntry: roomEntry,
-                              ),
+                              activeChat,
+                              isBookmark: isBookmark,
+                              roomEntry: roomEntry,
+                            ),
                       icon: const Icon(Icons.photo_camera),
                       tooltip: 'Send photo',
                     ),
                     const SizedBox(width: 4),
                     FilledButton(
-                      onPressed: activeChat == null || (isBookmark && !(roomEntry?.joined ?? false))
+                      onPressed:
+                          activeChat == null ||
+                              (isBookmark && !(roomEntry?.joined ?? false))
                           ? null
                           : () => _sendMessage(activeChat),
                       child: const Text('Send'),
@@ -1399,7 +1575,9 @@ class _WimsyHomeState extends State<WimsyHome> {
       password: _rememberPassword ? _passwordController.text : '',
       host: _hostController.text.trim(),
       port: port,
-      resource: _resourceController.text.trim().isEmpty ? 'wimsy' : _resourceController.text.trim(),
+      resource: _resourceController.text.trim().isEmpty
+          ? 'wimsy'
+          : _resourceController.text.trim(),
       rememberPassword: _rememberPassword,
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
@@ -1475,8 +1653,10 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (isBookmark && !(roomEntry?.joined ?? false)) {
       return;
     }
-    final isDesktop = !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
-    final supportsPickerCamera = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final isDesktop =
+        !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+    final supportsPickerCamera =
+        !kIsWeb && (Platform.isAndroid || Platform.isIOS);
     final useWebRtcCamera = kIsWeb || isDesktop;
     final supportsCamera = useWebRtcCamera || supportsPickerCamera;
     if (!supportsCamera) {
@@ -1557,7 +1737,8 @@ class _WimsyHomeState extends State<WimsyHome> {
       return _PhotoSelection(
         bytes: bytes,
         fileName: fileName,
-        mimeType: _guessImageMimeType(picked.path) ?? _guessImageMimeType(fileName),
+        mimeType:
+            _guessImageMimeType(picked.path) ?? _guessImageMimeType(fileName),
       );
     } catch (_) {
       if (mounted) {
@@ -1577,10 +1758,7 @@ class _WimsyHomeState extends State<WimsyHome> {
             width: 360,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.memory(
-                bytes,
-                fit: BoxFit.contain,
-              ),
+              child: Image.memory(bytes, fit: BoxFit.contain),
             ),
           ),
           actions: [
@@ -1600,13 +1778,14 @@ class _WimsyHomeState extends State<WimsyHome> {
   }
 
   Future<void> _startCall(String bareJid, {required bool video}) async {
-    final result = await widget.service.startCall(bareJid: bareJid, video: video);
+    final result = await widget.service.startCall(
+      bareJid: bareJid,
+      video: video,
+    );
     if (!mounted || result == null) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
   }
 
   Future<void> _acceptCall(CallSession session) async {
@@ -1639,12 +1818,12 @@ class _WimsyHomeState extends State<WimsyHome> {
           child: ListView(
             shrinkWrap: true,
             children: [
-              const ListTile(
-                title: Text('Audio output'),
-              ),
+              const ListTile(title: Text('Audio output')),
               for (final output in outputs)
                 ListTile(
-                  title: Text(output.label.isEmpty ? output.deviceId : output.label),
+                  title: Text(
+                    output.label.isEmpty ? output.deviceId : output.label,
+                  ),
                   onTap: () {
                     widget.service.selectAudioOutput(output.deviceId);
                     Navigator.of(context).pop();
@@ -1679,13 +1858,17 @@ class _WimsyHomeState extends State<WimsyHome> {
               for (var i = 0; i < inputs.length; i++)
                 ListTile(
                   title: Text(_deviceLabel(inputs[i], i, 'Microphone')),
-                  subtitle: inputs[i].deviceId == widget.service.preferredAudioInputId
+                  subtitle:
+                      inputs[i].deviceId == widget.service.preferredAudioInputId
                       ? const Text('Selected')
                       : null,
                   onTap: () async {
                     widget.service.selectAudioInput(inputs[i].deviceId);
                     final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString('wimsy_audio_input', inputs[i].deviceId);
+                    await prefs.setString(
+                      'wimsy_audio_input',
+                      inputs[i].deviceId,
+                    );
                     if (context.mounted) {
                       Navigator.of(context).pop();
                     }
@@ -1704,9 +1887,9 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     if (inputs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No cameras available.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No cameras available.')));
       return;
     }
     await showModalBottomSheet<void>(
@@ -1720,13 +1903,17 @@ class _WimsyHomeState extends State<WimsyHome> {
               for (var i = 0; i < inputs.length; i++)
                 ListTile(
                   title: Text(_deviceLabel(inputs[i], i, 'Camera')),
-                  subtitle: inputs[i].deviceId == widget.service.preferredVideoInputId
+                  subtitle:
+                      inputs[i].deviceId == widget.service.preferredVideoInputId
                       ? const Text('Selected')
                       : null,
                   onTap: () async {
                     widget.service.selectVideoInput(inputs[i].deviceId);
                     final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString('wimsy_video_input', inputs[i].deviceId);
+                    await prefs.setString(
+                      'wimsy_video_input',
+                      inputs[i].deviceId,
+                    );
                     if (context.mounted) {
                       Navigator.of(context).pop();
                     }
@@ -1739,7 +1926,11 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
   }
 
-  String _deviceLabel(MediaDeviceInfo device, int index, String fallbackPrefix) {
+  String _deviceLabel(
+    MediaDeviceInfo device,
+    int index,
+    String fallbackPrefix,
+  ) {
     final label = device.label.trim();
     if (label.isNotEmpty) {
       return label;
@@ -1805,7 +1996,11 @@ class _WimsyHomeState extends State<WimsyHome> {
       if (message.body.trim().isEmpty) {
         continue;
       }
-      _startEditingMessage(activeChat: activeChat, message: message, isRoom: isRoom);
+      _startEditingMessage(
+        activeChat: activeChat,
+        message: message,
+        isRoom: isRoom,
+      );
       break;
     }
   }
@@ -1815,7 +2010,8 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (session == null) {
       return const SizedBox.shrink();
     }
-    if (session.state != CallState.ringing && session.state != CallState.active) {
+    if (session.state != CallState.ringing &&
+        session.state != CallState.active) {
       return const SizedBox.shrink();
     }
     final theme = Theme.of(context);
@@ -1825,8 +2021,8 @@ class _WimsyHomeState extends State<WimsyHome> {
     final title = isActive
         ? 'In $typeLabel call'
         : isIncoming
-            ? 'Incoming $typeLabel call'
-            : 'Calling...';
+        ? 'Incoming $typeLabel call'
+        : 'Calling...';
     final localStream = service.callLocalStreamFor(bareJid);
     final remoteStream = service.callRemoteStreamFor(bareJid);
     final localSpeaking = service.isCallLocalSpeaking(bareJid);
@@ -1849,12 +2045,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                   color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
+                Expanded(child: Text(title, style: theme.textTheme.bodyMedium)),
                 if (!isActive && isIncoming) ...[
                   TextButton(
                     onPressed: () => _declineCall(session),
@@ -1941,9 +2132,13 @@ class _WimsyHomeState extends State<WimsyHome> {
                   IconButton(
                     onPressed: () => service.toggleSpeakerphone(),
                     icon: Icon(
-                      service.isSpeakerphoneOn ? Icons.volume_up : Icons.volume_down,
+                      service.isSpeakerphoneOn
+                          ? Icons.volume_up
+                          : Icons.volume_down,
                     ),
-                    tooltip: service.isSpeakerphoneOn ? 'Speaker on' : 'Speaker off',
+                    tooltip: service.isSpeakerphoneOn
+                        ? 'Speaker on'
+                        : 'Speaker off',
                   ),
                   IconButton(
                     onPressed: _showAudioOutputPicker,
@@ -1989,8 +2184,14 @@ class _WimsyHomeState extends State<WimsyHome> {
                     _advancedOptionsExpanded = !_advancedOptionsExpanded;
                   });
                 },
-          icon: Icon(_advancedOptionsExpanded ? Icons.expand_less : Icons.expand_more),
-          label: Text(_advancedOptionsExpanded ? 'Hide advanced options' : 'Show advanced options'),
+          icon: Icon(
+            _advancedOptionsExpanded ? Icons.expand_less : Icons.expand_more,
+          ),
+          label: Text(
+            _advancedOptionsExpanded
+                ? 'Hide advanced options'
+                : 'Show advanced options',
+          ),
         ),
         if (_advancedOptionsExpanded) ...[
           const SizedBox(height: 4),
@@ -2012,9 +2213,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                   controller: _portController,
                   enabled: !service.isConnecting,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Port',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Port'),
                 ),
               ),
             ],
@@ -2024,7 +2223,9 @@ class _WimsyHomeState extends State<WimsyHome> {
             contentPadding: EdgeInsets.zero,
             dense: true,
             title: const Text('Direct TLS (XEP-0368)'),
-            subtitle: const Text('Uses direct TLS when the server advertises it via SRV.'),
+            subtitle: const Text(
+              'Uses direct TLS when the server advertises it via SRV.',
+            ),
             value: _useDirectTls,
             onChanged: service.isConnecting || kIsWeb
                 ? null
@@ -2041,9 +2242,7 @@ class _WimsyHomeState extends State<WimsyHome> {
           TextField(
             controller: _resourceController,
             enabled: !service.isConnecting,
-            decoration: const InputDecoration(
-              labelText: 'Resource',
-            ),
+            decoration: const InputDecoration(labelText: 'Resource'),
           ),
           const SizedBox(height: 12),
           CheckboxListTile(
@@ -2150,8 +2349,15 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
   }
 
-  List<TextSpan> _linkifyText(String input, TextStyle? baseStyle, TextStyle? linkStyle) {
-    final regex = RegExp(r'((https?:\/\/)|(www\.))[^\s<]+', caseSensitive: false);
+  List<TextSpan> _linkifyText(
+    String input,
+    TextStyle? baseStyle,
+    TextStyle? linkStyle,
+  ) {
+    final regex = RegExp(
+      r'((https?:\/\/)|(www\.))[^\s<]+',
+      caseSensitive: false,
+    );
     final matches = regex.allMatches(input).toList();
     if (matches.isEmpty) {
       return [TextSpan(text: input, style: baseStyle)];
@@ -2161,22 +2367,29 @@ class _WimsyHomeState extends State<WimsyHome> {
     var lastIndex = 0;
     for (final match in matches) {
       if (match.start > lastIndex) {
-        spans.add(TextSpan(text: input.substring(lastIndex, match.start), style: baseStyle));
+        spans.add(
+          TextSpan(
+            text: input.substring(lastIndex, match.start),
+            style: baseStyle,
+          ),
+        );
       }
       final raw = input.substring(match.start, match.end);
       final normalized = _normalizeUrl(raw);
-      spans.add(TextSpan(
-        text: raw,
-        style: linkStyle ?? baseStyle,
-        recognizer: TapGestureRecognizer()
-          ..onTap = () async {
-            final uri = Uri.tryParse(normalized);
-            if (uri == null) {
-              return;
-            }
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          },
-      ));
+      spans.add(
+        TextSpan(
+          text: raw,
+          style: linkStyle ?? baseStyle,
+          recognizer: TapGestureRecognizer()
+            ..onTap = () async {
+              final uri = Uri.tryParse(normalized);
+              if (uri == null) {
+                return;
+              }
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            },
+        ),
+      );
       lastIndex = match.end;
     }
     if (lastIndex < input.length) {
@@ -2196,7 +2409,8 @@ class _WimsyHomeState extends State<WimsyHome> {
 
   String _stripTrailingPunctuation(String input) {
     var result = input;
-    while (result.isNotEmpty && RegExp(r'[\\).,!?;:\\]]').hasMatch(result[result.length - 1])) {
+    while (result.isNotEmpty &&
+        RegExp(r'[\\).,!?;:\\]]').hasMatch(result[result.length - 1])) {
       result = result.substring(0, result.length - 1);
     }
     return result;
@@ -2237,34 +2451,39 @@ class _WimsyHomeState extends State<WimsyHome> {
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: participants.map((participant) {
-                  final icon = participant.muted ? Icons.mic_off : Icons.mic;
-                  final speakerIcon =
-                      participant.speaking ? Icons.volume_up : Icons.volume_off;
-                  return Chip(
-                    avatar: Icon(
-                      icon,
-                      size: 16,
-                      color: participant.muted
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.primary,
-                    ),
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(participant.nick),
-                        const SizedBox(width: 4),
-                        Icon(
-                          speakerIcon,
+                children: participants
+                    .map((participant) {
+                      final icon = participant.muted
+                          ? Icons.mic_off
+                          : Icons.mic;
+                      final speakerIcon = participant.speaking
+                          ? Icons.volume_up
+                          : Icons.volume_off;
+                      return Chip(
+                        avatar: Icon(
+                          icon,
                           size: 16,
-                          color: participant.speaking
-                              ? theme.colorScheme.primary
-                              : theme.colorScheme.onSurfaceVariant,
+                          color: participant.muted
+                              ? theme.colorScheme.error
+                              : theme.colorScheme.primary,
                         ),
-                      ],
-                    ),
-                  );
-                }).toList(growable: false),
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(participant.nick),
+                            const SizedBox(width: 4),
+                            Icon(
+                              speakerIcon,
+                              size: 16,
+                              color: participant.speaking
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
+                      );
+                    })
+                    .toList(growable: false),
               ),
           ],
         ),
@@ -2289,19 +2508,13 @@ class _WimsyHomeState extends State<WimsyHome> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            Icon(
-              Icons.groups,
-              color: theme.colorScheme.primary,
-            ),
+            Icon(Icons.groups, color: theme.colorScheme.primary),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Muji call active',
-                    style: theme.textTheme.labelLarge,
-                  ),
+                  Text('Muji call active', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 2),
                   Text(
                     'Other participants can join from the room.',
@@ -2322,7 +2535,11 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
   }
 
-  Future<void> _sendAttachment(String? activeChat, {required bool isBookmark, RoomEntry? roomEntry}) async {
+  Future<void> _sendAttachment(
+    String? activeChat, {
+    required bool isBookmark,
+    RoomEntry? roomEntry,
+  }) async {
     if (activeChat == null) {
       return;
     }
@@ -2361,12 +2578,17 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
   }
 
-  Future<void> _promptAcceptFileTransfer(String activeChat, ChatMessage message) async {
+  Future<void> _promptAcceptFileTransfer(
+    String activeChat,
+    ChatMessage message,
+  ) async {
     final transferId = message.fileTransferId;
     if (transferId == null || transferId.isEmpty) {
       return;
     }
-    final suggested = message.fileName?.isNotEmpty == true ? message.fileName! : 'file';
+    final suggested = message.fileName?.isNotEmpty == true
+        ? message.fileName!
+        : 'file';
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Save file',
       fileName: suggested,
@@ -2455,9 +2677,9 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _showInviteDialog(String? roomJid) async {
@@ -2530,7 +2752,9 @@ class _WimsyHomeState extends State<WimsyHome> {
     final isEdit = contact != null;
     final jidController = TextEditingController(text: contact?.jid ?? '');
     final nameController = TextEditingController(text: contact?.name ?? '');
-    final groupsController = TextEditingController(text: contact?.groups.join(' ') ?? '');
+    final groupsController = TextEditingController(
+      text: contact?.groups.join(' ') ?? '',
+    );
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -2551,9 +2775,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Display name',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Display name'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -2653,69 +2875,67 @@ class _WimsyHomeState extends State<WimsyHome> {
   Future<void> _showBookmarkDialog(ContactEntry bookmark) async {
     final jidController = TextEditingController(text: bookmark.jid);
     final nameController = TextEditingController(text: bookmark.name ?? '');
-    final nickController = TextEditingController(text: bookmark.bookmarkNick ?? '');
-    final passwordController = TextEditingController(text: bookmark.bookmarkPassword ?? '');
+    final nickController = TextEditingController(
+      text: bookmark.bookmarkNick ?? '',
+    );
+    final passwordController = TextEditingController(
+      text: bookmark.bookmarkPassword ?? '',
+    );
     var autoJoin = bookmark.bookmarkAutoJoin;
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Edit bookmark'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: jidController,
-                    readOnly: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Room JID',
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Edit bookmark'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: jidController,
+                      readOnly: true,
+                      decoration: const InputDecoration(labelText: 'Room JID'),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Room name',
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: 'Room name'),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nickController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nickname',
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nickController,
+                      decoration: const InputDecoration(labelText: 'Nickname'),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: passwordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordController,
+                      decoration: const InputDecoration(labelText: 'Password'),
+                      obscureText: true,
                     ),
-                    obscureText: true,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    value: autoJoin,
-                    onChanged: (value) => setState(() => autoJoin = value),
-                    title: const Text('Auto-join'),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      value: autoJoin,
+                      onChanged: (value) => setState(() => autoJoin = value),
+                      title: const Text('Auto-join'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        });
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
     if (result != true) {
@@ -2723,10 +2943,14 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
     final updated = ContactEntry(
       jid: bookmark.jid,
-      name: nameController.text.trim().isNotEmpty ? nameController.text.trim() : null,
+      name: nameController.text.trim().isNotEmpty
+          ? nameController.text.trim()
+          : null,
       groups: const [],
       isBookmark: true,
-      bookmarkNick: nickController.text.trim().isNotEmpty ? nickController.text.trim() : null,
+      bookmarkNick: nickController.text.trim().isNotEmpty
+          ? nickController.text.trim()
+          : null,
       bookmarkPassword: passwordController.text.trim().isNotEmpty
           ? passwordController.text.trim()
           : null,
@@ -2748,71 +2972,74 @@ class _WimsyHomeState extends State<WimsyHome> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Join room'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: jidController,
-                    decoration: const InputDecoration(
-                      labelText: 'Room JID',
-                      hintText: 'room@conference.example.com',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nickController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nickname (optional)',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: passwordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Password (optional)',
-                    ),
-                    obscureText: true,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    value: saveBookmark,
-                    onChanged: (value) => setState(() => saveBookmark = value),
-                    title: const Text('Save bookmark'),
-                  ),
-                  if (saveBookmark) ...[
-                    const SizedBox(height: 8),
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Join room'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     TextField(
-                      controller: nameController,
+                      controller: jidController,
                       decoration: const InputDecoration(
-                        labelText: 'Room name (optional)',
+                        labelText: 'Room JID',
+                        hintText: 'room@conference.example.com',
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    SwitchListTile(
-                      value: autoJoin,
-                      onChanged: (value) => setState(() => autoJoin = value),
-                      title: const Text('Auto-join'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nickController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nickname (optional)',
+                      ),
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordController,
+                      decoration: const InputDecoration(
+                        labelText: 'Password (optional)',
+                      ),
+                      obscureText: true,
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      value: saveBookmark,
+                      onChanged: (value) =>
+                          setState(() => saveBookmark = value),
+                      title: const Text('Save bookmark'),
+                    ),
+                    if (saveBookmark) ...[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Room name (optional)',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SwitchListTile(
+                        value: autoJoin,
+                        onChanged: (value) => setState(() => autoJoin = value),
+                        title: const Text('Auto-join'),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Join'),
-              ),
-            ],
-          );
-        });
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Join'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
     if (result != true) {
@@ -2831,10 +3058,14 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (saveBookmark) {
       final bookmark = ContactEntry(
         jid: roomJid,
-        name: nameController.text.trim().isNotEmpty ? nameController.text.trim() : null,
+        name: nameController.text.trim().isNotEmpty
+            ? nameController.text.trim()
+            : null,
         groups: const [],
         isBookmark: true,
-        bookmarkNick: nickController.text.trim().isNotEmpty ? nickController.text.trim() : null,
+        bookmarkNick: nickController.text.trim().isNotEmpty
+            ? nickController.text.trim()
+            : null,
         bookmarkPassword: passwordController.text.trim().isNotEmpty
             ? passwordController.text.trim()
             : null,
@@ -2919,7 +3150,11 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
   }
 
-  void _handleTypingState(XmppService service, String activeChat, String value) {
+  void _handleTypingState(
+    XmppService service,
+    String activeChat,
+    String value,
+  ) {
     _typingDebounce?.cancel();
     _idleTimer?.cancel();
 
@@ -3007,8 +3242,10 @@ class _WimsyHomeState extends State<WimsyHome> {
       unawaited(_discoverEndpoint(trimmed));
       return;
     }
-    _endpointDiscoveryDebounce =
-        Timer(const Duration(milliseconds: 700), () => _discoverEndpoint(trimmed));
+    _endpointDiscoveryDebounce = Timer(
+      const Duration(milliseconds: 700),
+      () => _discoverEndpoint(trimmed),
+    );
   }
 
   Future<void> _discoverEndpoint(String jid) async {
@@ -3043,7 +3280,8 @@ class _WimsyHomeState extends State<WimsyHome> {
       }
       setState(() {
         _endpointDiscoveryBusy = false;
-        _endpointDiscoveryMessage = 'WebSocket endpoint discovered for $domain.';
+        _endpointDiscoveryMessage =
+            'WebSocket endpoint discovered for $domain.';
       });
       return;
     }
@@ -3110,7 +3348,9 @@ class _WimsyHomeState extends State<WimsyHome> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Clear cached data?'),
-          content: const Text('This removes cached roster and messages from this device.'),
+          content: const Text(
+            'This removes cached roster and messages from this device.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -3161,7 +3401,9 @@ String _messagePreviewText(XmppService service, ChatMessage message) {
     return 'Message';
   }
   final uri = Uri.tryParse(oob);
-  final name = uri == null || uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
+  final name = uri == null || uri.pathSegments.isEmpty
+      ? ''
+      : uri.pathSegments.last.trim();
   return name.isEmpty ? oob : 'File: ${Uri.decodeComponent(name)}';
 }
 
@@ -3177,6 +3419,112 @@ class _PhotoSelection {
   final String? mimeType;
 }
 
+List<String> _reactionPickerOptions(List<String> recent) {
+  final ordered = <String>[];
+  for (final emoji in [...recent, ..._defaultReactionOptions]) {
+    if (emoji.trim().isEmpty || ordered.contains(emoji)) {
+      continue;
+    }
+    ordered.add(emoji);
+  }
+  return ordered;
+}
+
+Future<String?> _promptForCustomReaction(BuildContext context) async {
+  final controller = TextEditingController();
+  final value = await showDialog<String>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('Add reaction'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Emoji',
+            hintText: 'Paste or type an emoji',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Add'),
+          ),
+        ],
+      );
+    },
+  );
+  final normalized = value?.trim() ?? '';
+  if (normalized.isEmpty) {
+    return null;
+  }
+  final chars = normalized.characters;
+  return chars.isEmpty ? null : chars.first;
+}
+
+void _showReactionPickerSheet({
+  required BuildContext context,
+  required void Function(String emoji) onReact,
+  required List<String> recentReactionOptions,
+  required Set<String> ownReactions,
+}) {
+  final options = _reactionPickerOptions(recentReactionOptions);
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetContext) {
+      final theme = Theme.of(sheetContext);
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final emoji in options)
+                    FilterChip(
+                      selected: ownReactions.contains(emoji),
+                      label: Text(emoji, style: const TextStyle(fontSize: 20)),
+                      side: BorderSide(
+                        color: ownReactions.contains(emoji)
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.outlineVariant,
+                      ),
+                      onSelected: (_) {
+                        Navigator.of(sheetContext).pop();
+                        onReact(emoji);
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () async {
+                  Navigator.of(sheetContext).pop();
+                  final custom = await _promptForCustomReaction(context);
+                  if (custom == null || custom.isEmpty) {
+                    return;
+                  }
+                  onReact(custom);
+                },
+                icon: const Icon(Icons.add_reaction_outlined),
+                label: const Text('Use custom emoji'),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
@@ -3188,6 +3536,8 @@ class _MessageBubble extends StatelessWidget {
     required this.inviteAvatarBytes,
     required this.inviteReason,
     required this.onJoinInvite,
+    required this.selfReactionSenderId,
+    required this.recentReactionOptions,
     required this.onReact,
     required this.onEdit,
     required this.onAcceptFile,
@@ -3204,20 +3554,13 @@ class _MessageBubble extends StatelessWidget {
   final Uint8List? inviteAvatarBytes;
   final String? inviteReason;
   final VoidCallback? onJoinInvite;
+  final String selfReactionSenderId;
+  final List<String> recentReactionOptions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
   final VoidCallback? onAcceptFile;
   final VoidCallback? onDeclineFile;
   final VoidCallback? onFallbackUpload;
-
-  static const List<String> _reactionOptions = [
-    '👍',
-    '❤️',
-    '😂',
-    '😮',
-    '😢',
-    '👎',
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -3233,9 +3576,17 @@ class _MessageBubble extends StatelessWidget {
     final fileTransferCard = _buildFileTransferCard(context);
     final inviteCard = _buildInviteCard(context);
     final reactions = message.reactions ?? const {};
+    final ownReactions = _ownReactions(reactions);
 
     return GestureDetector(
-      onLongPress: onReact == null ? null : () => _showReactionSheet(context),
+      onLongPress: onReact == null
+          ? null
+          : () => _showReactionPickerSheet(
+              context: context,
+              onReact: onReact!,
+              recentReactionOptions: recentReactionOptions,
+              ownReactions: ownReactions,
+            ),
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
@@ -3252,7 +3603,9 @@ class _MessageBubble extends StatelessWidget {
                       Expanded(
                         child: Text(
                           senderName,
-                          style: theme.textTheme.labelMedium?.copyWith(color: nameColor),
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: nameColor,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -3261,7 +3614,9 @@ class _MessageBubble extends StatelessWidget {
                         children: [
                           Text(
                             timestamp,
-                            style: theme.textTheme.labelSmall?.copyWith(color: textColor.withValues(alpha: 0.7)),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: textColor.withValues(alpha: 0.7),
+                            ),
                           ),
                           if (message.edited) ...[
                             const SizedBox(width: 6),
@@ -3279,6 +3634,8 @@ class _MessageBubble extends StatelessWidget {
                           const SizedBox(width: 6),
                           _MessageMenuButton(
                             message: message,
+                            recentReactionOptions: recentReactionOptions,
+                            ownReactions: ownReactions,
                             onReact: onReact,
                             onEdit: onEdit,
                           ),
@@ -3286,54 +3643,61 @@ class _MessageBubble extends StatelessWidget {
                       ),
                     ],
                   ),
-                const SizedBox(height: 6),
-                if (fileTransferCard != null) ...[
-                  fileTransferCard,
-                  const SizedBox(height: 8),
-                ],
-                if (inviteCard != null) ...[
-                  inviteCard,
-                  const SizedBox(height: 8),
-                ],
-                if (oobImage != null) ...[
-                  oobImage,
-                  const SizedBox(height: 8),
-                ],
-                if (oobFileCard != null) ...[
-                  oobFileCard,
-                  const SizedBox(height: 8),
-                ],
-                if (_meCommandAction(message.body) != null)
-                  SelectableText(
-                    _formatMeCommand(senderName, _meCommandAction(message.body)!),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: textColor,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  )
-                else if (_shouldShowBody(message.body, message.oobUrl))
-                  SelectableText.rich(
-                    TextSpan(
-                      style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
-                      children: _linkifyText(
-                        message.body,
-                        theme.textTheme.bodyMedium?.copyWith(color: textColor),
-                        theme.textTheme.bodyMedium?.copyWith(
-                          color: linkColor,
-                          decoration: TextDecoration.underline,
+                  const SizedBox(height: 6),
+                  if (fileTransferCard != null) ...[
+                    fileTransferCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (inviteCard != null) ...[
+                    inviteCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (oobImage != null) ...[
+                    oobImage,
+                    const SizedBox(height: 8),
+                  ],
+                  if (oobFileCard != null) ...[
+                    oobFileCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (_meCommandAction(message.body) != null)
+                    SelectableText(
+                      _formatMeCommand(
+                        senderName,
+                        _meCommandAction(message.body)!,
+                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: textColor,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  else if (_shouldShowBody(message.body, message.oobUrl))
+                    SelectableText.rich(
+                      TextSpan(
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: textColor,
+                        ),
+                        children: _linkifyText(
+                          message.body,
+                          theme.textTheme.bodyMedium?.copyWith(
+                            color: textColor,
+                          ),
+                          theme.textTheme.bodyMedium?.copyWith(
+                            color: linkColor,
+                            decoration: TextDecoration.underline,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                if (reactions.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  _buildReactionRow(context, reactions),
+                  if (reactions.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    _buildReactionRow(context, reactions, ownReactions),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -3362,8 +3726,15 @@ class _MessageBubble extends StatelessWidget {
     return null;
   }
 
-  List<TextSpan> _linkifyText(String input, TextStyle? baseStyle, TextStyle? linkStyle) {
-    final regex = RegExp(r'((https?:\/\/)|(www\.))[^\s<]+', caseSensitive: false);
+  List<TextSpan> _linkifyText(
+    String input,
+    TextStyle? baseStyle,
+    TextStyle? linkStyle,
+  ) {
+    final regex = RegExp(
+      r'((https?:\/\/)|(www\.))[^\s<]+',
+      caseSensitive: false,
+    );
     final matches = regex.allMatches(input).toList();
     if (matches.isEmpty) {
       return [TextSpan(text: input, style: baseStyle)];
@@ -3373,22 +3744,29 @@ class _MessageBubble extends StatelessWidget {
     var lastIndex = 0;
     for (final match in matches) {
       if (match.start > lastIndex) {
-        spans.add(TextSpan(text: input.substring(lastIndex, match.start), style: baseStyle));
+        spans.add(
+          TextSpan(
+            text: input.substring(lastIndex, match.start),
+            style: baseStyle,
+          ),
+        );
       }
       final raw = input.substring(match.start, match.end);
       final normalized = _normalizeUrl(raw);
-      spans.add(TextSpan(
-        text: raw,
-        style: linkStyle ?? baseStyle,
-        recognizer: TapGestureRecognizer()
-          ..onTap = () async {
-            final uri = Uri.tryParse(normalized);
-            if (uri == null) {
-              return;
-            }
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          },
-      ));
+      spans.add(
+        TextSpan(
+          text: raw,
+          style: linkStyle ?? baseStyle,
+          recognizer: TapGestureRecognizer()
+            ..onTap = () async {
+              final uri = Uri.tryParse(normalized);
+              if (uri == null) {
+                return;
+              }
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            },
+        ),
+      );
       lastIndex = match.end;
     }
     if (lastIndex < input.length) {
@@ -3408,7 +3786,8 @@ class _MessageBubble extends StatelessWidget {
 
   String _stripTrailingPunctuation(String input) {
     var result = input;
-    while (result.isNotEmpty && RegExp(r'[\\).,!?;:\\]]').hasMatch(result[result.length - 1])) {
+    while (result.isNotEmpty &&
+        RegExp(r'[\\).,!?;:\\]]').hasMatch(result[result.length - 1])) {
       result = result.substring(0, result.length - 1);
     }
     return result;
@@ -3450,7 +3829,9 @@ class _MessageBubble extends StatelessWidget {
       return null;
     }
     final theme = Theme.of(context);
-    final title = inviteRoomName?.isNotEmpty == true ? inviteRoomName! : roomJid;
+    final title = inviteRoomName?.isNotEmpty == true
+        ? inviteRoomName!
+        : roomJid;
     final subtitle = inviteReason?.isNotEmpty == true ? inviteReason! : roomJid;
     return Container(
       decoration: BoxDecoration(
@@ -3468,10 +3849,7 @@ class _MessageBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: theme.textTheme.titleSmall,
-                ),
+                Text(title, style: theme.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
@@ -3503,15 +3881,19 @@ class _MessageBubble extends StatelessWidget {
       return null;
     }
     final theme = Theme.of(context);
-    final name = message.fileName?.isNotEmpty == true ? message.fileName! : 'File';
+    final name = message.fileName?.isNotEmpty == true
+        ? message.fileName!
+        : 'File';
     final size = message.fileSize;
     final bytes = message.fileBytes ?? 0;
     final state = message.fileState ?? '';
     final status = _fileTransferStatusLabel(state, message.outgoing);
-    final showActions = !message.outgoing &&
+    final showActions =
+        !message.outgoing &&
         state == 'offered' &&
         (onAcceptFile != null || onDeclineFile != null);
-    final showFallback = message.outgoing &&
+    final showFallback =
+        message.outgoing &&
         (state == 'failed' || state == 'declined') &&
         onFallbackUpload != null;
     final hasProgress = size != null && size > 0 && state == 'in_progress';
@@ -3527,10 +3909,7 @@ class _MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            name,
-            style: theme.textTheme.titleSmall,
-          ),
+          Text(name, style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
             size == null ? 'Size unknown' : _formatFileSize(size),
@@ -3603,7 +3982,9 @@ class _MessageBubble extends StatelessWidget {
       size /= 1024;
       unitIndex += 1;
     }
-    final value = size >= 10 ? size.roundToDouble() : double.parse(size.toStringAsFixed(1));
+    final value = size >= 10
+        ? size.roundToDouble()
+        : double.parse(size.toStringAsFixed(1));
     final text = value == value.roundToDouble()
         ? value.toStringAsFixed(0)
         : value.toStringAsFixed(1);
@@ -3617,7 +3998,9 @@ class _MessageBubble extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 260.0;
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 260.0;
         final cap = math.min(maxWidth, 280.0);
         return ConstrainedBox(
           constraints: BoxConstraints(maxWidth: cap, maxHeight: cap),
@@ -3664,10 +4047,7 @@ class _MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            name,
-            style: theme.textTheme.titleSmall,
-          ),
+          Text(name, style: theme.textTheme.titleSmall),
           if (description.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
@@ -3757,36 +4137,25 @@ class _MessageBubble extends StatelessWidget {
     return RegExp(r'\.(png|jpe?g|gif|webp|bmp)$').hasMatch(path);
   }
 
-  void _showReactionSheet(BuildContext context) {
-    if (onReact == null) {
-      return;
+  Set<String> _ownReactions(Map<String, List<String>> reactions) {
+    final sender = selfReactionSenderId.trim();
+    if (sender.isEmpty) {
+      return <String>{};
     }
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                for (final emoji in _reactionOptions)
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      onReact?.call(emoji);
-                    },
-                    child: Text(emoji, style: const TextStyle(fontSize: 20)),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    final result = <String>{};
+    reactions.forEach((emoji, senders) {
+      if (senders.contains(sender)) {
+        result.add(emoji);
+      }
+    });
+    return result;
   }
 
-  Widget _buildReactionRow(BuildContext context, Map<String, List<String>> reactions) {
+  Widget _buildReactionRow(
+    BuildContext context,
+    Map<String, List<String>> reactions,
+    Set<String> ownReactions,
+  ) {
     final theme = Theme.of(context);
     final entries = reactions.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
@@ -3797,15 +4166,36 @@ class _MessageBubble extends StatelessWidget {
         for (final entry in entries)
           Tooltip(
             message: entry.value.join(', '),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
                 borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${entry.key} ${entry.value.length}',
-                style: theme.textTheme.labelSmall,
+                onTap: onReact == null ? null : () => onReact!(entry.key),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: ownReactions.contains(entry.key)
+                        ? theme.colorScheme.primaryContainer
+                        : theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: ownReactions.contains(entry.key)
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Text(
+                    '${entry.key} ${entry.value.length}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: ownReactions.contains(entry.key)
+                          ? theme.colorScheme.onPrimaryContainer
+                          : null,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -3907,13 +4297,12 @@ class _AvatarPlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     final initial = label.trim().isEmpty ? '?' : label.trim()[0].toUpperCase();
     if (bytes != null) {
-      return CircleAvatar(
-        radius: 18,
-        backgroundImage: MemoryImage(bytes!),
-      );
+      return CircleAvatar(radius: 18, backgroundImage: MemoryImage(bytes!));
     }
     final baseColor = xep0392ColorForLabel(label);
-    final onBase = baseColor.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+    final onBase = baseColor.computeLuminance() > 0.5
+        ? Colors.black
+        : Colors.white;
     return CircleAvatar(
       radius: 18,
       backgroundColor: baseColor,
@@ -3926,11 +4315,15 @@ class _AvatarPlaceholder extends StatelessWidget {
 class _MessageMenuButton extends StatelessWidget {
   const _MessageMenuButton({
     required this.message,
+    required this.recentReactionOptions,
+    required this.ownReactions,
     required this.onReact,
     required this.onEdit,
   });
 
   final ChatMessage message;
+  final List<String> recentReactionOptions;
+  final Set<String> ownReactions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
 
@@ -3972,10 +4365,7 @@ class _MessageMenuButton extends StatelessWidget {
             value: 'view_reactions',
             child: Text('View reactions'),
           ),
-        const PopupMenuItem(
-          value: 'view_xml',
-          child: Text('View XML'),
-        ),
+        const PopupMenuItem(value: 'view_xml', child: Text('View XML')),
       ],
     );
   }
@@ -3984,28 +4374,11 @@ class _MessageMenuButton extends StatelessWidget {
     if (onReact == null) {
       return;
     }
-    showModalBottomSheet<void>(
+    _showReactionPickerSheet(
       context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                for (final emoji in _MessageBubble._reactionOptions)
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      onReact?.call(emoji);
-                    },
-                    child: Text(emoji, style: const TextStyle(fontSize: 20)),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
+      onReact: onReact!,
+      recentReactionOptions: recentReactionOptions,
+      ownReactions: ownReactions,
     );
   }
 
@@ -4022,16 +4395,14 @@ class _MessageMenuButton extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final entry in reactions.entries.toList()
-                    ..sort((a, b) => a.key.compareTo(b.key)))
+                  for (final entry
+                      in reactions.entries.toList()
+                        ..sort((a, b) => a.key.compareTo(b.key)))
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        '${entry.key} ${entry.value.join(', ')}',
-                      ),
+                      child: Text('${entry.key} ${entry.value.join(', ')}'),
                     ),
-                  if (reactions.isEmpty)
-                    const Text('No reactions yet.'),
+                  if (reactions.isEmpty) const Text('No reactions yet.'),
                 ],
               ),
             ),
@@ -4058,7 +4429,9 @@ class _MessageMenuButton extends StatelessWidget {
             width: 500,
             child: SingleChildScrollView(
               child: SelectableText(
-                (xml == null || xml.isEmpty) ? 'No XML cached for this message.' : xml,
+                (xml == null || xml.isEmpty)
+                    ? 'No XML cached for this message.'
+                    : xml,
               ),
             ),
           ),
@@ -4149,11 +4522,15 @@ class _PresenceMenu extends StatelessWidget {
     if (selfJid == null || selfJid.isEmpty) {
       return;
     }
-    final isDesktop = !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
-    final supportsPickerCamera = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final isDesktop =
+        !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+    final supportsPickerCamera =
+        !kIsWeb && (Platform.isAndroid || Platform.isIOS);
     final useWebRtcCamera = kIsWeb || isDesktop;
     final supportsCamera = useWebRtcCamera || supportsPickerCamera;
-    final nameController = TextEditingController(text: service.displayNameFor(selfJid));
+    final nameController = TextEditingController(
+      text: service.displayNameFor(selfJid),
+    );
     Uint8List? avatarBytes = service.avatarBytesFor(selfJid);
     String? avatarMimeType;
     var clearAvatar = false;
@@ -4161,156 +4538,188 @@ class _PresenceMenu extends StatelessWidget {
     await showDialog<void>(
       context: context,
       builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Edit profile'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 32,
-                    backgroundImage: avatarBytes != null ? MemoryImage(avatarBytes!) : null,
-                    child: avatarBytes == null ? const Icon(Icons.person, size: 32) : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name',
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Edit profile'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 32,
+                      backgroundImage: avatarBytes != null
+                          ? MemoryImage(avatarBytes!)
+                          : null,
+                      child: avatarBytes == null
+                          ? const Icon(Icons.person, size: 32)
+                          : null,
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                final result = await FilePicker.platform.pickFiles(
-                                  type: FileType.image,
-                                  withData: true,
-                                );
-                                if (result == null || result.files.isEmpty) {
-                                  return;
-                                }
-                                final file = result.files.first;
-                                final bytes = await _readPickedFileBytes(file);
-                                if (bytes == null || bytes.isEmpty) {
-                                  return;
-                                }
-                                setState(() {
-                                  avatarBytes = bytes;
-                                  avatarMimeType = _guessImageMimeType(file.name);
-                                  clearAvatar = false;
-                                });
-                              },
-                        icon: const Icon(Icons.image),
-                        label: const Text('Choose file'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Display name',
                       ),
-                      OutlinedButton.icon(
-                        onPressed: saving
-                            ? null
-                            : (supportsCamera
-                                ? () async {
-                                    final messenger = ScaffoldMessenger.of(context);
-                                    try {
-                                      Uint8List? bytes;
-                                      String? mimeType;
-                                      if (useWebRtcCamera) {
-                                        bytes = await _capturePhotoViaWebRtc(context);
-                                        mimeType = bytes == null ? null : 'image/png';
-                                      } else if (supportsPickerCamera) {
-                                        final picker = ImagePicker();
-                                        final picked =
-                                            await picker.pickImage(source: ImageSource.camera);
-                                        if (picked == null) {
-                                          return;
-                                        }
-                                        bytes = await picked.readAsBytes();
-                                        if (bytes.isEmpty) {
-                                          return;
-                                        }
-                                        mimeType = _guessImageMimeType(picked.path);
-                                      }
-                                      if (bytes == null || bytes.isEmpty) {
-                                        return;
-                                      }
-                                      setState(() {
-                                        avatarBytes = bytes;
-                                        avatarMimeType = mimeType;
-                                        clearAvatar = false;
-                                      });
-                                    } catch (_) {
-                                      if (!context.mounted) {
-                                        return;
-                                      }
-                                      messenger.showSnackBar(
-                                        const SnackBar(content: Text('Camera not available.')),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: saving
+                              ? null
+                              : () async {
+                                  final result = await FilePicker.platform
+                                      .pickFiles(
+                                        type: FileType.image,
+                                        withData: true,
                                       );
-                                    }
+                                  if (result == null || result.files.isEmpty) {
+                                    return;
                                   }
-                                : () {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Camera not available.')),
+                                  final file = result.files.first;
+                                  final bytes = await _readPickedFileBytes(
+                                    file,
+                                  );
+                                  if (bytes == null || bytes.isEmpty) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    avatarBytes = bytes;
+                                    avatarMimeType = _guessImageMimeType(
+                                      file.name,
                                     );
-                                  }),
-                        icon: const Icon(Icons.photo_camera),
-                        label: const Text('Take photo'),
-                      ),
-                      TextButton(
-                        onPressed: saving
-                            ? null
-                            : () {
-                                setState(() {
-                                  avatarBytes = null;
-                                  avatarMimeType = null;
-                                  clearAvatar = true;
-                                });
-                              },
-                        child: const Text('Clear photo'),
-                      ),
-                    ],
-                  ),
-                ],
+                                    clearAvatar = false;
+                                  });
+                                },
+                          icon: const Icon(Icons.image),
+                          label: const Text('Choose file'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: saving
+                              ? null
+                              : (supportsCamera
+                                    ? () async {
+                                        final messenger = ScaffoldMessenger.of(
+                                          context,
+                                        );
+                                        try {
+                                          Uint8List? bytes;
+                                          String? mimeType;
+                                          if (useWebRtcCamera) {
+                                            bytes =
+                                                await _capturePhotoViaWebRtc(
+                                                  context,
+                                                );
+                                            mimeType = bytes == null
+                                                ? null
+                                                : 'image/png';
+                                          } else if (supportsPickerCamera) {
+                                            final picker = ImagePicker();
+                                            final picked = await picker
+                                                .pickImage(
+                                                  source: ImageSource.camera,
+                                                );
+                                            if (picked == null) {
+                                              return;
+                                            }
+                                            bytes = await picked.readAsBytes();
+                                            if (bytes.isEmpty) {
+                                              return;
+                                            }
+                                            mimeType = _guessImageMimeType(
+                                              picked.path,
+                                            );
+                                          }
+                                          if (bytes == null || bytes.isEmpty) {
+                                            return;
+                                          }
+                                          setState(() {
+                                            avatarBytes = bytes;
+                                            avatarMimeType = mimeType;
+                                            clearAvatar = false;
+                                          });
+                                        } catch (_) {
+                                          if (!context.mounted) {
+                                            return;
+                                          }
+                                          messenger.showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Camera not available.',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    : () {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Camera not available.',
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                          icon: const Icon(Icons.photo_camera),
+                          label: const Text('Take photo'),
+                        ),
+                        TextButton(
+                          onPressed: saving
+                              ? null
+                              : () {
+                                  setState(() {
+                                    avatarBytes = null;
+                                    avatarMimeType = null;
+                                    clearAvatar = true;
+                                  });
+                                },
+                          child: const Text('Clear photo'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: saving ? null : () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: saving
-                    ? null
-                    : () async {
-                        setState(() => saving = true);
-                        final error = await service.updateSelfVcard(
-                          displayName: nameController.text,
-                          avatarBytes: avatarBytes,
-                          avatarMimeType: avatarMimeType,
-                          clearAvatar: clearAvatar,
-                        );
-                        if (context.mounted) {
-                          if (error != null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(error)),
-                            );
-                          } else {
-                            Navigator.of(context).pop();
+              actions: [
+                TextButton(
+                  onPressed: saving ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          setState(() => saving = true);
+                          final error = await service.updateSelfVcard(
+                            displayName: nameController.text,
+                            avatarBytes: avatarBytes,
+                            avatarMimeType: avatarMimeType,
+                            clearAvatar: clearAvatar,
+                          );
+                          if (context.mounted) {
+                            if (error != null) {
+                              ScaffoldMessenger.of(
+                                context,
+                              ).showSnackBar(SnackBar(content: Text(error)));
+                            } else {
+                              Navigator.of(context).pop();
+                            }
                           }
-                        }
-                        if (context.mounted) {
-                          setState(() => saving = false);
-                        }
-                      },
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        });
+                          if (context.mounted) {
+                            setState(() => saving = false);
+                          }
+                        },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -4323,7 +4732,8 @@ class _PresenceMenu extends StatelessWidget {
     final latencyLabel = latencyMs == null ? '--' : '$latencyMs ms';
     final dotColor = _presenceDotColor(
       theme,
-      service.selfPresence.showElement ?? (service.isConnected ? PresenceShowElement.CHAT : null),
+      service.selfPresence.showElement ??
+          (service.isConnected ? PresenceShowElement.CHAT : null),
     );
     return FutureBuilder<bool>(
       future: _getSentryOptIn(),
@@ -4335,29 +4745,49 @@ class _PresenceMenu extends StatelessWidget {
           onSelected: (action) async {
             switch (action) {
               case _PresenceAction.online:
-                service.setSelfPresence(show: PresenceShowElement.CHAT, status: service.selfPresence.status);
+                service.setSelfPresence(
+                  show: PresenceShowElement.CHAT,
+                  status: service.selfPresence.status,
+                );
                 break;
-          case _PresenceAction.away:
-            service.setSelfPresence(show: PresenceShowElement.AWAY, status: service.selfPresence.status);
-            break;
-          case _PresenceAction.dnd:
-            service.setSelfPresence(show: PresenceShowElement.DND, status: service.selfPresence.status);
-            break;
-          case _PresenceAction.xa:
-            service.setSelfPresence(show: PresenceShowElement.XA, status: service.selfPresence.status);
-            break;
-          case _PresenceAction.setStatus:
-            final status = await _promptStatus(context, service.selfPresence.status ?? '');
-            if (status != null) {
-              service.setSelfPresence(show: service.selfPresence.showElement ?? PresenceShowElement.CHAT, status: status);
-            }
-            break;
-          case _PresenceAction.editProfile:
-            await _editProfile(context);
-            break;
-          case _PresenceAction.clearCacheExit:
-            onClearCacheExit?.call();
-            break;
+              case _PresenceAction.away:
+                service.setSelfPresence(
+                  show: PresenceShowElement.AWAY,
+                  status: service.selfPresence.status,
+                );
+                break;
+              case _PresenceAction.dnd:
+                service.setSelfPresence(
+                  show: PresenceShowElement.DND,
+                  status: service.selfPresence.status,
+                );
+                break;
+              case _PresenceAction.xa:
+                service.setSelfPresence(
+                  show: PresenceShowElement.XA,
+                  status: service.selfPresence.status,
+                );
+                break;
+              case _PresenceAction.setStatus:
+                final status = await _promptStatus(
+                  context,
+                  service.selfPresence.status ?? '',
+                );
+                if (status != null) {
+                  service.setSelfPresence(
+                    show:
+                        service.selfPresence.showElement ??
+                        PresenceShowElement.CHAT,
+                    status: status,
+                  );
+                }
+                break;
+              case _PresenceAction.editProfile:
+                await _editProfile(context);
+                break;
+              case _PresenceAction.clearCacheExit:
+                onClearCacheExit?.call();
+                break;
               case _PresenceAction.simulateDisconnect:
                 service.simulateServerDisconnect();
                 break;
@@ -4379,26 +4809,54 @@ class _PresenceMenu extends StatelessWidget {
               child: Text('Latency: $latencyLabel'),
             ),
             const PopupMenuDivider(),
-            const PopupMenuItem(value: _PresenceAction.online, child: Text('Online')),
-            const PopupMenuItem(value: _PresenceAction.away, child: Text('Away')),
-            const PopupMenuItem(value: _PresenceAction.dnd, child: Text('Do not disturb')),
-            const PopupMenuItem(value: _PresenceAction.xa, child: Text('Extended away')),
-            const PopupMenuDivider(),
-            const PopupMenuItem(value: _PresenceAction.setStatus, child: Text('Set status message...')),
-            const PopupMenuItem(value: _PresenceAction.editProfile, child: Text('Edit profile...')),
-            PopupMenuItem(
-              value: _PresenceAction.toggleSentry,
-              child: Text(sentryEnabled ? 'Disable crash reporting' : 'Enable crash reporting'),
+            const PopupMenuItem(
+              value: _PresenceAction.online,
+              child: Text('Online'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.away,
+              child: Text('Away'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.dnd,
+              child: Text('Do not disturb'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.xa,
+              child: Text('Extended away'),
             ),
             const PopupMenuDivider(),
-            const PopupMenuItem(value: _PresenceAction.simulateDisconnect, child: Text('Simulate disconnect')),
+            const PopupMenuItem(
+              value: _PresenceAction.setStatus,
+              child: Text('Set status message...'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.editProfile,
+              child: Text('Edit profile...'),
+            ),
+            PopupMenuItem(
+              value: _PresenceAction.toggleSentry,
+              child: Text(
+                sentryEnabled
+                    ? 'Disable crash reporting'
+                    : 'Enable crash reporting',
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: _PresenceAction.simulateDisconnect,
+              child: Text('Simulate disconnect'),
+            ),
             const PopupMenuDivider(),
             PopupMenuItem(
               enabled: onClearCacheExit != null,
               value: _PresenceAction.clearCacheExit,
               child: const Text('Clear Cache & Exit'),
             ),
-            const PopupMenuItem(value: _PresenceAction.exit, child: Text('Exit')),
+            const PopupMenuItem(
+              value: _PresenceAction.exit,
+              child: Text('Exit'),
+            ),
           ],
         );
       },
@@ -4426,170 +4884,202 @@ Future<Uint8List?> _capturePhotoViaWebRtc(BuildContext context) async {
     final result = await showDialog<Uint8List?>(
       context: context,
       builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return AlertDialog(
-            title: const Text('Take photo'),
-            content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AspectRatio(
-                    aspectRatio: 4 / 3,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final size = constraints.biggest;
-                        if (previewSize != size) {
-                          previewSize = size;
-                          final side = math.min(size.width, size.height) * cropScale;
-                          cropRect ??= Rect.fromCenter(
-                            center: Offset(size.width / 2, size.height / 2),
-                            width: side,
-                            height: side,
-                          );
-                        }
-                        final rect = cropRect;
-                        return RepaintBoundary(
-                          key: boundaryKey,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                RTCVideoView(renderer, mirror: true),
-                                if (rect != null)
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _CropMaskPainter(rect),
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Take photo'),
+              content: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 4 / 3,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final size = constraints.biggest;
+                          if (previewSize != size) {
+                            previewSize = size;
+                            final side =
+                                math.min(size.width, size.height) * cropScale;
+                            cropRect ??= Rect.fromCenter(
+                              center: Offset(size.width / 2, size.height / 2),
+                              width: side,
+                              height: side,
+                            );
+                          }
+                          final rect = cropRect;
+                          return RepaintBoundary(
+                            key: boundaryKey,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  RTCVideoView(renderer, mirror: true),
+                                  if (rect != null)
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _CropMaskPainter(rect),
+                                      ),
                                     ),
-                                  ),
-                                if (rect != null)
-                                  Positioned.fromRect(
-                                    rect: rect,
-                                    child: GestureDetector(
-                                      onPanUpdate: (details) {
-                                        final current = cropRect;
-                                        if (current == null || previewSize == null) {
-                                          return;
-                                        }
-                                        final next = current.shift(details.delta);
-                                        final bounds =
-                                            Rect.fromLTWH(0, 0, previewSize!.width, previewSize!.height);
-                                        final clamped = Rect.fromLTWH(
-                                          next.left.clamp(bounds.left, bounds.right - next.width),
-                                          next.top.clamp(bounds.top, bounds.bottom - next.height),
-                                          next.width,
-                                          next.height,
-                                        );
-                                        setState(() {
-                                          cropRect = clamped;
-                                        });
-                                      },
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          border: Border.all(
-                                            color: Colors.white,
-                                            width: 2,
+                                  if (rect != null)
+                                    Positioned.fromRect(
+                                      rect: rect,
+                                      child: GestureDetector(
+                                        onPanUpdate: (details) {
+                                          final current = cropRect;
+                                          if (current == null ||
+                                              previewSize == null) {
+                                            return;
+                                          }
+                                          final next = current.shift(
+                                            details.delta,
+                                          );
+                                          final bounds = Rect.fromLTWH(
+                                            0,
+                                            0,
+                                            previewSize!.width,
+                                            previewSize!.height,
+                                          );
+                                          final clamped = Rect.fromLTWH(
+                                            next.left.clamp(
+                                              bounds.left,
+                                              bounds.right - next.width,
+                                            ),
+                                            next.top.clamp(
+                                              bounds.top,
+                                              bounds.bottom - next.height,
+                                            ),
+                                            next.width,
+                                            next.height,
+                                          );
+                                          setState(() {
+                                            cropRect = clamped;
+                                          });
+                                        },
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              color: Colors.white,
+                                              width: 2,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text('Crop'),
-                      Expanded(
-                        child: Slider(
-                          value: cropScale,
-                          min: 0.4,
-                          max: 1.0,
-                          divisions: 6,
-                          onChanged: (value) {
-                            if (previewSize == null) {
-                              return;
-                            }
-                            final size = previewSize!;
-                            final center = cropRect?.center ?? Offset(size.width / 2, size.height / 2);
-                            final side = math.min(size.width, size.height) * value;
-                            final rect = Rect.fromCenter(
-                              center: center,
-                              width: side,
-                              height: side,
-                            );
-                            final bounds = Rect.fromLTWH(0, 0, size.width, size.height);
-                            final clamped = Rect.fromLTWH(
-                              rect.left.clamp(bounds.left, bounds.right - rect.width),
-                              rect.top.clamp(bounds.top, bounds.bottom - rect.height),
-                              rect.width,
-                              rect.height,
-                            );
-                            setState(() {
-                              cropScale = value;
-                              cropRect = clamped;
-                            });
-                          },
-                        ),
+                          );
+                        },
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text('Crop'),
+                        Expanded(
+                          child: Slider(
+                            value: cropScale,
+                            min: 0.4,
+                            max: 1.0,
+                            divisions: 6,
+                            onChanged: (value) {
+                              if (previewSize == null) {
+                                return;
+                              }
+                              final size = previewSize!;
+                              final center =
+                                  cropRect?.center ??
+                                  Offset(size.width / 2, size.height / 2);
+                              final side =
+                                  math.min(size.width, size.height) * value;
+                              final rect = Rect.fromCenter(
+                                center: center,
+                                width: side,
+                                height: side,
+                              );
+                              final bounds = Rect.fromLTWH(
+                                0,
+                                0,
+                                size.width,
+                                size.height,
+                              );
+                              final clamped = Rect.fromLTWH(
+                                rect.left.clamp(
+                                  bounds.left,
+                                  bounds.right - rect.width,
+                                ),
+                                rect.top.clamp(
+                                  bounds.top,
+                                  bounds.bottom - rect.height,
+                                ),
+                                rect.width,
+                                rect.height,
+                              );
+                              setState(() {
+                                cropScale = value;
+                                cropRect = clamped;
+                              });
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  final bytes = await _captureBoundaryPng(boundaryKey);
-                  if (!context.mounted) {
-                    return;
-                  }
-                  if (bytes == null || bytes.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Unable to capture photo.')),
-                    );
-                    return;
-                  }
-                  final rect = cropRect;
-                  final size = previewSize;
-                  if (rect != null && size != null) {
-                    final cropped = await _cropPngBytes(bytes, rect, size);
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final bytes = await _captureBoundaryPng(boundaryKey);
                     if (!context.mounted) {
                       return;
                     }
-                    if (cropped != null && cropped.isNotEmpty) {
-                      Navigator.of(context).pop(cropped);
+                    if (bytes == null || bytes.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Unable to capture photo.'),
+                        ),
+                      );
                       return;
                     }
-                  }
-                  if (!context.mounted) {
-                    return;
-                  }
-                  Navigator.of(context).pop(bytes);
-                },
-                child: const Text('Capture'),
-              ),
-            ],
-          );
-        });
+                    final rect = cropRect;
+                    final size = previewSize;
+                    if (rect != null && size != null) {
+                      final cropped = await _cropPngBytes(bytes, rect, size);
+                      if (!context.mounted) {
+                        return;
+                      }
+                      if (cropped != null && cropped.isNotEmpty) {
+                        Navigator.of(context).pop(cropped);
+                        return;
+                      }
+                    }
+                    if (!context.mounted) {
+                      return;
+                    }
+                    Navigator.of(context).pop(bytes);
+                  },
+                  child: const Text('Capture'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
     return result;
   } catch (_) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Camera not available.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Camera not available.')));
     }
     return null;
   } finally {
@@ -4631,12 +5121,15 @@ Future<Uint8List?> _cropPngBytes(
   final image = frame.image;
   final scaleX = image.width / renderSize.width;
   final scaleY = image.height / renderSize.height;
-  final src = Rect.fromLTRB(
-    cropRect.left * scaleX,
-    cropRect.top * scaleY,
-    cropRect.right * scaleX,
-    cropRect.bottom * scaleY,
-  ).intersect(Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()));
+  final src =
+      Rect.fromLTRB(
+        cropRect.left * scaleX,
+        cropRect.top * scaleY,
+        cropRect.right * scaleX,
+        cropRect.bottom * scaleY,
+      ).intersect(
+        Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      );
   if (src.width <= 0 || src.height <= 0) {
     return null;
   }
@@ -4695,7 +5188,7 @@ enum _PresenceAction {
   toggleSentry,
   simulateDisconnect,
   clearCacheExit,
-  exit
+  exit,
 }
 
 Future<String?> _promptStatus(BuildContext context, String current) async {
@@ -4735,9 +5228,7 @@ class _SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }
 
@@ -4818,8 +5309,12 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
                   contentPadding: EdgeInsets.zero,
                   value: _sentryOptIn,
                   title: const Text('Share crash reports'),
-                  subtitle: const Text('Help improve Wimsy by sending anonymized crash reports.'),
-                  onChanged: _submitting ? null : (value) => setState(() => _sentryOptIn = value),
+                  subtitle: const Text(
+                    'Help improve Wimsy by sending anonymized crash reports.',
+                  ),
+                  onChanged: _submitting
+                      ? null
+                      : (value) => setState(() => _sentryOptIn = value),
                 ),
                 const SizedBox(height: 8),
                 FilledButton(
@@ -4830,7 +5325,9 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
                   const SizedBox(height: 12),
                   Text(
                     _error!,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
                   ),
                 ],
               ],
@@ -4928,15 +5425,21 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
                     contentPadding: EdgeInsets.zero,
                     value: _sentryOptIn,
                     title: const Text('Share crash reports'),
-                    subtitle: const Text('Help improve Wimsy by sending anonymized crash reports.'),
-                    onChanged: _submitting ? null : (value) => setState(() => _sentryOptIn = value),
+                    subtitle: const Text(
+                      'Help improve Wimsy by sending anonymized crash reports.',
+                    ),
+                    onChanged: _submitting
+                        ? null
+                        : (value) => setState(() => _sentryOptIn = value),
                   ),
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(
                     _error!,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
                   ),
                 ],
               ],
@@ -5097,10 +5600,7 @@ class _SpeakingFrame extends StatelessWidget {
           width: active ? 2 : 1,
         ),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: child,
-      ),
+      child: ClipRRect(borderRadius: BorderRadius.circular(8), child: child),
     );
   }
 }
@@ -5123,7 +5623,9 @@ class _SpeakingPill extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: active ? color.withAlpha(31) : theme.colorScheme.surfaceContainerHighest,
+        color: active
+            ? color.withAlpha(31)
+            : theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: active ? color : theme.colorScheme.outlineVariant,
@@ -5141,10 +5643,7 @@ class _SpeakingPill extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall,
-          ),
+          Text(label, style: theme.textTheme.labelSmall),
         ],
       ),
     );

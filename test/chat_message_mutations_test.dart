@@ -92,4 +92,61 @@ void main() {
       });
     },
   );
+
+  test('updateReactionsInList keeps multiple reactions for one sender', () {
+    final list = <ChatMessage>[
+      _message(
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'hello',
+        id: 'm3',
+        stanzaId: 's3',
+        reactions: {
+          '😀': ['alice@example.com', 'carol@example.com'],
+        },
+      ),
+    ];
+
+    final changed = ChatMessageMutations.updateReactionsInList(
+      list,
+      'alice@example.com',
+      ReactionUpdate('s3', ['😀', '🔥']),
+    );
+
+    expect(changed, isTrue);
+    expect(list.single.reactions, {
+      '😀': ['alice@example.com', 'carol@example.com'],
+      '🔥': ['alice@example.com'],
+    });
+  });
+
+  test(
+    'updateReactionsInList removes sender reactions when reaction list is empty',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'hello',
+          id: 'm4',
+          stanzaId: 's4',
+          reactions: {
+            '😀': ['alice@example.com', 'carol@example.com'],
+            '🔥': ['alice@example.com'],
+          },
+        ),
+      ];
+
+      final changed = ChatMessageMutations.updateReactionsInList(
+        list,
+        'alice@example.com',
+        ReactionUpdate('s4', const []),
+      );
+
+      expect(changed, isTrue);
+      expect(list.single.reactions, {
+        '😀': ['carol@example.com'],
+      });
+    },
+  );
 }

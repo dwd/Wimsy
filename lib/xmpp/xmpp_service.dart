@@ -253,6 +253,8 @@ class XmppService extends ChangeNotifier {
   final Map<String, ISentrySpan> _jingleSetupTransactions = {};
   final Map<String, ISentrySpan> _fileTransferTransactions = {};
   final Map<String, String> _fileTransferStateBySid = {};
+  final Set<String> _pendingRecentReactionRequests = {};
+  final List<String> _recentReactionEmojis = [];
   final Map<String, Timer> _callTimeoutTimers = {};
   final Map<String, Timer> _callStatsTimers = {};
   final Map<String, CallQualitySample> _callQualityBySid = {};
@@ -285,10 +287,14 @@ class XmppService extends ChangeNotifier {
   static const String _fileTransferStateCompleted = 'completed';
   static const String _fileTransferStateFailed = 'failed';
   static const String _fileTransferStateDeclined = 'declined';
+  static const String _recentReactionsNode = 'urn:wimsy:reactions:recent:0';
+  static const int _maxRecentReactionEmojis = 10;
 
   XmppStatus get status => _status;
   String? get errorMessage => _errorMessage;
   String? get currentUserBareJid => _currentUserBareJid;
+  List<String> get recentReactionEmojis =>
+      List.unmodifiable(_recentReactionEmojis);
   XmppConnectionState? get lastConnectionState => _lastConnectionState;
   List<ContactEntry> get contacts {
     final combined = <ContactEntry>[..._bookmarks, ..._contacts];
@@ -297,6 +303,11 @@ class XmppService extends ChangeNotifier {
   }
 
   String? get activeChatBareJid => _activeChatBareJid;
+  String reactionSenderForChat(String bareJid, {required bool isRoom}) {
+    final normalized = _bareJid(bareJid);
+    return isRoom ? _roomNickFor(normalized) : (_currentUserBareJid ?? '');
+  }
+
   RoomEntry? roomFor(String bareJid) => _rooms[_bareJid(bareJid)];
   Duration? get lastPingLatency => _lastPingLatency;
   DateTime? get lastPingAt => _lastPingAt;
@@ -1933,39 +1944,102 @@ class XmppService extends ChangeNotifier {
     if (trimmed.isEmpty) {
       return;
     }
+    if (!_isLikelyEmoji(trimmed)) {
+      return;
+    }
     final targetId = message.stanzaId ?? message.messageId;
     if (targetId == null || targetId.isEmpty) {
       return;
     }
-    final stanza = MessageStanza(
-      AbstractStanza.getRandomId(),
-      isRoom ? MessageStanzaType.GROUPCHAT : MessageStanzaType.CHAT,
-    );
-    stanza.toJid = Jid.fromFullJid(_bareJid(bareJid));
-    final reactions = XmppElement()..name = 'reactions';
-    reactions.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:reactions:0'));
-    reactions.addAttribute(XmppAttribute('id', targetId));
-    final reaction = XmppElement()..name = 'reaction';
-    reaction.textValue = trimmed;
-    reactions.addChild(reaction);
-    stanza.addChild(reactions);
-    connection.writeStanza(stanza);
-
+    final normalizedJid = _bareJid(bareJid);
     final sender = isRoom
-        ? _roomNickFor(_bareJid(bareJid))
+        ? _roomNickFor(normalizedJid)
         : (_currentUserBareJid ?? '');
     if (sender.isEmpty) {
       return;
     }
+    final currentOwn = _ownReactionsFor(message, sender);
+    final nextOwn = <String>{...currentOwn};
+    final added = !nextOwn.remove(trimmed);
+    if (added) {
+      nextOwn.add(trimmed);
+      _rememberRecentReactionEmoji(trimmed);
+    }
+    final outgoingReactions = nextOwn.toList()..sort();
+
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      isRoom ? MessageStanzaType.GROUPCHAT : MessageStanzaType.CHAT,
+    );
+    stanza.toJid = Jid.fromFullJid(normalizedJid);
+    final reactions = XmppElement()..name = 'reactions';
+    reactions.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:reactions:0'));
+    reactions.addAttribute(XmppAttribute('id', targetId));
+    for (final value in outgoingReactions) {
+      final reaction = XmppElement()..name = 'reaction';
+      reaction.textValue = value;
+      reactions.addChild(reaction);
+    }
+    stanza.addChild(reactions);
+    connection.writeStanza(stanza);
+
     if (isRoom) {
-      _applyRoomReactionUpdate(_bareJid(bareJid), sender, targetId, [trimmed]);
+      _applyRoomReactionUpdate(
+        normalizedJid,
+        sender,
+        targetId,
+        outgoingReactions,
+      );
     } else {
       _applyReactionUpdate(
-        _bareJid(bareJid),
+        normalizedJid,
         sender,
-        ReactionUpdate(targetId, [trimmed]),
+        ReactionUpdate(targetId, outgoingReactions),
       );
     }
+  }
+
+  Set<String> _ownReactionsFor(ChatMessage message, String sender) {
+    final reactions = message.reactions ?? const {};
+    final own = <String>{};
+    reactions.forEach((emoji, senders) {
+      if (emoji.isNotEmpty && senders.contains(sender)) {
+        own.add(emoji);
+      }
+    });
+    return own;
+  }
+
+  bool _isLikelyEmoji(String value) {
+    if (value.isEmpty || value.contains(RegExp(r'\s'))) {
+      return false;
+    }
+    return RegExp(
+      r'[\u{00A9}\u{00AE}\u{203C}-\u{3299}\u{1F000}-\u{1FAFF}]',
+      unicode: true,
+    ).hasMatch(value);
+  }
+
+  void _rememberRecentReactionEmoji(String emoji) {
+    if (!_isLikelyEmoji(emoji)) {
+      return;
+    }
+    final existing = _recentReactionEmojis.indexOf(emoji);
+    if (existing == 0) {
+      return;
+    }
+    if (existing > 0) {
+      _recentReactionEmojis.removeAt(existing);
+    }
+    _recentReactionEmojis.insert(0, emoji);
+    if (_recentReactionEmojis.length > _maxRecentReactionEmojis) {
+      _recentReactionEmojis.removeRange(
+        _maxRecentReactionEmojis,
+        _recentReactionEmojis.length,
+      );
+    }
+    _publishRecentReactionEmojis();
+    notifyListeners();
   }
 
   void _setupRoster() {
@@ -4719,6 +4793,7 @@ class XmppService extends ChangeNotifier {
       connection: connection,
       pepManager: _pepManager!,
     );
+    _requestRecentReactionEmojis();
     _pepManager?.requestMetadataIfMissing(_currentUserBareJid!);
     for (final contact in _contacts) {
       _pepManager?.requestMetadataIfMissing(contact.jid);
@@ -4729,6 +4804,7 @@ class XmppService extends ChangeNotifier {
         return;
       }
       _handleDisplayedSyncStanza(stanza);
+      _handleRecentReactionsStanza(stanza);
       _pepManager?.handleStanza(stanza);
       _pepCapsManager?.handleStanza(stanza);
       _bookmarksManager?.handleStanza(stanza);
@@ -4781,6 +4857,166 @@ class XmppService extends ChangeNotifier {
     pubsub.addChild(items);
     iqStanza.addChild(pubsub);
     connection.writeStanza(iqStanza);
+  }
+
+  void _requestRecentReactionEmojis() {
+    final connection = _connection;
+    final selfBareJid = _currentUserBareJid;
+    if (connection == null || selfBareJid == null || selfBareJid.isEmpty) {
+      return;
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(selfBareJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
+    final items = XmppElement()..name = 'items';
+    items.addAttribute(XmppAttribute('node', _recentReactionsNode));
+    items.addAttribute(XmppAttribute('max_items', '1'));
+    pubsub.addChild(items);
+    iqStanza.addChild(pubsub);
+    _pendingRecentReactionRequests.add(id);
+    connection.writeStanza(iqStanza);
+  }
+
+  void _publishRecentReactionEmojis() {
+    final connection = _connection;
+    final selfBareJid = _currentUserBareJid;
+    if (connection == null || selfBareJid == null || selfBareJid.isEmpty) {
+      return;
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(selfBareJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
+    final publish = XmppElement()..name = 'publish';
+    publish.addAttribute(XmppAttribute('node', _recentReactionsNode));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('id', 'recent'));
+    final recent = XmppElement()..name = 'recent';
+    recent.addAttribute(XmppAttribute('xmlns', _recentReactionsNode));
+    for (final emoji in _recentReactionEmojis) {
+      final element = XmppElement()..name = 'emoji';
+      element.textValue = emoji;
+      recent.addChild(element);
+    }
+    item.addChild(recent);
+    publish.addChild(item);
+    pubsub.addChild(publish);
+
+    final options = XmppElement()..name = 'publish-options';
+    final form = XmppElement()..name = 'x';
+    form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+    form.addAttribute(XmppAttribute('type', 'submit'));
+    final formType = XmppElement()..name = 'field';
+    formType.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
+    formType.addAttribute(XmppAttribute('type', 'hidden'));
+    final formTypeValue = XmppElement()..name = 'value';
+    formTypeValue.textValue =
+        'http://jabber.org/protocol/pubsub#publish-options';
+    formType.addChild(formTypeValue);
+    final accessModel = XmppElement()..name = 'field';
+    accessModel.addAttribute(XmppAttribute('var', 'pubsub#access_model'));
+    final accessValue = XmppElement()..name = 'value';
+    accessValue.textValue = 'whitelist';
+    accessModel.addChild(accessValue);
+    form.addChild(formType);
+    form.addChild(accessModel);
+    options.addChild(form);
+    pubsub.addChild(options);
+    iqStanza.addChild(pubsub);
+    connection.writeStanza(iqStanza);
+  }
+
+  void _handleRecentReactionsStanza(AbstractStanza stanza) {
+    if (stanza is MessageStanza) {
+      _handleRecentReactionsEvent(stanza);
+      return;
+    }
+    if (stanza is IqStanza) {
+      _handleRecentReactionsResult(stanza);
+    }
+  }
+
+  void _handleRecentReactionsEvent(MessageStanza stanza) {
+    final event = stanza.children.firstWhere(
+      (child) =>
+          child.name == 'event' &&
+          child.getAttribute('xmlns')?.value ==
+              'http://jabber.org/protocol/pubsub#event',
+      orElse: () => XmppElement(),
+    );
+    if (event.name != 'event') {
+      return;
+    }
+    final items = event.getChild('items');
+    if (items == null ||
+        items.getAttribute('node')?.value != _recentReactionsNode) {
+      return;
+    }
+    _applyRecentReactionsItems(items);
+  }
+
+  void _handleRecentReactionsResult(IqStanza stanza) {
+    final id = stanza.id;
+    if (id == null || !_pendingRecentReactionRequests.remove(id)) {
+      return;
+    }
+    if (stanza.type != IqStanzaType.RESULT) {
+      return;
+    }
+    final pubsub = stanza.getChild('pubsub');
+    if (pubsub == null ||
+        pubsub.getAttribute('xmlns')?.value !=
+            'http://jabber.org/protocol/pubsub') {
+      return;
+    }
+    final items = pubsub.getChild('items');
+    if (items == null ||
+        items.getAttribute('node')?.value != _recentReactionsNode) {
+      return;
+    }
+    _applyRecentReactionsItems(items);
+  }
+
+  void _applyRecentReactionsItems(XmppElement items) {
+    for (final item in items.children.where((child) => child.name == 'item')) {
+      final payload = item.children.firstWhere(
+        (child) =>
+            child.name == 'recent' &&
+            child.getAttribute('xmlns')?.value == _recentReactionsNode,
+        orElse: () => XmppElement(),
+      );
+      if (payload.name != 'recent') {
+        continue;
+      }
+      final next = <String>[];
+      for (final emojiNode in payload.children.where(
+        (child) => child.name == 'emoji',
+      )) {
+        final emoji = emojiNode.textValue?.trim() ?? '';
+        if (!_isLikelyEmoji(emoji) || next.contains(emoji)) {
+          continue;
+        }
+        next.add(emoji);
+        if (next.length == _maxRecentReactionEmojis) {
+          break;
+        }
+      }
+      if (_listEquals(next, _recentReactionEmojis)) {
+        return;
+      }
+      _recentReactionEmojis
+        ..clear()
+        ..addAll(next);
+      notifyListeners();
+      return;
+    }
   }
 
   void _handlePepAvatarUpdate() {
@@ -6437,6 +6673,7 @@ class XmppService extends ChangeNotifier {
     _ibbCloseSubscription?.cancel();
     _ibbCloseSubscription = null;
     _pendingPings.clear();
+    _pendingRecentReactionRequests.clear();
     for (final timer in _pingTimeoutTimers.values) {
       timer.cancel();
     }
@@ -6497,6 +6734,9 @@ class XmppService extends ChangeNotifier {
     _lastDisplayedMarkerIdByChat.clear();
     _displayedStanzaIdByChat.clear();
     _displayedAtByChat.clear();
+    if (!preserveCache) {
+      _recentReactionEmojis.clear();
+    }
     _lastPingLatency = null;
     _lastPingAt = null;
     _carbonsEnabled = false;
