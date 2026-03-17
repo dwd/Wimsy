@@ -287,7 +287,8 @@ class XmppService extends ChangeNotifier {
   static const String _fileTransferStateCompleted = 'completed';
   static const String _fileTransferStateFailed = 'failed';
   static const String _fileTransferStateDeclined = 'declined';
-  static const String _recentReactionsNode = 'urn:wimsy:reactions:recent:0';
+  static const String _recentReactionsNode =
+      'https://cridland.io/wimsy/reactions/recent/0';
   static const int _maxRecentReactionEmojis = 10;
 
   XmppStatus get status => _status;
