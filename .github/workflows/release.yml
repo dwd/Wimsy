@@ -18,6 +18,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Linux
@@ -79,6 +96,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Windows
@@ -107,6 +141,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build macOS
@@ -128,6 +179,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Android (release)
@@ -146,6 +214,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Web

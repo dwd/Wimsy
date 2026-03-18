@@ -13,6 +13,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Install xmpp_stone dependencies
@@ -39,13 +56,107 @@ jobs:
         uses: anchore/scan-action@v6
         with:
           path: .
-          fail-build: true
+          fail-build: false
           severity-cutoff: high
           output-format: sarif
       - name: Upload Vulnerability Report
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: ${{ steps.vuln-scan.outputs.sarif }}
+      - name: Upload Vulnerability SARIF Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-vulnerabilities-sarif
+          path: ${{ steps.vuln-scan.outputs.sarif }}
+      - name: Print Vulnerability Summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sarif="${{ steps.vuln-scan.outputs.sarif }}"
+          echo "SARIF: $sarif"
+          if [[ ! -f "$sarif" ]]; then
+            echo "No SARIF report found."
+            exit 1
+          fi
+          findings="$(jq '.runs[0].results | length' "$sarif")"
+          echo "High+ findings: $findings"
+          if [[ "$findings" -gt 0 ]]; then
+            jq -r '
+              .runs[0].results[]
+              | "- \(.ruleId): \(.message.text // "No message")"
+            ' "$sarif"
+          fi
+      - name: Enforce Vulnerability Acceptance Policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from datetime import date
+          from pathlib import Path
+
+          sarif_path = Path("${{ steps.vuln-scan.outputs.sarif }}")
+          if not sarif_path.exists():
+            raise SystemExit("SARIF report missing")
+
+          accept_path = Path(".github/security/vulnerability-acceptances.json")
+          if not accept_path.exists():
+            raise SystemExit(
+              "Acceptance file missing: .github/security/vulnerability-acceptances.json"
+            )
+
+          sarif = json.loads(sarif_path.read_text(encoding="utf-8"))
+          accepted_doc = json.loads(accept_path.read_text(encoding="utf-8"))
+
+          results = sarif.get("runs", [{}])[0].get("results", [])
+          present_ids = {item.get("ruleId") for item in results if item.get("ruleId")}
+
+          accepted_items = accepted_doc.get("accepted", [])
+          accepted_ids = set()
+          today = date.today()
+          errors = []
+
+          for item in accepted_items:
+            vuln_id = item.get("id")
+            review_by = item.get("review_by")
+            if not vuln_id or not review_by:
+              errors.append(f"Invalid acceptance entry: {item}")
+              continue
+            accepted_ids.add(vuln_id)
+            try:
+              review_date = date.fromisoformat(review_by)
+            except ValueError:
+              errors.append(f"Invalid review_by date for {vuln_id}: {review_by}")
+              continue
+            if review_date < today:
+              errors.append(
+                f"Acceptance expired for {vuln_id}: review_by={review_by}, today={today.isoformat()}"
+              )
+
+          stale_acceptances = sorted(accepted_ids - present_ids)
+          if stale_acceptances:
+            errors.append(
+              "Accepted vulnerabilities no longer present (remove from acceptance file): "
+              + ", ".join(stale_acceptances)
+            )
+
+          unaccepted = sorted(present_ids - accepted_ids)
+          if unaccepted:
+            errors.append(
+              "Unaccepted vulnerabilities found: " + ", ".join(unaccepted)
+            )
+
+          if errors:
+            print("Dependency vulnerability policy failed:")
+            for err in errors:
+              print(f"- {err}")
+            raise SystemExit(1)
+
+          print("Dependency vulnerability policy passed.")
+          PY
 
   sbom:
     needs: analyze
@@ -86,6 +197,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Linux
@@ -105,6 +233,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Windows
@@ -124,6 +269,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build macOS
@@ -143,6 +305,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build iOS
@@ -162,6 +341,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Android (debug)
@@ -181,6 +377,23 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Set Build Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          base_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          base_version="${base_tag#v}"
+          if [[ -z "$base_version" ]]; then
+            base_version="0.0.0"
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${base_version}-pre-$(git rev-parse --short HEAD)"
+          fi
+          sed -i -E "s/^version: .*/version: ${version}/" pubspec.yaml
+          echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Web
