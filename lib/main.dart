@@ -2803,6 +2803,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                   ),
                   const SizedBox(height: 12),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: OutlinedButton(
@@ -3592,25 +3593,35 @@ class _MessageBubble extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _AvatarPlaceholder(label: senderName, bytes: avatarBytes),
+            _MessageMenuButton(
+              message: message,
+              recentReactionOptions: recentReactionOptions,
+              ownReactions: ownReactions,
+              onReact: onReact,
+              onEdit: onEdit,
+              child: _AvatarPlaceholder(label: senderName, bytes: avatarBytes),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: Text(
                           senderName,
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: nameColor,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Row(
                         mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             timestamp,
@@ -3631,14 +3642,6 @@ class _MessageBubble extends StatelessWidget {
                             const SizedBox(width: 6),
                             tickIcon,
                           ],
-                          const SizedBox(width: 6),
-                          _MessageMenuButton(
-                            message: message,
-                            recentReactionOptions: recentReactionOptions,
-                            ownReactions: ownReactions,
-                            onReact: onReact,
-                            onEdit: onEdit,
-                          ),
                         ],
                       ),
                     ],
@@ -4319,6 +4322,7 @@ class _MessageMenuButton extends StatelessWidget {
     required this.ownReactions,
     required this.onReact,
     required this.onEdit,
+    this.child,
   });
 
   final ChatMessage message;
@@ -4326,13 +4330,16 @@ class _MessageMenuButton extends StatelessWidget {
   final Set<String> ownReactions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
+  final Widget? child;
 
   @override
   Widget build(BuildContext context) {
     final reactions = message.reactions ?? const {};
     return PopupMenuButton<String>(
       padding: EdgeInsets.zero,
-      icon: const Icon(Icons.more_horiz, size: 16),
+      constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+      icon: child == null ? const Icon(Icons.more_horiz, size: 16) : null,
+      child: child,
       onSelected: (value) {
         switch (value) {
           case 'edit_message':
