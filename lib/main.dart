@@ -875,11 +875,19 @@ class _WimsyHomeState extends State<WimsyHome> {
                         final messages = isBookmark
                             ? service.roomMessagesFor(jid)
                             : service.messagesFor(jid);
-                        final lastReadAt =
-                            service.displayedAtFor(jid) ??
-                            _lastReadAtByChat[jid];
+                        final displayedAt = service.displayedAtFor(jid);
+                        final localReadAt = _lastReadAtByChat[jid];
+                        final activeChat = service.activeChatBareJid;
+                        final isActiveChat = activeChat == jid;
+                        final lastReadAt = displayedAt == null
+                            ? localReadAt
+                            : (localReadAt == null ||
+                                      displayedAt.isAfter(localReadAt)
+                                  ? displayedAt
+                                  : localReadAt);
                         var unreadCount = 0;
-                        if (service.isMamCatchUpCompleteFor(jid)) {
+                        if (!isActiveChat &&
+                            service.isMamCatchUpCompleteFor(jid)) {
                           if (lastReadAt == null) {
                             for (final message in messages) {
                               if (!message.outgoing) {
