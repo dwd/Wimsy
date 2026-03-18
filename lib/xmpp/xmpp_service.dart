@@ -6540,13 +6540,15 @@ class XmppService extends ChangeNotifier {
     final supportsMamExtended = _supportsMamExtendedQuery(connection, mam);
     final beforeId = supportsMamExtended ? plan.beforeId : null;
     final afterId = supportsMamExtended ? plan.afterId : null;
-    final before = !supportsMamExtended &&
+    final before =
+        !supportsMamExtended &&
             (plan.before == null || plan.before!.isEmpty) &&
             plan.beforeId != null &&
             plan.beforeId!.isNotEmpty
         ? plan.beforeId
         : plan.before;
-    final after = !supportsMamExtended &&
+    final after =
+        !supportsMamExtended &&
             (plan.after == null || plan.after!.isEmpty) &&
             plan.afterId != null &&
             plan.afterId!.isNotEmpty
@@ -6917,7 +6919,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     if (state != null && state.isNotEmpty) {
-      _selfVcardPhotoHash = state;
+      _selfVcardPhotoHash = normalizeVcardPhotoHash(state);
       _selfVcardPhotoKnown = true;
       return;
     }
@@ -6961,7 +6963,7 @@ class XmppService extends ChangeNotifier {
   XmppElement _buildVcardUpdateElement() {
     final update = XmppElement()..name = 'x';
     update.addAttribute(XmppAttribute('xmlns', 'vcard-temp:x:update'));
-    final hash = _selfVcardPhotoHash.trim();
+    final hash = normalizeVcardPhotoHash(_selfVcardPhotoHash);
     if (hash.isNotEmpty || _selfVcardPhotoKnown) {
       final photo = XmppElement()..name = 'photo';
       if (hash.isNotEmpty) {
@@ -7422,7 +7424,7 @@ class XmppService extends ChangeNotifier {
     }
     _vcardUnavailable.remove(bareJid);
     final photo = update.getChild('photo');
-    final hash = photo?.textValue?.trim() ?? '';
+    final hash = normalizeVcardPhotoHash(photo?.textValue ?? '');
     final existing = _vcardAvatarState[bareJid];
     if (hash.isEmpty) {
       if (existing != _vcardNoAvatar) {
@@ -7475,12 +7477,13 @@ class XmppService extends ChangeNotifier {
     }
     if (bytes != null && bytes.isNotEmpty) {
       final hash = await vcardPhotoHash(bytes);
-      _selfVcardPhotoHash = hash;
+      final normalizedHash = normalizeVcardPhotoHash(hash);
+      _selfVcardPhotoHash = normalizedHash;
       _selfVcardPhotoKnown = true;
       _vcardAvatarBytes[selfBareJid] = bytes;
       storage.storeVcardAvatar(selfBareJid, base64Encode(bytes));
-      _vcardAvatarState[selfBareJid] = hash;
-      storage.storeVcardAvatarState(selfBareJid, hash);
+      _vcardAvatarState[selfBareJid] = normalizedHash;
+      storage.storeVcardAvatarState(selfBareJid, normalizedHash);
     } else if (clearAvatar) {
       _selfVcardPhotoHash = '';
       _selfVcardPhotoKnown = true;

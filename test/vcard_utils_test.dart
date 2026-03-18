@@ -31,4 +31,16 @@ void main() {
     final hash = await vcardPhotoHash(Uint8List.fromList([1, 2, 3]));
     expect(hash.length, 40);
   });
+
+  test('normalizeVcardPhotoHash keeps non-duplicated hash unchanged', () {
+    const hash = 'a6626f8138cf2b82d2e8c3f3e28090a03d54aee2';
+    expect(normalizeVcardPhotoHash(hash), hash);
+  });
+
+  test('normalizeVcardPhotoHash removes duplicated halves', () {
+    const single = 'a6626f8138cf2b82d2e8c3f3e28090a03d54aee2';
+    const doubled =
+        'a6626f8138cf2b82d2e8c3f3e28090a03d54aee2a6626f8138cf2b82d2e8c3f3e28090a03d54aee2';
+    expect(normalizeVcardPhotoHash(doubled), single);
+  });
 }

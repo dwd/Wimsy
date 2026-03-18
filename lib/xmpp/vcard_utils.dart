@@ -57,6 +57,20 @@ Future<String> vcardPhotoHash(Uint8List bytes) async {
   return _toHex(hash.bytes);
 }
 
+String normalizeVcardPhotoHash(String hash) {
+  var normalized = hash.trim();
+  while (normalized.length.isEven && normalized.isNotEmpty) {
+    final half = normalized.length ~/ 2;
+    final first = normalized.substring(0, half);
+    final second = normalized.substring(half);
+    if (first != second) {
+      break;
+    }
+    normalized = first;
+  }
+  return normalized;
+}
+
 String _toHex(List<int> bytes) {
   final buffer = StringBuffer();
   for (final byte in bytes) {
