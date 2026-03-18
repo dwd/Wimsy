@@ -31,6 +31,7 @@ import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 const String _sentryOptInKey = 'sentry_opt_in';
+const String _pinIgnoredKey = 'wimsy_pin_ignored';
 const List<String> _defaultReactionOptions = [
   '👍',
   '❤️',
@@ -297,6 +298,7 @@ class _Gatekeeper extends StatefulWidget {
 class _GatekeeperState extends State<_Gatekeeper> {
   bool _checkingPin = true;
   bool _hasPin = false;
+  bool _pinIgnored = false;
 
   @override
   void initState() {
@@ -306,11 +308,25 @@ class _GatekeeperState extends State<_Gatekeeper> {
 
   Future<void> _loadPinState() async {
     final hasPin = await widget.storage.hasPin();
+    var pinIgnored = false;
+    if (hasPin) {
+      final prefs = await SharedPreferences.getInstance();
+      pinIgnored = prefs.getBool(_pinIgnoredKey) ?? false;
+      if (pinIgnored) {
+        try {
+          await widget.storage.unlock('0000');
+        } catch (_) {
+          pinIgnored = false;
+          await prefs.setBool(_pinIgnoredKey, false);
+        }
+      }
+    }
     if (!mounted) {
       return;
     }
     setState(() {
       _hasPin = hasPin;
+      _pinIgnored = pinIgnored;
       _checkingPin = false;
     });
   }
@@ -322,19 +338,23 @@ class _GatekeeperState extends State<_Gatekeeper> {
     }
     if (!_hasPin) {
       return _PinSetupScreen(
-        onPinSet: (pin) async {
+        onPinSet: (pin, {required ignored}) async {
           await widget.storage.setupPin(pin);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool(_pinIgnoredKey, ignored);
           if (!mounted) {
             return;
           }
           setState(() {
             _hasPin = true;
+            _pinIgnored = ignored;
           });
         },
       );
     }
     if (!widget.storage.isUnlocked) {
       return _PinUnlockScreen(
+        pinIgnored: _pinIgnored,
         onUnlocked: (pin) async {
           await widget.storage.unlock(pin);
           if (!mounted) {
@@ -5296,7 +5316,7 @@ class _CropMaskPainter extends CustomPainter {
 class _PinSetupScreen extends StatefulWidget {
   const _PinSetupScreen({required this.onPinSet});
 
-  final Future<void> Function(String pin) onPinSet;
+  final Future<void> Function(String pin, {required bool ignored}) onPinSet;
 
   @override
   State<_PinSetupScreen> createState() => _PinSetupScreenState();
@@ -5331,6 +5351,18 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
               children: [
                 Text('Set a PIN', style: theme.textTheme.headlineSmall),
                 const SizedBox(height: 12),
+                Text(
+                  'Your PIN encrypts local storage for messages, passwords, and other account data.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'You can continue without a PIN, but device access will allow access to local data.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 TextField(
                   controller: _pinController,
                   obscureText: true,
@@ -5360,6 +5392,11 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
                 FilledButton(
                   onPressed: _submitting ? null : _submit,
                   child: Text(_submitting ? 'Setting...' : 'Set PIN'),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _submitting ? null : _continueWithoutPin,
+                  child: const Text('Continue without PIN'),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
@@ -5396,7 +5433,7 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_sentryOptInKey, _sentryOptIn);
-      await widget.onPinSet(pin);
+      await widget.onPinSet(pin, ignored: false);
       if (_sentryOptIn && mounted) {
         await _enableSentryAndRestart();
       }
@@ -5408,12 +5445,34 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
       }
     }
   }
+
+  Future<void> _continueWithoutPin() async {
+    setState(() {
+      _error = null;
+      _submitting = true;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_sentryOptInKey, _sentryOptIn);
+      await widget.onPinSet('0000', ignored: true);
+      if (_sentryOptIn && mounted) {
+        await _enableSentryAndRestart();
+      }
+    } catch (error) {
+      setState(() => _error = 'Failed to continue without PIN: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
 }
 
 class _PinUnlockScreen extends StatefulWidget {
-  const _PinUnlockScreen({required this.onUnlocked});
+  const _PinUnlockScreen({required this.onUnlocked, required this.pinIgnored});
 
   final Future<void> Function(String pin) onUnlocked;
+  final bool pinIgnored;
 
   @override
   State<_PinUnlockScreen> createState() => _PinUnlockScreenState();
@@ -5447,17 +5506,27 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
               children: [
                 Text('Unlock', style: theme.textTheme.headlineSmall),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: _pinController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'PIN'),
-                  onSubmitted: (_) => _submit(),
-                ),
+                if (!widget.pinIgnored)
+                  TextField(
+                    controller: _pinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'PIN'),
+                    onSubmitted: (_) => _submit(),
+                  )
+                else
+                  Text(
+                    'Unlocked automatically because PIN was skipped on first run.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: _submitting ? null : _submit,
-                  child: Text(_submitting ? 'Unlocking...' : 'Unlock'),
+                  child: Text(
+                    _submitting
+                        ? 'Unlocking...'
+                        : (widget.pinIgnored ? 'Continue' : 'Unlock'),
+                  ),
                 ),
                 if (_loadedSentryPref && !_sentryOptIn) ...[
                   const SizedBox(height: 12),
@@ -5491,8 +5560,8 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
   }
 
   Future<void> _submit() async {
-    final pin = _pinController.text.trim();
-    if (pin.isEmpty) {
+    final pin = widget.pinIgnored ? '0000' : _pinController.text.trim();
+    if (!widget.pinIgnored && pin.isEmpty) {
       setState(() => _error = 'Enter your PIN.');
       return;
     }
