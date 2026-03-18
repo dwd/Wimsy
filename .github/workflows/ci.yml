@@ -26,6 +26,53 @@ jobs:
       - name: Test
         run: flutter test
 
+  dependency-vulnerability-scan:
+    needs: analyze
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan Dependencies For Vulnerabilities
+        id: vuln-scan
+        uses: anchore/scan-action@v6
+        with:
+          path: .
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+      - name: Upload Vulnerability Report
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.vuln-scan.outputs.sarif }}
+
+  sbom:
+    needs: analyze
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build-target:
+          - linux
+          - windows
+          - macos
+          - ios
+          - android
+          - web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.build-target }}.cdx.json
+      - name: Upload CycloneDX SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.build-target }}
+          path: sbom-${{ matrix.build-target }}.cdx.json
+
   build-linux:
     needs: analyze
     runs-on: ubuntu-latest
