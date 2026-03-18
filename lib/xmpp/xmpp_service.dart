@@ -6540,12 +6540,24 @@ class XmppService extends ChangeNotifier {
     final supportsMamExtended = _supportsMamExtendedQuery(connection, mam);
     final beforeId = supportsMamExtended ? plan.beforeId : null;
     final afterId = supportsMamExtended ? plan.afterId : null;
+    final before = !supportsMamExtended &&
+            (plan.before == null || plan.before!.isEmpty) &&
+            plan.beforeId != null &&
+            plan.beforeId!.isNotEmpty
+        ? plan.beforeId
+        : plan.before;
+    final after = !supportsMamExtended &&
+            (plan.after == null || plan.after!.isEmpty) &&
+            plan.afterId != null &&
+            plan.afterId!.isNotEmpty
+        ? plan.afterId
+        : plan.after;
     mam.queryById(
       jid: isRoom ? null : Jid.fromFullJid(jid),
       toJid: isRoom ? Jid.fromFullJid(jid) : null,
       max: plan.max,
-      before: plan.before,
-      after: plan.after,
+      before: before,
+      after: after,
       beforeId: beforeId,
       afterId: afterId,
     );
