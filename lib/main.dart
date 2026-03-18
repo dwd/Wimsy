@@ -1034,20 +1034,20 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             ],
                                           ],
                                         ),
-                                        if (contact.displayName != jid) ...[
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            jid,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: theme
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                          ),
-                                        ],
+                                        // if (contact.displayName != jid) ...[
+                                        //   const SizedBox(height: 2),
+                                        //   Text(
+                                        //     jid,
+                                        //     maxLines: 1,
+                                        //     overflow: TextOverflow.ellipsis,
+                                        //     style: theme.textTheme.bodySmall
+                                        //         ?.copyWith(
+                                        //           color: theme
+                                        //               .colorScheme
+                                        //               .onSurfaceVariant,
+                                        //         ),
+                                        //   ),
+                                        // ],
                                         const SizedBox(height: 2),
                                         Text(
                                           isBookmark
