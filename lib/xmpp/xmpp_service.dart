@@ -6537,14 +6537,29 @@ class XmppService extends ChangeNotifier {
     if (!mam.enabled) {
       return;
     }
+    final supportsMamExtended = _supportsMamExtendedQuery(connection, mam);
+    final beforeId = supportsMamExtended ? plan.beforeId : null;
+    final afterId = supportsMamExtended ? plan.afterId : null;
     mam.queryById(
       jid: isRoom ? null : Jid.fromFullJid(jid),
       toJid: isRoom ? Jid.fromFullJid(jid) : null,
       max: plan.max,
       before: plan.before,
       after: plan.after,
-      beforeId: plan.beforeId,
-      afterId: plan.afterId,
+      beforeId: beforeId,
+      afterId: afterId,
+    );
+  }
+
+  bool _supportsMamExtendedQuery(
+    Connection connection,
+    MessageArchiveManager mam,
+  ) {
+    if (mam.hasExtended == true) {
+      return true;
+    }
+    return connection.getSupportedFeatures().any(
+      (feature) => feature.xmppVar == 'urn:xmpp:mam:2#extended',
     );
   }
 
