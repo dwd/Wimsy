@@ -904,12 +904,9 @@ class _WimsyHomeState extends State<WimsyHome> {
                           }
                         }
                         final isUnread = unreadCount > 0;
-                        final bookmarkStatusText =
-                            contact.bookmarkNick?.isNotEmpty == true
-                            ? 'Nickname: ${contact.bookmarkNick}'
-                            : (contact.bookmarkAutoJoin
-                                  ? 'Auto-join room'
-                                  : 'Room bookmark');
+                        final bookmarkStatusText = contact.bookmarkAutoJoin
+                            ? 'Auto-join room'
+                            : 'Room bookmark';
                         return InkWell(
                           onTap: () => service.selectChat(jid),
                           child: Container(
@@ -1070,19 +1067,39 @@ class _WimsyHomeState extends State<WimsyHome> {
                                         ),
                                         if (latest != null) ...[
                                           const SizedBox(height: 2),
-                                          Text(
-                                            _messagePreviewText(
-                                              service,
-                                              latest,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: theme
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
+                                          Builder(
+                                            builder: (context) {
+                                              final previewText = isBookmark
+                                                  ? '${_roomPreviewSenderLabel(latest)}: ${_messagePreviewText(service, latest)}'
+                                                  : _messagePreviewText(
+                                                      service,
+                                                      latest,
+                                                    );
+                                              final isOutgoingPreview =
+                                                  latest.outgoing;
+                                              final isUnreadIncomingPreview =
+                                                  !latest.outgoing &&
+                                                  unreadCount > 0;
+                                              return Text(
+                                                previewText,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                      color: theme
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                                      fontStyle:
+                                                          isOutgoingPreview
+                                                          ? FontStyle.italic
+                                                          : null,
+                                                      fontWeight:
+                                                          isUnreadIncomingPreview
+                                                          ? FontWeight.w700
+                                                          : null,
+                                                    ),
+                                              );
+                                            },
                                           ),
                                         ],
                                         if (!isBookmark &&
@@ -3414,6 +3431,14 @@ String _messagePreviewText(XmppService service, ChatMessage message) {
       ? ''
       : uri.pathSegments.last.trim();
   return name.isEmpty ? oob : 'File: ${Uri.decodeComponent(name)}';
+}
+
+String _roomPreviewSenderLabel(ChatMessage message) {
+  if (message.outgoing) {
+    return 'you';
+  }
+  final sender = message.from.trim();
+  return sender.isEmpty ? 'unknown' : sender;
 }
 
 class _PhotoSelection {
