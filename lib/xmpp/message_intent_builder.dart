@@ -37,6 +37,9 @@ class MessageScopedId {
   final String id;
 }
 
+typedef ReplyPayloadExtractor =
+    ReplyPayload? Function(XmppElement stanza, {String? body});
+
 abstract class MessageIntent {
   const MessageIntent();
 }
@@ -136,7 +139,7 @@ class MessageIntentBuilder {
     required this.extractReactionUpdate,
     required this.reactionChatTarget,
     required this.extractOobInfoFromStanza,
-    required this.extractReplyPayload,
+    this.extractReplyPayload,
     required this.isArchivedStanza,
     required this.bareJid,
     required this.hasReceiptRequest,
@@ -153,8 +156,7 @@ class MessageIntentBuilder {
   final ReactionUpdate? Function(MessageStanza stanza) extractReactionUpdate;
   final String Function(String fromBare, String toBare) reactionChatTarget;
   final OobInfo? Function(XmppElement stanza) extractOobInfoFromStanza;
-  final ReplyPayload? Function(XmppElement stanza, {String? body})
-  extractReplyPayload;
+  final ReplyPayloadExtractor? extractReplyPayload;
   final bool Function(MessageStanza stanza) isArchivedStanza;
   final String Function(String jid) bareJid;
   final bool Function(MessageStanza stanza) hasReceiptRequest;
@@ -204,7 +206,11 @@ class MessageIntentBuilder {
         ),
       ];
     }
-    final reply = extractReplyPayload(stanza, body: stanza.body);
+    ReplyPayload? reply;
+    final replyExtractor = extractReplyPayload;
+    if (replyExtractor != null) {
+      reply = replyExtractor(stanza, body: stanza.body);
+    }
     final body = reply?.cleanedBody ?? stanza.body ?? '';
     final oobInfo = extractOobInfoFromStanza(stanza);
     final oobUrl = oobInfo?.url;

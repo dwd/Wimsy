@@ -20,6 +20,38 @@ MessageStanza _chatStanza({
 }
 
 void main() {
+  test('MessageIntentBuilder tolerates missing reply extractor', () {
+    final builder = MessageIntentBuilder(
+      currentUserBareJid: () => null,
+      activeChatBareJid: () => null,
+      parseJmiAction: (_) => null,
+      extractReceiptsId: (_) => null,
+      extractMarkerId: (_, _) => null,
+      extractReactionUpdate: (_) => null,
+      reactionChatTarget: (from, _) => from,
+      extractOobInfoFromStanza: (_) => null,
+      extractReplyPayload: null,
+      isArchivedStanza: (_) => false,
+      bareJid: (jid) => jid,
+      hasReceiptRequest: (_) => false,
+      hasMarkable: (_) => false,
+      serializeStanza: (_) => '<message/>',
+      now: DateTime.now,
+    );
+    final stanza = _chatStanza(
+      id: 'm0',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'hello',
+    );
+    final intents = builder.build(stanza);
+    expect(intents.length, 1);
+    expect(intents.first, isA<AddMessageIntent>());
+    final add = intents.first as AddMessageIntent;
+    expect(add.body, 'hello');
+    expect(add.replyToId, isNull);
+  });
+
   test('buildMessageIntents applies receipt with scoped id', () {
     final service = XmppService();
     final stanza = _chatStanza(
