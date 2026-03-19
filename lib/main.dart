@@ -414,6 +414,11 @@ class _WimsyHomeState extends State<WimsyHome> {
   String? _editingMessageId;
   String? _editingChatBareJid;
   bool _editingIsRoom = false;
+  String? _replyingChatBareJid;
+  bool _replyingIsRoom = false;
+  ChatMessage? _replyingToMessage;
+  final Map<String, GlobalKey> _messageKeysByChatAndId = {};
+  final Map<String, int> _messageIndexByChatAndId = {};
   String? _activeChatForKeyHandler;
   bool _activeChatIsBookmark = false;
   bool _activeChatRoomJoined = false;
@@ -1206,6 +1211,8 @@ class _WimsyHomeState extends State<WimsyHome> {
         : isBookmark
         ? service.roomMessagesFor(activeChat)
         : service.messagesFor(activeChat);
+    final messageById = _indexMessagesById(messages);
+    _indexMessagePositions(activeChat, messages);
     final roomEntry = activeChat == null ? null : service.roomFor(activeChat);
     _activeChatForKeyHandler = activeChat;
     _activeChatIsBookmark = isBookmark;
@@ -1220,12 +1227,18 @@ class _WimsyHomeState extends State<WimsyHome> {
       if (_editingChatBareJid != null) {
         _cancelEditing();
       }
+      if (_replyingChatBareJid != null) {
+        _cancelReply();
+      }
     } else if (activeChat != _lastFocusedChat) {
       _lastFocusedChat = activeChat;
       _lastMessageCount = messages.length;
       _markChatRead(activeChat, messages);
       if (_editingChatBareJid != null && _editingChatBareJid != activeChat) {
         _cancelEditing();
+      }
+      if (_replyingChatBareJid != null && _replyingChatBareJid != activeChat) {
+        _cancelReply();
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -1361,11 +1374,28 @@ class _WimsyHomeState extends State<WimsyHome> {
                     itemCount: messages.length,
                     itemBuilder: (context, index) {
                       final message = messages[index];
+                      final messageKey = _keyForMessage(activeChat, message);
                       final senderName = isBookmark
                           ? (message.outgoing ? 'You' : message.from)
                           : message.outgoing
                           ? 'You'
                           : service.displayNameFor(message.from);
+                      final replyTarget = _resolveReplyTarget(
+                        message: message,
+                        messageById: messageById,
+                      );
+                      final replySenderName = replyTarget == null
+                          ? null
+                          : (isBookmark
+                                ? (replyTarget.outgoing
+                                      ? 'you'
+                                      : replyTarget.from)
+                                : (replyTarget.outgoing
+                                      ? 'you'
+                                      : service.displayNameFor(
+                                          replyTarget.from,
+                                        )));
+                      final replyBody = replyTarget?.body;
                       final timestamp = _formatTimestamp(message.timestamp);
                       final avatarBytes = isBookmark
                           ? null
@@ -1389,10 +1419,19 @@ class _WimsyHomeState extends State<WimsyHome> {
                             )
                           : null;
                       return _MessageBubble(
+                        key: messageKey,
                         message: message,
                         senderName: senderName,
                         timestamp: timestamp,
                         avatarBytes: avatarBytes,
+                        replySenderName: replySenderName,
+                        replyBody: replyBody,
+                        onReplyTargetTap: (message.replyToId ?? '').isEmpty
+                            ? null
+                            : () => _scrollToMessageById(
+                                activeChat,
+                                message.replyToId!,
+                              ),
                         inviteRoomJid: inviteRoomJid,
                         inviteRoomName: inviteRoomName,
                         inviteAvatarBytes: inviteAvatarBytes,
@@ -1415,6 +1454,15 @@ class _WimsyHomeState extends State<WimsyHome> {
                             (message.outgoing &&
                                 (message.messageId ?? '').isNotEmpty)
                             ? () => _startEditingMessage(
+                                activeChat: activeChat,
+                                message: message,
+                                isRoom: isBookmark,
+                              )
+                            : null,
+                        onReply:
+                            ((message.stanzaId ?? message.messageId) ?? '')
+                                .isNotEmpty
+                            ? () => _startReplyingToMessage(
                                 activeChat: activeChat,
                                 message: message,
                                 isRoom: isBookmark,
@@ -1517,6 +1565,31 @@ class _WimsyHomeState extends State<WimsyHome> {
                         ),
                         TextButton(
                           onPressed: _cancelEditing,
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (activeChat != null &&
+                    _replyingToMessage != null &&
+                    _replyingChatBareJid == activeChat) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Replying: ${_replyPreviewLabel(_replyingToMessage!)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _cancelReply,
                           child: const Text('Cancel'),
                         ),
                       ],
@@ -1645,6 +1718,9 @@ class _WimsyHomeState extends State<WimsyHome> {
     final editingId = _editingMessageId;
     final editingChat = _editingChatBareJid;
     final editingIsRoom = _editingIsRoom;
+    final replyingMessage = _replyingToMessage;
+    final replyingChat = _replyingChatBareJid;
+    final replyingIsRoom = _replyingIsRoom;
     _messageController.clear();
     if (editingId != null && editingChat == activeChat) {
       _cancelEditing();
@@ -1663,10 +1739,37 @@ class _WimsyHomeState extends State<WimsyHome> {
         _setChatState(activeChat, ChatState.ACTIVE);
       }
     } else if (isBookmark) {
-      widget.service.sendRoomMessage(activeChat, trimmed);
+      final replyRef =
+          (replyingMessage != null &&
+              replyingChat == activeChat &&
+              replyingIsRoom == isBookmark)
+          ? widget.service.buildReplyReference(
+              chatJid: activeChat,
+              message: replyingMessage,
+              isRoom: true,
+            )
+          : null;
+      widget.service.sendRoomMessage(activeChat, trimmed, reply: replyRef);
     } else {
-      widget.service.sendMessage(toBareJid: activeChat, text: trimmed);
+      final replyRef =
+          (replyingMessage != null &&
+              replyingChat == activeChat &&
+              replyingIsRoom == isBookmark)
+          ? widget.service.buildReplyReference(
+              chatJid: activeChat,
+              message: replyingMessage,
+              isRoom: false,
+            )
+          : null;
+      widget.service.sendMessage(
+        toBareJid: activeChat,
+        text: trimmed,
+        reply: replyRef,
+      );
       _setChatState(activeChat, ChatState.ACTIVE);
+    }
+    if (replyingChat == activeChat) {
+      _cancelReply();
     }
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
@@ -1978,6 +2081,156 @@ class _WimsyHomeState extends State<WimsyHome> {
       _editingChatBareJid = null;
       _editingIsRoom = false;
     });
+  }
+
+  void _cancelReply() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _replyingChatBareJid = null;
+      _replyingIsRoom = false;
+      _replyingToMessage = null;
+    });
+  }
+
+  void _startReplyingToMessage({
+    required String activeChat,
+    required ChatMessage message,
+    required bool isRoom,
+  }) {
+    setState(() {
+      _replyingChatBareJid = activeChat;
+      _replyingIsRoom = isRoom;
+      _replyingToMessage = message;
+    });
+    if (_messageFocusNode.canRequestFocus) {
+      _messageFocusNode.requestFocus();
+    }
+  }
+
+  String _replyPreviewLabel(ChatMessage message) {
+    final compact = message.body.trim().replaceAll('\n', ' ');
+    if (compact.isEmpty) {
+      return '(empty message)';
+    }
+    const maxChars = 100;
+    if (compact.runes.length <= maxChars) {
+      return compact;
+    }
+    return '${String.fromCharCodes(compact.runes.take(maxChars))}…';
+  }
+
+  GlobalKey? _keyForMessage(String? activeChat, ChatMessage message) {
+    if (activeChat == null) {
+      return null;
+    }
+    final ids = _messageIds(message);
+    if (ids.isEmpty) {
+      return null;
+    }
+    GlobalKey? existing;
+    for (final id in ids) {
+      final candidate = _messageKeysByChatAndId['$activeChat|$id'];
+      if (candidate != null) {
+        existing = candidate;
+        break;
+      }
+    }
+    final key = existing ?? GlobalKey();
+    for (final id in ids) {
+      _messageKeysByChatAndId['$activeChat|$id'] = key;
+    }
+    return key;
+  }
+
+  Set<String> _messageIds(ChatMessage message) {
+    final ids = <String>{};
+    final messageId = message.messageId;
+    final stanzaId = message.stanzaId;
+    final mamId = message.mamId;
+    if (messageId != null && messageId.isNotEmpty) {
+      ids.add(messageId);
+    }
+    if (stanzaId != null && stanzaId.isNotEmpty) {
+      ids.add(stanzaId);
+    }
+    if (mamId != null && mamId.isNotEmpty) {
+      ids.add(mamId);
+    }
+    return ids;
+  }
+
+  Map<String, ChatMessage> _indexMessagesById(List<ChatMessage> messages) {
+    final map = <String, ChatMessage>{};
+    for (final message in messages) {
+      for (final id in _messageIds(message)) {
+        map[id] = message;
+      }
+    }
+    return map;
+  }
+
+  void _indexMessagePositions(String? activeChat, List<ChatMessage> messages) {
+    if (activeChat == null) {
+      return;
+    }
+    for (var i = 0; i < messages.length; i += 1) {
+      for (final id in _messageIds(messages[i])) {
+        _messageIndexByChatAndId['$activeChat|$id'] = i;
+      }
+    }
+  }
+
+  ChatMessage? _resolveReplyTarget({
+    required ChatMessage message,
+    required Map<String, ChatMessage> messageById,
+  }) {
+    final replyToId = message.replyToId;
+    if (replyToId == null || replyToId.isEmpty) {
+      return null;
+    }
+    return messageById[replyToId];
+  }
+
+  Future<void> _scrollToMessageById(String? activeChat, String targetId) async {
+    if (activeChat == null || targetId.isEmpty) {
+      return;
+    }
+    final mapKey = '$activeChat|$targetId';
+    final immediateContext = _messageKeysByChatAndId[mapKey]?.currentContext;
+    if (immediateContext != null) {
+      await Scrollable.ensureVisible(
+        immediateContext,
+        alignment: 0.15,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+      return;
+    }
+    {
+      final index = _messageIndexByChatAndId[mapKey];
+      if (index == null || !_messageScrollController.hasClients) {
+        return;
+      }
+      final targetOffset = index * 84.0;
+      final clamped = targetOffset.clamp(
+        0.0,
+        _messageScrollController.position.maxScrollExtent,
+      );
+      await _messageScrollController.animateTo(
+        clamped,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+      if (!mounted) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      if (!mounted) {
+        return;
+      }
+    }
   }
 
   void _startEditingMessage({
@@ -3567,10 +3820,14 @@ void _showReactionPickerSheet({
 
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
+    super.key,
     required this.message,
     required this.senderName,
     required this.timestamp,
     required this.avatarBytes,
+    required this.replySenderName,
+    required this.replyBody,
+    required this.onReplyTargetTap,
     required this.inviteRoomJid,
     required this.inviteRoomName,
     required this.inviteAvatarBytes,
@@ -3580,6 +3837,7 @@ class _MessageBubble extends StatelessWidget {
     required this.recentReactionOptions,
     required this.onReact,
     required this.onEdit,
+    required this.onReply,
     required this.onAcceptFile,
     required this.onDeclineFile,
     required this.onFallbackUpload,
@@ -3589,6 +3847,9 @@ class _MessageBubble extends StatelessWidget {
   final String senderName;
   final String timestamp;
   final Uint8List? avatarBytes;
+  final String? replySenderName;
+  final String? replyBody;
+  final VoidCallback? onReplyTargetTap;
   final String? inviteRoomJid;
   final String? inviteRoomName;
   final Uint8List? inviteAvatarBytes;
@@ -3598,6 +3859,7 @@ class _MessageBubble extends StatelessWidget {
   final List<String> recentReactionOptions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
+  final VoidCallback? onReply;
   final VoidCallback? onAcceptFile;
   final VoidCallback? onDeclineFile;
   final VoidCallback? onFallbackUpload;
@@ -3638,6 +3900,7 @@ class _MessageBubble extends StatelessWidget {
               ownReactions: ownReactions,
               onReact: onReact,
               onEdit: onEdit,
+              onReply: onReply,
               child: _AvatarPlaceholder(label: senderName, bytes: avatarBytes),
             ),
             const SizedBox(width: 12),
@@ -3686,6 +3949,10 @@ class _MessageBubble extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 6),
+                  if ((message.replyToId ?? '').isNotEmpty) ...[
+                    _buildReplyCard(context),
+                    const SizedBox(height: 8),
+                  ],
                   if (fileTransferCard != null) ...[
                     fileTransferCard,
                     const SizedBox(height: 8),
@@ -3737,6 +4004,48 @@ class _MessageBubble extends StatelessWidget {
                   ],
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReplyCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final cardBody = (replyBody ?? message.replyFallback ?? '').trim();
+    final text = cardBody.isEmpty ? '(original message unavailable)' : cardBody;
+    return InkWell(
+      onTap: onReplyTargetTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.5,
+          ),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              replySenderName ?? 'original message',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -4361,6 +4670,7 @@ class _MessageMenuButton extends StatelessWidget {
     required this.ownReactions,
     required this.onReact,
     required this.onEdit,
+    required this.onReply,
     this.child,
   });
 
@@ -4369,6 +4679,7 @@ class _MessageMenuButton extends StatelessWidget {
   final Set<String> ownReactions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
+  final VoidCallback? onReply;
   final Widget? child;
 
   @override
@@ -4383,6 +4694,9 @@ class _MessageMenuButton extends StatelessWidget {
         switch (value) {
           case 'edit_message':
             onEdit?.call();
+            break;
+          case 'reply_message':
+            onReply?.call();
             break;
           case 'add_reaction':
             _showReactionSheet(context);
@@ -4401,6 +4715,8 @@ class _MessageMenuButton extends StatelessWidget {
             value: 'edit_message',
             child: Text('Edit message'),
           ),
+        if (onReply != null)
+          const PopupMenuItem(value: 'reply_message', child: Text('Reply')),
         if (onReact != null)
           const PopupMenuItem(
             value: 'add_reaction',

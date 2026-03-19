@@ -5,6 +5,10 @@ import 'message_intent_builder.dart';
 class MessageStanzaParser {
   const MessageStanzaParser();
 
+  static const _replyNs = 'urn:xmpp:reply:0';
+  static const _featureFallbackNs = 'urn:xmpp:feature-fallback:0';
+  static const _legacyFallbackNs = 'urn:xmpp:fallback:0';
+
   bool hasReceiptRequest(MessageStanza stanza) {
     return _hasChildWithXmlns(stanza, 'request', 'urn:xmpp:receipts');
   }
@@ -90,6 +94,48 @@ class MessageStanzaParser {
     return null;
   }
 
+  ReplyPayload? extractReplyPayload(XmppElement stanza, {String? body}) {
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name != 'reply' ||
+            child.getAttribute('xmlns')?.value != _replyNs) {
+          continue;
+        }
+        final id = child.getAttribute('id')?.value?.trim() ?? '';
+        if (id.isEmpty) {
+          return null;
+        }
+        final to = child.getAttribute('to')?.value?.trim();
+        final fallbackRange = _extractReplyFallbackRange(candidate);
+        String? fallbackBody;
+        String? cleanedBody = body;
+        if (body != null &&
+            fallbackRange != null &&
+            fallbackRange.end > fallbackRange.start) {
+          fallbackBody = _substringByRunes(
+            body,
+            fallbackRange.start,
+            fallbackRange.end,
+          )?.trimRight();
+          cleanedBody = _removeRuneRange(
+            body,
+            fallbackRange.start,
+            fallbackRange.end,
+          );
+        }
+        return ReplyPayload(
+          replyToId: id,
+          replyToJid: (to == null || to.isEmpty) ? null : to,
+          fallbackBody: (fallbackBody == null || fallbackBody.isEmpty)
+              ? null
+              : fallbackBody,
+          cleanedBody: cleanedBody,
+        );
+      }
+    }
+    return null;
+  }
+
   bool _hasChildWithXmlns(XmppElement stanza, String name, String xmlns) {
     return _findChildWithXmlns(stanza, name, xmlns) != null;
   }
@@ -128,4 +174,67 @@ class MessageStanzaParser {
     }
     return candidates;
   }
+
+  _FallbackRange? _extractReplyFallbackRange(XmppElement stanza) {
+    for (final child in stanza.children) {
+      if (child.name != 'fallback') {
+        continue;
+      }
+      final xmlns = child.getAttribute('xmlns')?.value;
+      if (xmlns != _featureFallbackNs && xmlns != _legacyFallbackNs) {
+        continue;
+      }
+      final forNamespace = child.getAttribute('for')?.value?.trim();
+      if (forNamespace != null &&
+          forNamespace.isNotEmpty &&
+          forNamespace != _replyNs) {
+        continue;
+      }
+      final body = child.children.firstWhere(
+        (element) => element.name == 'body',
+        orElse: () => XmppElement(),
+      );
+      if (body.name != 'body') {
+        continue;
+      }
+      final start = int.tryParse(body.getAttribute('start')?.value ?? '0') ?? 0;
+      final endRaw = body.getAttribute('end')?.value;
+      final end = int.tryParse(endRaw ?? '') ?? start;
+      if (start < 0 || end < start) {
+        continue;
+      }
+      return _FallbackRange(start, end);
+    }
+    return null;
+  }
+
+  String? _substringByRunes(String input, int start, int end) {
+    final runes = input.runes.toList();
+    if (start < 0 || end < start || start > runes.length) {
+      return null;
+    }
+    final safeEnd = end > runes.length ? runes.length : end;
+    return String.fromCharCodes(runes.sublist(start, safeEnd));
+  }
+
+  String _removeRuneRange(String input, int start, int end) {
+    final runes = input.runes.toList();
+    if (start < 0 || end < start || start > runes.length) {
+      return input;
+    }
+    final safeEnd = end > runes.length ? runes.length : end;
+    if (safeEnd <= start) {
+      return input;
+    }
+    final before = runes.sublist(0, start);
+    final after = runes.sublist(safeEnd);
+    return String.fromCharCodes(before.followedBy(after));
+  }
+}
+
+class _FallbackRange {
+  const _FallbackRange(this.start, this.end);
+
+  final int start;
+  final int end;
 }

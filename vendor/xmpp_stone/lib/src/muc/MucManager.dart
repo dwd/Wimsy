@@ -26,12 +26,16 @@ class MucManager {
 
   final Connection _connection;
 
-  final StreamController<MucMessage> _messageController = StreamController.broadcast();
-  final StreamController<MucPresenceUpdate> _presenceController = StreamController.broadcast();
-  final StreamController<MucSubjectUpdate> _subjectController = StreamController.broadcast();
+  final StreamController<MucMessage> _messageController =
+      StreamController.broadcast();
+  final StreamController<MucPresenceUpdate> _presenceController =
+      StreamController.broadcast();
+  final StreamController<MucSubjectUpdate> _subjectController =
+      StreamController.broadcast();
 
   Stream<MucMessage> get roomMessageStream => _messageController.stream;
-  Stream<MucPresenceUpdate> get roomPresenceStream => _presenceController.stream;
+  Stream<MucPresenceUpdate> get roomPresenceStream =>
+      _presenceController.stream;
   Stream<MucSubjectUpdate> get roomSubjectStream => _subjectController.stream;
 
   MucManager(this._connection) {
@@ -103,7 +107,8 @@ class MucManager {
       return;
     }
     final x = stanza.children.firstWhereOrNull(
-      (child) => child.name == 'x' && child.getAttribute('xmlns')?.value == _mucUserNs,
+      (child) =>
+          child.name == 'x' && child.getAttribute('xmlns')?.value == _mucUserNs,
     );
     if (x == null) {
       return;
@@ -129,11 +134,15 @@ class MucManager {
     );
     _presenceController.add(presence);
   }
-
 }
 
+const _replyNs = 'urn:xmpp:reply:0';
+const _featureFallbackNs = 'urn:xmpp:feature-fallback:0';
+const _legacyFallbackNs = 'urn:xmpp:fallback:0';
+
 bool _isMamGroupchatResult(MessageStanza stanza) {
-  final result = stanza.children.firstWhereOrNull((child) => child.name == 'result');
+  final result =
+      stanza.children.firstWhereOrNull((child) => child.name == 'result');
   final forwarded = result?.getChild('forwarded');
   final forwardedMessage = forwarded?.getChild('message');
   final type = forwardedMessage?.getAttribute('type')?.value;
@@ -153,7 +162,8 @@ String? _extractOobUrl(XmppElement? message) {
     return null;
   }
   for (final child in message.children) {
-    if (child.name != 'x' || child.getAttribute('xmlns')?.value != 'jabber:x:oob') {
+    if (child.name != 'x' ||
+        child.getAttribute('xmlns')?.value != 'jabber:x:oob') {
       continue;
     }
     final url = child.getChild('url')?.textValue?.trim();
@@ -191,18 +201,26 @@ String? _extractStanzaId(XmppElement? message, String roomJid) {
   if (message == null) {
     return null;
   }
-  final stanzaId = message.children.firstWhereOrNull(
-    (child) =>
-        child.name == 'stanza-id' &&
-        child.getAttribute('xmlns')?.value == 'urn:xmpp:sid:0' &&
-        child.getAttribute('by')?.value == roomJid,
-  )?.getAttribute('id')?.value;
+  final stanzaId = message.children
+      .firstWhereOrNull(
+        (child) =>
+            child.name == 'stanza-id' &&
+            child.getAttribute('xmlns')?.value == 'urn:xmpp:sid:0' &&
+            child.getAttribute('by')?.value == roomJid,
+      )
+      ?.getAttribute('id')
+      ?.value;
   if (stanzaId != null && stanzaId.isNotEmpty) {
     return stanzaId;
   }
-  final byMatch = message.children.firstWhereOrNull(
-    (child) => child.name == 'stanza-id' && child.getAttribute('by')?.value == roomJid,
-  )?.getAttribute('id')?.value;
+  final byMatch = message.children
+      .firstWhereOrNull(
+        (child) =>
+            child.name == 'stanza-id' &&
+            child.getAttribute('by')?.value == roomJid,
+      )
+      ?.getAttribute('id')
+      ?.value;
   if (byMatch != null && byMatch.isNotEmpty) {
     return byMatch;
   }
@@ -213,7 +231,8 @@ String? _extractStanzaId(XmppElement? message, String roomJid) {
   return null;
 }
 
-String? _extractMessageIdAttr(XmppElement? forwardedMessage, MessageStanza stanza) {
+String? _extractMessageIdAttr(
+    XmppElement? forwardedMessage, MessageStanza stanza) {
   final forwardedId = forwardedMessage?.getAttribute('id')?.value;
   if (forwardedId != null && forwardedId.isNotEmpty) {
     return forwardedId;
@@ -260,7 +279,8 @@ DateTime? _extractDelayedTimestamp(XmppElement? element) {
 }
 
 MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
-  final result = stanza.children.firstWhereOrNull((child) => child.name == 'result');
+  final result =
+      stanza.children.firstWhereOrNull((child) => child.name == 'result');
   final forwarded = result?.getChild('forwarded');
   final forwardedMessage = forwarded?.getChild('message');
   final from = _parseForwardedFrom(forwardedMessage) ?? stanza.fromJid;
@@ -269,9 +289,25 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   }
   final roomJid = from.userAtDomain;
   final nick = from.resource;
-  final body = _extractForwardedBody(forwardedMessage) ?? stanza.body ?? '';
+  final rawBody = _extractForwardedBody(forwardedMessage) ?? stanza.body ?? '';
+  final replyInfo =
+      _extractReplyInfo(forwardedMessage) ?? _extractReplyInfo(stanza);
+  final fallbackRange = _extractReplyFallbackRange(forwardedMessage) ??
+      _extractReplyFallbackRange(stanza);
+  final fallbackBody = (replyInfo != null &&
+          fallbackRange != null &&
+          fallbackRange.end > fallbackRange.start)
+      ? _substringByRunes(rawBody, fallbackRange.start, fallbackRange.end)
+          ?.trimRight()
+      : null;
+  final body = (replyInfo != null &&
+          fallbackRange != null &&
+          fallbackRange.end > fallbackRange.start)
+      ? _removeRuneRange(rawBody, fallbackRange.start, fallbackRange.end)
+      : rawBody;
   final oobUrl = _extractOobUrl(forwardedMessage) ?? _extractOobUrl(stanza);
-  final reactionsInfo = _extractReactions(forwardedMessage) ?? _extractReactions(stanza);
+  final reactionsInfo =
+      _extractReactions(forwardedMessage) ?? _extractReactions(stanza);
   final subject = _extractForwardedSubject(forwardedMessage) ?? stanza.subject;
   if (subject != null && subject.isNotEmpty && body.trim().isEmpty) {
     return MucParsedGroupMessage.subject(
@@ -291,7 +327,8 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   final forwardedStanzaId = _extractStanzaId(forwardedMessage, roomJid);
   final directStanzaId = _extractStanzaId(stanza, roomJid);
   final messageIdAttr = _extractMessageIdAttr(forwardedMessage, stanza);
-  final replaceId = _extractReplaceId(forwardedMessage) ?? _extractReplaceId(stanza);
+  final replaceId =
+      _extractReplaceId(forwardedMessage) ?? _extractReplaceId(stanza);
   return MucParsedGroupMessage.message(
     MucMessage(
       roomJid: roomJid,
@@ -302,6 +339,10 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       replaceId: replaceId,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
+      replyToId: replyInfo?.id,
+      replyToJid: replyInfo?.toJid,
+      replyFallback:
+          (fallbackBody == null || fallbackBody.isEmpty) ? null : fallbackBody,
       mamResultId: mamResultId,
       messageId: messageIdAttr,
       stanzaId: forwardedStanzaId ?? directStanzaId ?? stanza.id,
@@ -315,6 +356,20 @@ class _ReactionInfo {
 
   final String targetId;
   final List<String> reactions;
+}
+
+class _ReplyInfo {
+  const _ReplyInfo({required this.id, this.toJid});
+
+  final String id;
+  final String? toJid;
+}
+
+class _FallbackRange {
+  const _FallbackRange(this.start, this.end);
+
+  final int start;
+  final int end;
 }
 
 class MucParsedGroupMessage {
@@ -339,6 +394,9 @@ class MucMessage {
     this.replaceId,
     this.reactionTargetId,
     this.reactions = const [],
+    this.replyToId,
+    this.replyToJid,
+    this.replyFallback,
   });
 
   final String roomJid;
@@ -353,6 +411,81 @@ class MucMessage {
   final String? replaceId;
   final String? reactionTargetId;
   final List<String> reactions;
+  final String? replyToId;
+  final String? replyToJid;
+  final String? replyFallback;
+}
+
+_ReplyInfo? _extractReplyInfo(XmppElement? message) {
+  if (message == null) {
+    return null;
+  }
+  final reply = message.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'reply' && child.getAttribute('xmlns')?.value == _replyNs,
+  );
+  final id = reply?.getAttribute('id')?.value?.trim() ?? '';
+  if (id.isEmpty) {
+    return null;
+  }
+  final toJid = reply?.getAttribute('to')?.value?.trim();
+  return _ReplyInfo(
+      id: id, toJid: (toJid == null || toJid.isEmpty) ? null : toJid);
+}
+
+_FallbackRange? _extractReplyFallbackRange(XmppElement? message) {
+  if (message == null) {
+    return null;
+  }
+  for (final child in message.children) {
+    if (child.name != 'fallback') {
+      continue;
+    }
+    final xmlns = child.getAttribute('xmlns')?.value;
+    if (xmlns != _featureFallbackNs && xmlns != _legacyFallbackNs) {
+      continue;
+    }
+    final forNamespace = child.getAttribute('for')?.value?.trim();
+    if (forNamespace != null &&
+        forNamespace.isNotEmpty &&
+        forNamespace != _replyNs) {
+      continue;
+    }
+    final body = child.getChild('body');
+    if (body == null) {
+      continue;
+    }
+    final start = int.tryParse(body.getAttribute('start')?.value ?? '0') ?? 0;
+    final end = int.tryParse(body.getAttribute('end')?.value ?? '') ?? start;
+    if (start < 0 || end < start) {
+      continue;
+    }
+    return _FallbackRange(start, end);
+  }
+  return null;
+}
+
+String? _substringByRunes(String input, int start, int end) {
+  final runes = input.runes.toList();
+  if (start < 0 || start > runes.length || end < start) {
+    return null;
+  }
+  final safeEnd = end > runes.length ? runes.length : end;
+  return String.fromCharCodes(runes.sublist(start, safeEnd));
+}
+
+String _removeRuneRange(String input, int start, int end) {
+  final runes = input.runes.toList();
+  if (start < 0 || start > runes.length || end < start) {
+    return input;
+  }
+  final safeEnd = end > runes.length ? runes.length : end;
+  if (safeEnd <= start) {
+    return input;
+  }
+  final before = runes.sublist(0, start);
+  final after = runes.sublist(safeEnd);
+  return String.fromCharCodes(before.followedBy(after));
 }
 
 class MucPresenceUpdate {

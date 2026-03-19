@@ -157,6 +157,40 @@ void main() {
     expect(intent.messageId, 'm6');
   });
 
+  test('buildMessageIntents includes reply payload and stripped body', () {
+    final service = XmppService();
+    final stanza = _chatStanza(
+      id: 'm8',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: '> quote\n\nnew body',
+    );
+    final reply = XmppElement()..name = 'reply';
+    reply.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:reply:0'));
+    reply.addAttribute(XmppAttribute('id', 'orig-99'));
+    reply.addAttribute(XmppAttribute('to', 'alice@example.com'));
+    stanza.addChild(reply);
+    final fallback = XmppElement()..name = 'fallback';
+    fallback.addAttribute(
+      XmppAttribute('xmlns', 'urn:xmpp:feature-fallback:0'),
+    );
+    fallback.addAttribute(XmppAttribute('for', 'urn:xmpp:reply:0'));
+    final body = XmppElement()..name = 'body';
+    body.addAttribute(XmppAttribute('start', '0'));
+    body.addAttribute(XmppAttribute('end', '9'));
+    fallback.addChild(body);
+    stanza.addChild(fallback);
+
+    final intents = service.buildMessageIntentsForTesting(stanza);
+
+    expect(intents.length, 1);
+    final intent = intents.first as AddMessageIntent;
+    expect(intent.body, 'new body');
+    expect(intent.replyToId, 'orig-99');
+    expect(intent.replyToJid, 'alice@example.com');
+    expect(intent.replyFallback, '> quote');
+  });
+
   test('buildMessageIntents returns no-action intent for no body', () {
     final service = XmppService();
     final stanza = _chatStanza(

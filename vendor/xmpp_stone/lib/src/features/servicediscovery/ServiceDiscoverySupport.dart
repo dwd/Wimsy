@@ -17,6 +17,8 @@ const List<String> SERVICE_DISCOVERY_SUPPORT_LIST = [
   'urn:xmpp:jingle:apps:file-transfer:5',
   'urn:xmpp:jingle:transports:ibb:1',
   'urn:xmpp:mds:displayed:0+notify',
+  'urn:xmpp:reply:0',
+  'urn:xmpp:feature-fallback:0',
 ];
 
 const List<Map<String, String>> SERVICE_DISCOVERY_IDENTITIES = [

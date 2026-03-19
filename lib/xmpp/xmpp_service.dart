@@ -65,6 +65,18 @@ class _ReconnectConfig {
   final List<String> wsProtocols;
 }
 
+class ReplyReference {
+  const ReplyReference({
+    required this.id,
+    required this.toJid,
+    required this.fallback,
+  });
+
+  final String id;
+  final String toJid;
+  final String fallback;
+}
+
 enum XmppStatus { disconnected, connecting, connected, error }
 
 class XmppService extends ChangeNotifier {
@@ -80,6 +92,7 @@ class XmppService extends ChangeNotifier {
       extractReactionUpdate: _messageStanzaParser.extractReactionUpdate,
       reactionChatTarget: _reactionChatTarget,
       extractOobInfoFromStanza: _messageStanzaParser.extractOobInfo,
+      extractReplyPayload: _messageStanzaParser.extractReplyPayload,
       isArchivedStanza: _isArchivedStanza,
       bareJid: _bareJid,
       hasReceiptRequest: _messageStanzaParser.hasReceiptRequest,
@@ -176,6 +189,8 @@ class XmppService extends ChangeNotifier {
   bool _carbonsEnabled = false;
   static const String _capsNode = 'https://wimsy.im/caps';
   static const String _capsHash = 'sha-1';
+  static const String _replyNamespace = 'urn:xmpp:reply:0';
+  static const String _featureFallbackNamespace = 'urn:xmpp:feature-fallback:0';
   static const String _jingleNamespace = 'urn:xmpp:jingle:1';
   static const String _jingleRtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
   static const String _jingleGroupingNamespace =
@@ -1110,7 +1125,11 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
-  void sendMessage({required String toBareJid, required String text}) {
+  void sendMessage({
+    required String toBareJid,
+    required String text,
+    ReplyReference? reply,
+  }) {
     if (isBookmark(toBareJid)) {
       _setError('Joining bookmarked rooms is not supported yet.');
       return;
@@ -1125,10 +1144,38 @@ class XmppService extends ChangeNotifier {
       return;
     }
 
+    final connection = _connection;
+    if (connection == null) {
+      _setError('Not connected.');
+      return;
+    }
+    final messageId = AbstractStanza.getRandomId();
+    final stanza = _buildChatMessageStanza(
+      toBareJid: toBareJid,
+      messageId: messageId,
+      body: trimmed,
+      reply: reply,
+    );
+    connection.writeStanza(stanza);
+    final sender = _currentUserBareJid ?? connection.fullJid.userAtDomain;
+    if (sender.isNotEmpty) {
+      _addMessage(
+        bareJid: toBareJid,
+        from: sender,
+        to: toBareJid,
+        body: trimmed,
+        rawXml: _serializeStanza(stanza),
+        outgoing: true,
+        timestamp: DateTime.now(),
+        messageId: messageId,
+        replyToId: reply?.id,
+        replyToJid: reply?.toJid,
+        replyFallback: reply?.fallback,
+      );
+    }
     final jid = Jid.fromFullJid(toBareJid);
     final chat = chatManager.getChat(jid);
     _ensureChatSubscription(chat);
-    chat.sendMessage(trimmed);
     chat.myState = ChatState.ACTIVE;
   }
 
@@ -1387,7 +1434,7 @@ class XmppService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void sendRoomMessage(String roomJid, String text) {
+  void sendRoomMessage(String roomJid, String text, {ReplyReference? reply}) {
     final muc = _mucManager;
     if (muc == null) {
       _setError('Not connected.');
@@ -1399,12 +1446,22 @@ class XmppService extends ChangeNotifier {
     }
     final normalized = _bareJid(roomJid);
     final messageId = AbstractStanza.getRandomId();
-    muc.sendGroupMessage(
-      Jid.fromFullJid(normalized),
-      trimmed,
-      messageId: messageId,
-    );
-    final rawXml = _buildOutgoingGroupStanzaXml(normalized, messageId, trimmed);
+    final payloadBody = _buildReplyBody(reply, trimmed);
+    final stanza = MessageStanza(messageId, MessageStanzaType.GROUPCHAT);
+    stanza.toJid = Jid.fromFullJid(normalized);
+    stanza.body = payloadBody;
+    if (reply != null) {
+      stanza.addChild(_buildReplyElement(reply));
+      stanza.addChild(
+        _buildFallbackElement(
+          start: 0,
+          end: reply.fallback.runes.length,
+          forNamespace: _replyNamespace,
+        ),
+      );
+    }
+    _connection?.writeStanza(stanza);
+    final rawXml = _serializeStanza(stanza);
     final nick = _roomNickFor(normalized);
     _addRoomMessage(
       roomJid: normalized,
@@ -1414,6 +1471,9 @@ class XmppService extends ChangeNotifier {
       outgoing: true,
       timestamp: DateTime.now(),
       messageId: messageId,
+      replyToId: reply?.id,
+      replyToJid: reply?.toJid,
+      replyFallback: reply?.fallback,
     );
   }
 
@@ -2000,6 +2060,46 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  ReplyReference? buildReplyReference({
+    required String chatJid,
+    required ChatMessage message,
+    required bool isRoom,
+  }) {
+    final targetId = message.stanzaId ?? message.messageId;
+    if (targetId == null || targetId.isEmpty) {
+      return null;
+    }
+    final normalized = _bareJid(chatJid);
+    final toJid = isRoom
+        ? '$normalized/${message.from}'
+        : (message.outgoing
+              ? (_currentUserBareJid ?? normalized)
+              : _bareJid(message.from));
+    final fallbackQuote = _buildReplyFallbackQuote(message.body);
+    return ReplyReference(
+      id: targetId,
+      toJid: toJid,
+      fallback: '$fallbackQuote\n\n',
+    );
+  }
+
+  String _buildReplyFallbackQuote(String body) {
+    final normalized = body.trim().replaceAll('\r\n', '\n');
+    if (normalized.isEmpty) {
+      return '> …';
+    }
+    final maxLength = 280;
+    final clipped = normalized.runes.length > maxLength
+        ? '${String.fromCharCodes(normalized.runes.take(maxLength))}…'
+        : normalized;
+    final lines = clipped.split('\n');
+    final firstLines = lines.take(3).toList();
+    if (lines.length > 3) {
+      firstLines.add('…');
+    }
+    return firstLines.map((line) => '> $line').join('\n');
+  }
+
   Set<String> _ownReactionsFor(ChatMessage message, String sender) {
     final reactions = message.reactions ?? const {};
     final own = <String>{};
@@ -2243,6 +2343,9 @@ class XmppService extends ChangeNotifier {
         messageId: message.messageId ?? message.stanzaId,
         mamId: message.mamResultId,
         stanzaId: message.stanzaId,
+        replyToId: message.replyToId,
+        replyToJid: message.replyToJid,
+        replyFallback: message.replyFallback,
       );
     });
     _roomSubscriptions['presence']?.cancel();
@@ -4060,6 +4163,9 @@ class XmppService extends ChangeNotifier {
           messageId: intent.messageId,
           oobUrl: intent.oobUrl,
           oobDescription: intent.oobDescription,
+          replyToId: intent.replyToId,
+          replyToJid: intent.replyToJid,
+          replyFallback: intent.replyFallback,
         );
       } else if (intent is UnhandledMessageIntent) {
         _logUnhandledMessage(stanza, intent);
@@ -4603,11 +4709,9 @@ class XmppService extends ChangeNotifier {
       oob.addChild(descElement);
     }
     stanza.addChild(oob);
-    final fallback = XmppElement()..name = 'fallback';
-    fallback.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fallback:0'));
-    final bodyFallback = XmppElement()..name = 'body';
-    fallback.addChild(bodyFallback);
-    stanza.addChild(fallback);
+    stanza.addChild(
+      _buildFallbackElement(start: 0, end: stanza.body!.runes.length),
+    );
     if (!isRoom) {
       final receiptRequest = XmppElement()..name = 'request';
       receiptRequest.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
@@ -4617,6 +4721,70 @@ class XmppService extends ChangeNotifier {
       stanza.addChild(markable);
     }
     return stanza;
+  }
+
+  MessageStanza _buildChatMessageStanza({
+    required String toBareJid,
+    required String messageId,
+    required String body,
+    ReplyReference? reply,
+  }) {
+    final stanza = MessageStanza(messageId, MessageStanzaType.CHAT);
+    stanza.toJid = Jid.fromFullJid(toBareJid);
+    stanza.fromJid = _connection?.fullJid;
+    final payloadBody = _buildReplyBody(reply, body);
+    stanza.body = payloadBody;
+    if (reply != null) {
+      stanza.addChild(_buildReplyElement(reply));
+      stanza.addChild(
+        _buildFallbackElement(
+          start: 0,
+          end: reply.fallback.runes.length,
+          forNamespace: _replyNamespace,
+        ),
+      );
+    }
+    final receiptRequest = XmppElement()..name = 'request';
+    receiptRequest.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
+    stanza.addChild(receiptRequest);
+    final markable = XmppElement()..name = 'markable';
+    markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
+    stanza.addChild(markable);
+    return stanza;
+  }
+
+  XmppElement _buildReplyElement(ReplyReference reply) {
+    final element = XmppElement()..name = 'reply';
+    element.addAttribute(XmppAttribute('xmlns', _replyNamespace));
+    element.addAttribute(XmppAttribute('id', reply.id));
+    if (reply.toJid.isNotEmpty) {
+      element.addAttribute(XmppAttribute('to', reply.toJid));
+    }
+    return element;
+  }
+
+  XmppElement _buildFallbackElement({
+    required int start,
+    required int end,
+    String? forNamespace,
+  }) {
+    final fallback = XmppElement()..name = 'fallback';
+    fallback.addAttribute(XmppAttribute('xmlns', _featureFallbackNamespace));
+    if (forNamespace != null && forNamespace.isNotEmpty) {
+      fallback.addAttribute(XmppAttribute('for', forNamespace));
+    }
+    final bodyFallback = XmppElement()..name = 'body';
+    bodyFallback.addAttribute(XmppAttribute('start', start.toString()));
+    bodyFallback.addAttribute(XmppAttribute('end', end.toString()));
+    fallback.addChild(bodyFallback);
+    return fallback;
+  }
+
+  String _buildReplyBody(ReplyReference? reply, String body) {
+    if (reply == null) {
+      return body;
+    }
+    return '${reply.fallback}$body';
   }
 
   Future<IqStanza?> _sendIqAndAwait(
@@ -4645,17 +4813,6 @@ class XmppService extends ChangeNotifier {
     });
     connection.writeStanza(stanza);
     return completer.future;
-  }
-
-  String _buildOutgoingGroupStanzaXml(
-    String roomJid,
-    String messageId,
-    String body,
-  ) {
-    final stanza = MessageStanza(messageId, MessageStanzaType.GROUPCHAT);
-    stanza.toJid = Jid.fromFullJid(roomJid);
-    stanza.body = body;
-    return _serializeStanza(stanza);
   }
 
   XmppElement _buildReplaceElement(String replaceId) {
@@ -5467,7 +5624,11 @@ class XmppService extends ChangeNotifier {
       for (final message in chat.messages ?? const <Message>[]) {
         final from = message.from?.userAtDomain ?? 'unknown';
         final to = message.to?.userAtDomain ?? '';
-        final body = message.text ?? '';
+        final parsedReply = _messageStanzaParser.extractReplyPayload(
+          message.messageStanza,
+          body: message.text,
+        );
+        final body = parsedReply?.cleanedBody ?? message.text ?? '';
         final oobInfo = _messageStanzaParser.extractOobInfo(
           message.messageStanza,
         );
@@ -5522,6 +5683,9 @@ class XmppService extends ChangeNotifier {
           messageId: message.messageId,
           mamId: message.mamResultId,
           stanzaId: message.stanzaId,
+          replyToId: parsedReply?.replyToId,
+          replyToJid: parsedReply?.replyToJid,
+          replyFallback: parsedReply?.fallbackBody,
         );
       }
     }
@@ -5530,7 +5694,11 @@ class XmppService extends ChangeNotifier {
     ) {
       final from = message.from?.userAtDomain ?? 'unknown';
       final to = message.to?.userAtDomain ?? '';
-      final body = message.text ?? '';
+      final parsedReply = _messageStanzaParser.extractReplyPayload(
+        message.messageStanza,
+        body: message.text,
+      );
+      final body = parsedReply?.cleanedBody ?? message.text ?? '';
       final oobInfo = _messageStanzaParser.extractOobInfo(
         message.messageStanza,
       );
@@ -5589,6 +5757,9 @@ class XmppService extends ChangeNotifier {
         inviteRoomJid: invite?.roomJid,
         inviteReason: invite?.reason,
         invitePassword: invite?.password,
+        replyToId: parsedReply?.replyToId,
+        replyToJid: parsedReply?.replyToJid,
+        replyFallback: parsedReply?.fallbackBody,
       );
     });
 
@@ -5615,6 +5786,9 @@ class XmppService extends ChangeNotifier {
     String? inviteRoomJid,
     String? inviteReason,
     String? invitePassword,
+    String? replyToId,
+    String? replyToJid,
+    String? replyFallback,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -5654,6 +5828,16 @@ class XmppService extends ChangeNotifier {
             (invitePassword != null && invitePassword.isNotEmpty)
             ? invitePassword
             : existing.invitePassword;
+        final nextReplyToId = (replyToId != null && replyToId.isNotEmpty)
+            ? replyToId
+            : existing.replyToId;
+        final nextReplyToJid = (replyToJid != null && replyToJid.isNotEmpty)
+            ? replyToJid
+            : existing.replyToJid;
+        final nextReplyFallback =
+            (replyFallback != null && replyFallback.isNotEmpty)
+            ? replyFallback
+            : existing.replyFallback;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
@@ -5661,7 +5845,10 @@ class XmppService extends ChangeNotifier {
             nextOobDescription != existing.oobDescription ||
             nextInviteRoomJid != existing.inviteRoomJid ||
             nextInviteReason != existing.inviteReason ||
-            nextInvitePassword != existing.invitePassword) {
+            nextInvitePassword != existing.invitePassword ||
+            nextReplyToId != existing.replyToId ||
+            nextReplyToJid != existing.replyToJid ||
+            nextReplyFallback != existing.replyFallback) {
           list[existingIndex] = ChatMessage(
             from: existing.from,
             to: existing.to,
@@ -5686,6 +5873,9 @@ class XmppService extends ChangeNotifier {
             edited: existing.edited,
             editedAt: existing.editedAt,
             reactions: existing.reactions ?? const {},
+            replyToId: nextReplyToId,
+            replyToJid: nextReplyToJid,
+            replyFallback: nextReplyFallback,
             acked: existing.acked,
             receiptReceived: existing.receiptReceived,
             displayed: existing.displayed,
@@ -5752,6 +5942,9 @@ class XmppService extends ChangeNotifier {
           oobDescription: oobDescription,
           rawXml: rawXml,
           reactions: const {},
+          replyToId: replyToId,
+          replyToJid: replyToJid,
+          replyFallback: replyFallback,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -5775,6 +5968,9 @@ class XmppService extends ChangeNotifier {
       oobDescription: oobDescription,
       rawXml: rawXml,
       reactions: const {},
+      replyToId: replyToId,
+      replyToJid: replyToJid,
+      replyFallback: replyFallback,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
@@ -5801,6 +5997,9 @@ class XmppService extends ChangeNotifier {
     String? stanzaId,
     String? oobUrl,
     String? oobDescription,
+    String? replyToId,
+    String? replyToJid,
+    String? replyFallback,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
@@ -5832,13 +6031,26 @@ class XmppService extends ChangeNotifier {
             (oobDescription != null && oobDescription.isNotEmpty)
             ? oobDescription
             : existing.oobDescription;
+        final nextReplyToId = (replyToId != null && replyToId.isNotEmpty)
+            ? replyToId
+            : existing.replyToId;
+        final nextReplyToJid = (replyToJid != null && replyToJid.isNotEmpty)
+            ? replyToJid
+            : existing.replyToJid;
+        final nextReplyFallback =
+            (replyFallback != null && replyFallback.isNotEmpty)
+            ? replyFallback
+            : existing.replyFallback;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextReceiptReceived != existing.receiptReceived ||
             nextTimestamp != existing.timestamp ||
             nextOobUrl != existing.oobUrl ||
             nextOobDescription != existing.oobDescription ||
-            nextRawXml != existing.rawXml) {
+            nextRawXml != existing.rawXml ||
+            nextReplyToId != existing.replyToId ||
+            nextReplyToJid != existing.replyToJid ||
+            nextReplyFallback != existing.replyFallback) {
           final updated = ChatMessage(
             from: existing.from,
             to: existing.to,
@@ -5860,6 +6072,9 @@ class XmppService extends ChangeNotifier {
             edited: existing.edited,
             editedAt: existing.editedAt,
             reactions: existing.reactions ?? const {},
+            replyToId: nextReplyToId,
+            replyToJid: nextReplyToJid,
+            replyFallback: nextReplyFallback,
             acked: existing.acked,
             receiptReceived: nextReceiptReceived,
             displayed: existing.displayed,
@@ -5900,6 +6115,9 @@ class XmppService extends ChangeNotifier {
           oobDescription: oobDescription,
           rawXml: rawXml,
           reactions: const {},
+          replyToId: replyToId,
+          replyToJid: replyToJid,
+          replyFallback: replyFallback,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -5923,6 +6141,9 @@ class XmppService extends ChangeNotifier {
       oobDescription: oobDescription,
       rawXml: rawXml,
       reactions: const {},
+      replyToId: replyToId,
+      replyToJid: replyToJid,
+      replyFallback: replyFallback,
     );
     _insertMessageOrdered(list, newMessage);
     notifyListeners();
@@ -6066,6 +6287,9 @@ class XmppService extends ChangeNotifier {
         edited: existing.edited,
         editedAt: existing.editedAt,
         reactions: existing.reactions ?? const {},
+        replyToId: existing.replyToId,
+        replyToJid: existing.replyToJid,
+        replyFallback: existing.replyFallback,
         acked: existing.acked,
         receiptReceived: existing.receiptReceived,
         displayed: existing.displayed,
@@ -6258,6 +6482,9 @@ class XmppService extends ChangeNotifier {
         edited: existing.edited,
         editedAt: existing.editedAt,
         reactions: existing.reactions ?? const {},
+        replyToId: existing.replyToId,
+        replyToJid: existing.replyToJid,
+        replyFallback: existing.replyFallback,
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
@@ -6315,6 +6542,9 @@ class XmppService extends ChangeNotifier {
         edited: existing.edited,
         editedAt: existing.editedAt,
         reactions: existing.reactions ?? const {},
+        replyToId: existing.replyToId,
+        replyToJid: existing.replyToJid,
+        replyFallback: existing.replyFallback,
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,

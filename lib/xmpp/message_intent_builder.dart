@@ -16,6 +16,20 @@ class OobInfo {
   final String? description;
 }
 
+class ReplyPayload {
+  const ReplyPayload({
+    required this.replyToId,
+    this.replyToJid,
+    this.fallbackBody,
+    this.cleanedBody,
+  });
+
+  final String replyToId;
+  final String? replyToJid;
+  final String? fallbackBody;
+  final String? cleanedBody;
+}
+
 class MessageScopedId {
   const MessageScopedId({required this.scopeJid, required this.id});
 
@@ -87,6 +101,9 @@ class AddMessageIntent extends MessageIntent {
     required this.rawXml,
     this.oobUrl,
     this.oobDescription,
+    this.replyToId,
+    this.replyToJid,
+    this.replyFallback,
   });
 
   final String bareJid;
@@ -98,6 +115,9 @@ class AddMessageIntent extends MessageIntent {
   final String rawXml;
   final String? oobUrl;
   final String? oobDescription;
+  final String? replyToId;
+  final String? replyToJid;
+  final String? replyFallback;
 }
 
 class UnhandledMessageIntent extends MessageIntent {
@@ -116,6 +136,7 @@ class MessageIntentBuilder {
     required this.extractReactionUpdate,
     required this.reactionChatTarget,
     required this.extractOobInfoFromStanza,
+    required this.extractReplyPayload,
     required this.isArchivedStanza,
     required this.bareJid,
     required this.hasReceiptRequest,
@@ -132,6 +153,8 @@ class MessageIntentBuilder {
   final ReactionUpdate? Function(MessageStanza stanza) extractReactionUpdate;
   final String Function(String fromBare, String toBare) reactionChatTarget;
   final OobInfo? Function(XmppElement stanza) extractOobInfoFromStanza;
+  final ReplyPayload? Function(XmppElement stanza, {String? body})
+  extractReplyPayload;
   final bool Function(MessageStanza stanza) isArchivedStanza;
   final String Function(String jid) bareJid;
   final bool Function(MessageStanza stanza) hasReceiptRequest;
@@ -181,7 +204,8 @@ class MessageIntentBuilder {
         ),
       ];
     }
-    final body = stanza.body ?? '';
+    final reply = extractReplyPayload(stanza, body: stanza.body);
+    final body = reply?.cleanedBody ?? stanza.body ?? '';
     final oobInfo = extractOobInfoFromStanza(stanza);
     final oobUrl = oobInfo?.url;
     if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
@@ -237,6 +261,9 @@ class MessageIntentBuilder {
         rawXml: serializeStanza(stanza),
         oobUrl: oobUrl,
         oobDescription: oobInfo?.description,
+        replyToId: reply?.replyToId,
+        replyToJid: reply?.replyToJid,
+        replyFallback: reply?.fallbackBody,
       ),
     );
     if (intents.isEmpty) {

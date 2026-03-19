@@ -23,6 +23,9 @@ class ChatMessage {
     this.edited = false,
     this.editedAt,
     this.reactions,
+    this.replyToId,
+    this.replyToJid,
+    this.replyFallback,
     this.acked = false,
     this.receiptReceived = false,
     this.displayed = false,
@@ -51,6 +54,9 @@ class ChatMessage {
   final bool edited;
   final DateTime? editedAt;
   final Map<String, List<String>>? reactions;
+  final String? replyToId;
+  final String? replyToJid;
+  final String? replyFallback;
   final bool acked;
   final bool receiptReceived;
   final bool displayed;
@@ -80,6 +86,9 @@ class ChatMessage {
       'edited': edited,
       'editedAt': editedAt?.toIso8601String(),
       'reactions': reactions ?? const {},
+      'replyToId': replyToId,
+      'replyToJid': replyToJid,
+      'replyFallback': replyFallback,
       'acked': acked,
       'receiptReceived': receiptReceived,
       'displayed': displayed,
@@ -113,11 +122,18 @@ class ChatMessage {
     final edited = map['edited'] == true;
     final editedAtRaw = map['editedAt']?.toString();
     final reactions = _parseReactions(map['reactions']);
+    final replyToId = map['replyToId']?.toString();
+    final replyToJid = map['replyToJid']?.toString();
+    final replyFallback = map['replyFallback']?.toString();
     final acked = map['acked'] == true;
     final receiptReceived = map['receiptReceived'] == true;
     final displayed = map['displayed'] == true;
-    final fileSize = fileSizeRaw is int ? fileSizeRaw : int.tryParse(fileSizeRaw?.toString() ?? '');
-    final fileBytes = fileBytesRaw is int ? fileBytesRaw : int.tryParse(fileBytesRaw?.toString() ?? '');
+    final fileSize = fileSizeRaw is int
+        ? fileSizeRaw
+        : int.tryParse(fileSizeRaw?.toString() ?? '');
+    final fileBytes = fileBytesRaw is int
+        ? fileBytesRaw
+        : int.tryParse(fileBytesRaw?.toString() ?? '');
     final hasBody = body.isNotEmpty;
     final hasOobUrl = oobUrl != null && oobUrl.isNotEmpty;
     final hasRawXml = rawXml != null && rawXml.isNotEmpty;
@@ -134,7 +150,9 @@ class ChatMessage {
     if (timestamp == null) {
       return null;
     }
-    final editedAt = editedAtRaw == null ? null : DateTime.tryParse(editedAtRaw);
+    final editedAt = editedAtRaw == null
+        ? null
+        : DateTime.tryParse(editedAtRaw);
     return ChatMessage(
       from: from,
       to: to,
@@ -159,6 +177,9 @@ class ChatMessage {
       edited: edited,
       editedAt: editedAt,
       reactions: reactions,
+      replyToId: replyToId,
+      replyToJid: replyToJid,
+      replyFallback: replyFallback,
       acked: acked,
       receiptReceived: receiptReceived,
       displayed: displayed,
@@ -177,7 +198,10 @@ class ChatMessage {
       }
       final value = entry.value;
       if (value is List) {
-        final senders = value.map((item) => item.toString()).where((item) => item.isNotEmpty).toList();
+        final senders = value
+            .map((item) => item.toString())
+            .where((item) => item.isNotEmpty)
+            .toList();
         if (senders.isNotEmpty) {
           result[emoji] = senders;
         }

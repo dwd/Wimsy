@@ -129,4 +129,35 @@ void main() {
       expect(parser.extractReplaceId(stanza), 'orig-123');
     },
   );
+
+  test('extractReplyPayload strips feature-fallback body range', () {
+    final stanza = _chatStanza(
+      id: 'm5',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: '> quoted line\n\nhello',
+    );
+    final reply = XmppElement()..name = 'reply';
+    reply.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:reply:0'));
+    reply.addAttribute(XmppAttribute('id', 'orig-1'));
+    reply.addAttribute(XmppAttribute('to', 'alice@example.com'));
+    stanza.addChild(reply);
+    final fallback = XmppElement()..name = 'fallback';
+    fallback.addAttribute(
+      XmppAttribute('xmlns', 'urn:xmpp:feature-fallback:0'),
+    );
+    fallback.addAttribute(XmppAttribute('for', 'urn:xmpp:reply:0'));
+    final body = XmppElement()..name = 'body';
+    body.addAttribute(XmppAttribute('start', '0'));
+    body.addAttribute(XmppAttribute('end', '15'));
+    fallback.addChild(body);
+    stanza.addChild(fallback);
+
+    final payload = parser.extractReplyPayload(stanza, body: stanza.body);
+    expect(payload, isNotNull);
+    expect(payload!.replyToId, 'orig-1');
+    expect(payload.replyToJid, 'alice@example.com');
+    expect(payload.fallbackBody, '> quoted line');
+    expect(payload.cleanedBody, 'hello');
+  });
 }

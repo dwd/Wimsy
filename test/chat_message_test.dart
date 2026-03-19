@@ -23,6 +23,9 @@ void main() {
       reactions: const {
         '👍': ['alice@example.com', 'bob@example.com'],
       },
+      replyToId: 'orig-1',
+      replyToJid: 'alice@example.com',
+      replyFallback: '> hello',
     );
 
     final roundtrip = ChatMessage.fromMap(message.toMap());
@@ -38,7 +41,13 @@ void main() {
     expect(roundtrip.fileBytes, 567);
     expect(roundtrip.fileState, 'in_progress');
     expect(roundtrip.reactions, isNotNull);
-    expect(roundtrip.reactions!['👍'], ['alice@example.com', 'bob@example.com']);
+    expect(roundtrip.reactions!['👍'], [
+      'alice@example.com',
+      'bob@example.com',
+    ]);
+    expect(roundtrip.replyToId, 'orig-1');
+    expect(roundtrip.replyToJid, 'alice@example.com');
+    expect(roundtrip.replyFallback, '> hello');
   });
 
   test('ChatMessage rejects cached entries without raw XML', () {
