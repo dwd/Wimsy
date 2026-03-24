@@ -33,6 +33,7 @@ import 'mam_query_planner.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
+import 'jid_discovery.dart';
 import 'chat_message_mutations.dart';
 import 'message_intent_builder.dart';
 import 'message_stanza_parser.dart';
@@ -616,6 +617,26 @@ class XmppService extends ChangeNotifier {
     final presenceManager = PresenceManager.getInstance(connection);
     presenceManager.acceptSubscription(Jid.fromFullJid(normalized));
     return true;
+  }
+
+  Future<JidDiscoveryResult> discoverJidKind(
+    String jid, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final connection = _connection;
+    if (connection == null) {
+      return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
+    }
+    final normalized = _bareJid(jid);
+    if (normalized.isEmpty) {
+      return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
+    }
+    try {
+      final discoInfo = await _requestDiscoInfo(normalized).timeout(timeout);
+      return classifyJidFromDiscoInfo(discoInfo);
+    } catch (_) {
+      return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
+    }
   }
 
   ChatState? chatStateFor(String bareJid) {

@@ -24,6 +24,7 @@ import 'notifications/notification_service.dart';
 import 'storage/account_record.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/xmpp_service.dart';
+import 'xmpp/jid_discovery.dart';
 import 'xmpp/alt_connection.dart';
 import 'xmpp/ws_endpoint.dart';
 import 'background/foreground_task_handler.dart';
@@ -842,17 +843,9 @@ class _WimsyHomeState extends State<WimsyHome> {
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: () => _showContactDialog(),
-                    icon: const Icon(Icons.person_add_alt_1),
-                    label: const Text('Add contact'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showJoinRoomDialog(),
-                    icon: const Icon(Icons.meeting_room_outlined),
-                    label: const Text('Join room'),
+                    onPressed: _showAddByJidDialog,
+                    icon: const Icon(Icons.person_search),
+                    label: const Text('Add by JID'),
                   ),
                 ),
               ],
@@ -3157,6 +3150,43 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
   }
 
+  Future<void> _showAddByJidDialog() async {
+    final result = await showDialog<_AddByJidResult>(
+      context: context,
+      builder: (context) => _AddByJidDialog(service: widget.service),
+    );
+    if (result == null) {
+      return;
+    }
+    if (result.isRoom) {
+      widget.service.joinRoom(
+        result.jid,
+        nick: result.nick,
+        password: result.password,
+      );
+      if (result.saveBookmark) {
+        final bookmark = ContactEntry(
+          jid: result.jid,
+          name: result.roomName,
+          groups: const [],
+          isBookmark: true,
+          bookmarkNick: result.nick,
+          bookmarkPassword: result.password,
+          bookmarkAutoJoin: result.autoJoin,
+        );
+        final ok = await widget.service.upsertBookmark(bookmark);
+        if (!ok) {
+          _showSnack('Failed to save bookmark.');
+        }
+      }
+      return;
+    }
+    final ok = await widget.service.upsertRosterContact(result.jid);
+    if (!ok) {
+      _showSnack('Failed to save contact.');
+    }
+  }
+
   Future<void> _showBookmarkDialog(ContactEntry bookmark) async {
     final jidController = TextEditingController(text: bookmark.jid);
     final nameController = TextEditingController(text: bookmark.name ?? '');
@@ -3244,122 +3274,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     final ok = await widget.service.upsertBookmark(updated);
     if (!ok) {
       _showSnack('Failed to save bookmark.');
-    }
-  }
-
-  Future<void> _showJoinRoomDialog() async {
-    final jidController = TextEditingController();
-    final nickController = TextEditingController();
-    final passwordController = TextEditingController();
-    final nameController = TextEditingController();
-    var saveBookmark = false;
-    var autoJoin = false;
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Join room'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: jidController,
-                      decoration: const InputDecoration(
-                        labelText: 'Room JID',
-                        hintText: 'room@conference.example.com',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: nickController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nickname (optional)',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: passwordController,
-                      decoration: const InputDecoration(
-                        labelText: 'Password (optional)',
-                      ),
-                      obscureText: true,
-                    ),
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      value: saveBookmark,
-                      onChanged: (value) =>
-                          setState(() => saveBookmark = value),
-                      title: const Text('Save bookmark'),
-                    ),
-                    if (saveBookmark) ...[
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Room name (optional)',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
-                        value: autoJoin,
-                        onChanged: (value) => setState(() => autoJoin = value),
-                        title: const Text('Auto-join'),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Join'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-    if (result != true) {
-      return;
-    }
-    final roomJid = jidController.text.trim();
-    if (roomJid.isEmpty) {
-      _showSnack('Enter a room JID.');
-      return;
-    }
-    widget.service.joinRoom(
-      roomJid,
-      nick: nickController.text.trim(),
-      password: passwordController.text.trim(),
-    );
-    if (saveBookmark) {
-      final bookmark = ContactEntry(
-        jid: roomJid,
-        name: nameController.text.trim().isNotEmpty
-            ? nameController.text.trim()
-            : null,
-        groups: const [],
-        isBookmark: true,
-        bookmarkNick: nickController.text.trim().isNotEmpty
-            ? nickController.text.trim()
-            : null,
-        bookmarkPassword: passwordController.text.trim().isNotEmpty
-            ? passwordController.text.trim()
-            : null,
-        bookmarkAutoJoin: autoJoin,
-      );
-      final ok = await widget.service.upsertBookmark(bookmark);
-      if (!ok) {
-        _showSnack('Failed to save bookmark.');
-      }
     }
   }
 
@@ -4629,6 +4543,306 @@ class _ContactActionsMenu extends StatelessWidget {
             child: Text(isBlocked ? 'Unblock' : 'Block'),
           ),
         ];
+      },
+    );
+  }
+}
+
+enum _AddTargetType { person, room }
+
+class _AddByJidResult {
+  const _AddByJidResult({
+    required this.jid,
+    required this.isRoom,
+    this.nick,
+    this.password,
+    required this.saveBookmark,
+    this.roomName,
+    required this.autoJoin,
+  });
+
+  final String jid;
+  final bool isRoom;
+  final String? nick;
+  final String? password;
+  final bool saveBookmark;
+  final String? roomName;
+  final bool autoJoin;
+}
+
+class _AddByJidDialog extends StatefulWidget {
+  const _AddByJidDialog({required this.service});
+
+  final XmppService service;
+
+  @override
+  State<_AddByJidDialog> createState() => _AddByJidDialogState();
+}
+
+class _AddByJidDialogState extends State<_AddByJidDialog> {
+  final TextEditingController _jidController = TextEditingController();
+  final TextEditingController _nickController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _roomNameController = TextEditingController();
+  Timer? _discoveryDebounce;
+  int _discoveryToken = 0;
+  bool _discovering = false;
+  bool _manualTypeOverride = false;
+  bool _saveBookmark = false;
+  bool _autoJoin = false;
+  String? _jidError;
+  String? _discoveryMessage;
+  _AddTargetType _selectedType = _AddTargetType.person;
+
+  @override
+  void initState() {
+    super.initState();
+    _jidController.addListener(_handleJidChanged);
+  }
+
+  @override
+  void dispose() {
+    _discoveryDebounce?.cancel();
+    _jidController.removeListener(_handleJidChanged);
+    _jidController.dispose();
+    _nickController.dispose();
+    _passwordController.dispose();
+    _roomNameController.dispose();
+    super.dispose();
+  }
+
+  void _handleJidChanged() {
+    final raw = _jidController.text.trim();
+    final normalized = _normalizeJid(raw);
+    final token = ++_discoveryToken;
+    _manualTypeOverride = false;
+    _discoveryDebounce?.cancel();
+    if (raw.isEmpty) {
+      setState(() {
+        _discovering = false;
+        _discoveryMessage = null;
+        _jidError = null;
+        _selectedType = _AddTargetType.person;
+      });
+      return;
+    }
+    if (normalized == null) {
+      setState(() {
+        _discovering = false;
+        _discoveryMessage = null;
+        _jidError = 'Enter a valid JID.';
+      });
+      return;
+    }
+    setState(() {
+      _jidError = null;
+      _discovering = true;
+      _discoveryMessage = 'Checking...';
+    });
+    _discoveryDebounce = Timer(const Duration(milliseconds: 500), () async {
+      final result = await widget.service.discoverJidKind(normalized);
+      if (!mounted || token != _discoveryToken) {
+        return;
+      }
+      setState(() {
+        _discovering = false;
+        switch (result.kind) {
+          case DiscoveredJidKind.room:
+            _discoveryMessage = 'Detected: Room';
+            if (!_manualTypeOverride) {
+              _selectedType = _AddTargetType.room;
+            }
+          case DiscoveredJidKind.person:
+            _discoveryMessage = 'Detected: Person';
+            if (!_manualTypeOverride) {
+              _selectedType = _AddTargetType.person;
+            }
+          case DiscoveredJidKind.unknown:
+            _discoveryMessage =
+                'Couldn’t determine type. Using manual selection.';
+        }
+      });
+    });
+  }
+
+  String? _normalizeJid(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final parsed = Jid.fromFullJid(trimmed);
+    final bare = parsed.userAtDomain;
+    if (bare.isEmpty ||
+        !bare.contains('@') ||
+        bare.startsWith('@') ||
+        bare.endsWith('@')) {
+      return null;
+    }
+    return bare;
+  }
+
+  void _submit() {
+    final normalized = _normalizeJid(_jidController.text);
+    if (normalized == null) {
+      setState(() {
+        _jidError = 'Enter a valid JID.';
+      });
+      return;
+    }
+    final isRoom = _selectedType == _AddTargetType.room;
+    final nick = _nickController.text.trim();
+    final password = _passwordController.text.trim();
+    final roomName = _roomNameController.text.trim();
+    Navigator.of(context).pop(
+      _AddByJidResult(
+        jid: normalized,
+        isRoom: isRoom,
+        nick: nick.isEmpty ? null : nick,
+        password: password.isEmpty ? null : password,
+        saveBookmark: isRoom && _saveBookmark,
+        roomName: roomName.isEmpty ? null : roomName,
+        autoJoin: isRoom && _saveBookmark ? _autoJoin : false,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AnimatedBuilder(
+      animation: widget.service,
+      builder: (context, _) {
+        final normalized = _normalizeJid(_jidController.text);
+        final previewLabel = normalized ?? _jidController.text.trim();
+        final avatarBytes = normalized == null
+            ? null
+            : widget.service.avatarBytesFor(normalized);
+        final name = (normalized == null || normalized.isEmpty)
+            ? ''
+            : widget.service.displayNameFor(normalized);
+        final isRoom = _selectedType == _AddTargetType.room;
+        return AlertDialog(
+          title: const Text('Add by JID'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _jidController,
+                  decoration: InputDecoration(
+                    labelText: 'JID',
+                    hintText: 'user@example.com',
+                    errorText: _jidError,
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 12),
+                SegmentedButton<_AddTargetType>(
+                  segments: const [
+                    ButtonSegment<_AddTargetType>(
+                      value: _AddTargetType.person,
+                      label: Text('Person'),
+                      icon: Icon(Icons.person_outline),
+                    ),
+                    ButtonSegment<_AddTargetType>(
+                      value: _AddTargetType.room,
+                      label: Text('Room'),
+                      icon: Icon(Icons.meeting_room_outlined),
+                    ),
+                  ],
+                  selected: <_AddTargetType>{_selectedType},
+                  onSelectionChanged: (selection) {
+                    if (selection.isEmpty) {
+                      return;
+                    }
+                    setState(() {
+                      _manualTypeOverride = true;
+                      _selectedType = selection.first;
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _AvatarPlaceholder(label: previewLabel, bytes: avatarBytes),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        name.isNotEmpty ? name : previewLabel,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _discovering
+                        ? 'Checking...'
+                        : (_discoveryMessage ?? 'Type a JID to detect type.'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (isRoom) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _nickController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nickname (optional)',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _passwordController,
+                    decoration: const InputDecoration(
+                      labelText: 'Password (optional)',
+                    ),
+                    obscureText: true,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _saveBookmark,
+                    onChanged: (value) => setState(() => _saveBookmark = value),
+                    title: const Text('Save bookmark'),
+                  ),
+                  if (_saveBookmark) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _roomNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Room name (optional)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _autoJoin,
+                      onChanged: (value) => setState(() => _autoJoin = value),
+                      title: const Text('Auto-join'),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: _submit,
+              child: Text(isRoom ? 'Join room' : 'Add contact'),
+            ),
+          ],
+        );
       },
     );
   }
