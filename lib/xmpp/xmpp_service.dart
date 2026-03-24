@@ -80,6 +80,8 @@ class ReplyReference {
 
 enum XmppStatus { disconnected, connecting, connected, error }
 
+enum CsiOverrideMode { auto, active, inactive }
+
 class XmppService extends ChangeNotifier {
   final MessageStanzaParser _messageStanzaParser = const MessageStanzaParser();
 
@@ -199,6 +201,7 @@ class XmppService extends ChangeNotifier {
   static const String _jingleGroupingBundle = 'BUNDLE';
   String? _capsVer;
   bool _csiInactive = false;
+  CsiOverrideMode _csiOverrideMode = CsiOverrideMode.auto;
   static const Duration _csiIdleDelay = Duration(minutes: 1);
   final MamCursorStore _mamCursorStore = MamCursorStore();
   final Map<String, Timer> _mamCatchUpTimers = {};
@@ -701,6 +704,17 @@ class XmppService extends ChangeNotifier {
   bool get isConnected => _status == XmppStatus.connected;
   bool get isConnecting => _status == XmppStatus.connecting;
   bool get isBackgroundMode => _backgroundMode;
+  bool get isCsiInactive => _csiInactive;
+  CsiOverrideMode get csiOverrideMode => _csiOverrideMode;
+
+  void setCsiOverrideMode(CsiOverrideMode mode) {
+    if (_csiOverrideMode == mode) {
+      return;
+    }
+    _csiOverrideMode = mode;
+    _applyClientState();
+    notifyListeners();
+  }
 
   void setBackgroundMode(bool enabled) {
     if (_backgroundMode == enabled) {
@@ -734,6 +748,9 @@ class XmppService extends ChangeNotifier {
   }
 
   void noteUserActivity() {
+    if (_csiOverrideMode != CsiOverrideMode.auto) {
+      return;
+    }
     if (_backgroundMode) {
       return;
     }
@@ -7351,6 +7368,18 @@ class XmppService extends ChangeNotifier {
   }
 
   void _applyClientState() {
+    if (_csiOverrideMode == CsiOverrideMode.inactive) {
+      _sendClientState(active: false);
+      _csiIdleTimer?.cancel();
+      _csiIdleTimer = null;
+      return;
+    }
+    if (_csiOverrideMode == CsiOverrideMode.active) {
+      _sendClientState(active: true);
+      _csiIdleTimer?.cancel();
+      _csiIdleTimer = null;
+      return;
+    }
     if (_backgroundMode) {
       _sendClientState(active: false);
       _csiIdleTimer?.cancel();
@@ -7362,6 +7391,9 @@ class XmppService extends ChangeNotifier {
   }
 
   void _scheduleCsiIdle() {
+    if (_csiOverrideMode != CsiOverrideMode.auto) {
+      return;
+    }
     _csiIdleTimer?.cancel();
     _csiIdleTimer = Timer(_csiIdleDelay, () {
       _sendClientState(active: false);

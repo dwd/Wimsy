@@ -5405,6 +5405,15 @@ class _PresenceMenu extends StatelessWidget {
               case _PresenceAction.simulateDisconnect:
                 service.simulateServerDisconnect();
                 break;
+              case _PresenceAction.csiAuto:
+                service.setCsiOverrideMode(CsiOverrideMode.auto);
+                break;
+              case _PresenceAction.csiForceActive:
+                service.setCsiOverrideMode(CsiOverrideMode.active);
+                break;
+              case _PresenceAction.csiForceInactive:
+                service.setCsiOverrideMode(CsiOverrideMode.inactive);
+                break;
               case _PresenceAction.toggleSentry:
                 await _setSentryOptIn(context, !sentryEnabled);
                 break;
@@ -5421,6 +5430,12 @@ class _PresenceMenu extends StatelessWidget {
             PopupMenuItem(
               enabled: false,
               child: Text('Latency: $latencyLabel'),
+            ),
+            PopupMenuItem(
+              enabled: false,
+              child: Text(
+                'CSI: ${service.isCsiInactive ? 'inactive' : 'active'}',
+              ),
             ),
             const PopupMenuDivider(),
             const PopupMenuItem(
@@ -5447,6 +5462,31 @@ class _PresenceMenu extends StatelessWidget {
             const PopupMenuItem(
               value: _PresenceAction.editProfile,
               child: Text('Edit profile...'),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: _PresenceAction.csiAuto,
+              child: Text(
+                service.csiOverrideMode == CsiOverrideMode.auto
+                    ? 'CSI override: Auto (current)'
+                    : 'CSI override: Auto',
+              ),
+            ),
+            PopupMenuItem(
+              value: _PresenceAction.csiForceActive,
+              child: Text(
+                service.csiOverrideMode == CsiOverrideMode.active
+                    ? 'CSI override: Force active (current)'
+                    : 'CSI override: Force active',
+              ),
+            ),
+            PopupMenuItem(
+              value: _PresenceAction.csiForceInactive,
+              child: Text(
+                service.csiOverrideMode == CsiOverrideMode.inactive
+                    ? 'CSI override: Force inactive (current)'
+                    : 'CSI override: Force inactive',
+              ),
             ),
             PopupMenuItem(
               value: _PresenceAction.toggleSentry,
@@ -5799,6 +5839,9 @@ enum _PresenceAction {
   xa,
   setStatus,
   editProfile,
+  csiAuto,
+  csiForceActive,
+  csiForceInactive,
   toggleSentry,
   simulateDisconnect,
   clearCacheExit,
