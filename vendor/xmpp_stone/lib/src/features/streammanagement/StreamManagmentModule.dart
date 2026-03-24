@@ -202,7 +202,7 @@ class StreamManagementModule extends Negotiator {
     if (timer != null) {
       timer!.cancel();
     }
-    timer = Timer.periodic(_periodicAckInterval, (Timer t) => sendAckRequest());
+    timer = Timer.periodic(_periodicAckInterval, (Timer t) => sendPingAckRequest());
     outStanzaSubscription?.cancel();
     inStanzaSubscription?.cancel();
     outStanzaSubscription = _connection.outStanzasStream.listen(parseOutStanza);
@@ -216,8 +216,13 @@ class StreamManagementModule extends Negotiator {
     if (timer != null) {
       timer!.cancel();
     }
-    timer = Timer.periodic(_periodicAckInterval, (Timer t) => sendAckRequest());
+    timer = Timer.periodic(_periodicAckInterval, (Timer t) => sendPingAckRequest());
     Log.d(TAG, 'SM resumed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
+  }
+
+  void sendPingAckRequest() {
+    Log.d(TAG, "Ping r");
+    sendAckRequest();
   }
 
   void sendEnableStreamManagement() =>
@@ -230,10 +235,10 @@ class StreamManagementModule extends Negotiator {
     lastAckSent = streamState.lastReceivedStanza;
     Log.d(TAG, 'SM ack send h=$lastAckSent lastRecv=${streamState.lastReceivedStanza}');
     _connection.writeNonza(ANonza(lastAckSent));
-    if (ackTurnedOn && _pendingAckRequestTimer?.isActive) {
-        _pendingAckRequestTimer!.cancel();
-        sendAckRequest();
-      }
+    if (ackTurnedOn && _pendingAckRequestTimer != null && _pendingAckRequestTimer!.isActive) {
+      _pendingAckRequestTimer!.cancel();
+      Log.d(TAG, "Early r because we received an ack");
+      sendAckRequest();
     }
   }
 
