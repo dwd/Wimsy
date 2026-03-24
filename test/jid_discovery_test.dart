@@ -50,6 +50,17 @@ void main() {
     expect(result.kind, DiscoveredJidKind.person);
   });
 
+  test('classifies client identity as person', () {
+    final result = classifyJidFromDiscoInfo(
+      _discoInfoResult(
+        identities: const [
+          {'category': 'client', 'type': 'pc'},
+        ],
+      ),
+    );
+    expect(result.kind, DiscoveredJidKind.person);
+  });
+
   test('classifies muc feature as room without identity', () {
     final result = classifyJidFromDiscoInfo(
       _discoInfoResult(features: const ['http://jabber.org/protocol/muc']),
@@ -66,5 +77,16 @@ void main() {
     final iq = IqStanza('id-1', IqStanzaType.GET);
     final result = classifyJidFromDiscoInfo(iq);
     expect(result.kind, DiscoveredJidKind.unknown);
+  });
+
+  test('exposes identity name when present', () {
+    final result = classifyJidFromDiscoInfo(
+      _discoInfoResult(
+        identities: const [
+          {'category': 'client', 'type': 'pc', 'name': 'Alice Laptop'},
+        ],
+      ),
+    );
+    expect(result.identityName, 'Alice Laptop');
   });
 }

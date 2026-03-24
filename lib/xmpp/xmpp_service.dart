@@ -227,6 +227,7 @@ class XmppService extends ChangeNotifier {
   MucManager? _mucManager;
   final Map<String, Uint8List> _vcardAvatarBytes = {};
   final Map<String, String> _vcardAvatarState = {};
+  final Map<String, String> _vcardDisplayNames = {};
   final Set<String> _vcardRequests = {};
   final Set<String> _vcardUnavailable = {};
   static const _vcardNoAvatar = 'none';
@@ -491,8 +492,15 @@ class XmppService extends ChangeNotifier {
 
   String displayNameFor(String bareJid) {
     final normalized = _bareJid(bareJid);
-    final contact = _findContact(normalized) ?? ContactEntry(jid: normalized);
-    return contact.displayName;
+    final contact = _findContact(normalized);
+    if (contact != null) {
+      return contact.displayName;
+    }
+    final vcardName = _vcardDisplayNames[normalized]?.trim();
+    if (vcardName != null && vcardName.isNotEmpty) {
+      return vcardName;
+    }
+    return normalized;
   }
 
   bool isBookmark(String bareJid) {
@@ -990,6 +998,7 @@ class XmppService extends ChangeNotifier {
     _bookmarksManager?.clearCache();
     _vcardAvatarBytes.clear();
     _vcardAvatarState.clear();
+    _vcardDisplayNames.clear();
     _vcardRequests.clear();
     _vcardUnavailable.clear();
     _mamCursorStore.clear();
@@ -7040,6 +7049,7 @@ class XmppService extends ChangeNotifier {
     }
     _blockedJids.clear();
     _vcardAvatarBytes.clear();
+    _vcardDisplayNames.clear();
     _vcardRequests.clear();
     _vcardUnavailable.clear();
     _fileTransfers.clear();
@@ -7609,6 +7619,7 @@ class XmppService extends ChangeNotifier {
             return;
           }
           _vcardUnavailable.remove(bareJid);
+          _storeVcardDisplayName(bareJid, vcardDisplayName(vcard));
           _applyVcardToContact(bareJid, vcard, preferName: preferName);
           final bytes = vcard.imageData;
           if (bytes is List<int> && bytes.isNotEmpty) {
@@ -7630,6 +7641,19 @@ class XmppService extends ChangeNotifier {
         .catchError((_) {
           _vcardRequests.remove(bareJid);
         });
+  }
+
+  void _storeVcardDisplayName(String bareJid, String name) {
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty) {
+      return;
+    }
+    final existing = _vcardDisplayNames[bareJid];
+    if (existing == normalizedName) {
+      return;
+    }
+    _vcardDisplayNames[bareJid] = normalizedName;
+    notifyListeners();
   }
 
   void _applyVcardToContact(

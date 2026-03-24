@@ -6,10 +6,12 @@ class JidDiscoveryResult {
   const JidDiscoveryResult({
     required this.kind,
     this.features = const <String>{},
+    this.identityName,
   });
 
   final DiscoveredJidKind kind;
   final Set<String> features;
+  final String? identityName;
 }
 
 const String _discoInfoNamespace = 'http://jabber.org/protocol/disco#info';
@@ -28,13 +30,18 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
   final features = <String>{};
   var hasRoomIdentity = false;
   var hasAccountIdentity = false;
+  String? identityName;
 
   for (final child in query.children) {
     if (child.name == 'identity') {
       final category = child.getAttribute('category')?.value?.toLowerCase();
+      final name = child.getAttribute('name')?.value?.trim();
+      if ((identityName?.isEmpty ?? true) && name != null && name.isNotEmpty) {
+        identityName = name;
+      }
       if (category == 'conference') {
         hasRoomIdentity = true;
-      } else if (category == 'account') {
+      } else if (category == 'account' || category == 'client') {
         hasAccountIdentity = true;
       }
     } else if (child.name == 'feature') {
@@ -46,16 +53,22 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
   }
 
   if (hasRoomIdentity || features.contains(_mucNamespace)) {
-    return JidDiscoveryResult(kind: DiscoveredJidKind.room, features: features);
+    return JidDiscoveryResult(
+      kind: DiscoveredJidKind.room,
+      features: features,
+      identityName: identityName,
+    );
   }
   if (hasAccountIdentity) {
     return JidDiscoveryResult(
       kind: DiscoveredJidKind.person,
       features: features,
+      identityName: identityName,
     );
   }
   return JidDiscoveryResult(
     kind: DiscoveredJidKind.unknown,
     features: features,
+    identityName: identityName,
   );
 }

@@ -4592,6 +4592,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   bool _autoJoin = false;
   String? _jidError;
   String? _discoveryMessage;
+  String? _discoveredName;
   _AddTargetType _selectedType = _AddTargetType.person;
 
   @override
@@ -4621,6 +4622,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
       setState(() {
         _discovering = false;
         _discoveryMessage = null;
+        _discoveredName = null;
         _jidError = null;
         _selectedType = _AddTargetType.person;
       });
@@ -4630,6 +4632,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
       setState(() {
         _discovering = false;
         _discoveryMessage = null;
+        _discoveredName = null;
         _jidError = 'Enter a valid JID.';
       });
       return;
@@ -4646,6 +4649,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
       }
       setState(() {
         _discovering = false;
+        _discoveredName = result.identityName?.trim();
         switch (result.kind) {
           case DiscoveredJidKind.room:
             _discoveryMessage = 'Detected: Room';
@@ -4718,9 +4722,12 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
         final avatarBytes = normalized == null
             ? null
             : widget.service.avatarBytesFor(normalized);
-        final name = (normalized == null || normalized.isEmpty)
+        final serviceName = (normalized == null || normalized.isEmpty)
             ? ''
             : widget.service.displayNameFor(normalized);
+        final name = _discoveredName?.isNotEmpty == true
+            ? _discoveredName!
+            : (serviceName != normalized ? serviceName : '');
         final isRoom = _selectedType == _AddTargetType.room;
         return AlertDialog(
           title: const Text('Add by JID'),
@@ -4768,11 +4775,25 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                     _AvatarPlaceholder(label: previewLabel, bytes: avatarBytes),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        name.isNotEmpty ? name : previewLabel,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name.isNotEmpty ? name : 'Name not available yet',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                          if (previewLabel.isNotEmpty)
+                            Text(
+                              previewLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
