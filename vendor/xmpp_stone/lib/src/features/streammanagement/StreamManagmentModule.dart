@@ -230,8 +230,10 @@ class StreamManagementModule extends Negotiator {
     lastAckSent = streamState.lastReceivedStanza;
     Log.d(TAG, 'SM ack send h=$lastAckSent lastRecv=${streamState.lastReceivedStanza}');
     _connection.writeNonza(ANonza(lastAckSent));
-    if (ackTurnedOn && streamState.nonConfirmedSentStanzas.isNotEmpty) {
-      _connection.writeNonza(RNonza());
+    if (ackTurnedOn && _pendingAckRequestTimer?.isActive) {
+        _pendingAckRequestTimer!.cancel();
+        sendAckRequest();
+      }
     }
   }
 
