@@ -61,6 +61,17 @@ void main() {
     expect(result.kind, DiscoveredJidKind.person);
   });
 
+  test('classifies im server identity as person', () {
+    final result = classifyJidFromDiscoInfo(
+      _discoInfoResult(
+        identities: const [
+          {'category': 'server', 'type': 'im'},
+        ],
+      ),
+    );
+    expect(result.kind, DiscoveredJidKind.person);
+  });
+
   test('classifies muc feature as room without identity', () {
     final result = classifyJidFromDiscoInfo(
       _discoInfoResult(features: const ['http://jabber.org/protocol/muc']),

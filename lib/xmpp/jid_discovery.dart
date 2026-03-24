@@ -30,6 +30,7 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
   final features = <String>{};
   var hasRoomIdentity = false;
   var hasAccountIdentity = false;
+  var hasImServerIdentity = false;
   String? identityName;
 
   for (final child in query.children) {
@@ -43,6 +44,11 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
         hasRoomIdentity = true;
       } else if (category == 'account' || category == 'client') {
         hasAccountIdentity = true;
+      } else if (category == 'server') {
+        final type = child.getAttribute('type')?.value?.toLowerCase();
+        if (type == 'im') {
+          hasImServerIdentity = true;
+        }
       }
     } else if (child.name == 'feature') {
       final value = child.getAttribute('var')?.value?.trim();
@@ -59,7 +65,7 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
       identityName: identityName,
     );
   }
-  if (hasAccountIdentity) {
+  if (hasAccountIdentity || hasImServerIdentity) {
     return JidDiscoveryResult(
       kind: DiscoveredJidKind.person,
       features: features,

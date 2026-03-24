@@ -639,9 +639,30 @@ class XmppService extends ChangeNotifier {
     if (normalized.isEmpty) {
       return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
     }
+    if (!_hasValidBareJidStructure(normalized)) {
+      return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
+    }
     try {
       final discoInfo = await _requestDiscoInfo(normalized).timeout(timeout);
-      return classifyJidFromDiscoInfo(discoInfo);
+      final result = classifyJidFromDiscoInfo(discoInfo);
+      if (result.kind != DiscoveredJidKind.unknown) {
+        return result;
+      }
+      final domain = _domainFromBareJid(normalized);
+      if (domain.isNotEmpty && domain != normalized) {
+        final domainInfo = await _requestDiscoInfo(domain).timeout(timeout);
+        final domainResult = classifyJidFromDiscoInfo(domainInfo);
+        if (domainResult.kind != DiscoveredJidKind.unknown) {
+          return domainResult;
+        }
+      }
+      if (discoInfo != null &&
+          discoInfo.type == IqStanzaType.ERROR &&
+          _iqErrorCondition(discoInfo) == 'service-unavailable') {
+        _requestVcardAvatar(normalized);
+        return const JidDiscoveryResult(kind: DiscoveredJidKind.person);
+      }
+      return result;
     } catch (_) {
       return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
     }
@@ -7069,7 +7090,31 @@ class XmppService extends ChangeNotifier {
 
   bool _looksLikeJid(String jid) {
     final parsed = Jid.fromFullJid(jid);
-    return parsed.isValid();
+    if (!parsed.isValid()) {
+      return false;
+    }
+    return _hasValidBareJidStructure(parsed.userAtDomain);
+  }
+
+  bool _hasValidBareJidStructure(String bareJid) {
+    final trimmed = bareJid.trim();
+    if (trimmed.isEmpty || trimmed.contains(' ')) {
+      return false;
+    }
+    final atIndex = trimmed.indexOf('@');
+    if (atIndex <= 0 || atIndex != trimmed.lastIndexOf('@')) {
+      return false;
+    }
+    final local = trimmed.substring(0, atIndex);
+    final domain = trimmed.substring(atIndex + 1);
+    if (local.isEmpty ||
+        domain.isEmpty ||
+        domain.startsWith('.') ||
+        domain.endsWith('.') ||
+        domain.contains('..')) {
+      return false;
+    }
+    return true;
   }
 
   String _domainFromBareJid(String bareJid) {

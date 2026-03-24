@@ -4676,13 +4676,30 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
     }
     final parsed = Jid.fromFullJid(trimmed);
     final bare = parsed.userAtDomain;
-    if (bare.isEmpty ||
-        !bare.contains('@') ||
-        bare.startsWith('@') ||
-        bare.endsWith('@')) {
+    if (!_isValidBareJid(bare)) {
       return null;
     }
     return bare;
+  }
+
+  bool _isValidBareJid(String bare) {
+    if (bare.isEmpty || bare.contains(' ')) {
+      return false;
+    }
+    final atIndex = bare.indexOf('@');
+    if (atIndex <= 0 || atIndex != bare.lastIndexOf('@')) {
+      return false;
+    }
+    final local = bare.substring(0, atIndex);
+    final domain = bare.substring(atIndex + 1);
+    if (local.isEmpty ||
+        domain.isEmpty ||
+        domain.startsWith('.') ||
+        domain.endsWith('.') ||
+        domain.contains('..')) {
+      return false;
+    }
+    return true;
   }
 
   void _submit() {
