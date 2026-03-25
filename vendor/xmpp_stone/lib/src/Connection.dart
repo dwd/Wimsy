@@ -395,23 +395,28 @@ class Connection {
     write(nonza.buildXmlString());
   }
 
+  /// Emits keepalive state updates from Stream Management keepalive handling.
   Stream<KeepaliveState> get keepaliveStateStream {
     return streamManagementModule?.keepaliveStateStream ?? const Stream.empty();
   }
 
+  /// Emits keepalive failures (SM ack timeout or ping timeout).
   Stream<KeepaliveFailure> get keepaliveFailureStream {
     return streamManagementModule?.keepaliveFailureStream ??
         const Stream.empty();
   }
 
+  /// Most recent keepalive latency observed by the active keepalive strategy.
   Duration? get keepaliveLatency {
     return streamManagementModule?.lastKeepaliveLatency;
   }
 
+  /// Updates keepalive cadence for foreground/background app state.
   void setKeepaliveBackgroundMode(bool enabled) {
     streamManagementModule?.setBackgroundMode(enabled);
   }
 
+  /// Forces an immediate keepalive probe using SM-first, ping fallback logic.
   void probeKeepalive({bool shortTimeout = false}) {
     streamManagementModule?.probeKeepalive(shortTimeout: shortTimeout);
   }

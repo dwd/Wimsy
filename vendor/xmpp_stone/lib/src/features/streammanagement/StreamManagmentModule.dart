@@ -243,6 +243,7 @@ class StreamManagementModule extends Negotiator {
     _emitKeepaliveState();
   }
 
+  /// Switches keepalive cadence between foreground and background intervals.
   void setBackgroundMode(bool enabled) {
     if (_backgroundMode == enabled) {
       return;
@@ -252,6 +253,10 @@ class StreamManagementModule extends Negotiator {
     _emitKeepaliveState();
   }
 
+  /// Triggers an immediate keepalive probe.
+  ///
+  /// Uses XEP-0198 ack probes when SM is enabled, otherwise falls back to
+  /// XEP-0199 ping probes.
   void probeKeepalive({bool shortTimeout = false}) {
     if (!_connection.isOpened()) {
       return;
@@ -263,6 +268,7 @@ class StreamManagementModule extends Negotiator {
     _sendPing(shortTimeout: shortTimeout);
   }
 
+  /// Clears runtime stream management counters and pending keepalive state.
   void resetRuntimeCounters() {
     streamState.lastSentStanza = 0;
     streamState.lastReceivedStanza = 0;
