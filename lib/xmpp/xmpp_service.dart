@@ -42,30 +42,6 @@ import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
 import 'alt_connection.dart';
 
-class _ReconnectConfig {
-  _ReconnectConfig({
-    required this.jid,
-    required this.password,
-    required this.resource,
-    required this.host,
-    required this.port,
-    required this.useWebSocket,
-    required this.directTls,
-    required this.wsEndpoint,
-    required this.wsProtocols,
-  });
-
-  final String jid;
-  final String password;
-  final String resource;
-  final String host;
-  final int port;
-  final bool useWebSocket;
-  final bool directTls;
-  final String wsEndpoint;
-  final List<String> wsProtocols;
-}
-
 class ReplyReference {
   const ReplyReference({
     required this.id,
@@ -122,6 +98,7 @@ class XmppService extends ChangeNotifier {
   StreamSubscription<AbstractStanza?>? _pingSubscription;
   StreamSubscription<KeepaliveState>? _keepaliveStateSubscription;
   StreamSubscription<KeepaliveFailure>? _keepaliveFailureSubscription;
+  StreamSubscription<ReconnectionState>? _reconnectStateSubscription;
   StreamSubscription<MessageStanza?>? _messageStanzaSubscription;
   StreamSubscription<AbstractStanza>? _smDeliveredSubscription;
   StreamSubscription<AbstractStanza?>? _pepSubscription;
@@ -144,9 +121,6 @@ class XmppService extends ChangeNotifier {
   XmppConnectionState? _lastConnectionState;
   bool _backgroundMode = false;
   bool _networkOnline = true;
-  Timer? _reconnectTimer;
-  int _reconnectAttempt = 0;
-  _ReconnectConfig? _reconnectConfig;
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<ChatMessage>> _roomMessages = {};
   final Set<String> _seededMessageJids = {};
@@ -711,30 +685,30 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _backgroundMode = enabled;
-    if (!_backgroundMode) {
-      _reconnectTimer?.cancel();
-    }
     Log.i('XmppService', 'Background mode changed to $enabled');
     _applyClientState();
     _connection?.setKeepaliveBackgroundMode(_backgroundMode);
-    if (_backgroundMode && !_networkOnline) {
-      return;
-    }
-    if (_backgroundMode && !isConnected && !isConnecting) {
-      _scheduleReconnect();
-    }
+    _connection?.setReconnectContext(
+      networkOnline: _networkOnline,
+      allowAutoReconnect: true,
+    );
     Log.i('XmppService', 'Background mode change complete');
   }
 
   void handleConnectivityChange(bool online) {
     _networkOnline = online;
+    _connection?.setReconnectContext(
+      networkOnline: online,
+      allowAutoReconnect: true,
+    );
     if (!_networkOnline) {
       return;
     }
     _connection?.probeKeepalive(shortTimeout: true);
-    if (_backgroundMode && !isConnected && !isConnecting) {
-      _scheduleReconnect();
-    }
+    _connection?.requestReconnect(
+      reason: ReconnectionReason.networkChanged,
+      immediate: true,
+    );
   }
 
   void noteUserActivity() {
@@ -869,17 +843,35 @@ class XmppService extends ChangeNotifier {
 
       final connection = Connection.getInstance(account);
       _connection = connection;
-      _reconnectConfig = _ReconnectConfig(
-        jid: fullJid,
-        password: password,
-        resource: resource,
-        host: resolvedHost,
-        port: resolvedPort,
-        useWebSocket: shouldUseWebSocket,
-        directTls: resolvedDirectTls,
-        wsEndpoint: wsConfig?.uri.toString() ?? '',
-        wsProtocols: (wsConfig != null ? (wsProtocols ?? const []) : const []),
+      connection.setReconnectPolicy(
+        const ReconnectionPolicy(
+          baseDelay: Duration(seconds: 5),
+          maxDelay: Duration(minutes: 10),
+          jitterRatio: 0.25,
+          unboundedRetries: true,
+        ),
       );
+      connection.setReconnectContext(
+        networkOnline: _networkOnline,
+        allowAutoReconnect: true,
+      );
+      _reconnectStateSubscription?.cancel();
+      _reconnectStateSubscription = connection.reconnectStateStream.listen((
+        state,
+      ) {
+        if (state.phase == ReconnectionPhase.scheduled ||
+            state.phase == ReconnectionPhase.reconnecting) {
+          if (_status != XmppStatus.disconnected) {
+            _status = XmppStatus.connecting;
+            _errorMessage = null;
+            notifyListeners();
+          }
+          return;
+        }
+        if (state.phase == ReconnectionPhase.terminal) {
+          _setError(state.message ?? 'Reconnection halted.');
+        }
+      });
 
       final completer = Completer<void>();
       _connectionStateSubscription = connection.connectionStateStream.listen((
@@ -888,7 +880,8 @@ class XmppService extends ChangeNotifier {
         debugPrint('XMPP state: $state');
         Log.i('XmppService', 'Connection state: $state');
         _lastConnectionState = state;
-        if (state == XmppConnectionState.Reconnecting) {
+        if (state == XmppConnectionState.Reconnecting ||
+            state == XmppConnectionState.ForcefullyClosed) {
           _status = XmppStatus.connecting;
           _errorMessage = null;
           notifyListeners();
@@ -905,8 +898,6 @@ class XmppService extends ChangeNotifier {
           return;
         }
         if (state == XmppConnectionState.Ready) {
-          _reconnectAttempt = 0;
-          _reconnectTimer?.cancel();
           if (!completer.isCompleted) {
             completer.complete();
           }
@@ -958,7 +949,7 @@ class XmppService extends ChangeNotifier {
           );
           _connectTransaction = null;
           _setError(message);
-          _scheduleReconnect();
+          connection.setReconnectTerminal(message);
         } else if (_status == XmppStatus.connecting) {
           notifyListeners();
         }
@@ -982,15 +973,19 @@ class XmppService extends ChangeNotifier {
         status: const SpanStatus.internalError(),
       );
       _connectTransaction = null;
-      await _safeClose(preserveCache: true);
       if (_status != XmppStatus.error) {
         _setError('Connection failed: $error');
+        _connection?.requestReconnect(
+          reason: ReconnectionReason.manualRequest,
+          immediate: true,
+          shortTimeout: true,
+        );
       }
-      _scheduleReconnect();
     }
   }
 
   Future<void> disconnect() async {
+    _connection?.setReconnectContext(allowAutoReconnect: false);
     await _safeClose(preserveCache: true);
     _finishSpan(_connectAwaitSpan, status: const SpanStatus.cancelled());
     _connectAwaitSpan = null;
@@ -998,8 +993,6 @@ class XmppService extends ChangeNotifier {
     _connectTransaction = null;
     _status = XmppStatus.disconnected;
     _errorMessage = null;
-    _reconnectTimer?.cancel();
-    _reconnectAttempt = 0;
     notifyListeners();
   }
 
@@ -5607,7 +5600,6 @@ class XmppService extends ChangeNotifier {
       _lastPingLatency = null;
       _lastPingAt = failure.occurredAt;
       notifyListeners();
-      _scheduleReconnect(immediate: true, shortTimeout: failure.shortTimeout);
     });
     connection.setKeepaliveBackgroundMode(_backgroundMode);
     connection.probeKeepalive(shortTimeout: false);
@@ -5616,9 +5608,11 @@ class XmppService extends ChangeNotifier {
 
   Future<void> _handleStreamError(Nonza nonza) async {
     Log.w('XmppService', 'Stream error received: ${nonza.name}');
-    await _safeClose(preserveCache: true);
-    _setError('Stream error');
-    _scheduleReconnect(immediate: true, shortTimeout: true);
+    _connection?.requestReconnect(
+      reason: ReconnectionReason.streamError,
+      immediate: true,
+      shortTimeout: true,
+    );
   }
 
   void _ensureChatSubscription(Chat chat) {
@@ -6943,6 +6937,8 @@ class XmppService extends ChangeNotifier {
     _pendingRecentReactionRequests.clear();
     _connectionStateSubscription?.cancel();
     _connectionStateSubscription = null;
+    _reconnectStateSubscription?.cancel();
+    _reconnectStateSubscription = null;
     _rosterSubscription?.cancel();
     _rosterSubscription = null;
     _chatListSubscription?.cancel();
@@ -7138,9 +7134,7 @@ class XmppService extends ChangeNotifier {
   bool _isTerminalError(XmppConnectionState state) {
     return state == XmppConnectionState.AuthenticationFailure ||
         state == XmppConnectionState.AuthenticationNotSupported ||
-        state == XmppConnectionState.StartTlsFailed ||
-        state == XmppConnectionState.ForcefullyClosed ||
-        state == XmppConnectionState.Closed;
+        state == XmppConnectionState.StartTlsFailed;
   }
 
   String _connectionErrorMessage(XmppConnectionState state) {
@@ -7362,86 +7356,6 @@ class XmppService extends ChangeNotifier {
     iqStanza.addChild(enable);
     _carbonsRequestId = id;
     connection.writeStanza(iqStanza);
-  }
-
-  void _scheduleReconnect({bool immediate = false, bool shortTimeout = false}) {
-    if (!_networkOnline) {
-      return;
-    }
-    final config = _reconnectConfig;
-    if (config == null || config.password.isEmpty) {
-      return;
-    }
-    if (isConnected || isConnecting) {
-      return;
-    }
-    if (_reconnectTimer?.isActive == true) {
-      return;
-    }
-    if (_tryResumeStream()) {
-      return;
-    }
-    final backoffSeconds = immediate
-        ? 0
-        : (shortTimeout
-              ? _shortReconnectBackoffSeconds()
-              : _nextReconnectBackoffSeconds());
-    if (!immediate && !shortTimeout) {
-      _reconnectAttempt = (_reconnectAttempt + 1).clamp(0, 10);
-    }
-    _reconnectTimer = Timer(Duration(seconds: backoffSeconds), () {
-      _attemptReconnect(config);
-    });
-  }
-
-  int _nextReconnectBackoffSeconds() {
-    return (5 * (1 << _reconnectAttempt)).clamp(5, 300);
-  }
-
-  int _shortReconnectBackoffSeconds() {
-    final base = _lastPingLatency ?? Duration.zero;
-    final scaled = (base * 5).inSeconds;
-    return scaled >= 5 ? scaled : 5;
-  }
-
-  bool _tryResumeStream() {
-    final connection = _connection;
-    final streamManagement = connection?.streamManagementModule;
-    if (connection == null || streamManagement == null) {
-      return false;
-    }
-    if (!streamManagement.isResumeAvailable()) {
-      return false;
-    }
-    if (connection.state != XmppConnectionState.ForcefullyClosed) {
-      return false;
-    }
-    debugPrint('XMPP attempting stream resume');
-    connection.reconnect();
-    _status = XmppStatus.connecting;
-    _errorMessage = null;
-    notifyListeners();
-    return true;
-  }
-
-  void _attemptReconnect(_ReconnectConfig config) {
-    if (!_backgroundMode || !_networkOnline) {
-      return;
-    }
-    if (isConnected || isConnecting) {
-      return;
-    }
-    connect(
-      jid: config.jid,
-      password: config.password,
-      resource: config.resource,
-      host: config.host,
-      port: config.port,
-      useWebSocket: config.useWebSocket,
-      directTls: config.directTls,
-      wsEndpoint: config.wsEndpoint,
-      wsProtocols: config.wsProtocols,
-    );
   }
 
   void _requestMamOnOpen(String bareJid) {
