@@ -12,6 +12,7 @@ import 'package:xmpp_stone/src/features/servicediscovery/CarbonsNegotiator.dart'
 import 'package:xmpp_stone/src/features/servicediscovery/MAMNegotiator.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/ServiceDiscoveryNegotiator.dart';
 import 'package:xmpp_stone/src/features/streammanagement/StreamManagmentModule.dart';
+import 'package:xmpp_stone/src/features/streammanagement/KeepaliveState.dart';
 import 'package:xmpp_stone/src/parser/StanzaParser.dart';
 import 'package:xmpp_stone/src/extensions/iq_router/IqRouter.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
@@ -232,7 +233,8 @@ class Connection {
           setState(XmppConnectionState.SocketOpened);
           _socket = socket;
           _socketSubscription?.cancel();
-          _socketSubscription = socket.listen(handleResponse, onDone: handleConnectionDone);
+          _socketSubscription =
+              socket.listen(handleResponse, onDone: handleConnectionDone);
           _openStream();
         } else {
           Log.d(TAG, 'Closed in meantime');
@@ -391,6 +393,27 @@ class Connection {
   void writeNonza(Nonza nonza) {
     _outNonzaStreamController.add(nonza);
     write(nonza.buildXmlString());
+  }
+
+  Stream<KeepaliveState> get keepaliveStateStream {
+    return streamManagementModule?.keepaliveStateStream ?? const Stream.empty();
+  }
+
+  Stream<KeepaliveFailure> get keepaliveFailureStream {
+    return streamManagementModule?.keepaliveFailureStream ??
+        const Stream.empty();
+  }
+
+  Duration? get keepaliveLatency {
+    return streamManagementModule?.lastKeepaliveLatency;
+  }
+
+  void setKeepaliveBackgroundMode(bool enabled) {
+    streamManagementModule?.setBackgroundMode(enabled);
+  }
+
+  void probeKeepalive({bool shortTimeout = false}) {
+    streamManagementModule?.probeKeepalive(shortTimeout: shortTimeout);
   }
 
   void setState(XmppConnectionState state) {

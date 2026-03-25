@@ -10,6 +10,9 @@ import 'package:xmpp_stone/src/elements/nonzas/RNonza.dart';
 import 'package:xmpp_stone/src/elements/nonzas/ResumeNonza.dart';
 import 'package:xmpp_stone/src/elements/nonzas/ResumedNonza.dart';
 import 'package:xmpp_stone/src/elements/nonzas/SMNonza.dart';
+import 'package:xmpp_stone/src/elements/stanzas/AbstractStanza.dart';
+import 'package:xmpp_stone/src/elements/stanzas/IqStanza.dart';
+import 'package:xmpp_stone/src/features/streammanagement/KeepaliveState.dart';
 import 'package:xmpp_stone/src/features/streammanagement/StreamState.dart';
 
 import '../../../xmpp_stone.dart';
@@ -17,6 +20,12 @@ import '../Negotiator.dart';
 
 class StreamManagementModule extends Negotiator {
   static const TAG = 'StreamManagementModule';
+  static const Duration _smAckIntervalForeground = Duration(minutes: 1);
+  static const Duration _smAckIntervalBackground = Duration(minutes: 5);
+  static const Duration _pingIntervalForeground = Duration(seconds: 30);
+  static const Duration _pingIntervalBackground = Duration(minutes: 5);
+  static const Duration _pendingAckRequestDelay = Duration(seconds: 15);
+  static const Duration _keepaliveMaxTimeout = Duration(seconds: 30);
 
   static Map<Connection, StreamManagementModule> instances = {};
 
@@ -31,11 +40,11 @@ class StreamManagementModule extends Negotiator {
 
   static void removeInstance(Connection connection) {
     var instance = instances[connection];
-    instance?.timer?.cancel();
-    instance?.inNonzaSubscription?.cancel();
-    instance?.outStanzaSubscription?.cancel();
-    instance?.inStanzaSubscription?.cancel();
+    instance?._disposeRuntime();
     instance?._xmppConnectionStateSubscription.cancel();
+    instance?._deliveredStanzasStreamController.close();
+    instance?._keepaliveStateController.close();
+    instance?._keepaliveFailureController.close();
     instances.remove(connection);
   }
 
@@ -44,74 +53,53 @@ class StreamManagementModule extends Negotiator {
   late StreamSubscription<XmppConnectionState> _xmppConnectionStateSubscription;
   StreamSubscription<AbstractStanza?>? inStanzaSubscription;
   StreamSubscription<AbstractStanza>? outStanzaSubscription;
+  StreamSubscription<AbstractStanza?>? _keepaliveIqSubscription;
   StreamSubscription<Nonza>? inNonzaSubscription;
 
   bool ackTurnedOn = true;
-  Timer? timer;
+  bool _backgroundMode = false;
+  Timer? _keepaliveTimer;
   Timer? _pendingAckRequestTimer;
+  Timer? _pendingSmAckTimer;
+  Timer? _pendingPingTimer;
   int lastAckSent = 0;
-  static const Duration _periodicAckInterval = Duration(minutes: 5);
-  static const Duration _pendingAckRequestDelay = Duration(seconds: 15);
+  DateTime? _pendingSmAckAt;
+  DateTime? _pendingPingAt;
+  String? _pendingPingId;
+  Duration? _lastKeepaliveLatency;
+  DateTime? _lastKeepaliveSuccessAt;
+  DateTime? _lastKeepaliveFailureAt;
 
   final StreamController<AbstractStanza> _deliveredStanzasStreamController =
+      StreamController.broadcast();
+  final StreamController<KeepaliveState> _keepaliveStateController =
+      StreamController.broadcast();
+  final StreamController<KeepaliveFailure> _keepaliveFailureController =
       StreamController.broadcast();
 
   Stream<AbstractStanza> get deliveredStanzasStream {
     return _deliveredStanzasStreamController.stream;
   }
 
-  void sendAckRequest() {
-    if (ackTurnedOn) {
-      _connection.writeNonza(RNonza());
-    }
+  Stream<KeepaliveState> get keepaliveStateStream {
+    return _keepaliveStateController.stream;
   }
 
-  void parseAckResponse(String rawValue) {
-    var lastDeliveredStanza = int.parse(rawValue);
-    var shouldStay = streamState.lastSentStanza - lastDeliveredStanza;
-    if (shouldStay < 0) shouldStay = 0;
-    while (streamState.nonConfirmedSentStanzas.length > shouldStay) {
-      var stanza =
-          streamState.nonConfirmedSentStanzas.removeFirst() as AbstractStanza;
-      if (ackTurnedOn) {
-        _deliveredStanzasStreamController.add(stanza);
-      }
-      if (stanza.id != null) {
-        Log.d(TAG, 'Delivered: ${stanza.id}');
-      } else {
-        Log.d(TAG, 'Delivered stanza without id ${stanza.name}');
-      }
-    }
+  Stream<KeepaliveFailure> get keepaliveFailureStream {
+    return _keepaliveFailureController.stream;
   }
+
+  Duration? get lastKeepaliveLatency => _lastKeepaliveLatency;
 
   StreamManagementModule(this._connection) {
     _connection.streamManagementModule = this;
     ackTurnedOn = _connection.account.ackEnabled;
     expectedName = 'StreamManagementModule';
+    _keepaliveIqSubscription = _connection.inStanzasStream.listen(
+      _handleKeepaliveIq,
+    );
     _xmppConnectionStateSubscription =
-        _connection.connectionStateStream.listen((state) {
-      if (state == XmppConnectionState.Reconnecting) {
-        backToIdle();
-        _pendingAckRequestTimer?.cancel();
-        _pendingAckRequestTimer = null;
-      }
-      if (!_connection.isOpened() && timer != null) {
-        timer!.cancel();
-      }
-      ;
-      if (state == XmppConnectionState.Closed) {
-        streamState = StreamState();
-        lastAckSent = 0;
-        Log.d(TAG, 'SM reset on Closed: recv=0 ackSent=0');
-        _pendingAckRequestTimer?.cancel();
-        _pendingAckRequestTimer = null;
-        inStanzaSubscription?.cancel();
-        outStanzaSubscription?.cancel();
-        inStanzaSubscription = null;
-        outStanzaSubscription = null;
-        //state = XmppConnectionState.Idle;
-      }
-    });
+        _connection.connectionStateStream.listen(_handleConnectionState);
   }
 
   @override
@@ -120,14 +108,13 @@ class StreamManagementModule extends Negotiator {
     return nonza != null ? [nonza] : [];
   }
 
-  //TODO: Improve
   @override
   void negotiate(List<Nonza> nonzas) {
     if (nonzas.isNotEmpty &&
         SMNonza.match(nonzas[0]) &&
         _connection.authenticated) {
       state = NegotiatorState.NEGOTIATING;
-      inNonzaSubscription = _connection.inNonzasStream.listen(parseNonza);
+      inNonzaSubscription ??= _connection.inNonzasStream.listen(parseNonza);
       if (streamState.isResumeAvailable()) {
         tryToResumeStream();
       } else {
@@ -152,26 +139,34 @@ class StreamManagementModule extends Negotiator {
         resumeState(nonza);
       } else if (FailedNonza.match(nonza)) {
         if (streamState.tryingToResume) {
-          Log.d(TAG, 'Resuming failed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
+          Log.d(
+            TAG,
+            'Resuming failed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent',
+          );
           streamState = StreamState();
           lastAckSent = 0;
           _pendingAckRequestTimer?.cancel();
           _pendingAckRequestTimer = null;
           state = NegotiatorState.DONE;
           negotiatorStateStreamController = StreamController();
-          state = NegotiatorState.IDLE; //we will try again
+          state = NegotiatorState.IDLE;
+          _restartKeepaliveTimer();
         } else {
-          Log.d(TAG,
-              'StreamManagmentFailed'); //try to send an error down to client
+          Log.d(TAG, 'StreamManagmentFailed');
           state = NegotiatorState.DONE;
+          _restartKeepaliveTimer();
         }
       }
-    } else if (state == NegotiatorState.DONE) {
-      if (ANonza.match(nonza)) {
-        parseAckResponse(nonza.getAttribute('h')!.value!);
-      } else if (RNonza.match(nonza)) {
-        sendAckResponse();
-      }
+      return;
+    }
+
+    if (ANonza.match(nonza)) {
+      parseAckResponse(nonza.getAttribute('h')!.value!);
+      _handleSmAckResponse();
+      return;
+    }
+    if (RNonza.match(nonza)) {
+      sendAckResponse();
     }
   }
 
@@ -186,7 +181,10 @@ class StreamManagementModule extends Negotiator {
       return;
     }
     streamState.lastReceivedStanza++;
-    Log.d(TAG, 'SM recv h=${streamState.lastReceivedStanza} lastAckSent=$lastAckSent stanza=${stanza.name}');
+    Log.d(
+      TAG,
+      'SM recv h=${streamState.lastReceivedStanza} lastAckSent=$lastAckSent stanza=${stanza.name}',
+    );
   }
 
   void handleEnabled(Nonza nonza) {
@@ -197,47 +195,96 @@ class StreamManagementModule extends Negotiator {
       streamState.id = nonza.getAttribute('id')!.value;
     }
     lastAckSent = 0;
-    Log.d(TAG, 'SM enabled resume=${streamState.streamResumeEnabled} recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
+    Log.d(
+      TAG,
+      'SM enabled resume=${streamState.streamResumeEnabled} recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent',
+    );
     state = NegotiatorState.DONE;
-    if (timer != null) {
-      timer!.cancel();
-    }
-    timer = Timer.periodic(_periodicAckInterval, (Timer t) => sendPingAckRequest());
     outStanzaSubscription?.cancel();
     inStanzaSubscription?.cancel();
     outStanzaSubscription = _connection.outStanzasStream.listen(parseOutStanza);
     inStanzaSubscription = _connection.inStanzasStream.listen(parseInStanza);
+    _restartKeepaliveTimer();
+    _emitKeepaliveState();
   }
 
   void handleResumed(Nonza nonza) {
     parseAckResponse(nonza.getAttribute('h')!.value!);
-
     state = NegotiatorState.DONE;
-    if (timer != null) {
-      timer!.cancel();
-    }
-    timer = Timer.periodic(_periodicAckInterval, (Timer t) => sendPingAckRequest());
-    Log.d(TAG, 'SM resumed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent');
-  }
-
-  void sendPingAckRequest() {
-    Log.d(TAG, "Ping r");
-    sendAckRequest();
+    _restartKeepaliveTimer();
+    Log.d(
+      TAG,
+      'SM resumed recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent',
+    );
+    _emitKeepaliveState();
   }
 
   void sendEnableStreamManagement() =>
       _connection.writeNonza(EnableNonza(_connection.account.smResumable));
 
-  void sendAckResponse() =>
-      _sendAckResponseWithLog();
+  void sendAckResponse() => _sendAckResponseWithLog();
+
+  void sendAckRequest({bool force = false, bool shortTimeout = false}) {
+    if (!ackTurnedOn) {
+      return;
+    }
+    if (!_connection.isOpened()) {
+      return;
+    }
+    if (_pendingSmAckAt != null && !force) {
+      if (shortTimeout) {
+        _scheduleSmAckTimeout(shortTimeout: true);
+      }
+      return;
+    }
+    _connection.writeNonza(RNonza());
+    _pendingSmAckAt = DateTime.now();
+    _scheduleSmAckTimeout(shortTimeout: shortTimeout);
+    _emitKeepaliveState();
+  }
+
+  void setBackgroundMode(bool enabled) {
+    if (_backgroundMode == enabled) {
+      return;
+    }
+    _backgroundMode = enabled;
+    _restartKeepaliveTimer();
+    _emitKeepaliveState();
+  }
+
+  void probeKeepalive({bool shortTimeout = false}) {
+    if (!_connection.isOpened()) {
+      return;
+    }
+    if (_isSmEnabled()) {
+      sendAckRequest(force: true, shortTimeout: shortTimeout);
+      return;
+    }
+    _sendPing(shortTimeout: shortTimeout);
+  }
+
+  void resetRuntimeCounters() {
+    streamState.lastSentStanza = 0;
+    streamState.lastReceivedStanza = 0;
+    streamState.nonConfirmedSentStanzas.clear();
+    streamState.tryingToResume = false;
+    _clearPendingSmAck();
+    _clearPendingPing();
+    _emitKeepaliveState();
+  }
 
   void _sendAckResponseWithLog() {
     lastAckSent = streamState.lastReceivedStanza;
-    Log.d(TAG, 'SM ack send h=$lastAckSent lastRecv=${streamState.lastReceivedStanza}');
+    Log.d(
+      TAG,
+      'SM ack send h=$lastAckSent lastRecv=${streamState.lastReceivedStanza}',
+    );
     _connection.writeNonza(ANonza(lastAckSent));
-    if (ackTurnedOn && _pendingAckRequestTimer != null && _pendingAckRequestTimer!.isActive) {
+    if (ackTurnedOn &&
+        _pendingAckRequestTimer != null &&
+        _pendingAckRequestTimer!.isActive) {
       _pendingAckRequestTimer!.cancel();
-      Log.d(TAG, "Early r because we received an ack");
+      Log.d(TAG, 'Early r because we received an ack');
       sendAckRequest();
     }
   }
@@ -245,7 +292,8 @@ class StreamManagementModule extends Negotiator {
   void tryToResumeStream() {
     if (!streamState.tryingToResume) {
       _connection.writeNonza(
-          ResumeNonza(streamState.id, streamState.lastReceivedStanza));
+        ResumeNonza(streamState.id, streamState.lastReceivedStanza),
+      );
       streamState.tryingToResume = true;
     }
   }
@@ -264,8 +312,28 @@ class StreamManagementModule extends Negotiator {
     backToIdle();
   }
 
+  void parseAckResponse(String rawValue) {
+    var lastDeliveredStanza = int.parse(rawValue);
+    var shouldStay = streamState.lastSentStanza - lastDeliveredStanza;
+    if (shouldStay < 0) {
+      shouldStay = 0;
+    }
+    while (streamState.nonConfirmedSentStanzas.length > shouldStay) {
+      var stanza =
+          streamState.nonConfirmedSentStanzas.removeFirst() as AbstractStanza;
+      if (ackTurnedOn) {
+        _deliveredStanzasStreamController.add(stanza);
+      }
+      if (stanza.id != null) {
+        Log.d(TAG, 'Delivered: ${stanza.id}');
+      } else {
+        Log.d(TAG, 'Delivered stanza without id ${stanza.name}');
+      }
+    }
+  }
+
   void _schedulePendingAckRequest() {
-    if (!ackTurnedOn) {
+    if (!ackTurnedOn || !_isSmEnabled()) {
       return;
     }
     if (_pendingAckRequestTimer?.isActive == true) {
@@ -277,5 +345,235 @@ class StreamManagementModule extends Negotiator {
         sendAckRequest();
       }
     });
+  }
+
+  void _handleConnectionState(XmppConnectionState state) {
+    if (state == XmppConnectionState.Reconnecting) {
+      backToIdle();
+      _clearPendingSmAck();
+      _clearPendingPing();
+    }
+    if (!_connection.isOpened()) {
+      _keepaliveTimer?.cancel();
+      _keepaliveTimer = null;
+    }
+    if (state == XmppConnectionState.Closed) {
+      streamState = StreamState();
+      lastAckSent = 0;
+      Log.d(TAG, 'SM reset on Closed: recv=0 ackSent=0');
+      _pendingAckRequestTimer?.cancel();
+      _pendingAckRequestTimer = null;
+      inStanzaSubscription?.cancel();
+      outStanzaSubscription?.cancel();
+      inStanzaSubscription = null;
+      outStanzaSubscription = null;
+      _clearPendingSmAck();
+      _clearPendingPing();
+      _emitKeepaliveState();
+      return;
+    }
+    if (state == XmppConnectionState.Ready ||
+        state == XmppConnectionState.Resumed) {
+      _restartKeepaliveTimer();
+      probeKeepalive(shortTimeout: false);
+    }
+  }
+
+  void _restartKeepaliveTimer() {
+    _keepaliveTimer?.cancel();
+    if (!_connection.isOpened()) {
+      return;
+    }
+    final interval = _currentProbeInterval();
+    _keepaliveTimer = Timer.periodic(interval, (_) {
+      _tickKeepalive();
+    });
+  }
+
+  Duration _currentProbeInterval() {
+    if (_isSmEnabled()) {
+      return _backgroundMode
+          ? _smAckIntervalBackground
+          : _smAckIntervalForeground;
+    }
+    return _backgroundMode ? _pingIntervalBackground : _pingIntervalForeground;
+  }
+
+  bool _isSmEnabled() {
+    return streamState.streamManagementEnabled;
+  }
+
+  void _tickKeepalive() {
+    if (!_connection.isOpened()) {
+      return;
+    }
+    if (_isSmEnabled()) {
+      sendAckRequest();
+      return;
+    }
+    _sendPing();
+  }
+
+  void _handleSmAckResponse() {
+    final startedAt = _pendingSmAckAt;
+    if (startedAt == null) {
+      return;
+    }
+    _pendingSmAckAt = null;
+    _pendingSmAckTimer?.cancel();
+    _pendingSmAckTimer = null;
+    _handleKeepaliveSuccess(DateTime.now().difference(startedAt));
+  }
+
+  void _scheduleSmAckTimeout({required bool shortTimeout}) {
+    _pendingSmAckTimer?.cancel();
+    _pendingSmAckTimer = Timer(
+      _keepaliveTimeout(shortTimeout: shortTimeout),
+      () => _handleSmAckTimeout(shortTimeout: shortTimeout),
+    );
+  }
+
+  void _handleSmAckTimeout({required bool shortTimeout}) {
+    if (_pendingSmAckAt == null) {
+      return;
+    }
+    _clearPendingSmAck();
+    _handleKeepaliveFailure(
+      KeepaliveFailureReason.smAckTimeout,
+      shortTimeout: shortTimeout,
+    );
+    if (_pendingPingAt == null) {
+      _sendPing(shortTimeout: shortTimeout);
+    }
+  }
+
+  void _sendPing({bool shortTimeout = false}) {
+    if (!_connection.isOpened()) {
+      return;
+    }
+    if (_pendingPingAt != null) {
+      return;
+    }
+    final domain = _connection.serverName.userAtDomain;
+    if (domain.isEmpty) {
+      return;
+    }
+    final id = AbstractStanza.getRandomId();
+    final stanza = IqStanza(id, IqStanzaType.GET);
+    stanza.toJid = Jid.fromFullJid(domain);
+    final ping = XmppElement()..name = 'ping';
+    ping.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:ping'));
+    stanza.addChild(ping);
+    _pendingPingId = id;
+    _pendingPingAt = DateTime.now();
+    _pendingPingTimer = Timer(
+      _keepaliveTimeout(shortTimeout: shortTimeout),
+      () => _handlePingTimeout(shortTimeout: shortTimeout),
+    );
+    _connection.writeStanza(stanza);
+    _emitKeepaliveState();
+  }
+
+  void _handleKeepaliveIq(AbstractStanza? stanza) {
+    if (stanza is! IqStanza) {
+      return;
+    }
+    final pendingId = _pendingPingId;
+    if (pendingId == null || stanza.id != pendingId) {
+      return;
+    }
+    if (stanza.type != IqStanzaType.RESULT &&
+        stanza.type != IqStanzaType.ERROR) {
+      return;
+    }
+    final startedAt = _pendingPingAt;
+    _clearPendingPing();
+    if (startedAt == null) {
+      return;
+    }
+    _handleKeepaliveSuccess(DateTime.now().difference(startedAt));
+  }
+
+  void _handlePingTimeout({required bool shortTimeout}) {
+    if (_pendingPingAt == null) {
+      return;
+    }
+    _clearPendingPing();
+    _handleKeepaliveFailure(
+      KeepaliveFailureReason.pingTimeout,
+      shortTimeout: shortTimeout,
+    );
+  }
+
+  void _handleKeepaliveSuccess(Duration latency) {
+    _lastKeepaliveLatency = latency;
+    _lastKeepaliveSuccessAt = DateTime.now();
+    _emitKeepaliveState();
+  }
+
+  void _handleKeepaliveFailure(
+    KeepaliveFailureReason reason, {
+    required bool shortTimeout,
+  }) {
+    _lastKeepaliveFailureAt = DateTime.now();
+    _lastKeepaliveLatency = null;
+    _keepaliveFailureController.add(
+      KeepaliveFailure(
+        reason: reason,
+        shortTimeout: shortTimeout,
+        occurredAt: _lastKeepaliveFailureAt!,
+      ),
+    );
+    _emitKeepaliveState();
+  }
+
+  Duration _keepaliveTimeout({required bool shortTimeout}) {
+    final base = _lastKeepaliveLatency ?? Duration.zero;
+    final multiplier = shortTimeout ? 5 : 10;
+    final scaled = base * multiplier;
+    final floor = Duration(seconds: shortTimeout ? 5 : 10);
+    final candidate = scaled > floor ? scaled : floor;
+    return candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
+  }
+
+  void _clearPendingSmAck() {
+    _pendingSmAckAt = null;
+    _pendingSmAckTimer?.cancel();
+    _pendingSmAckTimer = null;
+  }
+
+  void _clearPendingPing() {
+    _pendingPingId = null;
+    _pendingPingAt = null;
+    _pendingPingTimer?.cancel();
+    _pendingPingTimer = null;
+  }
+
+  void _emitKeepaliveState() {
+    _keepaliveStateController.add(
+      KeepaliveState(
+        healthy: _lastKeepaliveFailureAt == null ||
+            (_lastKeepaliveSuccessAt != null &&
+                _lastKeepaliveSuccessAt!.isAfter(_lastKeepaliveFailureAt!)),
+        smEnabled: _isSmEnabled(),
+        backgroundMode: _backgroundMode,
+        awaitingSmAck: _pendingSmAckAt != null,
+        awaitingPing: _pendingPingAt != null,
+        lastLatency: _lastKeepaliveLatency,
+        lastSuccessAt: _lastKeepaliveSuccessAt,
+        lastFailureAt: _lastKeepaliveFailureAt,
+      ),
+    );
+  }
+
+  void _disposeRuntime() {
+    _keepaliveTimer?.cancel();
+    _pendingAckRequestTimer?.cancel();
+    _clearPendingSmAck();
+    _clearPendingPing();
+    _keepaliveIqSubscription?.cancel();
+    inNonzaSubscription?.cancel();
+    outStanzaSubscription?.cancel();
+    inStanzaSubscription?.cancel();
   }
 }

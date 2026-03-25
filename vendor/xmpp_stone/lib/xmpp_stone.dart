@@ -27,6 +27,7 @@ export 'src/features/servicediscovery/ServiceDiscoveryNegotiator.dart';
 export 'src/features/servicediscovery/ServiceDiscoverySupport.dart';
 export 'src/features/message_archive/MessageArchiveManager.dart';
 export 'src/features/privacy_lists/privacy_lists_manager.dart';
+export 'src/features/streammanagement/KeepaliveState.dart';
 export 'src/logger/Log.dart';
 export 'src/messages/MessageApi.dart';
 export 'src/messages/MessageHandler.dart';
