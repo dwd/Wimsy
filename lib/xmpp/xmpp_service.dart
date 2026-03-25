@@ -107,6 +107,10 @@ class XmppService extends ChangeNotifier {
   Timer? _mucSelfPingTimer;
   final Map<String, String> _pendingMucSelfPings = {};
   final Map<String, Timer> _mucSelfPingTimeouts = {};
+  // ignore: unused_field
+  // Hot-reload compatibility for pre-consolidation closures that still
+  // reference this field name.
+  final Map<String, DateTime> _pendingPings = {};
   String? _carbonsRequestId;
   static const Duration _mucSelfPingIdle = Duration(minutes: 10);
   static const Duration _mucSelfPingCheckInterval = Duration(minutes: 1);
@@ -6910,6 +6914,7 @@ class XmppService extends ChangeNotifier {
     }
     _mucSelfPingTimeouts.clear();
     _pendingMucSelfPings.clear();
+    _pendingPings.clear();
     _smNonzaSubscription?.cancel();
     _smNonzaSubscription = null;
     _pingSubscription?.cancel();
