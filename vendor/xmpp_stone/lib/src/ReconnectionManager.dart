@@ -100,6 +100,16 @@ class ReconnectionManager {
       return;
     }
     if (_connection.state != XmppConnectionState.ForcefullyClosed) {
+      if (_shouldForceClose(reason) &&
+          _connection.state != XmppConnectionState.Closed &&
+          _connection.state != XmppConnectionState.Closing &&
+          _connection.state != XmppConnectionState.SocketOpening) {
+        _connection.simulateForcefulClose();
+      } else {
+        return;
+      }
+    }
+    if (_connection.state != XmppConnectionState.ForcefullyClosed) {
       return;
     }
     if (_phase == ReconnectionPhase.reconnecting ||
@@ -110,6 +120,12 @@ class ReconnectionManager {
         ? Duration.zero
         : _delayForAttempt(_attempt, shortTimeout: shortTimeout);
     _schedule(delay, reason);
+  }
+
+  bool _shouldForceClose(ReconnectionReason reason) {
+    return reason == ReconnectionReason.keepaliveTimeout ||
+        reason == ReconnectionReason.streamError ||
+        reason == ReconnectionReason.manualRequest;
   }
 
   void connectionStateHandler(XmppConnectionState state) {

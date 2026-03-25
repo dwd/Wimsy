@@ -530,6 +530,13 @@ class StreamManagementModule extends Negotiator {
         occurredAt: _lastKeepaliveFailureAt!,
       ),
     );
+    if (reason == KeepaliveFailureReason.pingTimeout) {
+      _connection.requestReconnect(
+        reason: ReconnectionReason.keepaliveTimeout,
+        immediate: true,
+        shortTimeout: shortTimeout,
+      );
+    }
     _emitKeepaliveState();
   }
 
