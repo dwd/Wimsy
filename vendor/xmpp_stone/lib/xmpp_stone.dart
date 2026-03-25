@@ -3,6 +3,7 @@ library xmpp_stone;
 export 'src/Connection.dart';
 export 'src/ConnectionStateChangedListener.dart';
 export 'src/account/XmppAccountSettings.dart';
+export 'src/ReconnectionState.dart';
 export 'src/chat/Chat.dart';
 export 'src/chat/ChatManager.dart';
 export 'src/chat/Message.dart';

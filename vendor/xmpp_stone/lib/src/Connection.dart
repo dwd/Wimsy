@@ -6,6 +6,7 @@ import 'package:synchronized/synchronized.dart';
 import 'package:universal_io/io.dart';
 import 'package:xml/xml.dart' as xml;
 import 'package:xmpp_stone/src/ReconnectionManager.dart';
+import 'package:xmpp_stone/src/ReconnectionState.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/ConnectionNegotatiorManager.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/CarbonsNegotiator.dart';
@@ -419,6 +420,45 @@ class Connection {
   /// Forces an immediate keepalive probe using SM-first, ping fallback logic.
   void probeKeepalive({bool shortTimeout = false}) {
     streamManagementModule?.probeKeepalive(shortTimeout: shortTimeout);
+  }
+
+  Stream<ReconnectionState> get reconnectStateStream {
+    return reconnectionManager?.stateStream ?? const Stream.empty();
+  }
+
+  ReconnectionState get reconnectState {
+    return reconnectionManager?.currentState ??
+        ReconnectionState(
+          phase: ReconnectionPhase.idle,
+          updatedAt: DateTime.now(),
+        );
+  }
+
+  void setReconnectPolicy(ReconnectionPolicy policy) {
+    reconnectionManager?.setPolicy(policy);
+  }
+
+  void setReconnectContext({bool? networkOnline, bool? allowAutoReconnect}) {
+    reconnectionManager?.setContext(
+      networkOnline: networkOnline,
+      allowAutoReconnect: allowAutoReconnect,
+    );
+  }
+
+  void requestReconnect({
+    required ReconnectionReason reason,
+    bool immediate = false,
+    bool shortTimeout = false,
+  }) {
+    reconnectionManager?.requestReconnect(
+      reason: reason,
+      immediate: immediate,
+      shortTimeout: shortTimeout,
+    );
+  }
+
+  void setReconnectTerminal(String message) {
+    reconnectionManager?.setTerminalState(message);
   }
 
   void setState(XmppConnectionState state) {
