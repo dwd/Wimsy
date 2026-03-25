@@ -3147,6 +3147,10 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
     if (!ok) {
       _showSnack('Failed to save contact.');
+      return;
+    }
+    if (!isEdit) {
+      await _promptPresenceSubscriptionActions(jid);
     }
   }
 
@@ -3184,6 +3188,62 @@ class _WimsyHomeState extends State<WimsyHome> {
     final ok = await widget.service.upsertRosterContact(result.jid);
     if (!ok) {
       _showSnack('Failed to save contact.');
+      return;
+    }
+    await _promptPresenceSubscriptionActions(result.jid);
+  }
+
+  Future<void> _promptPresenceSubscriptionActions(String jid) async {
+    if (!mounted) {
+      return;
+    }
+    final selection = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Presence Subscription'),
+          content: const Text(
+            'Do you want to request and/or preauthorize presence subscription for this contact?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('skip'),
+              child: const Text('Skip'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('subscribe'),
+              child: const Text('Subscribe'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('preauthorize'),
+              child: const Text('Preauthorize'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop('both'),
+              child: const Text('Both'),
+            ),
+          ],
+        );
+      },
+    );
+    if (!mounted || selection == null || selection == 'skip') {
+      return;
+    }
+    if (selection == 'subscribe' || selection == 'both') {
+      final ok = await widget.service.requestPresenceSubscription(jid);
+      if (!ok) {
+        _showSnack('Failed to request presence.');
+      } else {
+        _showSnack('Presence subscription requested.');
+      }
+    }
+    if (selection == 'preauthorize' || selection == 'both') {
+      final ok = await widget.service.preauthorizePresenceSubscription(jid);
+      if (!ok) {
+        _showSnack('Failed to preauthorize.');
+      } else {
+        _showSnack('Preauthorized contact.');
+      }
     }
   }
 
