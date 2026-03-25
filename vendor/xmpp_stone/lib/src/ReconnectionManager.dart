@@ -46,7 +46,26 @@ class ReconnectionManager {
   String? _message;
 
   void setPolicy(ReconnectionPolicy policy) {
-    _policy = policy;
+    final jitter = policy.jitterRatio < 0
+        ? 0.0
+        : (policy.jitterRatio > 1 ? 1.0 : policy.jitterRatio);
+    final maxDelay =
+        policy.maxDelay < policy.baseDelay ? policy.baseDelay : policy.maxDelay;
+    _policy = ReconnectionPolicy(
+      baseDelay: policy.baseDelay,
+      maxDelay: maxDelay,
+      jitterRatio: jitter,
+      unboundedRetries: policy.unboundedRetries,
+      maxAttempts: policy.maxAttempts,
+    );
+    Log.i(
+      TAG,
+      'Policy updated base=${_policy.baseDelay.inMilliseconds}ms '
+      'max=${_policy.maxDelay.inMilliseconds}ms '
+      'jitter=${_policy.jitterRatio} '
+      'unbounded=${_policy.unboundedRetries} '
+      'maxAttempts=${_policy.maxAttempts}',
+    );
   }
 
   void setContext({bool? networkOnline, bool? allowAutoReconnect}) {
@@ -59,6 +78,10 @@ class ReconnectionManager {
     }
     if (!_networkOnline || !_allowAutoReconnect) {
       _cancelTimer();
+      Log.i(
+        TAG,
+        'Reconnect suspended online=$_networkOnline auto=$_allowAutoReconnect',
+      );
       _emit(
         ReconnectionPhase.suspended,
         reason: _lastReason,
@@ -71,6 +94,7 @@ class ReconnectionManager {
     if (wasOffline &&
         _networkOnline &&
         _connection.state == XmppConnectionState.ForcefullyClosed) {
+      Log.i(TAG, 'Network restored; requesting immediate reconnect');
       requestReconnect(
         reason: ReconnectionReason.networkChanged,
         immediate: true,
@@ -80,6 +104,7 @@ class ReconnectionManager {
 
   void setTerminalState(String message) {
     _cancelTimer();
+    Log.w(TAG, 'Reconnect terminal: $message');
     _emit(ReconnectionPhase.terminal, reason: _lastReason, message: message);
   }
 
@@ -90,6 +115,11 @@ class ReconnectionManager {
   }) {
     _lastReason = reason;
     if (!_networkOnline || !_allowAutoReconnect) {
+      Log.i(
+        TAG,
+        'Reconnect request suspended reason=$reason '
+        'online=$_networkOnline auto=$_allowAutoReconnect',
+      );
       _emit(
         ReconnectionPhase.suspended,
         reason: reason,
@@ -114,6 +144,7 @@ class ReconnectionManager {
     }
     if (_phase == ReconnectionPhase.reconnecting ||
         _phase == ReconnectionPhase.scheduled) {
+      Log.d(TAG, 'Reconnect dedupe reason=$reason phase=$_phase');
       return;
     }
     final delay = immediate
@@ -176,6 +207,11 @@ class ReconnectionManager {
   void _schedule(Duration delay, ReconnectionReason reason) {
     _cancelTimer();
     _nextDelay = delay;
+    Log.i(
+      TAG,
+      'Reconnect scheduled reason=$reason attempt=$_attempt '
+      'delay=${delay.inMilliseconds}ms',
+    );
     _emit(ReconnectionPhase.scheduled, reason: reason);
     timer = Timer(delay, () {
       timer = null;
@@ -190,10 +226,12 @@ class ReconnectionManager {
         return;
       }
       if (_connection.state != XmppConnectionState.ForcefullyClosed) {
+        Log.d(TAG, 'Reconnect skipped state=${_connection.state}');
         return;
       }
       isActive = true;
       _emit(ReconnectionPhase.reconnecting, reason: reason);
+      Log.i(TAG, 'Reconnect firing reason=$reason attempt=$_attempt');
       _connection.reconnect();
       _attempt += 1;
       if (!_policy.unboundedRetries &&

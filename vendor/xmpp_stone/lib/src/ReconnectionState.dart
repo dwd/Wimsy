@@ -6,6 +6,7 @@ enum ReconnectionPhase {
   terminal,
 }
 
+/// High-level trigger that requested reconnection.
 enum ReconnectionReason {
   forcefulClose,
   keepaliveTimeout,
@@ -30,6 +31,7 @@ class ReconnectionPolicy {
   final int? maxAttempts;
 }
 
+/// Snapshot of reconnection controller state for observers.
 class ReconnectionState {
   const ReconnectionState({
     required this.phase,
