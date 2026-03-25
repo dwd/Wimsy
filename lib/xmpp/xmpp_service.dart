@@ -120,30 +120,20 @@ class XmppService extends ChangeNotifier {
   StreamSubscription<PresenceErrorEvent>? _presenceErrorSubscription;
   StreamSubscription<Nonza>? _smNonzaSubscription;
   StreamSubscription<AbstractStanza?>? _pingSubscription;
+  StreamSubscription<KeepaliveState>? _keepaliveStateSubscription;
+  StreamSubscription<KeepaliveFailure>? _keepaliveFailureSubscription;
   StreamSubscription<MessageStanza?>? _messageStanzaSubscription;
   StreamSubscription<AbstractStanza>? _smDeliveredSubscription;
   StreamSubscription<AbstractStanza?>? _pepSubscription;
   StreamSubscription<AbstractStanza?>? _mucPresenceSubscription;
-  Timer? _pingTimer;
-  Timer? _smAckTimeoutTimer;
   Timer? _csiIdleTimer;
   Timer? _mucSelfPingTimer;
   final Map<String, String> _pendingMucSelfPings = {};
   final Map<String, Timer> _mucSelfPingTimeouts = {};
-  final Map<String, DateTime> _pendingPings = {};
-  final Map<String, Timer> _pingTimeoutTimers = {};
-  final Map<String, bool> _pingTimeoutShort = {};
-  DateTime? _pendingSmAckAt;
   String? _carbonsRequestId;
-  DateTime? _lastSmAckRequestAt;
-  static const Duration _smAckIntervalForeground = Duration(minutes: 1);
-  static const Duration _smAckIntervalBackground = Duration(minutes: 5);
-  static const Duration _pingIntervalForeground = Duration(seconds: 30);
-  static const Duration _pingIntervalBackground = Duration(minutes: 5);
   static const Duration _mucSelfPingIdle = Duration(minutes: 10);
   static const Duration _mucSelfPingCheckInterval = Duration(minutes: 1);
   static const Duration _mucSelfPingTimeout = Duration(seconds: 30);
-  static const Duration _keepaliveMaxTimeout = Duration(seconds: 30);
   final Map<String, StreamSubscription<Message>> _chatMessageSubscriptions = {};
   final Map<String, StreamSubscription<ChatState?>> _chatStateSubscriptions =
       {};
@@ -726,7 +716,7 @@ class XmppService extends ChangeNotifier {
     }
     Log.i('XmppService', 'Background mode changed to $enabled');
     _applyClientState();
-    _restartKeepaliveTimer();
+    _connection?.setKeepaliveBackgroundMode(_backgroundMode);
     if (_backgroundMode && !_networkOnline) {
       return;
     }
@@ -741,7 +731,7 @@ class XmppService extends ChangeNotifier {
     if (!_networkOnline) {
       return;
     }
-    _probeConnection(shortTimeout: true);
+    _connection?.probeKeepalive(shortTimeout: true);
     if (_backgroundMode && !isConnected && !isConnecting) {
       _scheduleReconnect();
     }
@@ -5573,24 +5563,11 @@ class XmppService extends ChangeNotifier {
     _smNonzaSubscription = connection.inNonzasStream.listen((nonza) {
       final xmlns = nonza.getAttribute('xmlns')?.value;
       if (nonza.name == 'enabled' && xmlns == 'urn:xmpp:sm:3') {
-        _resetStreamManagementCounters();
         return;
       }
       if (nonza.name == 'error' &&
           xmlns == 'http://etherx.jabber.org/streams') {
         _handleStreamError(nonza);
-        return;
-      }
-      if (nonza.name == 'a' && xmlns == 'urn:xmpp:sm:3') {
-        final startedAt = _pendingSmAckAt;
-        if (startedAt != null) {
-          _pendingSmAckAt = null;
-          _smAckTimeoutTimer?.cancel();
-          _smAckTimeoutTimer = null;
-          _lastPingLatency = DateTime.now().difference(startedAt);
-          _lastPingAt = DateTime.now();
-          notifyListeners();
-        }
       }
     });
 
@@ -5611,42 +5588,30 @@ class XmppService extends ChangeNotifier {
           _handleMucSelfPingResponse(selfPingRoom, stanza);
           return;
         }
-        final id = stanza.id;
-        if (id == null || !_pendingPings.containsKey(id)) {
-          return;
-        }
-        if (stanza.type == IqStanzaType.RESULT ||
-            stanza.type == IqStanzaType.ERROR) {
-          final startedAt = _pendingPings.remove(id);
-          final timer = _pingTimeoutTimers.remove(id);
-          timer?.cancel();
-          _pingTimeoutShort.remove(id);
-          if (startedAt != null) {
-            _lastPingLatency = DateTime.now().difference(startedAt);
-            _lastPingAt = DateTime.now();
-            notifyListeners();
-          }
-        }
       }
     });
-
-    _restartKeepaliveTimer();
+    _keepaliveStateSubscription?.cancel();
+    _keepaliveStateSubscription = connection.keepaliveStateStream.listen((
+      state,
+    ) {
+      _lastPingLatency = state.lastLatency;
+      if (state.lastSuccessAt != null) {
+        _lastPingAt = state.lastSuccessAt;
+      }
+      notifyListeners();
+    });
+    _keepaliveFailureSubscription?.cancel();
+    _keepaliveFailureSubscription = connection.keepaliveFailureStream.listen((
+      failure,
+    ) {
+      _lastPingLatency = null;
+      _lastPingAt = failure.occurredAt;
+      notifyListeners();
+      _scheduleReconnect(immediate: true, shortTimeout: failure.shortTimeout);
+    });
+    connection.setKeepaliveBackgroundMode(_backgroundMode);
+    connection.probeKeepalive(shortTimeout: false);
     _requestCarbons();
-  }
-
-  void _resetStreamManagementCounters() {
-    final streamManagement = _connection?.streamManagementModule;
-    if (streamManagement == null) {
-      return;
-    }
-    streamManagement.streamState.lastSentStanza = 0;
-    streamManagement.streamState.lastReceivedStanza = 0;
-    streamManagement.streamState.nonConfirmedSentStanzas.clear();
-    streamManagement.streamState.tryingToResume = false;
-    _pendingSmAckAt = null;
-    _lastSmAckRequestAt = null;
-    _smAckTimeoutTimer?.cancel();
-    _smAckTimeoutTimer = null;
   }
 
   Future<void> _handleStreamError(Nonza nonza) async {
@@ -5654,31 +5619,6 @@ class XmppService extends ChangeNotifier {
     await _safeClose(preserveCache: true);
     _setError('Stream error');
     _scheduleReconnect(immediate: true, shortTimeout: true);
-  }
-
-  Duration get _currentPingInterval =>
-      _backgroundMode ? _pingIntervalBackground : _pingIntervalForeground;
-
-  Duration get _currentSmAckInterval =>
-      _backgroundMode ? _smAckIntervalBackground : _smAckIntervalForeground;
-
-  void _restartKeepaliveTimer() {
-    _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(_currentPingInterval, (_) {
-      if (_isStreamManagementEnabled()) {
-        _sendSmAckRequest();
-      } else {
-        if (_pendingPings.isNotEmpty) {
-          return;
-        }
-        _sendPing();
-      }
-    });
-    if (_isStreamManagementEnabled()) {
-      _sendSmAckRequest(force: true);
-    } else {
-      _sendPing();
-    }
   }
 
   void _ensureChatSubscription(Chat chat) {
@@ -6967,10 +6907,6 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> _safeClose({required bool preserveCache}) async {
-    _pingTimer?.cancel();
-    _pingTimer = null;
-    _smAckTimeoutTimer?.cancel();
-    _smAckTimeoutTimer = null;
     _csiIdleTimer?.cancel();
     _csiIdleTimer = null;
     _mucSelfPingTimer?.cancel();
@@ -6984,6 +6920,10 @@ class XmppService extends ChangeNotifier {
     _smNonzaSubscription = null;
     _pingSubscription?.cancel();
     _pingSubscription = null;
+    _keepaliveStateSubscription?.cancel();
+    _keepaliveStateSubscription = null;
+    _keepaliveFailureSubscription?.cancel();
+    _keepaliveFailureSubscription = null;
     _messageStanzaSubscription?.cancel();
     _messageStanzaSubscription = null;
     _smDeliveredSubscription?.cancel();
@@ -7000,14 +6940,7 @@ class XmppService extends ChangeNotifier {
     _ibbDataSubscription = null;
     _ibbCloseSubscription?.cancel();
     _ibbCloseSubscription = null;
-    _pendingPings.clear();
     _pendingRecentReactionRequests.clear();
-    for (final timer in _pingTimeoutTimers.values) {
-      timer.cancel();
-    }
-    _pingTimeoutTimers.clear();
-    _pingTimeoutShort.clear();
-    _pendingSmAckAt = null;
     _connectionStateSubscription?.cancel();
     _connectionStateSubscription = null;
     _rosterSubscription?.cancel();
@@ -7889,122 +7822,6 @@ class XmppService extends ChangeNotifier {
     return from.userAtDomain;
   }
 
-  void _sendPing({bool shortTimeout = false}) {
-    final connection = _connection;
-    if (connection == null || _currentUserBareJid == null) {
-      return;
-    }
-    if (_pendingPings.isNotEmpty) {
-      return;
-    }
-    final domain = _domainFromBareJid(_currentUserBareJid!);
-    if (domain.isEmpty) {
-      return;
-    }
-    final id = AbstractStanza.getRandomId();
-    final stanza = IqStanza(id, IqStanzaType.GET);
-    stanza.toJid = Jid.fromFullJid(domain);
-    final ping = XmppElement()..name = 'ping';
-    ping.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:ping'));
-    stanza.addChild(ping);
-    _pendingPings[id] = DateTime.now();
-    connection.writeStanza(stanza);
-    _schedulePingTimeout(id, shortTimeout: shortTimeout);
-  }
-
-  void _sendSmAckRequest({bool force = false, bool shortTimeout = false}) {
-    final connection = _connection;
-    if (connection == null || !_isStreamManagementEnabled()) {
-      return;
-    }
-    if (!force && _lastSmAckRequestAt != null) {
-      final elapsed = DateTime.now().difference(_lastSmAckRequestAt!);
-      if (elapsed < _currentSmAckInterval) {
-        return;
-      }
-    }
-    if (_pendingSmAckAt != null) {
-      if (shortTimeout) {
-        _scheduleSmAckTimeout(shortTimeout: true);
-      } else {
-        _expireSmAck();
-      }
-      return;
-    }
-    _pendingSmAckAt = DateTime.now();
-    _lastSmAckRequestAt = _pendingSmAckAt;
-    connection.streamManagementModule?.sendAckRequest();
-    _scheduleSmAckTimeout(shortTimeout: shortTimeout);
-  }
-
-  void _expireSmAck() {
-    final startedAt = _pendingSmAckAt;
-    if (startedAt == null) {
-      return;
-    }
-    final timeout = _smAckTimeout(shortTimeout: false);
-    if (DateTime.now().difference(startedAt) > timeout) {
-      _handleSmAckTimeout(shortTimeout: false);
-    }
-  }
-
-  bool _isStreamManagementEnabled() {
-    return _connection
-            ?.streamManagementModule
-            ?.streamState
-            .streamManagementEnabled ==
-        true;
-  }
-
-  void _scheduleSmAckTimeout({required bool shortTimeout}) {
-    _smAckTimeoutTimer?.cancel();
-    final timeout = _smAckTimeout(shortTimeout: shortTimeout);
-    _smAckTimeoutTimer = Timer(
-      timeout,
-      () => _handleSmAckTimeout(shortTimeout: shortTimeout),
-    );
-  }
-
-  void _handleSmAckTimeout({required bool shortTimeout}) {
-    if (_pendingSmAckAt == null) {
-      return;
-    }
-    _pendingSmAckAt = null;
-    _smAckTimeoutTimer?.cancel();
-    _smAckTimeoutTimer = null;
-    _lastPingLatency = null;
-    _lastPingAt = DateTime.now();
-    notifyListeners();
-    if (_pendingPings.isEmpty) {
-      _sendPing(shortTimeout: shortTimeout);
-      return;
-    }
-    _scheduleReconnect(immediate: true, shortTimeout: shortTimeout);
-  }
-
-  void _schedulePingTimeout(String id, {required bool shortTimeout}) {
-    _pingTimeoutTimers[id]?.cancel();
-    final timeout = _pingTimeout(shortTimeout: shortTimeout);
-    _pingTimeoutShort[id] = shortTimeout;
-    _pingTimeoutTimers[id] = Timer(timeout, () {
-      final startedAt = _pendingPings.remove(id);
-      final timer = _pingTimeoutTimers.remove(id);
-      timer?.cancel();
-      final wasShort = _pingTimeoutShort.remove(id) ?? false;
-      if (startedAt == null) {
-        return;
-      }
-      _handlePingTimeout(shortTimeout: wasShort);
-    });
-  }
-
-  void _handlePingTimeout({required bool shortTimeout}) {
-    _lastPingLatency = null;
-    _lastPingAt = DateTime.now();
-    notifyListeners();
-    _scheduleReconnect(immediate: true, shortTimeout: shortTimeout);
-  }
-
   void _sendMucDefaultConfig(String roomJid) {
     final connection = _connection;
     if (connection == null) {
@@ -8012,35 +7829,6 @@ class XmppService extends ChangeNotifier {
     }
     final iq = buildMucDefaultConfigIq(roomJid);
     connection.writeStanza(iq);
-  }
-
-  Duration _smAckTimeout({required bool shortTimeout}) {
-    final base = _lastPingLatency ?? Duration.zero;
-    final multiplier = shortTimeout ? 5 : 10;
-    final scaled = base * multiplier;
-    final floor = Duration(seconds: shortTimeout ? 5 : 10);
-    final candidate = scaled > floor ? scaled : floor;
-    return candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
-  }
-
-  Duration _pingTimeout({required bool shortTimeout}) {
-    final base = _lastPingLatency ?? Duration.zero;
-    final multiplier = shortTimeout ? 5 : 10;
-    final scaled = base * multiplier;
-    final floor = Duration(seconds: shortTimeout ? 5 : 10);
-    final candidate = scaled > floor ? scaled : floor;
-    return candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
-  }
-
-  void _probeConnection({required bool shortTimeout}) {
-    if (!isConnected) {
-      return;
-    }
-    if (_isStreamManagementEnabled()) {
-      _sendSmAckRequest(force: true, shortTimeout: shortTimeout);
-      return;
-    }
-    _sendPing(shortTimeout: shortTimeout);
   }
 }
 
