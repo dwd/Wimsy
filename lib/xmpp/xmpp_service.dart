@@ -147,6 +147,8 @@ class XmppService extends ChangeNotifier {
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
   void Function(String roomJid, ChatMessage message)?
   _incomingRoomMessageHandler;
+  void Function(CallSession session)? _incomingCallHandler;
+  void Function(CallSession session)? _callSessionEndedHandler;
   void Function(List<ContactEntry> roster)? _rosterPersistor;
   void Function(List<ContactEntry> bookmarks)? _bookmarkPersistor;
   void Function(String bareJid, List<ChatMessage> messages)? _messagePersistor;
@@ -1108,6 +1110,14 @@ class XmppService extends ChangeNotifier {
     void Function(String roomJid, ChatMessage message)? handler,
   ) {
     _incomingRoomMessageHandler = handler;
+  }
+
+  void setIncomingCallHandler(void Function(CallSession session)? handler) {
+    _incomingCallHandler = handler;
+  }
+
+  void setCallSessionEndedHandler(void Function(CallSession session)? handler) {
+    _callSessionEndedHandler = handler;
   }
 
   void setBookmarkPersistor(
@@ -2678,6 +2688,7 @@ class XmppService extends ChangeNotifier {
     _callContentNamesBySid[event.sid] = contentNamesFor(contents);
     _callMutedBySid[event.sid] = false;
     _callVideoEnabledBySid[event.sid] = session.video;
+    _incomingCallHandler?.call(session);
     _startCallTimeout(
       sid: event.sid,
       duration: _incomingCallTimeout,
@@ -3530,10 +3541,31 @@ class XmppService extends ChangeNotifier {
     _callVideoEnabledBySid.remove(session.sid);
     _callLocalSpeakingBySid.remove(session.sid);
     _callRemoteSpeakingBySid.remove(session.sid);
+    _callSessionEndedHandler?.call(session);
     _callSessions.remove(session.sid);
     _callSessionByPeerKey.remove(_callPeerKeyForJid(session.peerBareJid));
     unawaited(_mediaSession.stop());
     notifyListeners();
+  }
+
+  CallSession? callSessionBySid(String sid) {
+    return _callSessions[sid];
+  }
+
+  Future<void> acceptCallBySid(String sid) async {
+    final session = _callSessions[sid];
+    if (session == null || session.direction != CallDirection.incoming) {
+      return;
+    }
+    await acceptCall(session);
+  }
+
+  Future<void> declineCallBySid(String sid) async {
+    final session = _callSessions[sid];
+    if (session == null || session.direction != CallDirection.incoming) {
+      return;
+    }
+    await declineCall(session);
   }
 
   void _handleJmiMessage(MessageStanza stanza, JmiAction action) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -110,10 +111,12 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     if (!_isFlutterTest) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _notifications.initialize();
+        _notifications.initialize(onEvent: _handleNotificationEvent);
       });
       _service.setIncomingMessageHandler(_handleIncomingMessage);
       _service.setIncomingRoomMessageHandler(_handleIncomingRoomMessage);
+      _service.setIncomingCallHandler(_handleIncomingCallSession);
+      _service.setCallSessionEndedHandler(_handleCallSessionEnded);
       if (!kIsWeb && Platform.isAndroid) {
         _startAndroidForegroundService();
         _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
@@ -133,6 +136,10 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectivitySubscription?.cancel();
+    _service.setIncomingMessageHandler(null);
+    _service.setIncomingRoomMessageHandler(null);
+    _service.setIncomingCallHandler(null);
+    _service.setCallSessionEndedHandler(null);
     _service.dispose();
     _storage.lock();
     super.dispose();
@@ -158,6 +165,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
       title: title,
       body: message.body,
+      chatJid: bareJid,
       tag: bareJid,
     );
   }
@@ -174,8 +182,70 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
       title: title,
       body: message.body,
+      chatJid: roomJid,
       tag: roomJid,
     );
+  }
+
+  void _handleIncomingCallSession(CallSession session) {
+    if (kIsWeb || !Platform.isAndroid) {
+      return;
+    }
+    if (session.direction != CallDirection.incoming ||
+        session.state != CallState.ringing) {
+      return;
+    }
+    unawaited(
+      _notifications.showIncomingCall(
+        sid: session.sid,
+        peerJid: session.peerBareJid,
+        video: session.video,
+      ),
+    );
+  }
+
+  void _handleCallSessionEnded(CallSession session) {
+    if (kIsWeb || !Platform.isAndroid) {
+      return;
+    }
+    unawaited(_notifications.cancelIncomingCall(session.sid));
+  }
+
+  void _handleNotificationEvent(NotificationEvent event) {
+    final payload = event.payload;
+    if (payload == null || payload.isEmpty) {
+      return;
+    }
+    Map<String, dynamic> data;
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+      data = decoded;
+    } catch (_) {
+      return;
+    }
+    final type = data['type']?.toString() ?? '';
+    final chatJid = data['chatJid']?.toString() ?? '';
+    final sid = data['sid']?.toString() ?? '';
+    final actionId = event.actionId ?? '';
+
+    if (type == 'call') {
+      if (actionId == 'call_decline') {
+        unawaited(_service.declineCallBySid(sid));
+        unawaited(_notifications.cancelIncomingCall(sid));
+        return;
+      }
+      if (actionId == 'call_answer') {
+        unawaited(_service.acceptCallBySid(sid));
+        unawaited(_notifications.cancelIncomingCall(sid));
+      }
+    }
+    if (chatJid.isNotEmpty) {
+      _service.selectChat(chatJid);
+      unawaited(_notifications.cancelMessagesForTag(chatJid));
+    }
   }
 
   bool _shouldNotifyFor(String bareJid) {
@@ -277,7 +347,11 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
               if (snapshot.connectionState != ConnectionState.done) {
                 return const _SplashScreen();
               }
-              return _Gatekeeper(service: _service, storage: _storage);
+              return _Gatekeeper(
+                service: _service,
+                storage: _storage,
+                notifications: _notifications,
+              );
             },
           ),
         ),
@@ -287,10 +361,15 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
 }
 
 class _Gatekeeper extends StatefulWidget {
-  const _Gatekeeper({required this.service, required this.storage});
+  const _Gatekeeper({
+    required this.service,
+    required this.storage,
+    required this.notifications,
+  });
 
   final XmppService service;
   final StorageService storage;
+  final NotificationService notifications;
 
   @override
   State<_Gatekeeper> createState() => _GatekeeperState();
@@ -365,15 +444,25 @@ class _GatekeeperState extends State<_Gatekeeper> {
         },
       );
     }
-    return WimsyHome(service: widget.service, storage: widget.storage);
+    return WimsyHome(
+      service: widget.service,
+      storage: widget.storage,
+      notifications: widget.notifications,
+    );
   }
 }
 
 class WimsyHome extends StatefulWidget {
-  const WimsyHome({super.key, required this.service, required this.storage});
+  const WimsyHome({
+    super.key,
+    required this.service,
+    required this.storage,
+    required this.notifications,
+  });
 
   final XmppService service;
   final StorageService storage;
+  final NotificationService notifications;
 
   @override
   State<WimsyHome> createState() => _WimsyHomeState();
@@ -1917,14 +2006,17 @@ class _WimsyHomeState extends State<WimsyHome> {
 
   Future<void> _acceptCall(CallSession session) async {
     await widget.service.acceptCall(session);
+    await widget.notifications.cancelIncomingCall(session.sid);
   }
 
   Future<void> _declineCall(CallSession session) async {
     await widget.service.declineCall(session);
+    await widget.notifications.cancelIncomingCall(session.sid);
   }
 
   Future<void> _endCall(CallSession session) async {
     await widget.service.endCall(session);
+    await widget.notifications.cancelIncomingCall(session.sid);
   }
 
   Future<void> _showAudioOutputPicker() async {
@@ -3438,6 +3530,7 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     _lastReadAtByChat[bareJid] = messages.last.timestamp;
+    unawaited(widget.notifications.cancelMessagesForTag(bareJid));
   }
 
   void _noteActiveChatRead(XmppService service, String? activeChat) {
