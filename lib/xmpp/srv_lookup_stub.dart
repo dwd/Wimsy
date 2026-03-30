@@ -1,19 +1,13 @@
-class XmppSrvTarget {
-  XmppSrvTarget({
-    required this.host,
-    required this.port,
-    required this.priority,
-    required this.weight,
-    required this.directTls,
-  });
-
-  final String host;
-  final int port;
-  final int priority;
-  final int weight;
-  final bool directTls;
-}
+import 'srv_target.dart';
 
 Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
-  return null;
+  final candidates = await resolveXmppSrvCandidates(domain);
+  if (candidates.isEmpty) {
+    return null;
+  }
+  return candidates.first;
+}
+
+Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
+  return const [];
 }

@@ -4,55 +4,59 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-
-class XmppSrvTarget {
-  XmppSrvTarget({
-    required this.host,
-    required this.port,
-    required this.priority,
-    required this.weight,
-    required this.directTls,
-  });
-
-  final String host;
-  final int port;
-  final int priority;
-  final int weight;
-  final bool directTls;
-}
+import 'srv_ordering.dart';
+import 'srv_target.dart';
 
 const MethodChannel _channel = MethodChannel('wimsy/dns');
 
 Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
-  debugPrint('SRV lookup: domain=$domain');
-  final records = <XmppSrvTarget>[];
-  records.addAll(await _lookupSrv('_xmpps-client._tcp.$domain', directTls: true));
-  records.addAll(await _lookupSrv('_xmpp-client._tcp.$domain', directTls: false));
-  if (records.isEmpty) {
-    debugPrint('SRV lookup: no records found');
+  final candidates = await resolveXmppSrvCandidates(domain);
+  if (candidates.isEmpty) {
     return null;
   }
-  final selected = _pickSrvTarget(records);
-  if (selected != null) {
+  return candidates.first;
+}
+
+Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
+  debugPrint('SRV lookup: domain=$domain');
+  final records = <XmppSrvTarget>[];
+  records.addAll(
+    await _lookupSrv('_xmpps-client._tcp.$domain', directTls: true),
+  );
+  records.addAll(
+    await _lookupSrv('_xmpp-client._tcp.$domain', directTls: false),
+  );
+  if (records.isEmpty) {
+    debugPrint('SRV lookup: no records found');
+    return const [];
+  }
+  final ordered = orderXmppSrvTargets(records);
+  final selected = ordered.first;
+  if (ordered.isNotEmpty) {
     debugPrint(
       'SRV lookup: selected host=${selected.host} port=${selected.port} '
       'priority=${selected.priority} weight=${selected.weight} directTls=${selected.directTls}',
     );
   }
-  return selected;
+  return ordered;
 }
 
-Future<List<XmppSrvTarget>> _lookupSrv(String name, {required bool directTls}) async {
+Future<List<XmppSrvTarget>> _lookupSrv(
+  String name, {
+  required bool directTls,
+}) async {
   final native = await _lookupSrvNative(name);
   if (native.isNotEmpty) {
     return native
-        .map((entry) => XmppSrvTarget(
-              host: entry.host,
-              port: entry.port,
-              priority: entry.priority,
-              weight: entry.weight,
-              directTls: directTls,
-            ))
+        .map(
+          (entry) => XmppSrvTarget(
+            host: entry.host,
+            port: entry.port,
+            priority: entry.priority,
+            weight: entry.weight,
+            directTls: directTls,
+          ),
+        )
         .toList();
   }
   return _lookupSrvUdp(name, directTls: directTls);
@@ -95,12 +99,14 @@ Future<List<_NativeSrvRecord>> _lookupSrvNative(String name) async {
       if (host.isEmpty || port == null || priority == null || weight == null) {
         continue;
       }
-      records.add(_NativeSrvRecord(
-        host: host,
-        port: port,
-        priority: priority,
-        weight: weight,
-      ));
+      records.add(
+        _NativeSrvRecord(
+          host: host,
+          port: port,
+          priority: priority,
+          weight: weight,
+        ),
+      );
     }
     debugPrint('SRV native: records=${records.length}');
     return records;
@@ -123,7 +129,10 @@ int? _toInt(dynamic value) {
   return null;
 }
 
-Future<List<XmppSrvTarget>> _lookupSrvUdp(String name, {required bool directTls}) async {
+Future<List<XmppSrvTarget>> _lookupSrvUdp(
+  String name, {
+  required bool directTls,
+}) async {
   debugPrint('SRV udp: query=$name');
   final resolvers = await _systemResolvers();
   if (resolvers.isEmpty) {
@@ -138,13 +147,15 @@ Future<List<XmppSrvTarget>> _lookupSrvUdp(String name, {required bool directTls}
       continue;
     }
     for (final record in response) {
-      records.add(XmppSrvTarget(
-        host: record.target,
-        port: record.port,
-        priority: record.priority,
-        weight: record.weight,
-        directTls: directTls,
-      ));
+      records.add(
+        XmppSrvTarget(
+          host: record.target,
+          port: record.port,
+          priority: record.priority,
+          weight: record.weight,
+          directTls: directTls,
+        ),
+      );
     }
     if (records.isNotEmpty) {
       break;
@@ -199,7 +210,9 @@ class _SrvRecord {
 
 Future<List<_SrvRecord>> _querySrv(String name, InternetAddress server) async {
   final socket = await RawDatagramSocket.bind(
-    server.type == InternetAddressType.IPv6 ? InternetAddress.anyIPv6 : InternetAddress.anyIPv4,
+    server.type == InternetAddressType.IPv6
+        ? InternetAddress.anyIPv6
+        : InternetAddress.anyIPv4,
     0,
   );
   try {
@@ -224,9 +237,12 @@ Future<List<_SrvRecord>> _querySrv(String name, InternetAddress server) async {
         }
       }
     });
-    final datagram = await completer.future.timeout(const Duration(seconds: 4), onTimeout: () {
-      return null;
-    });
+    final datagram = await completer.future.timeout(
+      const Duration(seconds: 4),
+      onTimeout: () {
+        return null;
+      },
+    );
     await sub.cancel();
     if (datagram == null) {
       return const [];
@@ -304,12 +320,14 @@ List<_SrvRecord> _parseSrvResponse(Uint8List data) {
         final target = decoded.name.endsWith('.')
             ? decoded.name.substring(0, decoded.name.length - 1)
             : decoded.name;
-        records.add(_SrvRecord(
-          priority: priority,
-          weight: weight,
-          port: port,
-          target: target,
-        ));
+        records.add(
+          _SrvRecord(
+            priority: priority,
+            weight: weight,
+            port: port,
+            target: target,
+          ),
+        );
       }
     }
     offset += rdLength;
@@ -369,29 +387,4 @@ _NameDecode _readName(Uint8List data, int offset) {
   final name = labels.join('.');
   final nextOffset = jumped ? jumpOffset : current;
   return _NameDecode(name, nextOffset);
-}
-
-XmppSrvTarget? _pickSrvTarget(List<XmppSrvTarget> records) {
-  if (records.isEmpty) {
-    return null;
-  }
-  records.sort((a, b) => a.priority.compareTo(b.priority));
-  final bestPriority = records.first.priority;
-  final candidates = records.where((record) => record.priority == bestPriority).toList();
-  if (candidates.length == 1) {
-    return candidates.first;
-  }
-  final totalWeight = candidates.fold<int>(0, (sum, record) => sum + record.weight);
-  if (totalWeight <= 0) {
-    return candidates[Random().nextInt(candidates.length)];
-  }
-  final roll = Random().nextInt(totalWeight);
-  var running = 0;
-  for (final record in candidates) {
-    running += record.weight;
-    if (roll < running) {
-      return record;
-    }
-  }
-  return candidates.last;
 }
