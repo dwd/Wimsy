@@ -16,8 +16,12 @@ void main() {
       var tcpCalled = false;
       var wsCalled = false;
       final channel = MockWebSocketChannel();
+      final addresses = <InternetAddress>[
+        InternetAddress('203.0.113.10'),
+      ];
       final socket = XmppWebSocketIo(
-        tcpConnect: (host, port) {
+        hostLookup: (host, {type = InternetAddressType.any}) async => addresses,
+        tcpConnect: (address, port, {timeout}) {
           tcpCalled = true;
           return Future.value(MockSocket());
         },
@@ -43,12 +47,18 @@ void main() {
       var secureCalled = false;
       final rawSocket = MockSocket();
       final secureSocket = MockSecureSocket();
+      final addresses = <InternetAddress>[
+        InternetAddress('203.0.113.20'),
+      ];
       final socket = XmppWebSocketIo(
-        tcpConnect: (host, port) {
+        hostLookup: (host, {type = InternetAddressType.any}) async => addresses,
+        tcpConnect: (address, port, {timeout}) {
           tcpCalled = true;
+          expect(timeout, const Duration(seconds: 5));
           return Future.value(rawSocket);
         },
-        secureSocketFactory: (socket, {host, context, onBadCertificate, supportedProtocols}) {
+        secureSocketFactory: (socket,
+            {host, context, onBadCertificate, supportedProtocols}) {
           secureCalled = true;
           return Future.value(secureSocket);
         },
@@ -62,6 +72,27 @@ void main() {
 
       expect(tcpCalled, isTrue);
       expect(secureCalled, isTrue);
+    });
+
+    test('Happy Eyeballs falls back from IPv6 to IPv4', () async {
+      final attempted = <InternetAddressType>[];
+      final v6 = InternetAddress('2001:db8::1');
+      final v4 = InternetAddress('203.0.113.30');
+      final socket = XmppWebSocketIo(
+        hostLookup: (host, {type = InternetAddressType.any}) async => [v6, v4],
+        tcpConnect: (address, port, {timeout}) {
+          attempted.add(address.type);
+          if (address.type == InternetAddressType.IPv6) {
+            throw const SocketException('IPv6 failed');
+          }
+          return Future.value(MockSocket());
+        },
+        happyEyeballsDelay: Duration.zero,
+      );
+
+      await socket.connect('example.com', 5222);
+
+      expect(attempted, [InternetAddressType.IPv6, InternetAddressType.IPv4]);
     });
   });
 }

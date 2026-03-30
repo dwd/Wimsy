@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:universal_io/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:xmpp_stone/src/connection/HappyEyeballsConnector.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 
@@ -21,17 +22,27 @@ class XmppWebSocketIo extends XmppWebSocket {
   WebSocketChannel? _webSocket;
   bool _useWebSocket = false;
   late String Function(String event) _map;
-  final TcpSocketConnect _tcpConnect;
+  final HostLookup _hostLookup;
+  final TcpAddressConnect _tcpConnect;
   final SecureSocketFactory _secureSocketFactory;
   final WebSocketChannelFactory _webSocketConnect;
+  final Duration _happyEyeballsDelay;
+  final Duration _connectTimeout;
 
   XmppWebSocketIo({
-    TcpSocketConnect? tcpConnect,
+    HostLookup? hostLookup,
+    TcpAddressConnect? tcpConnect,
     SecureSocketFactory? secureSocketFactory,
     WebSocketChannelFactory? webSocketConnect,
+    Duration happyEyeballsDelay = const Duration(milliseconds: 250),
+    Duration connectTimeout = const Duration(seconds: 5),
   })  : _tcpConnect = tcpConnect ?? Socket.connect,
-        _secureSocketFactory = secureSocketFactory ?? _defaultSecureSocketFactory,
-        _webSocketConnect = webSocketConnect ?? _defaultWebSocketConnect;
+        _hostLookup = hostLookup ?? InternetAddress.lookup,
+        _secureSocketFactory =
+            secureSocketFactory ?? _defaultSecureSocketFactory,
+        _webSocketConnect = webSocketConnect ?? _defaultWebSocketConnect,
+        _happyEyeballsDelay = happyEyeballsDelay,
+        _connectTimeout = connectTimeout;
 
   @override
   Future<XmppWebSocket> connect<S>(String host, int port,
@@ -56,15 +67,20 @@ class XmppWebSocketIo extends XmppWebSocket {
       Log.i(TAG, 'WebSocket URI: $uri');
       _webSocket = _webSocketConnect(uri, protocols: wsProtocols);
     } else {
+      final connector = HappyEyeballsConnector(
+        hostLookup: _hostLookup,
+        tcpConnect: _tcpConnect,
+        fallbackDelay: _happyEyeballsDelay,
+        connectTimeout: _connectTimeout,
+      );
       if (directTls) {
         Log.i(TAG, 'Direct TLS: SecureSocket.connect');
-        final rawSocket = await _tcpConnect(host, port);
-        _tcpSocket = await _secureSocketFactory(rawSocket, host: tlsHost ?? host);
+        final rawSocket = await connector.connect(host, port);
+        _tcpSocket =
+            await _secureSocketFactory(rawSocket, host: tlsHost ?? host);
       } else {
-        Log.i(TAG, 'Plain TCP: Socket.connect');
-        await _tcpConnect(host, port).then((Socket socket) {
-          _tcpSocket = socket;
-        });
+        Log.i(TAG, 'Plain TCP: HappyEyeballs connect');
+        _tcpSocket = await connector.connect(host, port);
       }
     }
 
@@ -99,17 +115,18 @@ class XmppWebSocketIo extends XmppWebSocket {
   StreamSubscription<String> listen(void Function(String event)? onData,
       {Function? onError, void Function()? onDone, bool? cancelOnError}) {
     if (_useWebSocket) {
-      return _webSocket!.stream.map((event) => event.toString()).map(_map).listen(
-          onData,
-          onError: onError,
-          onDone: onDone,
-          cancelOnError: cancelOnError);
+      return _webSocket!.stream
+          .map((event) => event.toString())
+          .map(_map)
+          .listen(onData,
+              onError: onError, onDone: onDone, cancelOnError: cancelOnError);
     }
-    return _tcpSocket!.cast<List<int>>().transform(utf8.decoder).map(_map).listen(
-        onData,
-        onError: onError,
-        onDone: onDone,
-        cancelOnError: cancelOnError);
+    return _tcpSocket!
+        .cast<List<int>>()
+        .transform(utf8.decoder)
+        .map(_map)
+        .listen(onData,
+            onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 
   @override
@@ -141,7 +158,6 @@ class XmppWebSocketIo extends XmppWebSocket {
   }
 }
 
-typedef TcpSocketConnect = Future<Socket> Function(String host, int port);
 typedef SecureSocketFactory = Future<SecureSocket> Function(
   Socket socket, {
   String? host,
