@@ -33,6 +33,13 @@ Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
   final ordered = orderXmppSrvTargets(records);
   final selected = ordered.first;
   if (ordered.isNotEmpty) {
+    final orderSummary = ordered
+        .map(
+          (record) =>
+              '${record.host}:${record.port}/p${record.priority}/w${record.weight}/tls=${record.directTls}',
+        )
+        .join(', ');
+    debugPrint('SRV lookup: ordered candidates=[$orderSummary]');
     debugPrint(
       'SRV lookup: selected host=${selected.host} port=${selected.port} '
       'priority=${selected.priority} weight=${selected.weight} directTls=${selected.directTls}',

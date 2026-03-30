@@ -94,5 +94,25 @@ void main() {
 
       expect(attempted, [InternetAddressType.IPv6, InternetAddressType.IPv4]);
     });
+
+    test('Happy Eyeballs throws after exhausting all addresses', () async {
+      final attempted = <InternetAddressType>[];
+      final v6 = InternetAddress('2001:db8::2');
+      final v4 = InternetAddress('203.0.113.40');
+      final socket = XmppWebSocketIo(
+        hostLookup: (host, {type = InternetAddressType.any}) async => [v6, v4],
+        tcpConnect: (address, port, {timeout}) {
+          attempted.add(address.type);
+          throw const SocketException('unreachable');
+        },
+        happyEyeballsDelay: Duration.zero,
+      );
+
+      await expectLater(
+        socket.connect('example.com', 5222),
+        throwsA(isA<SocketException>()),
+      );
+      expect(attempted, [InternetAddressType.IPv6, InternetAddressType.IPv4]);
+    });
   });
 }

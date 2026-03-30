@@ -76,11 +76,13 @@ class XmppWebSocketIo extends XmppWebSocket {
       if (directTls) {
         Log.i(TAG, 'Direct TLS: SecureSocket.connect');
         final rawSocket = await connector.connect(host, port);
+        _logHappyEyeballsWinner(rawSocket);
         _tcpSocket =
             await _secureSocketFactory(rawSocket, host: tlsHost ?? host);
       } else {
         Log.i(TAG, 'Plain TCP: HappyEyeballs connect');
         _tcpSocket = await connector.connect(host, port);
+        _logHappyEyeballsWinner(_tcpSocket!);
       }
     }
 
@@ -155,6 +157,18 @@ class XmppWebSocketIo extends XmppWebSocket {
   @override
   String getStreamOpeningElement(String domain) {
     return """<?xml version='1.0'?><stream:stream xmlns='jabber:client' version='1.0' xmlns:stream='http://etherx.jabber.org/streams' to='$domain' xml:lang='en'>""";
+  }
+
+  void _logHappyEyeballsWinner(Socket socket) {
+    try {
+      final address = socket.remoteAddress;
+      Log.i(
+          TAG,
+          'HappyEyeballs winner: ${address.address}:${socket.remotePort} '
+          'type=${address.type}');
+    } catch (_) {
+      // Mock/test sockets may not expose remote endpoint details.
+    }
   }
 }
 
