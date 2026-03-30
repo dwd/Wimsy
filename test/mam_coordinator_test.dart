@@ -136,6 +136,7 @@ void main() {
     expect(requested, 'm-99');
     expect(adapter.queries, hasLength(1));
     expect(adapter.queries.single.plan.after, 'm-99');
+    expect(adapter.queries.single.plan.useWithJid, isFalse);
   });
 
   test('catch-up fallback is invoked when no latest anchor exists', () {

@@ -9,6 +9,7 @@ void main() {
     expect(dm.beforeId, isNull);
     expect(dm.after, isNull);
     expect(dm.afterId, isNull);
+    expect(dm.useWithJid, isTrue);
 
     final room = MamQueryPlanner.initial(isRoom: true);
     expect(room.max, 25);
@@ -16,6 +17,7 @@ void main() {
     expect(room.beforeId, isNull);
     expect(room.after, isNull);
     expect(room.afterId, isNull);
+    expect(room.useWithJid, isTrue);
   });
 
   test('older plans switch between before and beforeId by seeded mode', () {
@@ -61,6 +63,7 @@ void main() {
     expect(seeded!.max, 50);
     expect(seeded.afterId, 'm-99');
     expect(seeded.after, isNull);
+    expect(seeded.useWithJid, isFalse);
 
     final unseeded = MamQueryPlanner.catchUp(
       isRoom: true,
@@ -71,6 +74,7 @@ void main() {
     expect(unseeded!.max, 50);
     expect(unseeded.after, 'r-99');
     expect(unseeded.afterId, isNull);
+    expect(unseeded.useWithJid, isTrue);
   });
 
   test('catch-up returns null when no latest anchor exists', () {

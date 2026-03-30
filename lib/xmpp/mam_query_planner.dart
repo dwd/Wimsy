@@ -5,6 +5,7 @@ class MamQueryPlan {
     this.after,
     this.beforeId,
     this.afterId,
+    this.useWithJid = true,
   });
 
   final int max;
@@ -12,6 +13,7 @@ class MamQueryPlan {
   final String? after;
   final String? beforeId;
   final String? afterId;
+  final bool useWithJid;
 }
 
 class MamQueryPlanner {
@@ -48,6 +50,9 @@ class MamQueryPlanner {
       max: isRoom ? 50 : 50,
       afterId: seeded ? latestMamId : null,
       after: seeded ? null : latestMamId,
+      // For DMs, avoid the MAM `with` filter during catch-up to prevent
+      // cursor gaps when local per-chat anchors drift from archive ordering.
+      useWithJid: isRoom,
     );
   }
 }

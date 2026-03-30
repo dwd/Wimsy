@@ -6773,7 +6773,11 @@ class XmppService extends ChangeNotifier {
     if (!mam.enabled) {
       return;
     }
-    final supportsMamExtended = _supportsMamExtendedQuery(connection, mam);
+    final supportsMamExtended = _supportsMamExtendedQuery(
+      connection,
+      mam,
+      isRoom: isRoom,
+    );
     final beforeId = supportsMamExtended ? plan.beforeId : null;
     final afterId = supportsMamExtended ? plan.afterId : null;
     final before =
@@ -6791,7 +6795,7 @@ class XmppService extends ChangeNotifier {
         ? plan.afterId
         : plan.after;
     mam.queryById(
-      jid: isRoom ? null : Jid.fromFullJid(jid),
+      jid: (!isRoom && plan.useWithJid) ? Jid.fromFullJid(jid) : null,
       toJid: isRoom ? Jid.fromFullJid(jid) : null,
       max: plan.max,
       before: before,
@@ -6803,8 +6807,15 @@ class XmppService extends ChangeNotifier {
 
   bool _supportsMamExtendedQuery(
     Connection connection,
-    MessageArchiveManager mam,
-  ) {
+    MessageArchiveManager mam, {
+    required bool isRoom,
+  }) {
+    // Room archives are queried on room/service endpoints, but xmpp_stone's
+    // negotiated MAM capabilities are connection-scoped. Until endpoint-scoped
+    // disco is tracked for rooms, avoid using extended-only fields there.
+    if (isRoom) {
+      return false;
+    }
     if (mam.hasExtended == true) {
       return true;
     }
