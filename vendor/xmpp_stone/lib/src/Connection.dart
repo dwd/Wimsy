@@ -44,6 +44,8 @@ enum XmppConnectionState {
   WouldLikeToClose,
 }
 
+typedef XmppSocketFactory = xmppSocket.XmppWebSocket Function();
+
 class Connection {
   var lock = Lock(reentrant: true);
 
@@ -141,8 +143,10 @@ class Connection {
   XmppConnectionState _state = XmppConnectionState.Idle;
 
   ReconnectionManager? reconnectionManager;
+  final XmppSocketFactory _socketFactory;
 
-  Connection(this.account) {
+  Connection(this.account, {XmppSocketFactory? socketFactory})
+      : _socketFactory = socketFactory ?? xmppSocket.createSocket {
     RosterManager.getInstance(this);
     PresenceManager.getInstance(this);
     MessageHandler.getInstance(this);
@@ -204,7 +208,6 @@ class Connection {
     connectionNegotatiorManager.init();
     setState(XmppConnectionState.SocketOpening);
     try {
-      var socket = xmppSocket.createSocket();
       final useWebSocket = account.useWebSocket ||
           account.wsUrl != null ||
           account.wsHost != null ||
@@ -215,37 +218,89 @@ class Connection {
       final socketPort =
           useWebSocket ? (account.wsPort ?? account.port) : account.port;
       final wsUri = account.wsUrl != null ? Uri.tryParse(account.wsUrl!) : null;
+      final endpoints = useWebSocket
+          ? const <XmppTcpEndpoint>[]
+          : (account.tcpEndpoints != null && account.tcpEndpoints!.isNotEmpty
+              ? account.tcpEndpoints!
+              : <XmppTcpEndpoint>[
+                  XmppTcpEndpoint(
+                    host: socketHost,
+                    port: socketPort,
+                    directTls: account.directTls,
+                    tlsHost: account.domain,
+                  ),
+                ]);
 
-      return await socket
-          .connect(
-        socketHost,
-        socketPort,
-        wsProtocols: account.wsProtocols,
-        wsPath: account.wsPath,
-        wsUri: wsUri,
-        useWebSocket: useWebSocket,
-        directTls: account.directTls,
-        tlsHost: account.domain,
-        map: prepareStreamResponse,
-      )
-          .then((socket) {
-        // if not closed in meantime
-        if (_state != XmppConnectionState.Closed) {
-          setState(XmppConnectionState.SocketOpened);
-          _socket = socket;
-          _socketSubscription?.cancel();
-          _socketSubscription =
-              socket.listen(handleResponse, onDone: handleConnectionDone);
-          _openStream();
-        } else {
-          Log.d(TAG, 'Closed in meantime');
-          socket.close();
+      if (useWebSocket) {
+        final socket = _socketFactory();
+        await socket.connect(
+          socketHost,
+          socketPort,
+          wsProtocols: account.wsProtocols,
+          wsPath: account.wsPath,
+          wsUri: wsUri,
+          useWebSocket: true,
+          directTls: account.directTls,
+          tlsHost: account.domain,
+          map: prepareStreamResponse,
+        );
+        _attachOpenedSocket(socket);
+        return;
+      }
+
+      Object? lastError;
+      for (final endpoint in endpoints) {
+        final socket = _socketFactory();
+        try {
+          Log.i(
+            TAG,
+            'TCP endpoint attempt host=${endpoint.host} '
+            'port=${endpoint.port} directTls=${endpoint.directTls}',
+          );
+          await socket.connect(
+            endpoint.host,
+            endpoint.port,
+            useWebSocket: false,
+            directTls: endpoint.directTls,
+            tlsHost: endpoint.tlsHost ?? account.domain,
+            map: prepareStreamResponse,
+          );
+          _attachOpenedSocket(socket);
+          return;
+        } catch (error) {
+          lastError = error;
+          try {
+            socket.close();
+          } catch (_) {
+            // ignore close errors while failing over endpoints
+          }
+          Log.w(
+            TAG,
+            'TCP endpoint failed host=${endpoint.host} '
+            'port=${endpoint.port} error=$error',
+          );
         }
-      });
+      }
+      throw Exception('All TCP endpoints failed. lastError=$lastError');
     } catch (error) {
       Log.e(TAG, 'Socket Exception' + error.toString());
       print('XMPP socket error: $error');
       handleConnectionError(error.toString());
+    }
+  }
+
+  void _attachOpenedSocket(xmppSocket.XmppWebSocket socket) {
+    // if not closed in meantime
+    if (_state != XmppConnectionState.Closed) {
+      setState(XmppConnectionState.SocketOpened);
+      _socket = socket;
+      _socketSubscription?.cancel();
+      _socketSubscription =
+          socket.listen(handleResponse, onDone: handleConnectionDone);
+      _openStream();
+    } else {
+      Log.d(TAG, 'Closed in meantime');
+      socket.close();
     }
   }
 

@@ -1,5 +1,19 @@
 import 'package:xmpp_stone/src/data/Jid.dart';
 
+class XmppTcpEndpoint {
+  const XmppTcpEndpoint({
+    required this.host,
+    required this.port,
+    required this.directTls,
+    this.tlsHost,
+  });
+
+  final String host;
+  final int port;
+  final bool directTls;
+  final String? tlsHost;
+}
+
 class XmppAccountSettings {
   String name;
   String username;
@@ -15,6 +29,7 @@ class XmppAccountSettings {
   int? wsPort;
   String? wsPath;
   List<String>? wsProtocols;
+  List<XmppTcpEndpoint>? tcpEndpoints;
   int totalReconnections = 3;
   int reconnectionTimeout = 1000;
   bool ackEnabled = true;
@@ -35,6 +50,7 @@ class XmppAccountSettings {
     this.wsPort,
     this.wsPath,
     this.wsProtocols,
+    this.tcpEndpoints,
   });
 
   Jid get fullJid => Jid(username, domain, resource);
