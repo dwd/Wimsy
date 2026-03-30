@@ -40,7 +40,9 @@ import 'message_stanza_parser.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
+import 'srv_target.dart';
 import 'alt_connection.dart';
+import 'tcp_endpoint_plan.dart';
 
 class ReplyReference {
   const ReplyReference({
@@ -766,6 +768,7 @@ class XmppService extends ChangeNotifier {
     var resolvedHost = host?.trim().isNotEmpty == true ? host!.trim() : '';
     var resolvedPort = port;
     var resolvedDirectTls = directTls;
+    List<XmppSrvTarget> srvCandidates = const [];
 
     _finishSpan(_connectTransaction);
     _connectTransaction = _startTransaction(
@@ -785,12 +788,13 @@ class XmppService extends ChangeNotifier {
         'xmpp.srv_lookup',
         description: domain,
       );
-      final srvTarget = await resolveXmppSrv(domain);
+      srvCandidates = await resolveXmppSrvCandidates(domain);
       _finishSpan(srvSpan);
-      if (srvTarget != null) {
-        resolvedHost = srvTarget.host;
-        resolvedPort = srvTarget.port;
-        resolvedDirectTls = srvTarget.directTls;
+      if (srvCandidates.isNotEmpty) {
+        final first = srvCandidates.first;
+        resolvedHost = first.host;
+        resolvedPort = first.port;
+        resolvedDirectTls = first.directTls;
       } else if (resolvedPort == 0 || resolvedPort == 5222) {
         resolvedPort = directTls ? 5223 : 5222;
       }
@@ -836,6 +840,15 @@ class XmppService extends ChangeNotifier {
       account.resource = resource;
       account.useWebSocket = shouldUseWebSocket;
       account.directTls = resolvedDirectTls;
+      if (!shouldUseWebSocket) {
+        account.tcpEndpoints = buildTcpEndpointPlan(
+          domain: account.domain,
+          resolvedHost: resolvedHost,
+          resolvedPort: resolvedPort,
+          directTls: resolvedDirectTls,
+          srvCandidates: srvCandidates,
+        );
+      }
       if (wsConfig != null) {
         account.wsUrl = wsConfig.uri.toString();
         account.wsHost = wsConfig.host;
