@@ -5399,6 +5399,17 @@ class XmppService extends ChangeNotifier {
       }
     }
     if (matched == null) {
+      final knownStanzaIds = list
+          .map((message) => message.stanzaId)
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
+          .take(5)
+          .toList(growable: false);
+      Log.w(
+        'XmppService',
+        'Displayed sync miss for chat=$normalized stanzaId=$stanzaId '
+            'messages=${list.length} knownStanzaIds=$knownStanzaIds',
+      );
       return false;
     }
     final existing = _displayedAtByChat[normalized];
