@@ -901,12 +901,19 @@ class XmppService extends ChangeNotifier {
         _lastConnectionState = state;
         if (state == XmppConnectionState.Reconnecting ||
             state == XmppConnectionState.ForcefullyClosed) {
+          // Any in-flight carbons enable request is tied to the old stream.
+          _carbonsRequestId = null;
+          _carbonsEnabled = false;
           _status = XmppStatus.connecting;
           _errorMessage = null;
           notifyListeners();
           return;
         }
         if (state == XmppConnectionState.Resumed) {
+          // Resumed stream may have lost prior client-state assumptions.
+          _carbonsRequestId = null;
+          _carbonsEnabled = false;
+          _csiInactive = false;
           _status = XmppStatus.connected;
           _errorMessage = null;
           notifyListeners();
@@ -914,6 +921,7 @@ class XmppService extends ChangeNotifier {
           _setupDeliveryTracking();
           _setupJingle();
           _setupIbb();
+          _applyClientState();
           return;
         }
         if (state == XmppConnectionState.Ready) {
