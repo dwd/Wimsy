@@ -1,0 +1,9 @@
+enum SaslMechanism {
+  EXTERNAL,
+  SCRAM_SHA_1_PLUS,
+  SCRAM_SHA_1,
+  SCRAM_SHA_256,
+  PLAIN,
+  ANONYMOUS,
+  NOT_SUPPORTED
+}

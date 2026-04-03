@@ -7,6 +7,7 @@ import 'package:universal_io/io.dart';
 import 'package:xml/xml.dart' as xml;
 import 'package:xmpp_stone/src/ReconnectionManager.dart';
 import 'package:xmpp_stone/src/ReconnectionState.dart';
+import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/ConnectionNegotatiorManager.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/CarbonsNegotiator.dart';
@@ -33,6 +34,7 @@ enum XmppConnectionState {
   PlainAuthentication,
   Authenticating,
   Authenticated,
+  AuthenticatedSasl2AwaitingFeatures,
   AuthenticationFailure,
   Resumed,
   SessionInitialized,
@@ -86,6 +88,10 @@ class Connection {
   }
 
   String? errorMessage;
+  String? _authorizationIdentifier;
+  Jid? _authorizedBareJid;
+  Map<String, XmppElement> _sasl2InlineFeatures = {};
+  List<XmppElement> _sasl2SuccessElements = [];
 
   bool authenticated = false;
 
@@ -124,12 +130,45 @@ class Connection {
     return _connectionStateStreamController.stream;
   }
 
-  Jid get fullJid => account.fullJid;
+  Jid get fullJid {
+    final authorized = _authorizedBareJid;
+    if (authorized == null) {
+      return account.fullJid;
+    }
+    return Jid(authorized.local, authorized.domain, account.resource);
+  }
 
   late ConnectionNegotiatorManager connectionNegotatiorManager;
 
   void fullJidRetrieved(Jid jid) {
+    _authorizedBareJid = Jid(jid.local, jid.domain, '');
+    _authorizationIdentifier = _authorizedBareJid!.userAtDomain;
     account.resource = jid.resource;
+  }
+
+  String? get authorizationIdentifier => _authorizationIdentifier;
+
+  void setAuthorizationIdentifier(String bareJid) {
+    final parsed = Jid.fromFullJid(bareJid);
+    if (!parsed.isValid()) {
+      return;
+    }
+    _authorizedBareJid = Jid(parsed.local, parsed.domain, '');
+    _authorizationIdentifier = _authorizedBareJid!.userAtDomain;
+  }
+
+  Map<String, XmppElement> get sasl2InlineFeatures =>
+      Map.unmodifiable(_sasl2InlineFeatures);
+
+  void setSasl2InlineFeatures(Map<String, XmppElement> features) {
+    _sasl2InlineFeatures = Map<String, XmppElement>.from(features);
+  }
+
+  List<XmppElement> get sasl2SuccessElements =>
+      List.unmodifiable(_sasl2SuccessElements);
+
+  void setSasl2SuccessElements(List<XmppElement> elements) {
+    _sasl2SuccessElements = List<XmppElement>.from(elements);
   }
 
   xmppSocket.XmppWebSocket? _socket;
@@ -205,6 +244,8 @@ class Connection {
   }
 
   Future<void> openSocket() async {
+    _sasl2InlineFeatures = {};
+    _sasl2SuccessElements = [];
     connectionNegotatiorManager.init();
     setState(XmppConnectionState.SocketOpening);
     try {
@@ -531,6 +572,9 @@ class Connection {
     if (state == XmppConnectionState.Authenticated) {
       authenticated = true;
       _openStream();
+    } else if (state ==
+        XmppConnectionState.AuthenticatedSasl2AwaitingFeatures) {
+      authenticated = true;
     } else if (state == XmppConnectionState.Closed ||
         state == XmppConnectionState.ForcefullyClosed) {
       authenticated = false;

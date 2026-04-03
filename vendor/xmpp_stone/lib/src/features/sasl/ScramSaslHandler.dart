@@ -10,7 +10,7 @@ import 'package:xmpp_stone/src/elements/XmppAttribute.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:unorm_dart/unorm_dart.dart' as unorm;
 import 'package:xmpp_stone/src/features/sasl/AbstractSaslHandler.dart';
-import 'package:xmpp_stone/src/features/sasl/SaslAuthenticationFeature.dart';
+import 'package:xmpp_stone/src/features/sasl/SaslMechanism.dart';
 
 import '../../logger/Log.dart';
 

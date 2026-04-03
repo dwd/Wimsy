@@ -842,6 +842,8 @@ class XmppService extends ChangeNotifier {
       account.resource = resource;
       account.useWebSocket = shouldUseWebSocket;
       account.directTls = resolvedDirectTls;
+      account.sasl2Software = 'Wimsy';
+      account.sasl2Device = resource;
       if (!shouldUseWebSocket) {
         account.tcpEndpoints = buildTcpEndpointPlan(
           domain: account.domain,

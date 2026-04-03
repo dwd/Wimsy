@@ -1,18 +1,26 @@
 import 'package:collection/collection.dart' show IterableExtension;
 import 'package:xmpp_stone/src/Connection.dart';
+import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/Negotiator.dart';
 import 'package:xmpp_stone/src/features/sasl/AbstractSaslHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/AnonymousHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/PlainSaslHandler.dart';
+import 'package:xmpp_stone/src/features/sasl/Sasl2AuthHandler.dart';
+import 'package:xmpp_stone/src/features/sasl/SaslMechanism.dart';
 import 'package:xmpp_stone/src/features/sasl/ScramSaslHandler.dart';
 
 class SaslAuthenticationFeature extends Negotiator {
+  static const String sasl1Namespace = 'urn:ietf:params:xml:ns:xmpp-sasl';
+  static const String sasl2Namespace = 'urn:xmpp:sasl:2';
+
   final Connection _connection;
   final String _password;
 
-  final Set<SaslMechanism> _offeredMechanisms = {};
   final Set<SaslMechanism> _supportedMechanisms = {};
+  final Set<SaslMechanism> _offeredSasl1Mechanisms = {};
+  final Set<SaslMechanism> _offeredSasl2Mechanisms = {};
+  final Map<String, XmppElement> _sasl2InlineFeatures = {};
 
   SaslAuthenticationFeature(this._connection, this._password) {
     _supportedMechanisms.add(SaslMechanism.SCRAM_SHA_1);
@@ -22,87 +30,182 @@ class SaslAuthenticationFeature extends Negotiator {
     expectedName = 'SaslAuthenticationFeature';
   }
 
-  // improve this
   @override
   List<Nonza> match(List<Nonza> requests) {
-    var nonza =
-        requests.firstWhereOrNull((element) => element.name == 'mechanisms');
-    return nonza != null ? [nonza] : [];
+    final out = <Nonza>[];
+    final sasl2 = requests.firstWhereOrNull(
+      (element) =>
+          element.name == 'authentication' &&
+          element.getNameSpace() == sasl2Namespace,
+    );
+    if (sasl2 != null) {
+      out.add(sasl2);
+    }
+    final sasl1 = requests.firstWhereOrNull(
+      (element) =>
+          element.name == 'mechanisms' &&
+          element.getNameSpace() == sasl1Namespace,
+    );
+    if (sasl1 != null) {
+      out.add(sasl1);
+    }
+    return out;
   }
 
   @override
   void negotiate(List<Nonza> nonzas) {
-    if (nonzas.isNotEmpty) {
-      _populateOfferedMechanism(nonzas[0]);
-      _process();
+    if (nonzas.isEmpty) {
+      return;
     }
+    _offeredSasl1Mechanisms.clear();
+    _offeredSasl2Mechanisms.clear();
+    _sasl2InlineFeatures.clear();
+
+    for (final nonza in nonzas) {
+      if (nonza.name == 'authentication' &&
+          nonza.getNameSpace() == sasl2Namespace) {
+        _offeredSasl2Mechanisms.addAll(parseMechanisms(nonza));
+        _sasl2InlineFeatures.addAll(parseInlineFeatures(nonza));
+      } else if (nonza.name == 'mechanisms' &&
+          nonza.getNameSpace() == sasl1Namespace) {
+        _offeredSasl1Mechanisms.addAll(parseMechanisms(nonza));
+      }
+    }
+
+    _connection.setSasl2InlineFeatures(_sasl2InlineFeatures);
+    _process();
   }
 
   void _process() {
-    var mechanism = _supportedMechanisms.firstWhere(
-        (mch) => _offeredMechanisms.contains(mch),
-        orElse: _handleAuthNotSupported);
-    print('XMPP SASL: selected $mechanism (offered $_offeredMechanisms)');
-    AbstractSaslHandler? saslHandler;
+    var useSasl2 = _shouldUseSasl2();
+    var offered = useSasl2 ? _offeredSasl2Mechanisms : _offeredSasl1Mechanisms;
+    var mechanism = _pickSupportedMechanism(offered);
+    if (mechanism == SaslMechanism.NOT_SUPPORTED && useSasl2) {
+      // Fallback before handshake if SASL2 has no supported mechanism.
+      useSasl2 = false;
+      offered = _offeredSasl1Mechanisms;
+      mechanism = _pickSupportedMechanism(offered);
+    }
+    if (mechanism == SaslMechanism.NOT_SUPPORTED) {
+      _handleAuthNotSupported();
+      return;
+    }
+    print(
+      'XMPP SASL: profile=${useSasl2 ? 'sasl2' : 'sasl1'} selected $mechanism '
+      '(offered=$offered)',
+    );
+
+    final saslHandler = _createHandler(mechanism, useSasl2);
+    if (saslHandler == null) {
+      _handleAuthNotSupported();
+      return;
+    }
+
+    state = NegotiatorState.NEGOTIATING;
+    saslHandler.start().then((result) {
+      if (result.successful) {
+        if (useSasl2) {
+          _connection
+            ..setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
+        } else {
+          _connection.setState(XmppConnectionState.Authenticated);
+        }
+      } else {
+        _connection.setState(XmppConnectionState.AuthenticationFailure);
+        _connection.errorMessage = result.message;
+        _connection.close();
+      }
+      state = NegotiatorState.DONE;
+    });
+  }
+
+  bool _shouldUseSasl2() {
+    final hasSasl2 = _offeredSasl2Mechanisms.isNotEmpty;
+    final hasSasl1 = _offeredSasl1Mechanisms.isNotEmpty;
+    if (!hasSasl2 && !hasSasl1) {
+      return false;
+    }
+    if (hasSasl2 && !hasSasl1) {
+      return true;
+    }
+    if (!hasSasl2 && hasSasl1) {
+      return false;
+    }
+    return _connection.account.preferSasl2;
+  }
+
+  AbstractSaslHandler? _createHandler(SaslMechanism mechanism, bool useSasl2) {
+    if (mechanism == SaslMechanism.NOT_SUPPORTED) {
+      return null;
+    }
+    if (useSasl2) {
+      return Sasl2AuthHandler(_connection, _password, mechanism);
+    }
     switch (mechanism) {
       case SaslMechanism.PLAIN:
-        saslHandler = PlainSaslHandler(_connection, _password);
-        break;
+        return PlainSaslHandler(_connection, _password);
       case SaslMechanism.SCRAM_SHA_256:
       case SaslMechanism.SCRAM_SHA_1:
-        saslHandler = ScramSaslHandler(_connection, _password, mechanism);
-        break;
-      case SaslMechanism.SCRAM_SHA_1_PLUS:
-        break;
-      case SaslMechanism.EXTERNAL:
-        break;
+        return ScramSaslHandler(_connection, _password, mechanism);
       case SaslMechanism.ANONYMOUS:
-        saslHandler = AnonymousHandler(_connection, mechanism);
-        break;
-      case SaslMechanism.NOT_SUPPORTED:
-        break;
-    }
-    if (saslHandler != null) {
-      state = NegotiatorState.NEGOTIATING;
-      saslHandler.start().then((result) {
-        if (result.successful) {
-          _connection.setState(XmppConnectionState.Authenticated);
-        } else {
-          _connection.setState(XmppConnectionState.AuthenticationFailure);
-          _connection.errorMessage = result.message;
-          _connection.close();
-        }
-        state = NegotiatorState.DONE;
-      });
+        return AnonymousHandler(_connection, mechanism);
+      default:
+        return null;
     }
   }
 
-  void _populateOfferedMechanism(Nonza nonza) {
+  SaslMechanism _pickSupportedMechanism(Set<SaslMechanism> offered) {
+    return _supportedMechanisms.firstWhere(
+      (mch) => offered.contains(mch),
+      orElse: () => SaslMechanism.NOT_SUPPORTED,
+    );
+  }
+
+  static Set<SaslMechanism> parseMechanisms(Nonza nonza) {
+    final offered = <SaslMechanism>{};
     nonza.children
         .where((element) => element.name == 'mechanism')
         .forEach((mechanism) {
       switch (mechanism.textValue) {
         case 'EXTERNAL':
-          _offeredMechanisms.add(SaslMechanism.EXTERNAL);
+          offered.add(SaslMechanism.EXTERNAL);
           break;
         case 'SCRAM-SHA-1-PLUS':
-          _offeredMechanisms.add(SaslMechanism.SCRAM_SHA_1_PLUS);
+          offered.add(SaslMechanism.SCRAM_SHA_1_PLUS);
           break;
         case 'SCRAM-SHA-256':
-          _offeredMechanisms.add(SaslMechanism.SCRAM_SHA_256);
+          offered.add(SaslMechanism.SCRAM_SHA_256);
           break;
         case 'SCRAM-SHA-1':
-          _offeredMechanisms.add(SaslMechanism.SCRAM_SHA_1);
+          offered.add(SaslMechanism.SCRAM_SHA_1);
           break;
         case 'ANONYMOUS':
-          _offeredMechanisms.add(SaslMechanism.ANONYMOUS);
+          offered.add(SaslMechanism.ANONYMOUS);
           break;
         case 'PLAIN':
-          _offeredMechanisms.add(SaslMechanism.PLAIN);
+          offered.add(SaslMechanism.PLAIN);
           break;
       }
     });
-    print('XMPP SASL: offered $_offeredMechanisms');
+    return offered;
+  }
+
+  static Map<String, XmppElement> parseInlineFeatures(Nonza authentication) {
+    final parsed = <String, XmppElement>{};
+    final inline = authentication.getChild('inline');
+    if (inline == null) {
+      return parsed;
+    }
+    for (final child in inline.children) {
+      final key = (child.getNameSpace() ?? '').isNotEmpty
+          ? child.getNameSpace()!
+          : child.name ?? '';
+      if (key.isEmpty) {
+        continue;
+      }
+      parsed[key] = child;
+    }
+    return parsed;
   }
 
   SaslMechanism _handleAuthNotSupported() {
@@ -111,14 +214,4 @@ class SaslAuthenticationFeature extends Negotiator {
     state = NegotiatorState.DONE;
     return SaslMechanism.NOT_SUPPORTED;
   }
-}
-
-enum SaslMechanism {
-  EXTERNAL,
-  SCRAM_SHA_1_PLUS,
-  SCRAM_SHA_1,
-  SCRAM_SHA_256,
-  PLAIN,
-  ANONYMOUS,
-  NOT_SUPPORTED
 }

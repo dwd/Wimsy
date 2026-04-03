@@ -30,6 +30,11 @@ class XmppAccountSettings {
   String? wsPath;
   List<String>? wsProtocols;
   List<XmppTcpEndpoint>? tcpEndpoints;
+  bool preferSasl2 = true;
+  bool sasl2SendUserAgent = true;
+  String? sasl2UserAgentId;
+  String? sasl2Software;
+  String? sasl2Device;
   int totalReconnections = 3;
   int reconnectionTimeout = 1000;
   bool ackEnabled = true;
