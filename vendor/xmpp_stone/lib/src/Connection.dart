@@ -503,7 +503,7 @@ class Connection {
         _scheduleFlush();
       }
     } else {
-      _socket!.write(message);
+      _safeSocketWrite(message);
     }
   }
 
@@ -528,7 +528,21 @@ class Connection {
     }
     final payload = _pendingWriteBuffer.toString();
     _pendingWriteBuffer.clear();
-    _socket!.write(payload);
+    _safeSocketWrite(payload);
+  }
+
+  void _safeSocketWrite(Object? payload) {
+    final socket = _socket;
+    if (socket == null) {
+      return;
+    }
+    try {
+      socket.write(payload);
+    } catch (error, stackTrace) {
+      reportError(error, stackTrace);
+      Log.e(TAG, 'Socket write failed: $error');
+      handleConnectionError(error.toString());
+    }
   }
 
   void writeStanza(AbstractStanza stanza) {

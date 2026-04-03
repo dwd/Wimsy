@@ -40,6 +40,21 @@ void main() {
       expect(socket.writes[0], equals('<iq id="1"/>'));
       expect(socket.writes[1], equals('<iq id="2"/>'));
     });
+
+    test('handles broken pipe during buffered flush without uncaught error',
+        () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..bufferedWritesEnabled = true;
+      final connection = Connection(account);
+      final socket = _ThrowingSocket();
+      connection.socket = socket;
+      connection.setState(XmppConnectionState.SocketOpened);
+
+      connection.write('<iq id="1"/>');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(connection.state, XmppConnectionState.ForcefullyClosed);
+    });
   });
 }
 
@@ -100,5 +115,12 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
       onDone: onDone,
       cancelOnError: cancelOnError,
     );
+  }
+}
+
+class _ThrowingSocket extends _RecordingSocket {
+  @override
+  void write(Object? message) {
+    throw const SocketException('Broken pipe', osError: OSError('Broken pipe'));
   }
 }
