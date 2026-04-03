@@ -7,6 +7,7 @@ import 'package:universal_io/io.dart';
 import 'package:xml/xml.dart' as xml;
 import 'package:xmpp_stone/src/ReconnectionManager.dart';
 import 'package:xmpp_stone/src/ReconnectionState.dart';
+import 'package:xmpp_stone/src/elements/XmppAttribute.dart';
 import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/ConnectionNegotatiorManager.dart';
@@ -92,6 +93,8 @@ class Connection {
   Jid? _authorizedBareJid;
   Map<String, XmppElement> _sasl2InlineFeatures = {};
   List<XmppElement> _sasl2SuccessElements = [];
+  XmppElement? _iapConfigVersion;
+  bool _iapAdvertisedInCurrentStream = false;
 
   bool authenticated = false;
 
@@ -171,6 +174,29 @@ class Connection {
     _sasl2SuccessElements = List<XmppElement>.from(elements);
   }
 
+  XmppElement? get iapConfigVersion => _iapConfigVersion;
+
+  void setIapConfigVersion({required String scheme, required String value}) {
+    final element = XmppElement()
+      ..name = 'config-version'
+      ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:iap:0'))
+      ..addAttribute(XmppAttribute('scheme', scheme))
+      ..addAttribute(XmppAttribute('value', value));
+    _iapConfigVersion = element;
+    _iapAdvertisedInCurrentStream = true;
+    account.iapConfigVersionScheme = scheme;
+    account.iapConfigVersionValue = value;
+  }
+
+  void clearIapConfigVersion() {
+    _iapConfigVersion = null;
+    _iapAdvertisedInCurrentStream = false;
+    account.iapConfigVersionScheme = null;
+    account.iapConfigVersionValue = null;
+  }
+
+  bool get iapAdvertisedInCurrentStream => _iapAdvertisedInCurrentStream;
+
   xmppSocket.XmppWebSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
 
@@ -249,6 +275,22 @@ class Connection {
   Future<void> openSocket() async {
     _sasl2InlineFeatures = {};
     _sasl2SuccessElements = [];
+    _iapAdvertisedInCurrentStream = false;
+    final iapScheme = account.iapConfigVersionScheme?.trim();
+    final iapValue = account.iapConfigVersionValue?.trim();
+    if (iapScheme != null &&
+        iapScheme.isNotEmpty &&
+        iapValue != null &&
+        iapValue.isNotEmpty) {
+      final element = XmppElement()
+        ..name = 'config-version'
+        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:iap:0'))
+        ..addAttribute(XmppAttribute('scheme', iapScheme))
+        ..addAttribute(XmppAttribute('value', iapValue));
+      _iapConfigVersion = element;
+    } else {
+      _iapConfigVersion = null;
+    }
     connectionNegotatiorManager.init();
     setState(XmppConnectionState.SocketOpening);
     try {

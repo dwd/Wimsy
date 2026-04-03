@@ -18,6 +18,7 @@ import '../../logger/Log.dart';
 class Sasl2AuthHandler implements AbstractSaslHandler {
   static const String TAG = 'Sasl2AuthHandler';
   static const String sasl2Namespace = 'urn:xmpp:sasl:2';
+  static const String iapNamespace = 'urn:xmpp:iap:0';
   static const int clientNonceLength = 48;
 
   final Connection _connection;
@@ -82,6 +83,12 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
 
     if (_connection.account.sasl2SendUserAgent) {
       authenticate.addChild(_buildUserAgentElement());
+    }
+    if (_connection.account.iapEnabled &&
+        _connection.account.iapIncludeConfigVersion &&
+        _connection.iapAdvertisedInCurrentStream &&
+        _connection.iapConfigVersion != null) {
+      authenticate.addChild(_connection.iapConfigVersion!);
     }
 
     _state = _Sasl2State.authSent;
@@ -330,6 +337,16 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   String? _extractFailureReason(Nonza nonza) {
     if (nonza.children.isEmpty) {
       return nonza.textValue;
+    }
+    final iapMismatch = nonza.children.firstWhere(
+      (child) =>
+          child.name == 'config-version-mismatch' &&
+          child.getNameSpace() == iapNamespace,
+      orElse: () => XmppElement(),
+    );
+    if (iapMismatch.name == 'config-version-mismatch') {
+      _connection.clearIapConfigVersion();
+      return 'IAP config-version mismatch';
     }
     final first = nonza.children.first;
     if (first.name == 'text') {

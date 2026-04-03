@@ -13,6 +13,7 @@ import 'package:xmpp_stone/src/features/sasl/ScramSaslHandler.dart';
 class SaslAuthenticationFeature extends Negotiator {
   static const String sasl1Namespace = 'urn:ietf:params:xml:ns:xmpp-sasl';
   static const String sasl2Namespace = 'urn:xmpp:sasl:2';
+  static const String iapNamespace = 'urn:xmpp:iap:0';
 
   final Connection _connection;
   final String _password;
@@ -49,6 +50,14 @@ class SaslAuthenticationFeature extends Negotiator {
     if (sasl1 != null) {
       out.add(sasl1);
     }
+    final iapConfigVersion = requests.firstWhereOrNull(
+      (element) =>
+          element.name == 'config-version' &&
+          element.getNameSpace() == iapNamespace,
+    );
+    if (iapConfigVersion != null) {
+      out.add(iapConfigVersion);
+    }
     return out;
   }
 
@@ -69,6 +78,9 @@ class SaslAuthenticationFeature extends Negotiator {
       } else if (nonza.name == 'mechanisms' &&
           nonza.getNameSpace() == sasl1Namespace) {
         _offeredSasl1Mechanisms.addAll(parseMechanisms(nonza));
+      } else if (nonza.name == 'config-version' &&
+          nonza.getNameSpace() == iapNamespace) {
+        applyIapConfigVersion(_connection, nonza);
       }
     }
 
@@ -206,6 +218,17 @@ class SaslAuthenticationFeature extends Negotiator {
       parsed[key] = child;
     }
     return parsed;
+  }
+
+  static void applyIapConfigVersion(Connection connection, Nonza nonza) {
+    final scheme = nonza.getAttribute('scheme')?.value?.trim() ?? '';
+    final value = nonza.getAttribute('value')?.value?.trim() ??
+        (nonza.textValue ?? '').trim();
+    if (scheme.isEmpty || value.isEmpty) {
+      connection.clearIapConfigVersion();
+      return;
+    }
+    connection.setIapConfigVersion(scheme: scheme, value: value);
   }
 
   SaslMechanism _handleAuthNotSupported() {

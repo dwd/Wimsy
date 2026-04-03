@@ -35,6 +35,10 @@ class XmppAccountSettings {
   String? sasl2UserAgentId;
   String? sasl2Software;
   String? sasl2Device;
+  bool iapEnabled = true;
+  bool iapIncludeConfigVersion = false;
+  String? iapConfigVersionScheme;
+  String? iapConfigVersionValue;
   bool bufferedWritesEnabled = true;
   int totalReconnections = 3;
   int reconnectionTimeout = 1000;

@@ -43,6 +43,33 @@ void main() {
       expect(mechanisms, contains(SaslMechanism.PLAIN));
       expect(inlineFeatures.containsKey('urn:xmpp:bind2:0'), isTrue);
     });
+
+    test('applies IAP config-version offer to connection', () {
+      final connection = Connection(
+        XmppAccountSettings.fromJid('alice@example.com', 'secret'),
+      );
+      final configVersion = Nonza()
+        ..name = 'config-version'
+        ..addAttribute(
+          XmppAttribute('xmlns', SaslAuthenticationFeature.iapNamespace),
+        )
+        ..addAttribute(XmppAttribute('scheme', 'sha-256'))
+        ..addAttribute(XmppAttribute('value', 'abc123'));
+
+      SaslAuthenticationFeature.applyIapConfigVersion(
+          connection, configVersion);
+
+      expect(connection.iapAdvertisedInCurrentStream, isTrue);
+      expect(connection.iapConfigVersion, isNotNull);
+      expect(
+        connection.iapConfigVersion?.getAttribute('scheme')?.value,
+        equals('sha-256'),
+      );
+      expect(
+        connection.iapConfigVersion?.getAttribute('value')?.value,
+        equals('abc123'),
+      );
+    });
   });
 
   group('SASL2 handler', () {
@@ -75,6 +102,7 @@ void main() {
         userAgent?.getAttribute('id')?.value,
         equals('123e4567-e89b-42d3-a456-426614174000'),
       );
+      expect(auth.getChild('config-version'), isNull);
 
       connection.handleResponse(
         "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
@@ -112,6 +140,66 @@ void main() {
       final result = await resultFuture;
       expect(result.successful, isFalse);
       expect(result.message, contains('not yet supported'));
+    });
+
+    test('includes IAP config-version in authenticate when advertised',
+        () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..iapEnabled = true
+        ..iapIncludeConfigVersion = true
+        ..sasl2SendUserAgent = false;
+      final connection = Connection(account);
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+      connection.setIapConfigVersion(scheme: 'sha-256', value: 'cfg-v1');
+      connection.setState(XmppConnectionState.SocketOpened);
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+
+      await Future<void>.delayed(Duration.zero);
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      final configVersion = auth.getChild('config-version');
+      expect(configVersion, isNotNull);
+      expect(configVersion?.getAttribute('scheme')?.value, equals('sha-256'));
+      expect(configVersion?.getAttribute('value')?.value, equals('cfg-v1'));
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'/></xmpp_stone>",
+      );
+      final result = await resultFuture;
+      expect(result.successful, isTrue);
+    });
+
+    test('clears IAP config-version on mismatch failure', () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..iapEnabled = true
+        ..iapIncludeConfigVersion = true
+        ..sasl2SendUserAgent = false;
+      final connection = Connection(account);
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+      connection.setIapConfigVersion(scheme: 'sha-256', value: 'cfg-v1');
+      connection.setState(XmppConnectionState.SocketOpened);
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      connection.handleResponse(
+        "<xmpp_stone><failure xmlns='urn:xmpp:sasl:2'>"
+        "<config-version-mismatch xmlns='urn:xmpp:iap:0'/>"
+        "</failure></xmpp_stone>",
+      );
+
+      final result = await resultFuture;
+      expect(result.successful, isFalse);
+      expect(result.message, equals('IAP config-version mismatch'));
+      expect(connection.iapConfigVersion, isNull);
+      expect(connection.iapAdvertisedInCurrentStream, isFalse);
     });
   });
 
