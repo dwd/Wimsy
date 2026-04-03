@@ -35,6 +35,7 @@ class XmppAccountSettings {
   String? sasl2UserAgentId;
   String? sasl2Software;
   String? sasl2Device;
+  bool bufferedWritesEnabled = true;
   int totalReconnections = 3;
   int reconnectionTimeout = 1000;
   bool ackEnabled = true;

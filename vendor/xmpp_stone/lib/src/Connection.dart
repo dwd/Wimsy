@@ -183,6 +183,9 @@ class Connection {
 
   ReconnectionManager? reconnectionManager;
   final XmppSocketFactory _socketFactory;
+  final StringBuffer _pendingWriteBuffer = StringBuffer();
+  bool _flushScheduled = false;
+  int _inboundProcessingDepth = 0;
 
   Connection(this.account, {XmppSocketFactory? socketFactory})
       : _socketFactory = socketFactory ?? xmppSocket.createSocket {
@@ -338,6 +341,9 @@ class Connection {
       _socketSubscription?.cancel();
       _socketSubscription =
           socket.listen(handleResponse, onDone: handleConnectionDone);
+      _pendingWriteBuffer.clear();
+      _flushScheduled = false;
+      _inboundProcessingDepth = 0;
       _openStream();
     } else {
       Log.d(TAG, 'Closed in meantime');
@@ -356,6 +362,8 @@ class Connection {
         try {
           setState(XmppConnectionState.Closing);
           _socketSubscription?.cancel();
+          _pendingWriteBuffer.clear();
+          _flushScheduled = false;
           _socket!.write('</stream:stream>');
         } on Exception {
           Log.d(TAG, 'Socket already closed');
@@ -410,6 +418,7 @@ class Connection {
   String _unparsedXmlResponse = '';
 
   void handleResponse(String response) {
+    _inboundProcessingDepth++;
     String fullResponse;
     if (_unparsedXmlResponse.isNotEmpty) {
       if (response.length > 12) {
@@ -423,40 +432,48 @@ class Connection {
       fullResponse = response;
     }
 
-    if (fullResponse.isNotEmpty) {
-      xml.XmlNode? xmlResponse;
-      try {
-        xmlResponse = xml.XmlDocument.parse(
-                fullResponse.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''))
-            .firstChild;
-      } catch (e) {
-        _unparsedXmlResponse += fullResponse.substring(
-            0, fullResponse.length - 13); //remove  xmpp_stone end tag
-        xmlResponse = xml.XmlElement(xml.XmlName('error'));
+    try {
+      if (fullResponse.isNotEmpty) {
+        xml.XmlNode? xmlResponse;
+        try {
+          xmlResponse = xml.XmlDocument.parse(
+                  fullResponse.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''))
+              .firstChild;
+        } catch (e) {
+          _unparsedXmlResponse += fullResponse.substring(
+              0, fullResponse.length - 13); //remove  xmpp_stone end tag
+          xmlResponse = xml.XmlElement(xml.XmlName('error'));
+        }
+
+        //TODO: Improve parser for children only
+        xmlResponse!.descendants
+            .whereType<xml.XmlElement>()
+            .where((element) => startMatcher(element))
+            .forEach((element) => processInitialStream(element));
+
+        xmlResponse.childElements
+            .where((element) => stanzaMatcher(element))
+            .map((xmlElement) => StanzaParser.parseStanza(xmlElement))
+            .forEach((stanza) => _inStanzaStreamController.add(stanza));
+
+        xmlResponse.descendants
+            .whereType<xml.XmlElement>()
+            .where((element) => featureMatcher(element))
+            .forEach((feature) =>
+                connectionNegotatiorManager.negotiateFeatureList(feature));
+
+        //TODO: Probably will introduce bugs!!!
+        xmlResponse.childElements
+            .where((element) => nonzaMatcher(element))
+            .map((xmlElement) => Nonza.parse(xmlElement))
+            .forEach((nonza) => _inNonzaStreamController.add(nonza));
       }
-
-      //TODO: Improve parser for children only
-      xmlResponse!.descendants
-          .whereType<xml.XmlElement>()
-          .where((element) => startMatcher(element))
-          .forEach((element) => processInitialStream(element));
-
-      xmlResponse.childElements
-          .where((element) => stanzaMatcher(element))
-          .map((xmlElement) => StanzaParser.parseStanza(xmlElement))
-          .forEach((stanza) => _inStanzaStreamController.add(stanza));
-
-      xmlResponse.descendants
-          .whereType<xml.XmlElement>()
-          .where((element) => featureMatcher(element))
-          .forEach((feature) =>
-              connectionNegotatiorManager.negotiateFeatureList(feature));
-
-      //TODO: Probably will introduce bugs!!!
-      xmlResponse.childElements
-          .where((element) => nonzaMatcher(element))
-          .map((xmlElement) => Nonza.parse(xmlElement))
-          .forEach((nonza) => _inNonzaStreamController.add(nonza));
+    } finally {
+      _inboundProcessingDepth--;
+      if (_inboundProcessingDepth <= 0) {
+        _inboundProcessingDepth = 0;
+        _scheduleFlush();
+      }
     }
   }
 
@@ -477,9 +494,41 @@ class Connection {
 
   void write(message) {
     Log.xmppp_sending(message);
-    if (isOpened()) {
+    if (!isOpened()) {
+      return;
+    }
+    if (account.bufferedWritesEnabled) {
+      _pendingWriteBuffer.write(message.toString());
+      if (_inboundProcessingDepth <= 0) {
+        _scheduleFlush();
+      }
+    } else {
       _socket!.write(message);
     }
+  }
+
+  void _scheduleFlush() {
+    if (_flushScheduled || !account.bufferedWritesEnabled) {
+      return;
+    }
+    _flushScheduled = true;
+    Timer.run(() {
+      _flushScheduled = false;
+      _flushPendingWrites();
+    });
+  }
+
+  void _flushPendingWrites() {
+    if (!isOpened()) {
+      _pendingWriteBuffer.clear();
+      return;
+    }
+    if (_pendingWriteBuffer.isEmpty) {
+      return;
+    }
+    final payload = _pendingWriteBuffer.toString();
+    _pendingWriteBuffer.clear();
+    _socket!.write(payload);
   }
 
   void writeStanza(AbstractStanza stanza) {

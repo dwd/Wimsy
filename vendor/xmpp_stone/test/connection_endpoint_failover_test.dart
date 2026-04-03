@@ -81,7 +81,8 @@ class _FakeXmppSocket extends XmppWebSocket {
 
 void main() {
   test('Connection retries next endpoint when first endpoint fails', () async {
-    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret');
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..bufferedWritesEnabled = false;
     account.tcpEndpoints = const <XmppTcpEndpoint>[
       XmppTcpEndpoint(host: 'first.example', port: 5222, directTls: false),
       XmppTcpEndpoint(host: 'second.example', port: 5222, directTls: false),
@@ -104,7 +105,8 @@ void main() {
   });
 
   test('Connection forcefully closes when all endpoints fail', () async {
-    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret');
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..bufferedWritesEnabled = false;
     account.tcpEndpoints = const <XmppTcpEndpoint>[
       XmppTcpEndpoint(host: 'first.example', port: 5222, directTls: false),
       XmppTcpEndpoint(host: 'second.example', port: 5222, directTls: false),

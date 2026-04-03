@@ -75,7 +75,8 @@ class _ConnectionSetup {
 
 void main() {
   _ConnectionSetup _newConnection() {
-    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret');
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..bufferedWritesEnabled = false;
     final connection = Connection.getInstance(account);
     StreamManagementModule.getInstance(connection);
     final socket = _FakeSocket();
