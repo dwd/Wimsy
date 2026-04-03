@@ -11,6 +11,8 @@ import 'package:xmpp_stone/src/elements/XmppAttribute.dart';
 import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/ConnectionNegotatiorManager.dart';
+import 'package:xmpp_stone/src/features/sasl/Sasl2AuthHandler.dart';
+import 'package:xmpp_stone/src/features/sasl/SaslAuthenticationFeature.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/CarbonsNegotiator.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/MAMNegotiator.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/ServiceDiscoveryNegotiator.dart';
@@ -95,6 +97,9 @@ class Connection {
   List<XmppElement> _sasl2SuccessElements = [];
   XmppElement? _iapConfigVersion;
   bool _iapAdvertisedInCurrentStream = false;
+  bool _sasl2PipelinedAuthInFlight = false;
+  bool _sasl2PipelinedRetryIssued = false;
+  xml.XmlElement? _deferredFeatureElement;
 
   bool authenticated = false;
 
@@ -196,6 +201,7 @@ class Connection {
   }
 
   bool get iapAdvertisedInCurrentStream => _iapAdvertisedInCurrentStream;
+  bool get sasl2PipelinedAuthInFlight => _sasl2PipelinedAuthInFlight;
 
   xmppSocket.XmppWebSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
@@ -227,6 +233,7 @@ class Connection {
   void _openStream() {
     var streamOpeningString = _socket?.getStreamOpeningElement(fullJid.domain);
     write(streamOpeningString);
+    _tryStartSasl2IapPipeline();
   }
 
   String restOfResponse = '';
@@ -276,6 +283,9 @@ class Connection {
     _sasl2InlineFeatures = {};
     _sasl2SuccessElements = [];
     _iapAdvertisedInCurrentStream = false;
+    _sasl2PipelinedAuthInFlight = false;
+    _sasl2PipelinedRetryIssued = false;
+    _deferredFeatureElement = null;
     final iapScheme = account.iapConfigVersionScheme?.trim();
     final iapValue = account.iapConfigVersionValue?.trim();
     if (iapScheme != null &&
@@ -501,8 +511,13 @@ class Connection {
         xmlResponse.descendants
             .whereType<xml.XmlElement>()
             .where((element) => featureMatcher(element))
-            .forEach((feature) =>
-                connectionNegotatiorManager.negotiateFeatureList(feature));
+            .forEach((feature) {
+          if (_sasl2PipelinedAuthInFlight) {
+            _deferredFeatureElement = feature;
+          } else {
+            connectionNegotatiorManager.negotiateFeatureList(feature);
+          }
+        });
 
         //TODO: Probably will introduce bugs!!!
         xmlResponse.childElements
@@ -585,6 +600,63 @@ class Connection {
       Log.e(TAG, 'Socket write failed: $error');
       handleConnectionError(error.toString());
     }
+  }
+
+  void _tryStartSasl2IapPipeline() {
+    if (_sasl2PipelinedRetryIssued || _sasl2PipelinedAuthInFlight) {
+      return;
+    }
+    if (!account.iapEnabled ||
+        !account.iapPipeliningEnabled ||
+        !account.iapIncludeConfigVersion) {
+      return;
+    }
+    if (_iapConfigVersion == null) {
+      return;
+    }
+
+    final mechanism = SaslAuthenticationFeature.mechanismFromWireName(
+      account.sasl2LastMechanism,
+    );
+    if (mechanism == null) {
+      return;
+    }
+    final cachedMechanisms = account.sasl2CachedMechanisms ?? const <String>[];
+    final mechanismName = account.sasl2LastMechanism;
+    if (mechanismName == null || !cachedMechanisms.contains(mechanismName)) {
+      return;
+    }
+
+    _sasl2PipelinedAuthInFlight = true;
+    authenticating();
+    final handler = Sasl2AuthHandler(
+      this,
+      account.password,
+      mechanism,
+      allowCachedIapConfigVersion: true,
+    );
+    handler.start().then((result) {
+      _sasl2PipelinedAuthInFlight = false;
+      if (result.successful) {
+        setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
+        _deferredFeatureElement = null;
+        return;
+      }
+
+      if (result.retryWithFreshFeatures &&
+          !_sasl2PipelinedRetryIssued &&
+          _deferredFeatureElement != null) {
+        _sasl2PipelinedRetryIssued = true;
+        final features = _deferredFeatureElement!;
+        _deferredFeatureElement = null;
+        connectionNegotatiorManager.negotiateFeatureList(features);
+        return;
+      }
+
+      setState(XmppConnectionState.AuthenticationFailure);
+      errorMessage = result.message;
+      close();
+    });
   }
 
   void writeStanza(AbstractStanza stanza) {

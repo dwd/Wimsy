@@ -5,6 +5,11 @@ abstract class AbstractSaslHandler {
 class AuthenticationResult {
   bool successful;
   String message;
+  bool retryWithFreshFeatures;
 
-  AuthenticationResult(this.successful, this.message);
+  AuthenticationResult(
+    this.successful,
+    this.message, {
+    this.retryWithFreshFeatures = false,
+  });
 }

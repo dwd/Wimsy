@@ -25,6 +25,7 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   final String? _password;
   final SaslMechanism _mechanism;
   final String _mechanismString;
+  final bool _allowCachedIapConfigVersion;
 
   late StreamSubscription<Nonza> _subscription;
   final _completer = Completer<AuthenticationResult>();
@@ -35,9 +36,15 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   late String _clientNonce;
   String? _initialMessage;
   List<int>? _serverSignature;
+  bool _retryWithFreshFeatures = false;
 
-  Sasl2AuthHandler(this._connection, this._password, this._mechanism)
-      : _mechanismString = _mapMechanism(_mechanism) {
+  Sasl2AuthHandler(
+    this._connection,
+    this._password,
+    this._mechanism, {
+    bool allowCachedIapConfigVersion = false,
+  })  : _allowCachedIapConfigVersion = allowCachedIapConfigVersion,
+        _mechanismString = _mapMechanism(_mechanism) {
     if (_mechanism == SaslMechanism.SCRAM_SHA_1) {
       _hash = sha1;
     } else if (_mechanism == SaslMechanism.SCRAM_SHA_256) {
@@ -86,7 +93,8 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
     }
     if (_connection.account.iapEnabled &&
         _connection.account.iapIncludeConfigVersion &&
-        _connection.iapAdvertisedInCurrentStream &&
+        (_connection.iapAdvertisedInCurrentStream ||
+            _allowCachedIapConfigVersion) &&
         _connection.iapConfigVersion != null) {
       authenticate.addChild(_connection.iapConfigVersion!);
     }
@@ -345,7 +353,7 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
       orElse: () => XmppElement(),
     );
     if (iapMismatch.name == 'config-version-mismatch') {
-      _connection.clearIapConfigVersion();
+      _retryWithFreshFeatures = true;
       return 'IAP config-version mismatch';
     }
     final first = nonza.children.first;
@@ -359,7 +367,13 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
     Log.e(TAG, message);
     if (!_completer.isCompleted) {
       _subscription.cancel();
-      _completer.complete(AuthenticationResult(false, message));
+      _completer.complete(
+        AuthenticationResult(
+          false,
+          message,
+          retryWithFreshFeatures: _retryWithFreshFeatures,
+        ),
+      );
     }
   }
 }

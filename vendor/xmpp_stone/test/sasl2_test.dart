@@ -173,7 +173,8 @@ void main() {
       expect(result.successful, isTrue);
     });
 
-    test('clears IAP config-version on mismatch failure', () async {
+    test('requests retry with fresh features on IAP mismatch failure',
+        () async {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..iapEnabled = true
         ..iapIncludeConfigVersion = true
@@ -198,8 +199,12 @@ void main() {
       final result = await resultFuture;
       expect(result.successful, isFalse);
       expect(result.message, equals('IAP config-version mismatch'));
-      expect(connection.iapConfigVersion, isNull);
-      expect(connection.iapAdvertisedInCurrentStream, isFalse);
+      expect(result.retryWithFreshFeatures, isTrue);
+      expect(connection.iapConfigVersion, isNotNull);
+      expect(
+        connection.iapConfigVersion?.getAttribute('value')?.value,
+        equals('cfg-v1'),
+      );
     });
   });
 

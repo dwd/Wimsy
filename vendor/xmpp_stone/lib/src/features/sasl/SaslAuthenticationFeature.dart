@@ -73,6 +73,7 @@ class SaslAuthenticationFeature extends Negotiator {
     for (final nonza in nonzas) {
       if (nonza.name == 'authentication' &&
           nonza.getNameSpace() == sasl2Namespace) {
+        _connection.account.sasl2CachedMechanisms = parseMechanismNames(nonza);
         _offeredSasl2Mechanisms.addAll(parseMechanisms(nonza));
         _sasl2InlineFeatures.addAll(parseInlineFeatures(nonza));
       } else if (nonza.name == 'mechanisms' &&
@@ -82,6 +83,10 @@ class SaslAuthenticationFeature extends Negotiator {
           nonza.getNameSpace() == iapNamespace) {
         applyIapConfigVersion(_connection, nonza);
       }
+    }
+
+    if (_connection.sasl2PipelinedAuthInFlight) {
+      return;
     }
 
     _connection.setSasl2InlineFeatures(_sasl2InlineFeatures);
@@ -106,6 +111,9 @@ class SaslAuthenticationFeature extends Negotiator {
       'XMPP SASL: profile=${useSasl2 ? 'sasl2' : 'sasl1'} selected $mechanism '
       '(offered=$offered)',
     );
+    if (useSasl2) {
+      _connection.account.sasl2LastMechanism = mechanismToWireName(mechanism);
+    }
 
     final saslHandler = _createHandler(mechanism, useSasl2);
     if (saslHandler == null) {
@@ -200,6 +208,52 @@ class SaslAuthenticationFeature extends Negotiator {
       }
     });
     return offered;
+  }
+
+  static List<String> parseMechanismNames(Nonza nonza) {
+    return nonza.children
+        .where((element) => element.name == 'mechanism')
+        .map((element) => (element.textValue ?? '').trim())
+        .where((name) => name.isNotEmpty)
+        .toList();
+  }
+
+  static String? mechanismToWireName(SaslMechanism mechanism) {
+    switch (mechanism) {
+      case SaslMechanism.PLAIN:
+        return 'PLAIN';
+      case SaslMechanism.SCRAM_SHA_1:
+        return 'SCRAM-SHA-1';
+      case SaslMechanism.SCRAM_SHA_256:
+        return 'SCRAM-SHA-256';
+      case SaslMechanism.ANONYMOUS:
+        return 'ANONYMOUS';
+      case SaslMechanism.EXTERNAL:
+        return 'EXTERNAL';
+      case SaslMechanism.SCRAM_SHA_1_PLUS:
+        return 'SCRAM-SHA-1-PLUS';
+      case SaslMechanism.NOT_SUPPORTED:
+        return null;
+    }
+  }
+
+  static SaslMechanism? mechanismFromWireName(String? wireName) {
+    switch (wireName) {
+      case 'PLAIN':
+        return SaslMechanism.PLAIN;
+      case 'SCRAM-SHA-1':
+        return SaslMechanism.SCRAM_SHA_1;
+      case 'SCRAM-SHA-256':
+        return SaslMechanism.SCRAM_SHA_256;
+      case 'ANONYMOUS':
+        return SaslMechanism.ANONYMOUS;
+      case 'EXTERNAL':
+        return SaslMechanism.EXTERNAL;
+      case 'SCRAM-SHA-1-PLUS':
+        return SaslMechanism.SCRAM_SHA_1_PLUS;
+      default:
+        return null;
+    }
   }
 
   static Map<String, XmppElement> parseInlineFeatures(Nonza authentication) {
