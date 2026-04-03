@@ -52,7 +52,7 @@ class StanzaParser {
     var typeString = element.getAttribute('type');
     MessageStanzaType? type;
     if (typeString == null) {
-      Log.w(TAG, 'No type found for message stanza');
+      type = MessageStanzaType.NORMAL;
     } else {
       switch (typeString) {
         case 'chat':
