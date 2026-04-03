@@ -147,6 +147,10 @@ class StreamManagementModule extends Negotiator {
           lastAckSent = 0;
           _pendingAckRequestTimer?.cancel();
           _pendingAckRequestTimer = null;
+          inStanzaSubscription?.cancel();
+          outStanzaSubscription?.cancel();
+          inStanzaSubscription = null;
+          outStanzaSubscription = null;
           state = NegotiatorState.DONE;
           negotiatorStateStreamController = StreamController();
           state = NegotiatorState.IDLE;
@@ -194,7 +198,7 @@ class StreamManagementModule extends Negotiator {
       streamState.streamResumeEnabled = true;
       streamState.id = nonza.getAttribute('id')!.value;
     }
-    lastAckSent = 0;
+    resetRuntimeCounters();
     Log.d(
       TAG,
       'SM enabled resume=${streamState.streamResumeEnabled} recv=${streamState.lastReceivedStanza} ackSent=$lastAckSent',
@@ -274,6 +278,9 @@ class StreamManagementModule extends Negotiator {
     streamState.lastReceivedStanza = 0;
     streamState.nonConfirmedSentStanzas.clear();
     streamState.tryingToResume = false;
+    lastAckSent = 0;
+    _pendingAckRequestTimer?.cancel();
+    _pendingAckRequestTimer = null;
     _clearPendingSmAck();
     _clearPendingPing();
     _emitKeepaliveState();
