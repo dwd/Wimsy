@@ -52,7 +52,8 @@ dependencies:
   flutter_webrtc: ^1.4.0
   permission_handler: ^12.0.1
   http: ^1.6.0
-  flutter_quic: ^1.0.0
+  flutter_quic:
+    path: vendor/flutter_quic
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1

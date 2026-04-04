@@ -313,10 +313,9 @@ packages:
   flutter_quic:
     dependency: "direct main"
     description:
-      name: flutter_quic
-      sha256: d747ddee0c94d3ba9b7d6a32e386b050c8c5abf8a21bd37fb2fa94170671a9d9
-      url: "https://pub.dev"
-    source: hosted
+      path: "vendor/flutter_quic"
+      relative: true
+    source: path
     version: "1.0.0"
   flutter_rust_bridge:
     dependency: transitive

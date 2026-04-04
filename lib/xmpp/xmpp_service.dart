@@ -753,6 +753,13 @@ class XmppService extends ChangeNotifier {
     String? wsEndpoint,
     List<String>? wsProtocols,
   }) async {
+    final quicTransportAvailable =
+        !kIsWeb &&
+        (Platform.isAndroid ||
+            Platform.isIOS ||
+            Platform.isLinux ||
+            Platform.isMacOS ||
+            Platform.isWindows);
     final shouldUseWebSocket = kIsWeb || useWebSocket;
     WsEndpointConfig? wsConfig;
     if (shouldUseWebSocket) {
@@ -793,10 +800,12 @@ class XmppService extends ChangeNotifier {
         'xmpp.srv_lookup',
         description: domain,
       );
-      quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
+      if (quicTransportAvailable) {
+        quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
+      }
       tcpSrvCandidates = await resolveXmppSrvCandidates(domain);
       _finishSpan(srvSpan);
-      if (quicSrvCandidates.isNotEmpty) {
+      if (quicTransportAvailable && quicSrvCandidates.isNotEmpty) {
         final first = quicSrvCandidates.first;
         resolvedHost = first.host;
         resolvedPort = first.port;
@@ -854,10 +863,12 @@ class XmppService extends ChangeNotifier {
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
       if (!shouldUseWebSocket) {
-        account.quicEndpoints = buildQuicEndpointPlan(
-          domain: account.domain,
-          srvCandidates: quicSrvCandidates,
-        );
+        account.quicEndpoints = quicTransportAvailable
+            ? buildQuicEndpointPlan(
+                domain: account.domain,
+                srvCandidates: quicSrvCandidates,
+              )
+            : const [];
         account.tcpEndpoints = buildTcpEndpointPlan(
           domain: account.domain,
           resolvedHost: resolvedHost,
@@ -875,7 +886,8 @@ class XmppService extends ChangeNotifier {
         account.wsProtocols = protocols.isEmpty ? null : protocols;
       }
 
-      final connection = !kIsWeb && (account.quicEndpoints?.isNotEmpty ?? false)
+      final connection =
+          quicTransportAvailable && (account.quicEndpoints?.isNotEmpty ?? false)
           ? Connection.getInstance(
               account,
               socketFactory: () => QuicCapableXmppSocket(),

@@ -193,11 +193,15 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev
+          sudo apt-get install -y curl clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
       - name: Set Build Version
         shell: bash
         run: |
@@ -234,6 +238,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
       - name: Set Build Version
         shell: bash
         run: |
@@ -342,6 +350,12 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
       - name: Set Build Version
         shell: bash
         run: |
