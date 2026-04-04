@@ -51,8 +51,12 @@ class XmppWebSocketIo extends XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) async {
+    if (useQuic) {
+      throw UnsupportedError('QUIC is not implemented in XmppWebSocketIo');
+    }
     _useWebSocket = useWebSocket || wsUri != null || wsPath != null;
     Log.i(TAG,
         'Socket connect: host=$host port=$port useWebSocket=$_useWebSocket directTls=$directTls');

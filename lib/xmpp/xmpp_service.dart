@@ -42,6 +42,8 @@ import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
 import 'srv_target.dart';
 import 'alt_connection.dart';
+import 'quic_endpoint_plan.dart';
+import 'quic_xmpp_socket.dart';
 import 'tcp_endpoint_plan.dart';
 
 class ReplyReference {
@@ -770,7 +772,8 @@ class XmppService extends ChangeNotifier {
     var resolvedHost = host?.trim().isNotEmpty == true ? host!.trim() : '';
     var resolvedPort = port;
     var resolvedDirectTls = directTls;
-    List<XmppSrvTarget> srvCandidates = const [];
+    List<XmppSrvTarget> quicSrvCandidates = const [];
+    List<XmppSrvTarget> tcpSrvCandidates = const [];
 
     _finishSpan(_connectTransaction);
     _connectTransaction = _startTransaction(
@@ -790,10 +793,16 @@ class XmppService extends ChangeNotifier {
         'xmpp.srv_lookup',
         description: domain,
       );
-      srvCandidates = await resolveXmppSrvCandidates(domain);
+      quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
+      tcpSrvCandidates = await resolveXmppSrvCandidates(domain);
       _finishSpan(srvSpan);
-      if (srvCandidates.isNotEmpty) {
-        final first = srvCandidates.first;
+      if (quicSrvCandidates.isNotEmpty) {
+        final first = quicSrvCandidates.first;
+        resolvedHost = first.host;
+        resolvedPort = first.port;
+        resolvedDirectTls = false;
+      } else if (tcpSrvCandidates.isNotEmpty) {
+        final first = tcpSrvCandidates.first;
         resolvedHost = first.host;
         resolvedPort = first.port;
         resolvedDirectTls = first.directTls;
@@ -845,12 +854,16 @@ class XmppService extends ChangeNotifier {
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
       if (!shouldUseWebSocket) {
+        account.quicEndpoints = buildQuicEndpointPlan(
+          domain: account.domain,
+          srvCandidates: quicSrvCandidates,
+        );
         account.tcpEndpoints = buildTcpEndpointPlan(
           domain: account.domain,
           resolvedHost: resolvedHost,
           resolvedPort: resolvedPort,
           directTls: resolvedDirectTls,
-          srvCandidates: srvCandidates,
+          srvCandidates: tcpSrvCandidates,
         );
       }
       if (wsConfig != null) {
@@ -862,7 +875,12 @@ class XmppService extends ChangeNotifier {
         account.wsProtocols = protocols.isEmpty ? null : protocols;
       }
 
-      final connection = Connection.getInstance(account);
+      final connection = !kIsWeb && (account.quicEndpoints?.isNotEmpty ?? false)
+          ? Connection.getInstance(
+              account,
+              socketFactory: () => QuicCapableXmppSocket(),
+            )
+          : Connection.getInstance(account);
       _connection = connection;
       connection.setReconnectPolicy(
         const ReconnectionPolicy(

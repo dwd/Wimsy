@@ -71,6 +71,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
+    bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
   }) async {

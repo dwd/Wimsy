@@ -20,7 +20,8 @@ void main() {
       completer.complete(event);
     });
 
-    final iq = '<iq type="set" id="j1" from="peer@example.com/res" to="user@example.com/res">'
+    final iq =
+        '<iq type="set" id="j1" from="peer@example.com/res" to="user@example.com/res">'
         '<jingle xmlns="urn:xmpp:jingle:1" action="session-initiate" sid="sid123">'
         '<content creator="initiator" name="file">'
         '<description xmlns="urn:xmpp:jingle:apps:file-transfer:5">'
@@ -116,7 +117,10 @@ void main() {
     expect(event.content!.rtpDescription!.payloadTypes.first.name, 'opus');
     expect(event.content!.rtpDescription!.payloadTypes.first.clockRate, 48000);
     expect(event.content!.rtpDescription!.payloadTypes.first.channels, 2);
-    expect(event.content!.rtpDescription!.payloadTypes.first.parameters['minptime'], '10');
+    expect(
+        event
+            .content!.rtpDescription!.payloadTypes.first.parameters['minptime'],
+        '10');
     expect(event.content!.rtpDescription!.rtcpFeedback, hasLength(1));
     expect(event.content!.rtpDescription!.rtcpFeedback.first.type, 'nack');
     expect(event.content!.rtpDescription!.rtcpFeedback.first.subtype, 'pli');
@@ -228,8 +232,8 @@ void main() {
     expect(jingle, isNotNull);
     final content = jingle!.getChild('content');
     final description = content?.getChild('description');
-    expect(description?.getAttribute('xmlns')?.value,
-        JingleManager.rtpNamespace);
+    expect(
+        description?.getAttribute('xmlns')?.value, JingleManager.rtpNamespace);
     expect(description?.getAttribute('media')?.value, 'audio');
     expect(description?.getChild('rtcp-fb')?.getAttribute('xmlns')?.value,
         JingleManager.rtcpFbNamespace);
@@ -241,8 +245,8 @@ void main() {
     expect(description?.getChild('source')?.getAttribute('xmlns')?.value,
         JingleManager.ssmaNamespace);
     final transport = content?.getChild('transport');
-    expect(transport?.getAttribute('xmlns')?.value,
-        JingleManager.iceUdpNamespace);
+    expect(
+        transport?.getAttribute('xmlns')?.value, JingleManager.iceUdpNamespace);
     expect(transport?.getChild('fingerprint')?.textValue, 'AB:CD');
   });
 
@@ -353,7 +357,8 @@ void main() {
 }
 
 class _FakeSocket extends Stream<String> implements XmppWebSocket {
-  final StreamController<String> _controller = StreamController<String>.broadcast();
+  final StreamController<String> _controller =
+      StreamController<String>.broadcast();
 
   @override
   StreamSubscription<String> listen(void Function(String event)? onData,
@@ -369,6 +374,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) async {
     return this;

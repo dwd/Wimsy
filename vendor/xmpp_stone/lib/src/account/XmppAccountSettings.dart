@@ -14,6 +14,18 @@ class XmppTcpEndpoint {
   final String? tlsHost;
 }
 
+class XmppQuicEndpoint {
+  const XmppQuicEndpoint({
+    required this.host,
+    required this.port,
+    this.tlsHost,
+  });
+
+  final String host;
+  final int port;
+  final String? tlsHost;
+}
+
 class XmppAccountSettings {
   String name;
   String username;
@@ -30,6 +42,7 @@ class XmppAccountSettings {
   String? wsPath;
   List<String>? wsProtocols;
   List<XmppTcpEndpoint>? tcpEndpoints;
+  List<XmppQuicEndpoint>? quicEndpoints;
   bool preferSasl2 = true;
   bool sasl2SendUserAgent = true;
   String? sasl2UserAgentId;
@@ -64,6 +77,7 @@ class XmppAccountSettings {
     this.wsPath,
     this.wsProtocols,
     this.tcpEndpoints,
+    this.quicEndpoints,
   });
 
   Jid get fullJid => Jid(username, domain, resource);

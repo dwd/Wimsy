@@ -77,10 +77,13 @@ class Connection {
 
   String? _serverName;
 
-  static Connection getInstance(XmppAccountSettings account) {
+  static Connection getInstance(
+    XmppAccountSettings account, {
+    XmppSocketFactory? socketFactory,
+  }) {
     var connection = instances[account.fullJid.userAtDomain];
     if (connection == null) {
-      connection = Connection(account);
+      connection = Connection(account, socketFactory: socketFactory);
       instances[account.fullJid.userAtDomain] = connection;
     }
     return connection;
@@ -314,6 +317,11 @@ class Connection {
       final socketPort =
           useWebSocket ? (account.wsPort ?? account.port) : account.port;
       final wsUri = account.wsUrl != null ? Uri.tryParse(account.wsUrl!) : null;
+      final quicEndpoints = useWebSocket
+          ? const <XmppQuicEndpoint>[]
+          : (account.quicEndpoints != null && account.quicEndpoints!.isNotEmpty
+              ? account.quicEndpoints!
+              : const <XmppQuicEndpoint>[]);
       final endpoints = useWebSocket
           ? const <XmppTcpEndpoint>[]
           : (account.tcpEndpoints != null && account.tcpEndpoints!.isNotEmpty
@@ -345,6 +353,39 @@ class Connection {
       }
 
       Object? lastError;
+      for (final endpoint in quicEndpoints) {
+        final socket = _socketFactory();
+        try {
+          Log.i(
+            TAG,
+            'QUIC endpoint attempt host=${endpoint.host} port=${endpoint.port}',
+          );
+          await socket.connect(
+            endpoint.host,
+            endpoint.port,
+            useWebSocket: false,
+            useQuic: true,
+            directTls: false,
+            tlsHost: endpoint.tlsHost ?? account.domain,
+            map: prepareStreamResponse,
+          );
+          _attachOpenedSocket(socket);
+          return;
+        } catch (error) {
+          lastError = error;
+          try {
+            socket.close();
+          } catch (_) {
+            // ignore close errors while failing over endpoints
+          }
+          Log.w(
+            TAG,
+            'QUIC endpoint failed host=${endpoint.host} '
+            'port=${endpoint.port} error=$error',
+          );
+        }
+      }
+
       for (final endpoint in endpoints) {
         final socket = _socketFactory();
         try {
@@ -357,6 +398,7 @@ class Connection {
             endpoint.host,
             endpoint.port,
             useWebSocket: false,
+            useQuic: false,
             directTls: endpoint.directTls,
             tlsHost: endpoint.tlsHost ?? account.domain,
             map: prepareStreamResponse,

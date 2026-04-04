@@ -35,7 +35,8 @@ void main() {
 }
 
 class _FakeSocket extends Stream<String> implements XmppWebSocket {
-  final StreamController<String> _controller = StreamController<String>.broadcast();
+  final StreamController<String> _controller =
+      StreamController<String>.broadcast();
 
   @override
   StreamSubscription<String> listen(void Function(String event)? onData,
@@ -51,6 +52,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) async {
     return this;
