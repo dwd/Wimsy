@@ -3,8 +3,9 @@
 use flutter_rust_bridge::frb;
 use crate::core::connection::QuicConnection;
 use crate::errors::QuicError;
-use std::net::{SocketAddr, Ipv4Addr};
+use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[frb(opaque)]
 pub struct QuicEndpoint {
@@ -30,6 +31,21 @@ impl QuicEndpoint {
 
     /// Create a new client endpoint with insecure configuration (for testing)
     pub fn client() -> Result<Self, QuicError> {
+        let bind_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
+        Self::client_with_bind_addr(bind_addr)
+    }
+
+    /// Create a client endpoint suitable for the target remote address family.
+    pub fn client_for_remote(remote_addr: SocketAddr) -> Result<Self, QuicError> {
+        let bind_addr = if remote_addr.is_ipv6() {
+            SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
+        } else {
+            SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)
+        };
+        Self::client_with_bind_addr(bind_addr)
+    }
+
+    fn client_with_bind_addr(bind_addr: SocketAddr) -> Result<Self, QuicError> {
         // Ensure crypto provider is installed
         if rustls::crypto::CryptoProvider::get_default().is_none() {
             rustls::crypto::ring::default_provider()
@@ -42,6 +58,8 @@ impl QuicEndpoint {
             .dangerous()
             .with_custom_certificate_verifier(SkipServerVerification::new())
             .with_no_client_auth();
+        let mut crypto = crypto;
+        crypto.alpn_protocols = vec![b"xmpp-client".to_vec()];
             
         let mut config = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
@@ -50,12 +68,15 @@ impl QuicEndpoint {
         
         // Configure transport parameters for better performance
         let mut transport = quinn::TransportConfig::default();
+        let idle_timeout = quinn::IdleTimeout::try_from(Duration::from_secs(300))
+            .map_err(|e| QuicError::Config(format!("Invalid idle timeout: {:?}", e)))?;
+        transport.max_idle_timeout(Some(idle_timeout));
         transport.max_concurrent_bidi_streams(100u32.into());
         transport.max_concurrent_uni_streams(100u32.into());
         config.transport_config(Arc::new(transport));
         
         // Create endpoint with default socket
-        let mut endpoint = quinn::Endpoint::client(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))
+        let mut endpoint = quinn::Endpoint::client(bind_addr)
             .map_err(|e| QuicError::Endpoint(format!("Failed to create client endpoint: {:?}", e)))?;
             
         endpoint.set_default_client_config(config);

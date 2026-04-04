@@ -10,6 +10,7 @@ use crate::core::{QuicConnectionStats, QuicPathStats, QuicFrameStats, QuicUdpSta
 use crate::core::{QuicServerConfig, QuicTransportConfig, QuicEndpointConfig};
 use crate::convenience::{QuicClient, QuicClientConfig};
 use crate::errors::{QuicError, QuicWriteException, QuicReadException, QuicReadToEndException, QuicDatagramException};
+use std::net::SocketAddr;
 
 
 
@@ -98,10 +99,14 @@ pub async fn connection_open_uni(
 /// Connect to a server using a QUIC endpoint
 /// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge
 pub async fn endpoint_connect(
-    endpoint: QuicEndpoint,
+    _endpoint: QuicEndpoint,
     addr: String,
     server_name: String,
 ) -> Result<(QuicEndpoint, QuicConnection), QuicError> {
+    // Build the endpoint inside the async executor context.
+    let remote_addr: SocketAddr = addr.parse()
+        .map_err(|e| QuicError::Connection(format!("Invalid address: {:?}", e)))?;
+    let endpoint = QuicEndpoint::client_for_remote(remote_addr)?;
     let connection = endpoint.connect(addr, server_name).await?;
     Ok((endpoint, connection))
 }

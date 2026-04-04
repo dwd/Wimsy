@@ -1,15 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 // ignore_for_file: implementation_imports
 
 import 'package:flutter_quic/flutter_quic.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
 
 class QuicCapableXmppSocket extends XmppWebSocket {
-  QuicCapableXmppSocket({this.quicConnectTimeout = const Duration(seconds: 3)});
+  QuicCapableXmppSocket({
+    this.quicConnectTimeout = const Duration(seconds: 3),
+    this.happyEyeballsDelay = const Duration(milliseconds: 250),
+  });
 
   final Duration quicConnectTimeout;
+  final Duration happyEyeballsDelay;
   final XmppWebSocketIo _fallbackSocket = XmppWebSocketIo();
   final StreamController<String> _quicStreamController =
       StreamController<String>.broadcast();
@@ -22,6 +27,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   late String Function(String event) _map;
   Future<void> _writeQueue = Future<void>.value();
 
+  // Kept as members so the winning endpoint/connection remain alive while
+  // stream objects are in use.
+  // ignore: unused_field
+  QuicEndpoint? _endpoint;
+  // ignore: unused_field
+  QuicConnection? _connection;
   QuicSendStream? _sendStream;
   QuicRecvStream? _recvStream;
 
@@ -104,6 +115,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     final stream = _sendStream;
     _sendStream = null;
     _recvStream = null;
+    _connection = null;
+    _endpoint = null;
     if (stream != null) {
       unawaited(
         Future<void>(() async {
@@ -171,27 +184,64 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (addresses.isEmpty) {
       throw SocketException('No addresses found for QUIC host $host');
     }
-
+    final candidates = buildQuicHappyEyeballsPlan(addresses);
     Object? lastError;
-    for (final address in addresses) {
+    for (var i = 0; i < candidates.length; i++) {
+      final address = candidates[i];
+      final timeout = (i == 0 && candidates.length > 1)
+          ? (happyEyeballsDelay * 2)
+          : quicConnectTimeout;
+      debugPrint(
+        'QUIC connect attempt ${i + 1}/${candidates.length}: '
+        '${address.address}:$port type=${address.type} timeout=${timeout.inMilliseconds}ms',
+      );
       try {
-        final endpoint = await createClientEndpoint();
-        final connect = endpointConnect(
-          endpoint: endpoint,
-          addr: _formatSocketAddress(address, port),
-          serverName: serverName,
+        final connected = await _connectQuicAddress(
+          address,
+          port,
+          serverName,
+          timeout: timeout,
         );
-        final connected = await connect.timeout(quicConnectTimeout);
-        final streamResult = await connectionOpenBi(connection: connected.$2);
-        _sendStream = streamResult.$2;
-        _recvStream = streamResult.$3;
+        debugPrint(
+          'QUIC connect winner: ${address.address}:$port type=${address.type}',
+        );
+        _endpoint = connected.endpoint;
+        _connection = connected.connection;
+        _sendStream = connected.sendStream;
+        _recvStream = connected.recvStream;
         return;
       } catch (error) {
+        debugPrint(
+          'QUIC connect failed: ${address.address}:$port '
+          'type=${address.type} error=$error',
+        );
         lastError = error;
       }
     }
     throw Exception(
       'Failed QUIC connect host=$host port=$port error=$lastError',
+    );
+  }
+
+  Future<_QuicConnectResult> _connectQuicAddress(
+    InternetAddress address,
+    int port,
+    String serverName, {
+    required Duration timeout,
+  }) async {
+    final endpoint = await createClientEndpoint();
+    final connect = endpointConnect(
+      endpoint: endpoint,
+      addr: _formatSocketAddress(address, port),
+      serverName: serverName,
+    );
+    final connected = await connect.timeout(timeout);
+    final streamResult = await connectionOpenBi(connection: connected.$2);
+    return _QuicConnectResult(
+      endpoint: connected.$1,
+      connection: streamResult.$1,
+      sendStream: streamResult.$2,
+      recvStream: streamResult.$3,
     );
   }
 
@@ -218,8 +268,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             _quicStreamController.add(_map(chunk));
           }
         } catch (error, stackTrace) {
-          if (!_quicStreamController.isClosed) {
-            _quicStreamController.addError(error, stackTrace);
+          if (!_quicStreamController.isClosed &&
+              !_isQuicConnectionClosure(error)) {
+            try {
+              _quicStreamController.addError(error, stackTrace);
+            } catch (_) {
+              // If no listener is present for stream errors, treat as closed.
+            }
           }
         } finally {
           if (!_quicStreamController.isClosed) {
@@ -246,4 +301,61 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     });
     return _rustInitFuture!;
   }
+
+  bool _isQuicConnectionClosure(Object error) {
+    final message = error.toString();
+    return message.contains('QuicReadException.connectionLost') ||
+        message.contains('ConnectionLost') ||
+        message.contains('TimedOut');
+  }
+}
+
+List<InternetAddress> buildQuicHappyEyeballsPlan(
+  List<InternetAddress> addresses,
+) {
+  final ipv6 = <InternetAddress>[];
+  final ipv4 = <InternetAddress>[];
+  for (final address in addresses) {
+    if (address.type == InternetAddressType.IPv6) {
+      ipv6.add(address);
+    } else if (address.type == InternetAddressType.IPv4) {
+      ipv4.add(address);
+    }
+  }
+
+  final preferIpv6 =
+      addresses.isNotEmpty && addresses.first.type == InternetAddressType.IPv6;
+  final plan = <InternetAddress>[];
+  while (ipv6.isNotEmpty || ipv4.isNotEmpty) {
+    if (preferIpv6) {
+      if (ipv6.isNotEmpty) {
+        plan.add(ipv6.removeAt(0));
+      }
+      if (ipv4.isNotEmpty) {
+        plan.add(ipv4.removeAt(0));
+      }
+    } else {
+      if (ipv4.isNotEmpty) {
+        plan.add(ipv4.removeAt(0));
+      }
+      if (ipv6.isNotEmpty) {
+        plan.add(ipv6.removeAt(0));
+      }
+    }
+  }
+  return plan;
+}
+
+class _QuicConnectResult {
+  const _QuicConnectResult({
+    required this.endpoint,
+    required this.connection,
+    required this.sendStream,
+    required this.recvStream,
+  });
+
+  final QuicEndpoint endpoint;
+  final QuicConnection connection;
+  final QuicSendStream sendStream;
+  final QuicRecvStream recvStream;
 }
