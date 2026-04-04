@@ -21,9 +21,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
   static Future<void>? _rustInitFuture;
   static bool _rustInitialized = false;
+  static const int _auxStreamSlots = 20;
+  static const int _maxControlBufferChars = 16 * 1024;
 
   bool _useQuic = false;
   bool _closed = false;
+  bool _postBindReady = false;
+  bool _auxOpenStarted = false;
+  String? _accountBareJid;
+  String _controlBuffer = '';
   late String Function(String event) _map;
   Future<void> _writeQueue = Future<void>.value();
 
@@ -35,6 +41,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   QuicConnection? _connection;
   QuicSendStream? _sendStream;
   QuicRecvStream? _recvStream;
+  final Map<int, _QuicStreamChannel> _auxStreamsBySlot = {};
 
   @override
   Future<XmppWebSocket> connect<S>(
@@ -70,7 +77,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _useQuic = true;
     await _ensureRustInitialized();
     await _connectQuic(host, port, tlsHost ?? host);
-    _startRecvLoop();
+    _startControlRecvLoop();
     return this;
   }
 
@@ -84,19 +91,17 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (payload.isEmpty) {
       return;
     }
-    final stream = _sendStream;
-    if (stream == null) {
-      throw StateError('QUIC send stream is not connected');
-    }
     _writeQueue = _writeQueue.then((_) async {
       if (_closed) {
         return;
       }
       try {
-        _sendStream = await sendStreamWriteAll(
-          stream: stream,
+        final target = await _selectSendTarget(payload);
+        final updated = await sendStreamWriteAll(
+          stream: target.stream,
           data: utf8.encode(payload),
         );
+        target.update(updated);
       } catch (error, stackTrace) {
         if (!_quicStreamController.isClosed) {
           _quicStreamController.addError(error, stackTrace);
@@ -112,22 +117,46 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       _fallbackSocket.close();
       return;
     }
-    final stream = _sendStream;
+
+    final controlStream = _sendStream;
+    final auxStreams = _auxStreamsBySlot.values
+        .map((channel) => channel.sendStream)
+        .toList(growable: false);
+
     _sendStream = null;
     _recvStream = null;
     _connection = null;
     _endpoint = null;
-    if (stream != null) {
+    _postBindReady = false;
+    _auxOpenStarted = false;
+    _accountBareJid = null;
+    _controlBuffer = '';
+    _auxStreamsBySlot.clear();
+
+    if (controlStream != null) {
       unawaited(
         Future<void>(() async {
           try {
-            await sendStreamFinish(stream: stream);
+            await sendStreamFinish(stream: controlStream);
           } catch (_) {
             // ignore close races
           }
         }),
       );
     }
+
+    for (final auxStream in auxStreams) {
+      unawaited(
+        Future<void>(() async {
+          try {
+            await sendStreamFinish(stream: auxStream);
+          } catch (_) {
+            // ignore close races
+          }
+        }),
+      );
+    }
+
     if (!_quicStreamController.isClosed) {
       unawaited(_quicStreamController.close());
     }
@@ -245,18 +274,37 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
-  void _startRecvLoop() {
+  void _startControlRecvLoop() {
+    final recvStream = _recvStream;
+    if (recvStream == null) {
+      return;
+    }
+    _startRecvLoop(recvStream, isControl: true);
+  }
+
+  void _startRecvLoop(
+    QuicRecvStream initial, {
+    required bool isControl,
+    int? slot,
+  }) {
     unawaited(
       Future<void>(() async {
-        var recvStream = _recvStream;
+        var recvStream = initial;
         try {
-          while (!_closed && recvStream != null) {
+          while (!_closed) {
             final readResult = await recvStreamRead(
               stream: recvStream,
               maxLength: BigInt.from(16 * 1024),
             );
             recvStream = readResult.$1;
-            _recvStream = recvStream;
+            if (isControl) {
+              _recvStream = recvStream;
+            } else if (slot != null) {
+              final channel = _auxStreamsBySlot[slot];
+              if (channel != null) {
+                channel.recvStream = recvStream;
+              }
+            }
             final bytes = readResult.$2;
             if (bytes == null) {
               break;
@@ -265,6 +313,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               continue;
             }
             final chunk = utf8.decode(bytes, allowMalformed: true);
+            if (isControl) {
+              _captureBindResult(chunk);
+            }
             _quicStreamController.add(_map(chunk));
           }
         } catch (error, stackTrace) {
@@ -277,8 +328,109 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
           }
         } finally {
-          if (!_quicStreamController.isClosed) {
+          if (isControl && !_quicStreamController.isClosed) {
             await _quicStreamController.close();
+          }
+        }
+      }),
+    );
+  }
+
+  Future<_QuicSendTarget> _selectSendTarget(String payload) async {
+    final control = _sendStream;
+    if (control == null) {
+      throw StateError('QUIC control send stream is not connected');
+    }
+    if (!_postBindReady) {
+      return _QuicSendTarget(
+        stream: control,
+        update: (updated) => _sendStream = updated,
+      );
+    }
+
+    final toBare = extractToBareJidForRouting(payload);
+    if (toBare == null ||
+        (_accountBareJid != null && toBare == _accountBareJid)) {
+      return _QuicSendTarget(
+        stream: control,
+        update: (updated) => _sendStream = updated,
+      );
+    }
+
+    final slot = quicAuxSlotForBareJid(toBare, _auxStreamSlots);
+    final channel = await _ensureAuxStream(slot);
+    return _QuicSendTarget(
+      stream: channel.sendStream,
+      update: (updated) => channel.sendStream = updated,
+    );
+  }
+
+  Future<_QuicStreamChannel> _ensureAuxStream(int slot) async {
+    final existing = _auxStreamsBySlot[slot];
+    if (existing != null) {
+      return existing;
+    }
+    final connection = _connection;
+    if (connection == null) {
+      throw StateError('QUIC connection is not established');
+    }
+    final opened = await connectionOpenBi(connection: connection);
+    _connection = opened.$1;
+    final channel = _QuicStreamChannel(
+      sendStream: opened.$2,
+      recvStream: opened.$3,
+    );
+    _auxStreamsBySlot[slot] = channel;
+    _startRecvLoop(opened.$3, isControl: false, slot: slot);
+    return channel;
+  }
+
+  void _captureBindResult(String chunk) {
+    if (_postBindReady) {
+      return;
+    }
+    _controlBuffer += chunk;
+    if (_controlBuffer.length > _maxControlBufferChars) {
+      _controlBuffer = _controlBuffer.substring(
+        _controlBuffer.length - _maxControlBufferChars,
+      );
+    }
+
+    final bindResult = RegExp(
+      '<bind\\b[^>]*xmlns=(["\\\'])urn:ietf:params:xml:ns:xmpp-bind\\1[^>]*>.*?<jid>([^<]+)</jid>',
+      dotAll: true,
+      caseSensitive: false,
+    ).firstMatch(_controlBuffer);
+    if (bindResult == null) {
+      return;
+    }
+    final fullJid = bindResult.group(2);
+    final bare = bareJidForRouting(fullJid);
+    if (bare == null || bare.isEmpty) {
+      return;
+    }
+    _accountBareJid = bare;
+    _postBindReady = true;
+    debugPrint('QUIC post-bind multi-stream enabled; accountBareJid=$bare');
+    _startAuxStreamsOpen();
+  }
+
+  void _startAuxStreamsOpen() {
+    if (_auxOpenStarted || _closed) {
+      return;
+    }
+    _auxOpenStarted = true;
+    unawaited(
+      Future<void>(() async {
+        for (var slot = 0; slot < _auxStreamSlots; slot++) {
+          if (_closed) {
+            break;
+          }
+          try {
+            await _ensureAuxStream(slot);
+          } catch (error) {
+            debugPrint('QUIC aux stream open failed slot=$slot error=$error');
+            break;
           }
         }
       }),
@@ -346,6 +498,41 @@ List<InternetAddress> buildQuicHappyEyeballsPlan(
   return plan;
 }
 
+String? extractToBareJidForRouting(String payload) {
+  final toMatch = RegExp('\\bto=(["\\\'])([^"\\\']+)\\1').firstMatch(payload);
+  if (toMatch == null) {
+    return null;
+  }
+  return bareJidForRouting(toMatch.group(2));
+}
+
+String? bareJidForRouting(String? jid) {
+  if (jid == null) {
+    return null;
+  }
+  final trimmed = jid.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  final slash = trimmed.indexOf('/');
+  if (slash == -1) {
+    return trimmed;
+  }
+  return trimmed.substring(0, slash);
+}
+
+int quicAuxSlotForBareJid(String bareJid, int slotCount) {
+  if (slotCount <= 0) {
+    throw ArgumentError.value(slotCount, 'slotCount', 'must be > 0');
+  }
+  var hash = 0x811c9dc5;
+  for (final unit in bareJid.codeUnits) {
+    hash ^= unit;
+    hash = (hash * 0x01000193) & 0xffffffff;
+  }
+  return hash % slotCount;
+}
+
 class _QuicConnectResult {
   const _QuicConnectResult({
     required this.endpoint,
@@ -358,4 +545,18 @@ class _QuicConnectResult {
   final QuicConnection connection;
   final QuicSendStream sendStream;
   final QuicRecvStream recvStream;
+}
+
+class _QuicStreamChannel {
+  _QuicStreamChannel({required this.sendStream, required this.recvStream});
+
+  QuicSendStream sendStream;
+  QuicRecvStream recvStream;
+}
+
+class _QuicSendTarget {
+  const _QuicSendTarget({required this.stream, required this.update});
+
+  final QuicSendStream stream;
+  final void Function(QuicSendStream updated) update;
 }

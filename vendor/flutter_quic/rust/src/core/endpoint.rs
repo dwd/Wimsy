@@ -71,8 +71,8 @@ impl QuicEndpoint {
         let idle_timeout = quinn::IdleTimeout::try_from(Duration::from_secs(300))
             .map_err(|e| QuicError::Config(format!("Invalid idle timeout: {:?}", e)))?;
         transport.max_idle_timeout(Some(idle_timeout));
-        transport.max_concurrent_bidi_streams(100u32.into());
-        transport.max_concurrent_uni_streams(100u32.into());
+        transport.max_concurrent_bidi_streams(25u32.into());
+        transport.max_concurrent_uni_streams(25u32.into());
         config.transport_config(Arc::new(transport));
         
         // Create endpoint with default socket
