@@ -377,14 +377,14 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     final slot = quicAuxSlotForBareJid(toBare, _auxStreamSlots);
-    final channel = await _ensureAuxStream(slot);
+    final channel = await _ensureAuxStream(slot, reason: 'on-demand routing for $toBare');
     return _QuicSendTarget(
       stream: channel.sendStream,
       update: (updated) => channel.sendStream = updated,
     );
   }
 
-  Future<_QuicStreamChannel> _ensureAuxStream(int slot) {
+  Future<_QuicStreamChannel> _ensureAuxStream(int slot, {String? reason}) {
     final existing = _auxStreamsBySlot[slot];
     if (existing != null) {
       return Future.value(existing);
@@ -392,15 +392,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     // Coalesce concurrent opens for the same slot: if one is already in
     // flight, return the same future so callers share the result rather than
     // each trying to consume _connection via Auto_Owned FFI transfer.
-    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot));
+    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot, reason: reason ?? 'pre-open'));
   }
 
-  Future<_QuicStreamChannel> _openAuxStream(int slot) async {
+  Future<_QuicStreamChannel> _openAuxStream(int slot, {String reason = 'pre-open'}) async {
     try {
       final connection = _connection;
       if (connection == null || _closed) {
         throw StateError('QUIC connection is not established');
       }
+      debugPrint('QUIC aux stream opening slot=$slot reason=$reason');
       final opened = await connectionOpenBi(connection: connection);
       // Re-check after the async gap: close() may have fired while we awaited.
       if (_closed) {
@@ -463,7 +464,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             break;
           }
           try {
-            await _ensureAuxStream(slot);
+            await _ensureAuxStream(slot, reason: 'post-bind pre-open slot $slot of $_auxStreamSlots');
           } catch (error) {
             debugPrint('QUIC aux stream open failed slot=$slot error=$error');
             break;
