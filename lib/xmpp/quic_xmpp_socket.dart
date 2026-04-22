@@ -371,10 +371,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return existing;
     }
     final connection = _connection;
-    if (connection == null) {
+    if (connection == null || _closed) {
       throw StateError('QUIC connection is not established');
     }
     final opened = await connectionOpenBi(connection: connection);
+    // Re-check after the async gap: close() may have fired while we awaited.
+    if (_closed) {
+      // Discard the newly opened streams; the connection is being torn down.
+      throw StateError('QUIC socket closed during aux stream open');
+    }
     _connection = opened.$1;
     final channel = _QuicStreamChannel(
       sendStream: opened.$2,
