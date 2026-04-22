@@ -45,6 +45,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   // In-flight futures for aux stream opens, keyed by slot. Concurrent callers
   // for the same slot await the same future rather than racing on _connection.
   final Map<int, Future<_QuicStreamChannel>> _auxStreamOpening = {};
+  // Global serialisation lock for connectionOpenBi calls. Because the FFI
+  // function uses Auto_Owned transfer (it consumes the RustArc and returns a
+  // new one), only one call may be in-flight at a time across ALL slots.
+  // Concurrent calls on different slots would both read the same _connection
+  // arc; the second would find it already disposed.
+  Future<void> _auxOpenLock = Future<void>.value();
 
   @override
   Future<XmppWebSocket> connect<S>(
@@ -147,6 +153,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _controlBuffer = '';
     _auxStreamsBySlot.clear();
     _auxStreamOpening.clear();
+    _auxOpenLock = Future<void>.value();
 
     if (controlStream != null) {
       unawaited(
@@ -397,26 +404,39 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
   Future<_QuicStreamChannel> _openAuxStream(int slot, {String reason = 'pre-open'}) async {
     try {
-      final connection = _connection;
-      if (connection == null || _closed) {
-        throw StateError('QUIC connection is not established');
+      // Serialise all connectionOpenBi calls globally: the FFI function uses
+      // Auto_Owned transfer, consuming _connection and returning a new arc.
+      // Two concurrent calls on different slots would both capture the same
+      // (soon-to-be-consumed) arc, causing DroppableDisposedException on the
+      // second call.
+      final completer = Completer<void>();
+      final previousLock = _auxOpenLock;
+      _auxOpenLock = completer.future;
+      try {
+        await previousLock;
+        final connection = _connection;
+        if (connection == null || _closed) {
+          throw StateError('QUIC connection is not established');
+        }
+        debugPrint('QUIC aux stream opening slot=$slot reason=$reason');
+        final opened = await connectionOpenBi(connection: connection);
+        // Re-check after the async gap: close() may have fired while we awaited.
+        if (_closed) {
+          // Discard the newly opened streams; the connection is being torn down.
+          throw StateError('QUIC socket closed during aux stream open');
+        }
+        _connection = opened.$1;
+        final channel = _QuicStreamChannel(
+          sendStream: opened.$2,
+          recvStream: opened.$3,
+        );
+        _auxStreamsBySlot[slot] = channel;
+        debugPrint('QUIC aux stream opened (outbound) slot=$slot');
+        _startRecvLoop(opened.$3, isControl: false, slot: slot);
+        return channel;
+      } finally {
+        completer.complete();
       }
-      debugPrint('QUIC aux stream opening slot=$slot reason=$reason');
-      final opened = await connectionOpenBi(connection: connection);
-      // Re-check after the async gap: close() may have fired while we awaited.
-      if (_closed) {
-        // Discard the newly opened streams; the connection is being torn down.
-        throw StateError('QUIC socket closed during aux stream open');
-      }
-      _connection = opened.$1;
-      final channel = _QuicStreamChannel(
-        sendStream: opened.$2,
-        recvStream: opened.$3,
-      );
-      _auxStreamsBySlot[slot] = channel;
-      debugPrint('QUIC aux stream opened (outbound) slot=$slot');
-      _startRecvLoop(opened.$3, isControl: false, slot: slot);
-      return channel;
     } finally {
       _auxStreamOpening.remove(slot);
     }
