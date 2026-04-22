@@ -5951,13 +5951,7 @@ class XmppService extends ChangeNotifier {
             nextReplyToId != existing.replyToId ||
             nextReplyToJid != existing.replyToJid ||
             nextReplyFallback != existing.replyFallback) {
-          list[existingIndex] = ChatMessage(
-            from: existing.from,
-            to: existing.to,
-            body: existing.body,
-            outgoing: existing.outgoing,
-            timestamp: existing.timestamp,
-            messageId: existing.messageId,
+          list[existingIndex] = existing.copyWith(
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
@@ -5966,21 +5960,9 @@ class XmppService extends ChangeNotifier {
             inviteRoomJid: nextInviteRoomJid,
             inviteReason: nextInviteReason,
             invitePassword: nextInvitePassword,
-            fileTransferId: existing.fileTransferId,
-            fileName: existing.fileName,
-            fileSize: existing.fileSize,
-            fileMime: existing.fileMime,
-            fileBytes: existing.fileBytes,
-            fileState: existing.fileState,
-            edited: existing.edited,
-            editedAt: existing.editedAt,
-            reactions: existing.reactions ?? const {},
             replyToId: nextReplyToId,
             replyToJid: nextReplyToJid,
             replyFallback: nextReplyFallback,
-            acked: existing.acked,
-            receiptReceived: existing.receiptReceived,
-            displayed: existing.displayed,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -6153,33 +6135,17 @@ class XmppService extends ChangeNotifier {
             nextReplyToId != existing.replyToId ||
             nextReplyToJid != existing.replyToJid ||
             nextReplyFallback != existing.replyFallback) {
-          final updated = ChatMessage(
-            from: existing.from,
-            to: existing.to,
-            body: existing.body,
-            outgoing: existing.outgoing,
+          final updated = existing.copyWith(
             timestamp: nextTimestamp,
-            messageId: existing.messageId,
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
             oobDescription: nextOobDescription,
             rawXml: nextRawXml,
-            fileTransferId: existing.fileTransferId,
-            fileName: existing.fileName,
-            fileSize: existing.fileSize,
-            fileMime: existing.fileMime,
-            fileBytes: existing.fileBytes,
-            fileState: existing.fileState,
-            edited: existing.edited,
-            editedAt: existing.editedAt,
-            reactions: existing.reactions ?? const {},
             replyToId: nextReplyToId,
             replyToJid: nextReplyToJid,
             replyFallback: nextReplyFallback,
-            acked: existing.acked,
             receiptReceived: nextReceiptReceived,
-            displayed: existing.displayed,
           );
           list.removeAt(existingIndex);
           _insertMessageOrdered(list, updated);
@@ -6365,36 +6331,9 @@ class XmppService extends ChangeNotifier {
       }
       final nextState = state ?? existing.fileState;
       final nextBytes = fileBytes ?? existing.fileBytes;
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
-        mamId: existing.mamId,
-        stanzaId: existing.stanzaId,
-        oobUrl: existing.oobUrl,
-        oobDescription: existing.oobDescription,
-        rawXml: existing.rawXml,
-        inviteRoomJid: existing.inviteRoomJid,
-        inviteReason: existing.inviteReason,
-        invitePassword: existing.invitePassword,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
+      list[i] = existing.copyWith(
         fileBytes: nextBytes,
         fileState: nextState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
-        acked: existing.acked,
-        receiptReceived: existing.receiptReceived,
-        displayed: existing.displayed,
       );
       notifyListeners();
       _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -6563,30 +6502,7 @@ class XmppService extends ChangeNotifier {
           nextDisplayed == existing.displayed) {
         return true;
       }
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
-        mamId: existing.mamId,
-        stanzaId: existing.stanzaId,
-        oobUrl: existing.oobUrl,
-        oobDescription: existing.oobDescription,
-        rawXml: existing.rawXml,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
-        fileBytes: existing.fileBytes,
-        fileState: existing.fileState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
+      list[i] = existing.copyWith(
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
@@ -6623,30 +6539,7 @@ class XmppService extends ChangeNotifier {
           nextDisplayed == existing.displayed) {
         return true;
       }
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
-        mamId: existing.mamId,
-        stanzaId: existing.stanzaId,
-        oobUrl: existing.oobUrl,
-        oobDescription: existing.oobDescription,
-        rawXml: existing.rawXml,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
-        fileBytes: existing.fileBytes,
-        fileState: existing.fileState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
+      list[i] = existing.copyWith(
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,

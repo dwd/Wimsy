@@ -44,11 +44,12 @@ void main() {
         stanzaId: 'sid-middle',
       );
 
-      // Current behavior: the incoming archived message is folded into
-      // the existing local row, so list growth is suppressed.
+      // The incoming archived message is folded into the existing local row,
+      // so list growth is suppressed. The original messageId is preserved
+      // (copyWith keeps all fields not explicitly overridden).
       expect(merged, isTrue);
       expect(list, hasLength(1));
-    expect(list.single.messageId, isNull);
+      expect(list.single.messageId, 'local-1');
       expect(list.single.mamId, 'mam-middle');
       expect(list.single.stanzaId, 'sid-middle');
     },
