@@ -43,6 +43,11 @@ const List<String> _defaultReactionOptions = [
   '👎',
 ];
 
+@pragma('vm:entry-point')
+void startCallback() {
+  FlutterForegroundTask.setTaskHandler(WimsyForegroundTaskHandler());
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   Log.logLevel = LogLevel.VERBOSE;
@@ -283,13 +288,12 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       ),
     );
 
-    FlutterForegroundTask.setTaskHandler(WimsyForegroundTaskHandler());
-
     final running = await FlutterForegroundTask.isRunningService;
     if (!running) {
       await FlutterForegroundTask.startService(
         notificationTitle: 'Wimsy is running',
         notificationText: 'Keeping your XMPP session connected.',
+        callback: startCallback,
       );
     }
   }
