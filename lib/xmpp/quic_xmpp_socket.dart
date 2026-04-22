@@ -119,9 +119,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     final controlStream = _sendStream;
+    final auxSlots = _auxStreamsBySlot.keys.toList(growable: false);
     final auxStreams = _auxStreamsBySlot.values
         .map((channel) => channel.sendStream)
         .toList(growable: false);
+    if (auxSlots.isNotEmpty) {
+      debugPrint('QUIC closing ${auxSlots.length} aux stream(s): slots=$auxSlots');
+    }
 
     _sendStream = null;
     _recvStream = null;
@@ -328,8 +332,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
           }
         } finally {
-          if (isControl && !_quicStreamController.isClosed) {
-            await _quicStreamController.close();
+          if (isControl) {
+            if (!_quicStreamController.isClosed) {
+              await _quicStreamController.close();
+            }
+          } else if (slot != null) {
+            debugPrint('QUIC aux stream recv loop ended slot=$slot');
           }
         }
       }),
@@ -386,6 +394,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       recvStream: opened.$3,
     );
     _auxStreamsBySlot[slot] = channel;
+    debugPrint('QUIC aux stream opened (outbound) slot=$slot');
     _startRecvLoop(opened.$3, isControl: false, slot: slot);
     return channel;
   }
