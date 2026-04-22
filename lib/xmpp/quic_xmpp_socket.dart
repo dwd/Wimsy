@@ -129,7 +129,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
     _sendStream = null;
     _recvStream = null;
-    _connection = null;
+    // Do NOT null _connection here: any in-flight connectionOpenBi call holds
+    // a local reference to the same RustArc. Nulling it here drops the last
+    // Dart-side strong reference and disposes the arc while the FFI call is
+    // still encoding its arguments, causing DroppableDisposedException.
+    // The connection will be released naturally once all local references drop.
     _endpoint = null;
     _postBindReady = false;
     _auxOpenStarted = false;
