@@ -17,17 +17,15 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'av/call_session.dart';
+import 'login_screen.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
 import 'models/room_entry.dart';
 import 'notifications/notification_service.dart';
-import 'storage/account_record.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/xmpp_service.dart';
 import 'xmpp/jid_discovery.dart';
-import 'xmpp/alt_connection.dart';
-import 'xmpp/ws_endpoint.dart';
 import 'background/foreground_task_handler.dart';
 import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -487,31 +485,11 @@ class WimsyHome extends StatefulWidget {
 }
 
 class _WimsyHomeState extends State<WimsyHome> {
-  final TextEditingController _jidController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _hostController = TextEditingController();
-  final TextEditingController _portController = TextEditingController(
-    text: '5222',
-  );
-  final TextEditingController _resourceController = TextEditingController(
-    text: 'wimsy',
-  );
-  final TextEditingController _wsEndpointController = TextEditingController();
-  final TextEditingController _wsProtocolsController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _messageScrollController = ScrollController();
   final Map<String, DateTime> _lastReadAtByChat = {};
-  bool _loadedAccount = false;
   bool _clearingCache = false;
-  bool _rememberPassword = false;
-  bool _useWebSocket = kIsWeb;
-  bool _useDirectTls = false;
-  Timer? _endpointDiscoveryDebounce;
-  bool _advancedOptionsExpanded = false;
-  bool _endpointDiscoveryBusy = false;
-  String? _endpointDiscoveryMessage;
-  String? _lastEndpointDiscoveryDomain;
   Timer? _typingDebounce;
   Timer? _idleTimer;
   ChatState? _lastSentChatState;
@@ -556,7 +534,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     _seedMessages();
     _seedRoomMessages();
     _loadMediaPreferences();
-    _loadAccount();
   }
 
   Future<void> _seedRoster() async {
@@ -579,40 +556,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     widget.service.seedBookmarks(bookmarks);
   }
 
-  Future<void> _loadAccount() async {
-    final cachedJid = widget.preferences.lastJid;
-    final account = AccountRecord.fromMap(widget.storage.loadAccount());
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      if (cachedJid != null && cachedJid.isNotEmpty) {
-        _jidController.text = cachedJid;
-      }
-      if (account != null) {
-        _jidController.text = account.jid;
-        _rememberPassword = account.rememberPassword;
-        if (_rememberPassword) {
-          _passwordController.text = account.password;
-        } else {
-          _passwordController.clear();
-        }
-        _hostController.text = account.host;
-        _portController.text = account.port.toString();
-        _resourceController.text = account.resource;
-        _useWebSocket = kIsWeb ? true : account.useWebSocket;
-        _useDirectTls = kIsWeb ? false : account.directTls;
-        _wsEndpointController.text = account.wsEndpoint;
-        if (account.wsProtocols.isNotEmpty) {
-          _wsProtocolsController.text = account.wsProtocols.join(', ');
-        } else {
-          _wsProtocolsController.clear();
-        }
-      }
-      _loadedAccount = true;
-    });
-  }
-
   Future<void> _loadMediaPreferences() async {
     final audioInput = widget.preferences.audioInputId;
     final videoInput = widget.preferences.videoInputId;
@@ -628,18 +571,10 @@ class _WimsyHomeState extends State<WimsyHome> {
   void dispose() {
     _typingDebounce?.cancel();
     _idleTimer?.cancel();
-    _endpointDiscoveryDebounce?.cancel();
     _messageScrollController.removeListener(_handleScrollPosition);
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _messageFocusNode.dispose();
     _messageScrollController.dispose();
-    _jidController.dispose();
-    _passwordController.dispose();
-    _hostController.dispose();
-    _portController.dispose();
-    _resourceController.dispose();
-    _wsEndpointController.dispose();
-    _wsProtocolsController.dispose();
     _messageController.dispose();
     super.dispose();
   }
@@ -678,199 +613,17 @@ class _WimsyHomeState extends State<WimsyHome> {
       builder: (context, _) {
         final service = widget.service;
         if (!service.isConnected) {
-          return _buildLogin(context, service);
+          return LoginScreen(
+            service: service,
+            storage: widget.storage,
+            preferences: widget.preferences,
+          );
         }
         return _buildClient(context, service);
       },
     );
   }
 
-  Widget _buildLogin(BuildContext context, XmppService service) {
-    final theme = Theme.of(context);
-    final size = MediaQuery.of(context).size;
-    final stateLabel = service.lastConnectionState?.name ?? 'Idle';
-
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFF7E7CE), Color(0xFFE3F0F1), Color(0xFFFDFBF7)],
-          ),
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: size.width > 640 ? 520 : double.infinity,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Wimsy',
-                    style: theme.textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.w300,
-                      letterSpacing: 1.2,
-                      color: const Color(0xFFA97BFF),
-                      fontFamily: 'SF Pro Display',
-                      fontFamilyFallback: const [
-                        'Helvetica Neue',
-                        'Arial',
-                        'Roboto',
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'A modern XMPP client built for secure servers.',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 24,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Connect', style: theme.textTheme.titleLarge),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _jidController,
-                          enabled: !service.isConnecting,
-                          decoration: const InputDecoration(
-                            labelText: 'JID',
-                            hintText: 'user@domain',
-                          ),
-                          onChanged: (value) =>
-                              _scheduleEndpointDiscovery(value),
-                          onEditingComplete: () => _scheduleEndpointDiscovery(
-                            _jidController.text.trim(),
-                            immediate: true,
-                          ),
-                        ),
-                        if (_endpointDiscoveryMessage != null) ...[
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              if (_endpointDiscoveryBusy)
-                                const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              if (_endpointDiscoveryBusy)
-                                const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _endpointDiscoveryMessage!,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _passwordController,
-                          enabled: !service.isConnecting,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Password',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _buildAdvancedOptions(service, theme),
-                        const SizedBox(height: 12),
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: const Text('Remember password on this device'),
-                          value: _rememberPassword,
-                          onChanged: service.isConnecting
-                              ? null
-                              : (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _rememberPassword = value;
-                                  });
-                                },
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: FilledButton(
-                                onPressed: service.isConnecting
-                                    ? null
-                                    : _handleConnect,
-                                child: Text(
-                                  service.isConnecting
-                                      ? 'Connecting...'
-                                      : 'Connect',
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (!_loadedAccount) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            'Unlocking storage...',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        Text(
-                          'Status: ${service.status.name} · $stateLabel',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        if (service.errorMessage != null) ...[
-                          const SizedBox(height: 16),
-                          Text(
-                            service.errorMessage!,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.error,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _buildClient(BuildContext context, XmppService service) {
     return LayoutBuilder(
@@ -1764,44 +1517,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
   }
 
-  void _handleConnect() {
-    final port = int.tryParse(_portController.text.trim()) ?? 5222;
-    final useWebSocket = kIsWeb || _useWebSocket;
-    final useDirectTls = kIsWeb ? false : _useDirectTls;
-    final wsProtocols = _wsProtocolsController.text
-        .split(',')
-        .map((entry) => entry.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList();
-    final account = AccountRecord(
-      jid: _jidController.text.trim(),
-      password: _rememberPassword ? _passwordController.text : '',
-      host: _hostController.text.trim(),
-      port: port,
-      resource: _resourceController.text.trim().isEmpty
-          ? 'wimsy'
-          : _resourceController.text.trim(),
-      rememberPassword: _rememberPassword,
-      useWebSocket: useWebSocket,
-      directTls: useDirectTls,
-      wsEndpoint: _wsEndpointController.text.trim(),
-      wsProtocols: wsProtocols,
-    );
-    widget.storage.storeAccount(account.toMap());
-    unawaited(widget.preferences.setLastJid(account.jid));
-    widget.service.connect(
-      jid: account.jid,
-      password: _passwordController.text,
-      resource: account.resource,
-      host: account.host,
-      port: port,
-      useWebSocket: useWebSocket,
-      directTls: useDirectTls,
-      wsEndpoint: account.wsEndpoint,
-      wsProtocols: wsProtocols,
-    );
-  }
-
   void _sendMessage(String? activeChat) {
     if (activeChat == null) {
       return;
@@ -2549,123 +2264,6 @@ class _WimsyHomeState extends State<WimsyHome> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildAdvancedOptions(XmppService service, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextButton.icon(
-          onPressed: service.isConnecting
-              ? null
-              : () {
-                  setState(() {
-                    _advancedOptionsExpanded = !_advancedOptionsExpanded;
-                  });
-                },
-          icon: Icon(
-            _advancedOptionsExpanded ? Icons.expand_less : Icons.expand_more,
-          ),
-          label: Text(
-            _advancedOptionsExpanded
-                ? 'Hide advanced options'
-                : 'Show advanced options',
-          ),
-        ),
-        if (_advancedOptionsExpanded) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _hostController,
-                  enabled: !service.isConnecting,
-                  decoration: const InputDecoration(
-                    labelText: 'Host (optional)',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  controller: _portController,
-                  enabled: !service.isConnecting,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Port'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Direct TLS (XEP-0368)'),
-            subtitle: const Text(
-              'Uses direct TLS when the server advertises it via SRV.',
-            ),
-            value: _useDirectTls,
-            onChanged: service.isConnecting || kIsWeb
-                ? null
-                : (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _useDirectTls = value;
-                    });
-                  },
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _resourceController,
-            enabled: !service.isConnecting,
-            decoration: const InputDecoration(labelText: 'Resource'),
-          ),
-          const SizedBox(height: 12),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Use WebSocket transport'),
-            subtitle: kIsWeb
-                ? const Text('Required for web builds.')
-                : const Text('Useful for testing server WebSocket support.'),
-            value: kIsWeb ? true : _useWebSocket,
-            onChanged: service.isConnecting || kIsWeb
-                ? null
-                : (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _useWebSocket = value;
-                    });
-                  },
-          ),
-          if (_useWebSocket || kIsWeb) ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _wsEndpointController,
-              enabled: !service.isConnecting,
-              decoration: const InputDecoration(
-                labelText: 'WebSocket endpoint',
-                hintText: 'wss://host/xmpp-websocket',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _wsProtocolsController,
-              enabled: !service.isConnecting,
-              decoration: const InputDecoration(
-                labelText: 'WebSocket subprotocols (optional)',
-                hintText: 'xmpp, stanza',
-              ),
-            ),
-          ],
-        ],
-      ],
     );
   }
 
@@ -3584,81 +3182,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
     _lastSentChatState = state;
     widget.service.setMyChatState(bareJid, state);
-  }
-
-  void _scheduleEndpointDiscovery(String jid, {bool immediate = false}) {
-    if (!kIsWeb && !_useWebSocket) {
-      return;
-    }
-    final trimmed = jid.trim();
-    if (trimmed.isEmpty) {
-      if (_endpointDiscoveryMessage != null) {
-        setState(() {
-          _endpointDiscoveryMessage = null;
-          _endpointDiscoveryBusy = false;
-        });
-      }
-      return;
-    }
-    _endpointDiscoveryDebounce?.cancel();
-    if (immediate) {
-      unawaited(_discoverEndpoint(trimmed));
-      return;
-    }
-    _endpointDiscoveryDebounce = Timer(
-      const Duration(milliseconds: 700),
-      () => _discoverEndpoint(trimmed),
-    );
-  }
-
-  Future<void> _discoverEndpoint(String jid) async {
-    final parsed = Jid.fromFullJid(jid);
-    if (!parsed.isValid()) {
-      return;
-    }
-    final domain = _domainFromBareJid(parsed.userAtDomain);
-    if (domain.isEmpty) {
-      return;
-    }
-    if (_endpointDiscoveryBusy && _lastEndpointDiscoveryDomain == domain) {
-      return;
-    }
-    if (_lastEndpointDiscoveryDomain == domain &&
-        _wsEndpointController.text.trim().isNotEmpty) {
-      return;
-    }
-    setState(() {
-      _endpointDiscoveryBusy = true;
-      _endpointDiscoveryMessage = 'Discovering WebSocket endpoint…';
-    });
-    _lastEndpointDiscoveryDomain = domain;
-    final discovered = await discoverWebSocketEndpoint(domain);
-    if (!mounted) {
-      return;
-    }
-    if (discovered != null) {
-      final parsedEndpoint = parseWsEndpoint(discovered.toString());
-      if (parsedEndpoint != null) {
-        _wsEndpointController.text = parsedEndpoint.uri.toString();
-      }
-      setState(() {
-        _endpointDiscoveryBusy = false;
-        _endpointDiscoveryMessage =
-            'WebSocket endpoint discovered for $domain.';
-      });
-      return;
-    }
-    setState(() {
-      _endpointDiscoveryBusy = false;
-      _endpointDiscoveryMessage =
-          'Could not discover a WebSocket endpoint for $domain. Enter one in advanced options.';
-      _advancedOptionsExpanded = true;
-    });
-  }
-
-  String _domainFromBareJid(String bareJid) {
-    final parts = bareJid.split('@');
-    return parts.length == 2 ? parts[1] : '';
   }
 
   void _handleAutoScroll(int messageCount) {
