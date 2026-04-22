@@ -241,26 +241,38 @@ class Connection {
 
   String restOfResponse = '';
 
-  String extractWholeChild(String response) {
-    return response;
-  }
-
   String prepareStreamResponse(String response) {
+    // Accumulate with any previously incomplete data
+    final combined = restOfResponse + response;
     Log.xmppp_receiving(response);
-    var response1 = extractWholeChild(restOfResponse + response);
-    if (response1.contains('</stream:stream>')) {
+
+    if (combined.contains('</stream:stream>')) {
+      restOfResponse = '';
       close();
       return '';
     }
-    if (response1.contains('stream:stream') &&
-        !(response1.contains('</stream:stream>'))) {
-      response1 = response1 +
-          '</stream:stream>'; // fix for crashing xml library without ending
-    }
 
-    //fix for multiple roots issue
-    response1 = '<xmpp_stone>$response1</xmpp_stone>';
-    return response1;
+    // Wrap in a synthetic root so the XML parser can handle multiple top-level
+    // elements (e.g. <stream:stream> followed by <stream:features>).
+    // If the stream opening tag is present but not yet closed, append a
+    // temporary closing tag so the XML library doesn't reject the fragment.
+    String wrapped = combined;
+    if (wrapped.contains('stream:stream') &&
+        !wrapped.contains('</stream:stream>')) {
+      wrapped = '$wrapped</stream:stream>';
+    }
+    wrapped = '<xmpp_stone>$wrapped</xmpp_stone>';
+
+    // Try to parse; if it fails the data is incomplete — buffer and wait.
+    try {
+      xml.XmlDocument.parse(wrapped.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''));
+      restOfResponse = '';
+      return wrapped;
+    } catch (_) {
+      // Incomplete chunk — accumulate and signal nothing to process yet.
+      restOfResponse = combined;
+      return '';
+    }
   }
 
   void reconnect() {
@@ -438,6 +450,7 @@ class Connection {
       _pendingWriteBuffer.clear();
       _flushScheduled = false;
       _inboundProcessingDepth = 0;
+      restOfResponse = '';
       _openStream();
     } else {
       Log.d(TAG, 'Closed in meantime');
@@ -509,35 +522,18 @@ class Connection {
     return (name == 'stream:features' || name == 'features');
   }
 
-  String _unparsedXmlResponse = '';
-
   void handleResponse(String response) {
     _inboundProcessingDepth++;
-    String fullResponse;
-    if (_unparsedXmlResponse.isNotEmpty) {
-      if (response.length > 12) {
-        fullResponse = '$_unparsedXmlResponse${response.substring(12)}'; //
-      } else {
-        fullResponse = _unparsedXmlResponse;
-      }
-      Log.v(TAG, 'full response = $fullResponse');
-      _unparsedXmlResponse = '';
-    } else {
-      fullResponse = response;
-    }
+    // prepareStreamResponse (the map function) already buffers incomplete
+    // chunks and returns '' until a complete, parseable XML fragment is ready.
+    final fullResponse = response;
 
     try {
       if (fullResponse.isNotEmpty) {
         xml.XmlNode? xmlResponse;
-        try {
-          xmlResponse = xml.XmlDocument.parse(
-                  fullResponse.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''))
-              .firstChild;
-        } catch (e) {
-          _unparsedXmlResponse += fullResponse.substring(
-              0, fullResponse.length - 13); //remove  xmpp_stone end tag
-          xmlResponse = xml.XmlElement(xml.XmlName('error'));
-        }
+        xmlResponse = xml.XmlDocument.parse(
+                fullResponse.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''))
+            .firstChild;
 
         //TODO: Improve parser for children only
         xmlResponse!.descendants
