@@ -50,8 +50,11 @@ void startCallback() {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Log.logLevel = LogLevel.VERBOSE;
-  Log.logXmpp = true;
+  assert(() {
+    Log.logLevel = LogLevel.VERBOSE;
+    Log.logXmpp = true;
+    return true;
+  }());
   final prefs = await SharedPreferences.getInstance();
   final optIn = prefs.getBool(_sentryOptInKey) ?? false;
   await _startApp(sentryEnabled: optIn);
@@ -167,7 +170,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     }
     final title = _service.displayNameFor(bareJid);
     _notifications.showMessage(
-      id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
+      id: bareJid.hashCode.abs() % (1 << 31),
       title: title,
       body: message.body,
       chatJid: bareJid,
@@ -184,7 +187,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     }
     final title = '$roomJid • ${message.from}';
     _notifications.showMessage(
-      id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
+      id: roomJid.hashCode.abs() % (1 << 31),
       title: title,
       body: message.body,
       chatJid: roomJid,
