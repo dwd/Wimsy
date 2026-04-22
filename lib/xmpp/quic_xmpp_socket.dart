@@ -42,6 +42,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   QuicSendStream? _sendStream;
   QuicRecvStream? _recvStream;
   final Map<int, _QuicStreamChannel> _auxStreamsBySlot = {};
+  // In-flight futures for aux stream opens, keyed by slot. Concurrent callers
+  // for the same slot await the same future rather than racing on _connection.
+  final Map<int, Future<_QuicStreamChannel>> _auxStreamOpening = {};
 
   @override
   Future<XmppWebSocket> connect<S>(
@@ -143,6 +146,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _accountBareJid = null;
     _controlBuffer = '';
     _auxStreamsBySlot.clear();
+    _auxStreamOpening.clear();
 
     if (controlStream != null) {
       unawaited(
@@ -380,30 +384,41 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
-  Future<_QuicStreamChannel> _ensureAuxStream(int slot) async {
+  Future<_QuicStreamChannel> _ensureAuxStream(int slot) {
     final existing = _auxStreamsBySlot[slot];
     if (existing != null) {
-      return existing;
+      return Future.value(existing);
     }
-    final connection = _connection;
-    if (connection == null || _closed) {
-      throw StateError('QUIC connection is not established');
+    // Coalesce concurrent opens for the same slot: if one is already in
+    // flight, return the same future so callers share the result rather than
+    // each trying to consume _connection via Auto_Owned FFI transfer.
+    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot));
+  }
+
+  Future<_QuicStreamChannel> _openAuxStream(int slot) async {
+    try {
+      final connection = _connection;
+      if (connection == null || _closed) {
+        throw StateError('QUIC connection is not established');
+      }
+      final opened = await connectionOpenBi(connection: connection);
+      // Re-check after the async gap: close() may have fired while we awaited.
+      if (_closed) {
+        // Discard the newly opened streams; the connection is being torn down.
+        throw StateError('QUIC socket closed during aux stream open');
+      }
+      _connection = opened.$1;
+      final channel = _QuicStreamChannel(
+        sendStream: opened.$2,
+        recvStream: opened.$3,
+      );
+      _auxStreamsBySlot[slot] = channel;
+      debugPrint('QUIC aux stream opened (outbound) slot=$slot');
+      _startRecvLoop(opened.$3, isControl: false, slot: slot);
+      return channel;
+    } finally {
+      _auxStreamOpening.remove(slot);
     }
-    final opened = await connectionOpenBi(connection: connection);
-    // Re-check after the async gap: close() may have fired while we awaited.
-    if (_closed) {
-      // Discard the newly opened streams; the connection is being torn down.
-      throw StateError('QUIC socket closed during aux stream open');
-    }
-    _connection = opened.$1;
-    final channel = _QuicStreamChannel(
-      sendStream: opened.$2,
-      recvStream: opened.$3,
-    );
-    _auxStreamsBySlot[slot] = channel;
-    debugPrint('QUIC aux stream opened (outbound) slot=$slot');
-    _startRecvLoop(opened.$3, isControl: false, slot: slot);
-    return channel;
   }
 
   void _captureBindResult(String chunk) {
