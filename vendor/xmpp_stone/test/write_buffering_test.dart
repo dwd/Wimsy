@@ -87,6 +87,8 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   void close() {
     _controller.close();
   }
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure({

@@ -84,6 +84,8 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
 
   @override
   void close() {}
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure(

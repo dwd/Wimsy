@@ -82,6 +82,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   @override
+  bool get isQuic => true;
+
+  @override
   void write(Object? message) {
     if (!_useQuic) {
       _fallbackSocket.write(message);

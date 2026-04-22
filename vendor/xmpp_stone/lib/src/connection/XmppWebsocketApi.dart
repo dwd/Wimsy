@@ -24,6 +24,8 @@ abstract class XmppWebSocket extends Stream<String> {
 
   void close();
 
+  bool get isQuic => false;
+
   Future<SecureSocket?> secure(
       {host,
       SecurityContext? context,

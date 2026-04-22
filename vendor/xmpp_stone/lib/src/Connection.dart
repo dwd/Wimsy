@@ -205,6 +205,7 @@ class Connection {
 
   bool get iapAdvertisedInCurrentStream => _iapAdvertisedInCurrentStream;
   bool get sasl2PipelinedAuthInFlight => _sasl2PipelinedAuthInFlight;
+  bool get isQuic => _socket?.isQuic ?? false;
 
   xmppSocket.XmppWebSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
