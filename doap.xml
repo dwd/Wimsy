@@ -235,7 +235,8 @@
     <doap:implements>
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0388.html"/>
-        <xmpp:status>partial</xmpp:status>
+        <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">Includes SCRAM authentication, user-agent binding, stream resumption inline, and IAP config-version pipelining.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>
