@@ -6,12 +6,16 @@
 // tree, read text, and verify that the values of widget properties are correct.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:wimsy/main.dart';
+import 'package:wimsy/storage/preferences_service.dart';
 
 void main() {
   testWidgets('App launches smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const WimsyApp());
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    await tester.pumpWidget(WimsyApp(preferences: prefs));
 
     expect(find.byType(WimsyApp), findsOneWidget);
   });

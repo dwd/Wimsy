@@ -12,7 +12,6 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -23,6 +22,7 @@ import 'models/contact_entry.dart';
 import 'models/room_entry.dart';
 import 'notifications/notification_service.dart';
 import 'storage/account_record.dart';
+import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/xmpp_service.dart';
 import 'xmpp/jid_discovery.dart';
@@ -32,8 +32,6 @@ import 'background/foreground_task_handler.dart';
 import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
-const String _sentryOptInKey = 'sentry_opt_in';
-const String _pinIgnoredKey = 'wimsy_pin_ignored';
 const List<String> _defaultReactionOptions = [
   '👍',
   '❤️',
@@ -55,14 +53,16 @@ Future<void> main() async {
     Log.logXmpp = true;
     return true;
   }());
-  final prefs = await SharedPreferences.getInstance();
-  final optIn = prefs.getBool(_sentryOptInKey) ?? false;
-  await _startApp(sentryEnabled: optIn);
+  final prefs = await PreferencesService.load();
+  await _startApp(sentryEnabled: prefs.sentryOptIn, preferences: prefs);
 }
 
 const bool _isFlutterTest = bool.fromEnvironment('FLUTTER_TEST');
 
-Future<void> _startApp({required bool sentryEnabled}) async {
+Future<void> _startApp({
+  required bool sentryEnabled,
+  required PreferencesService preferences,
+}) async {
   if (sentryEnabled) {
     await SentryFlutter.init(
       (options) {
@@ -74,31 +74,35 @@ Future<void> _startApp({required bool sentryEnabled}) async {
         Connection.errorReporter = (error, stackTrace) {
           Sentry.captureException(error, stackTrace: stackTrace);
         };
-        runApp(SentryWidget(child: const WimsyApp()));
+        runApp(SentryWidget(child: WimsyApp(preferences: preferences)));
       },
     );
     return;
   }
   Connection.errorReporter = null;
-  runApp(const WimsyApp());
+  runApp(WimsyApp(preferences: preferences));
 }
 
 Future<void> _enableSentryAndRestart() async {
   if (Sentry.isEnabled) {
     return;
   }
-  await _startApp(sentryEnabled: true);
+  final prefs = await PreferencesService.load();
+  await _startApp(sentryEnabled: true, preferences: prefs);
 }
 
 Future<void> _restartWithoutSentry() async {
   if (!Sentry.isEnabled) {
     return;
   }
-  await _startApp(sentryEnabled: false);
+  final prefs = await PreferencesService.load();
+  await _startApp(sentryEnabled: false, preferences: prefs);
 }
 
 class WimsyApp extends StatefulWidget {
-  const WimsyApp({super.key});
+  const WimsyApp({super.key, required this.preferences});
+
+  final PreferencesService preferences;
 
   @override
   State<WimsyApp> createState() => _WimsyAppState();
@@ -109,6 +113,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   final StorageService _storage = StorageService();
   final NotificationService _notifications = NotificationService();
   final Connectivity _connectivity = Connectivity();
+  PreferencesService get _preferences => widget.preferences;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _appIsForeground = true;
   late final Future<void> _initFuture;
@@ -358,6 +363,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
                 service: _service,
                 storage: _storage,
                 notifications: _notifications,
+                preferences: _preferences,
               );
             },
           ),
@@ -372,11 +378,13 @@ class _Gatekeeper extends StatefulWidget {
     required this.service,
     required this.storage,
     required this.notifications,
+    required this.preferences,
   });
 
   final XmppService service;
   final StorageService storage;
   final NotificationService notifications;
+  final PreferencesService preferences;
 
   @override
   State<_Gatekeeper> createState() => _GatekeeperState();
@@ -397,14 +405,13 @@ class _GatekeeperState extends State<_Gatekeeper> {
     final hasPin = await widget.storage.hasPin();
     var pinIgnored = false;
     if (hasPin) {
-      final prefs = await SharedPreferences.getInstance();
-      pinIgnored = prefs.getBool(_pinIgnoredKey) ?? false;
+      pinIgnored = widget.preferences.pinIgnored;
       if (pinIgnored) {
         try {
           await widget.storage.unlock('0000');
         } catch (_) {
           pinIgnored = false;
-          await prefs.setBool(_pinIgnoredKey, false);
+          await widget.preferences.setPinIgnored(false);
         }
       }
     }
@@ -425,10 +432,10 @@ class _GatekeeperState extends State<_Gatekeeper> {
     }
     if (!_hasPin) {
       return _PinSetupScreen(
+        preferences: widget.preferences,
         onPinSet: (pin, {required ignored}) async {
           await widget.storage.setupPin(pin);
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool(_pinIgnoredKey, ignored);
+          await widget.preferences.setPinIgnored(ignored);
           if (!mounted) {
             return;
           }
@@ -442,6 +449,7 @@ class _GatekeeperState extends State<_Gatekeeper> {
     if (!widget.storage.isUnlocked) {
       return _PinUnlockScreen(
         pinIgnored: _pinIgnored,
+        preferences: widget.preferences,
         onUnlocked: (pin) async {
           await widget.storage.unlock(pin);
           if (!mounted) {
@@ -455,6 +463,7 @@ class _GatekeeperState extends State<_Gatekeeper> {
       service: widget.service,
       storage: widget.storage,
       notifications: widget.notifications,
+      preferences: widget.preferences,
     );
   }
 }
@@ -465,11 +474,13 @@ class WimsyHome extends StatefulWidget {
     required this.service,
     required this.storage,
     required this.notifications,
+    required this.preferences,
   });
 
   final XmppService service;
   final StorageService storage;
   final NotificationService notifications;
+  final PreferencesService preferences;
 
   @override
   State<WimsyHome> createState() => _WimsyHomeState();
@@ -569,8 +580,7 @@ class _WimsyHomeState extends State<WimsyHome> {
   }
 
   Future<void> _loadAccount() async {
-    final prefs = await SharedPreferences.getInstance();
-    final cachedJid = prefs.getString('wimsy_last_jid');
+    final cachedJid = widget.preferences.lastJid;
     final account = AccountRecord.fromMap(widget.storage.loadAccount());
     if (!mounted) {
       return;
@@ -604,9 +614,8 @@ class _WimsyHomeState extends State<WimsyHome> {
   }
 
   Future<void> _loadMediaPreferences() async {
-    final prefs = await SharedPreferences.getInstance();
-    final audioInput = prefs.getString('wimsy_audio_input');
-    final videoInput = prefs.getString('wimsy_video_input');
+    final audioInput = widget.preferences.audioInputId;
+    final videoInput = widget.preferences.videoInputId;
     if (audioInput != null && audioInput.isNotEmpty) {
       widget.service.selectAudioInput(audioInput);
     }
@@ -876,6 +885,7 @@ class _WimsyHomeState extends State<WimsyHome> {
             actions: [
               _PresenceMenu(
                 service: service,
+                preferences: widget.preferences,
                 onClearCacheExit: _clearingCache
                     ? null
                     : _confirmClearCacheAndExit,
@@ -1778,9 +1788,7 @@ class _WimsyHomeState extends State<WimsyHome> {
       wsProtocols: wsProtocols,
     );
     widget.storage.storeAccount(account.toMap());
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setString('wimsy_last_jid', account.jid);
-    });
+    unawaited(widget.preferences.setLastJid(account.jid));
     widget.service.connect(
       jid: account.jid,
       password: _passwordController.text,
@@ -2090,9 +2098,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                       : null,
                   onTap: () async {
                     widget.service.selectAudioInput(inputs[i].deviceId);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString(
-                      'wimsy_audio_input',
+                    await widget.preferences.setAudioInputId(
                       inputs[i].deviceId,
                     );
                     if (context.mounted) {
@@ -2135,9 +2141,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                       : null,
                   onTap: () async {
                     widget.service.selectVideoInput(inputs[i].deviceId);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString(
-                      'wimsy_video_input',
+                    await widget.preferences.setVideoInputId(
                       inputs[i].deviceId,
                     );
                     if (context.mounted) {
@@ -5268,17 +5272,18 @@ Color _presenceDotColor(ThemeData theme, PresenceShowElement? show) {
 class _PresenceMenu extends StatelessWidget {
   const _PresenceMenu({
     required this.service,
+    required this.preferences,
     required this.onClearCacheExit,
     required this.onExit,
   });
 
   final XmppService service;
+  final PreferencesService preferences;
   final VoidCallback? onClearCacheExit;
   final VoidCallback onExit;
 
   Future<void> _setSentryOptIn(BuildContext context, bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_sentryOptInKey, enabled);
+    await preferences.setSentryOptIn(enabled);
     if (enabled) {
       await _enableSentryAndRestart();
       return;
@@ -5286,10 +5291,7 @@ class _PresenceMenu extends StatelessWidget {
     await _restartWithoutSentry();
   }
 
-  Future<bool> _getSentryOptIn() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_sentryOptInKey) ?? false;
-  }
+  Future<bool> _getSentryOptIn() async => preferences.sentryOptIn;
 
   Future<void> _editProfile(BuildContext context) async {
     final selfJid = service.currentUserBareJid;
@@ -6071,9 +6073,13 @@ class _CropMaskPainter extends CustomPainter {
 }
 
 class _PinSetupScreen extends StatefulWidget {
-  const _PinSetupScreen({required this.onPinSet});
+  const _PinSetupScreen({
+    required this.onPinSet,
+    required this.preferences,
+  });
 
   final Future<void> Function(String pin, {required bool ignored}) onPinSet;
+  final PreferencesService preferences;
 
   @override
   State<_PinSetupScreen> createState() => _PinSetupScreenState();
@@ -6188,8 +6194,7 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
       _submitting = true;
     });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_sentryOptInKey, _sentryOptIn);
+      await widget.preferences.setSentryOptIn(_sentryOptIn);
       await widget.onPinSet(pin, ignored: false);
       if (_sentryOptIn && mounted) {
         await _enableSentryAndRestart();
@@ -6209,8 +6214,7 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
       _submitting = true;
     });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_sentryOptInKey, _sentryOptIn);
+      await widget.preferences.setSentryOptIn(_sentryOptIn);
       await widget.onPinSet('0000', ignored: true);
       if (_sentryOptIn && mounted) {
         await _enableSentryAndRestart();
@@ -6226,10 +6230,15 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
 }
 
 class _PinUnlockScreen extends StatefulWidget {
-  const _PinUnlockScreen({required this.onUnlocked, required this.pinIgnored});
+  const _PinUnlockScreen({
+    required this.onUnlocked,
+    required this.pinIgnored,
+    required this.preferences,
+  });
 
   final Future<void> Function(String pin) onUnlocked;
   final bool pinIgnored;
+  final PreferencesService preferences;
 
   @override
   State<_PinUnlockScreen> createState() => _PinUnlockScreenState();
@@ -6327,10 +6336,9 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
       _submitting = true;
     });
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final existingOptIn = prefs.getBool(_sentryOptInKey) ?? false;
+      final existingOptIn = widget.preferences.sentryOptIn;
       if (_sentryOptIn && !existingOptIn) {
-        await prefs.setBool(_sentryOptInKey, true);
+        await widget.preferences.setSentryOptIn(true);
       }
       await widget.onUnlocked(pin);
       if (_sentryOptIn && !existingOptIn && mounted) {
@@ -6352,11 +6360,10 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
   }
 
   Future<void> _loadSentryOptIn() async {
-    final prefs = await SharedPreferences.getInstance();
+    final existing = widget.preferences.sentryOptIn;
     if (!mounted) {
       return;
     }
-    final existing = prefs.getBool(_sentryOptInKey) ?? false;
     setState(() {
       _sentryOptIn = existing;
       _loadedSentryPref = true;
