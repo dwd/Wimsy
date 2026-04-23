@@ -132,8 +132,9 @@ class StreamManagementModule extends Negotiator {
 
   @override
   bool isReady() {
-    // Not applicable over QUIC — transport layer handles reliability.
-    if (_connection.isQuic) return false;
+    // Over QUIC, SM is skipped but we must still report ready so that
+    // negotiate() is called and can advance the negotiator queue to DONE.
+    if (_connection.isQuic) return true;
     return super.isReady() &&
         (isResumeAvailable() ||
             (_connection.fullJid.resource != null &&
