@@ -57,9 +57,13 @@ class Log {
     }
   }
 
-  static void xmppp_sending(String message) {
+  static void xmppp_sending(String message, {String? channel}) {
     if (logXmpp) {
-      _emit('---Xmpp Sending:---');
+      if (channel == null) {
+        _emit('---Xmpp Sending:---');
+      } else {
+        _emit('---Xmpp Sending [$channel]:---');
+      }
       _emit('$message');
     }
   }

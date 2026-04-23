@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:flutter_quic/flutter_quic.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
+import 'package:xmpp_stone/src/logger/Log.dart';
 
 class QuicCapableXmppSocket extends XmppWebSocket {
   QuicCapableXmppSocket({
@@ -109,6 +110,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       }
       try {
         final target = await _selectSendTarget(payload);
+        Log.xmppp_sending(payload, channel: target.label);
         final updated = await sendStreamWriteAll(
           stream: target.stream,
           data: utf8.encode(payload),
@@ -371,6 +373,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return _QuicSendTarget(
         stream: control,
         update: (updated) => _sendStream = updated,
+        label: 'quic-control',
       );
     }
 
@@ -380,6 +383,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return _QuicSendTarget(
         stream: control,
         update: (updated) => _sendStream = updated,
+        label: 'quic-control',
       );
     }
 
@@ -388,6 +392,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     return _QuicSendTarget(
       stream: channel.sendStream,
       update: (updated) => channel.sendStream = updated,
+      label: 'quic-aux-$slot',
     );
   }
 
@@ -612,8 +617,13 @@ class _QuicStreamChannel {
 }
 
 class _QuicSendTarget {
-  const _QuicSendTarget({required this.stream, required this.update});
+  const _QuicSendTarget({
+    required this.stream,
+    required this.update,
+    required this.label,
+  });
 
   final QuicSendStream stream;
   final void Function(QuicSendStream updated) update;
+  final String label;
 }

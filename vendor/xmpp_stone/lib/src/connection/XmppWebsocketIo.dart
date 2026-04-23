@@ -111,9 +111,17 @@ class XmppWebSocketIo extends XmppWebSocket {
   @override
   void write(Object? message) {
     if (_useWebSocket) {
-      _webSocket?.sink.add(message);
+      if (_webSocket == null) {
+        return;
+      }
+      Log.xmppp_sending(message.toString(), channel: 'ws');
+      _webSocket!.sink.add(message);
     } else {
-      _tcpSocket?.write(message);
+      if (_tcpSocket == null) {
+        return;
+      }
+      Log.xmppp_sending(message.toString(), channel: 'tcp');
+      _tcpSocket!.write(message);
     }
   }
 

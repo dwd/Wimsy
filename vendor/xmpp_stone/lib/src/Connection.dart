@@ -589,7 +589,13 @@ class Connection {
   }
 
   void write(message) {
-    Log.xmppp_sending(message);
+    // Note: the actual "Xmpp Sending" log entry is emitted by the socket at the
+    // moment the data is handed to the transport (TCP/WS/QUIC). This gives an
+    // accurate picture of what is on the wire and, for QUIC, which stream
+    // (control vs aux slot) the data was written to. Logging here would only
+    // record queueing, which can differ significantly from actual send time
+    // when writes are buffered or routed to an aux QUIC stream that is still
+    // being opened.
     if (!isOpened()) {
       return;
     }
