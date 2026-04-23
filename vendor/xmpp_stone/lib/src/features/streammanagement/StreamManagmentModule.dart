@@ -112,7 +112,11 @@ class StreamManagementModule extends Negotiator {
   void negotiate(List<Nonza> nonzas) {
     // XEP-0198 stream management is incompatible with QUIC transport (XEP-0467),
     // which provides its own reliability guarantees at the transport layer.
-    if (_connection.isQuic) return;
+    // We must still emit DONE so the negotiator queue advances.
+    if (_connection.isQuic) {
+      state = NegotiatorState.DONE;
+      return;
+    }
     if (nonzas.isNotEmpty &&
         SMNonza.match(nonzas[0]) &&
         _connection.authenticated) {
