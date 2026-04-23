@@ -454,27 +454,68 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       final previousLock = _auxOpenLock;
       _auxOpenLock = completer.future;
       try {
+        debugPrint('QUIC aux stream slot=$slot awaiting open lock (reason=$reason)');
         await previousLock;
         final connection = _connection;
         if (connection == null || _closed) {
           throw StateError('QUIC connection is not established');
         }
-        debugPrint('QUIC aux stream opening slot=$slot reason=$reason');
-        final opened = await connectionOpenBi(connection: connection);
-        // Re-check after the async gap: close() may have fired while we awaited.
-        if (_closed) {
-          // Discard the newly opened streams; the connection is being torn down.
-          throw StateError('QUIC socket closed during aux stream open');
+        debugPrint('QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)');
+        // connectionOpenBi (Quinn open_bi) will BLOCK until the peer has
+        // granted enough bidirectional-stream credits for a new stream to be
+        // opened. If the server advertises a low initial_max_streams_bidi and
+        // does not proactively send MAX_STREAMS frames, this future can hang
+        // indefinitely — which previously held _auxOpenLock forever and
+        // prevented every subsequent aux slot from even logging that it was
+        // trying to open. Add progress logging and a hard timeout so this
+        // failure mode is visible and recoverable.
+        final openStart = DateTime.now();
+        Timer? progressTimer;
+        progressTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+          final elapsed = DateTime.now().difference(openStart);
+          debugPrint(
+            'QUIC aux stream slot=$slot connectionOpenBi still pending after '
+            '${elapsed.inMilliseconds}ms — peer has likely not granted bidi '
+            'stream credits yet',
+          );
+        });
+        try {
+          final opened = await connectionOpenBi(connection: connection)
+              .timeout(const Duration(seconds: 10), onTimeout: () {
+            throw TimeoutException(
+              'connectionOpenBi timed out for aux slot $slot after 10s '
+              '(peer likely did not grant additional bidi stream credits)',
+            );
+          });
+          // Re-check after the async gap: close() may have fired while we awaited.
+          if (_closed) {
+            // Discard the newly opened streams; the connection is being torn down.
+            throw StateError('QUIC socket closed during aux stream open');
+          }
+          _connection = opened.$1;
+          final channel = _QuicStreamChannel(
+            sendStream: opened.$2,
+            recvStream: opened.$3,
+          );
+          _auxStreamsBySlot[slot] = channel;
+          final elapsed = DateTime.now().difference(openStart);
+          debugPrint(
+            'QUIC aux stream opened (outbound) slot=$slot '
+            'in ${elapsed.inMilliseconds}ms',
+          );
+          _startRecvLoop(opened.$3, isControl: false, slot: slot);
+          return channel;
+        } catch (error, stack) {
+          final elapsed = DateTime.now().difference(openStart);
+          debugPrint(
+            'QUIC aux stream open error slot=$slot after '
+            '${elapsed.inMilliseconds}ms error=$error',
+          );
+          debugPrint('QUIC aux stream open stack slot=$slot: $stack');
+          rethrow;
+        } finally {
+          progressTimer.cancel();
         }
-        _connection = opened.$1;
-        final channel = _QuicStreamChannel(
-          sendStream: opened.$2,
-          recvStream: opened.$3,
-        );
-        _auxStreamsBySlot[slot] = channel;
-        debugPrint('QUIC aux stream opened (outbound) slot=$slot');
-        _startRecvLoop(opened.$3, isControl: false, slot: slot);
-        return channel;
       } finally {
         completer.complete();
       }
