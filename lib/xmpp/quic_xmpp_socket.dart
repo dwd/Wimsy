@@ -477,21 +477,21 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return;
     }
     _auxOpenStarted = true;
-    unawaited(
-      Future<void>(() async {
-        for (var slot = 0; slot < _auxStreamSlots; slot++) {
-          if (_closed) {
-            break;
-          }
-          try {
-            await _ensureAuxStream(slot, reason: 'post-bind pre-open slot $slot of $_auxStreamSlots');
-          } catch (error) {
-            debugPrint('QUIC aux stream open failed slot=$slot error=$error');
-            break;
-          }
+    // Fire all aux stream opens as independent async tasks so they do not
+    // block the main stream (which continues to be used for all connection
+    // state work and traffic to/from the user's own bare JID).  The global
+    // _auxOpenLock mutex in _openAuxStream ensures the underlying FFI calls
+    // are still serialised even though the Dart tasks run concurrently.
+    for (var slot = 0; slot < _auxStreamSlots; slot++) {
+      final s = slot;
+      unawaited(Future<void>(() async {
+        try {
+          await _ensureAuxStream(s, reason: 'post-bind pre-open slot $s of $_auxStreamSlots');
+        } catch (error) {
+          debugPrint('QUIC aux stream open failed slot=$s error=$error');
         }
-      }),
-    );
+      }));
+    }
   }
 
   String _formatSocketAddress(InternetAddress address, int port) {
