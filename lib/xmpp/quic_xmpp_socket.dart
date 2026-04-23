@@ -378,8 +378,20 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     final toBare = extractToBareJidForRouting(payload);
+    // Keep on the control stream when:
+    //  * the stanza has no `to` (server-directed, typical for negotiation IQs)
+    //  * the `to` is our own bare JID (self-directed)
+    //  * the `to` is our own server's bare domain (e.g. disco#info to the
+    //    account domain during negotiation) — this is negotiation traffic
+    //    which MUST not be queued behind an aux-stream open.
+    final accountDomain = _accountBareJid == null
+        ? null
+        : _accountBareJid!.contains('@')
+            ? _accountBareJid!.split('@').last
+            : _accountBareJid;
     if (toBare == null ||
-        (_accountBareJid != null && toBare == _accountBareJid)) {
+        (_accountBareJid != null && toBare == _accountBareJid) ||
+        (accountDomain != null && toBare == accountDomain)) {
       return _QuicSendTarget(
         stream: control,
         update: (updated) => _sendStream = updated,
@@ -388,7 +400,31 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     final slot = quicAuxSlotForBareJid(toBare, _auxStreamSlots);
-    final channel = await _ensureAuxStream(slot, reason: 'on-demand routing for $toBare');
+    // Do not block the write queue if the aux stream is not yet open: if we
+    // cannot get the aux channel synchronously, fall back to the control
+    // stream. The write queue is a single serial chain; awaiting aux-stream
+    // creation here deadlocks every subsequent write (including critical
+    // negotiation stanzas) behind a potentially slow/failed aux open.
+    final existing = _auxStreamsBySlot[slot];
+    if (existing == null) {
+      // Kick off opening the aux stream for future sends, but send this
+      // payload on the control stream right now.
+      unawaited(
+        _ensureAuxStream(slot, reason: 'on-demand routing for $toBare')
+            .catchError((Object error) {
+          debugPrint(
+            'QUIC aux stream on-demand open failed slot=$slot error=$error',
+          );
+          throw error;
+        }),
+      );
+      return _QuicSendTarget(
+        stream: control,
+        update: (updated) => _sendStream = updated,
+        label: 'quic-control',
+      );
+    }
+    final channel = existing;
     return _QuicSendTarget(
       stream: channel.sendStream,
       update: (updated) => channel.sendStream = updated,
