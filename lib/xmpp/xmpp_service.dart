@@ -752,6 +752,7 @@ class XmppService extends ChangeNotifier {
     bool directTls = false,
     String? wsEndpoint,
     List<String>? wsProtocols,
+    bool useQuic = true,
   }) async {
     final quicTransportAvailable =
         !kIsWeb &&
@@ -800,7 +801,7 @@ class XmppService extends ChangeNotifier {
         'xmpp.srv_lookup',
         description: domain,
       );
-      if (quicTransportAvailable) {
+      if (quicTransportAvailable && useQuic) {
         quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
       }
       tcpSrvCandidates = await resolveXmppSrvCandidates(domain);
@@ -863,7 +864,7 @@ class XmppService extends ChangeNotifier {
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
       if (!shouldUseWebSocket) {
-        account.quicEndpoints = quicTransportAvailable
+        account.quicEndpoints = (quicTransportAvailable && useQuic)
             ? buildQuicEndpointPlan(
                 domain: account.domain,
                 srvCandidates: quicSrvCandidates,

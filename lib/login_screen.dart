@@ -49,6 +49,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberPassword = false;
   bool _useWebSocket = kIsWeb;
   bool _useDirectTls = false;
+  /// Whether to attempt QUIC transport (XEP-0467) when available.
+  bool _useQuic = true;
   bool _advancedOptionsExpanded = false;
   bool _endpointDiscoveryBusy = false;
   String? _endpointDiscoveryMessage;
@@ -97,6 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _resourceController.text = account.resource;
         _useWebSocket = kIsWeb ? true : account.useWebSocket;
         _useDirectTls = kIsWeb ? false : account.directTls;
+        _useQuic = account.useQuic;
         _wsEndpointController.text = account.wsEndpoint;
         if (account.wsProtocols.isNotEmpty) {
           _wsProtocolsController.text = account.wsProtocols.join(', ');
@@ -130,6 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
       directTls: useDirectTls,
       wsEndpoint: _wsEndpointController.text.trim(),
       wsProtocols: wsProtocols,
+      useQuic: _useQuic,
     );
     widget.storage.storeAccount(account.toMap());
     unawaited(widget.preferences.setLastJid(account.jid));
@@ -143,6 +147,7 @@ class _LoginScreenState extends State<LoginScreen> {
       directTls: useDirectTls,
       wsEndpoint: account.wsEndpoint,
       wsProtocols: wsProtocols,
+      useQuic: _useQuic,
     );
   }
 
@@ -292,6 +297,26 @@ class _LoginScreenState extends State<LoginScreen> {
             controller: _resourceController,
             enabled: !service.isConnecting,
             decoration: const InputDecoration(labelText: 'Resource'),
+          ),
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Use QUIC transport (XEP-0467)'),
+            subtitle: const Text(
+              'Enables QUIC when the server advertises it via SRV. Disable to isolate QUIC issues.',
+            ),
+            value: kIsWeb ? false : _useQuic,
+            onChanged: service.isConnecting || kIsWeb
+                ? null
+                : (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _useQuic = value;
+                    });
+                  },
           ),
           const SizedBox(height: 12),
           CheckboxListTile(
