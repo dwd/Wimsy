@@ -189,6 +189,17 @@ Future<(QuicConnection, QuicConnectionStats)> connectionStats({
 }) =>
     RustLib.instance.api.crateApiBridgeConnectionStats(connection: connection);
 
+/// Get the peer's advertised QUIC transport parameters relevant to stream credits.
+///
+/// Exposes [`QuicConnection::peer_transport_params`] across the FFI. Useful for
+/// diagnosing `connection_open_bi` hangs caused by the peer advertising a small
+/// `initial_max_streams_bidi` and never raising it with `MAX_STREAMS`.
+Future<(QuicConnection, QuicPeerTransportParams)>
+connectionPeerTransportParams({required QuicConnection connection}) => RustLib
+    .instance
+    .api
+    .crateApiBridgeConnectionPeerTransportParams(connection: connection);
+
 /// Create a new server config with single certificate
 Future<QuicServerConfig> serverConfigWithSingleCert({
   required List<Uint8List> certChain,

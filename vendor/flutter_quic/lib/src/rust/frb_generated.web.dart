@@ -204,6 +204,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   QuicPathStats dco_decode_quic_path_stats(dynamic raw);
 
   @protected
+  QuicPeerTransportParams dco_decode_quic_peer_transport_params(dynamic raw);
+
+  @protected
   QuicReadException dco_decode_quic_read_exception(dynamic raw);
 
   @protected
@@ -260,6 +263,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   (QuicConnection, QuicConnectionStats)
   dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
+    dynamic raw,
+  );
+
+  @protected
+  (QuicConnection, QuicPeerTransportParams)
+  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
     dynamic raw,
   );
 
@@ -481,6 +490,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   QuicPathStats sse_decode_quic_path_stats(SseDeserializer deserializer);
 
   @protected
+  QuicPeerTransportParams sse_decode_quic_peer_transport_params(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   QuicReadException sse_decode_quic_read_exception(
     SseDeserializer deserializer,
   );
@@ -543,6 +557,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   (QuicConnection, QuicConnectionStats)
   sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  (QuicConnection, QuicPeerTransportParams)
+  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
     SseDeserializer deserializer,
   );
 
@@ -803,6 +823,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_quic_path_stats(QuicPathStats self, SseSerializer serializer);
 
   @protected
+  void sse_encode_quic_peer_transport_params(
+    QuicPeerTransportParams self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_quic_read_exception(
     QuicReadException self,
     SseSerializer serializer,
@@ -876,6 +902,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
     (QuicConnection, QuicConnectionStats) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
+    (QuicConnection, QuicPeerTransportParams) self,
     SseSerializer serializer,
   );
 

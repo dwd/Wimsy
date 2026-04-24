@@ -7,6 +7,7 @@ pub fn init_app() {
 // Core API exposure functions to ensure flutter_rust_bridge discovers our types
 use crate::core::{QuicEndpoint, QuicConnection, QuicSendStream, QuicRecvStream};
 use crate::core::{QuicConnectionStats, QuicPathStats, QuicFrameStats, QuicUdpStats};
+use crate::core::connection::QuicPeerTransportParams;
 use crate::core::{QuicServerConfig, QuicTransportConfig, QuicEndpointConfig};
 use crate::convenience::{QuicClient, QuicClientConfig};
 use crate::errors::{QuicError, QuicWriteException, QuicReadException, QuicReadToEndException, QuicDatagramException};
@@ -218,6 +219,18 @@ pub fn connection_stats(
     (connection, stats)
 }
 
+/// Get the peer's advertised QUIC transport parameters relevant to stream credits.
+///
+/// Exposes [`QuicConnection::peer_transport_params`] across the FFI. Useful for
+/// diagnosing `connection_open_bi` hangs caused by the peer advertising a small
+/// `initial_max_streams_bidi` and never raising it with `MAX_STREAMS`.
+pub fn connection_peer_transport_params(
+    connection: QuicConnection,
+) -> (QuicConnection, QuicPeerTransportParams) {
+    let params = connection.peer_transport_params();
+    (connection, params)
+}
+
 // Configuration builder functions
 
 /// Create a new server config with single certificate
@@ -253,6 +266,7 @@ pub fn _expose_types_for_frb_generation() {
     let _path_stats: Option<QuicPathStats> = None;
     let _frame_stats: Option<QuicFrameStats> = None;
     let _udp_stats: Option<QuicUdpStats> = None;
+    let _peer_params: Option<QuicPeerTransportParams> = None;
     let _server_config: Option<QuicServerConfig> = None;
     let _transport_config: Option<QuicTransportConfig> = None;
     let _endpoint_config: Option<QuicEndpointConfig> = None;

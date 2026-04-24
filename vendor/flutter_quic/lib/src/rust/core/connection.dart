@@ -189,6 +189,46 @@ class QuicPathStats {
           congestionEvents == other.congestionEvents;
 }
 
+/// Peer-advertised QUIC transport parameters relevant to stream/data credits.
+///
+/// These come from the remote peer's `transport_parameters` TLS extension and
+/// represent the *initial* limits the peer granted us at handshake time. They
+/// may be raised at runtime by `MAX_STREAMS` / `MAX_DATA` frames, which are
+/// reflected in [`QuicFrameStats`] (`max_streams_bidi`, `max_streams_uni`,
+/// `max_data`), not here.
+class QuicPeerTransportParams {
+  /// Peer's `initial_max_streams_bidi`: the total number of client-initiated
+  /// bidirectional streams we may open before needing a `MAX_STREAMS` update.
+  final BigInt initialMaxStreamsBidi;
+
+  /// Peer's `initial_max_streams_uni`.
+  final BigInt initialMaxStreamsUni;
+
+  /// Peer's `initial_max_data` (connection-level flow-control window, bytes).
+  final BigInt initialMaxData;
+
+  const QuicPeerTransportParams({
+    required this.initialMaxStreamsBidi,
+    required this.initialMaxStreamsUni,
+    required this.initialMaxData,
+  });
+
+  @override
+  int get hashCode =>
+      initialMaxStreamsBidi.hashCode ^
+      initialMaxStreamsUni.hashCode ^
+      initialMaxData.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is QuicPeerTransportParams &&
+          runtimeType == other.runtimeType &&
+          initialMaxStreamsBidi == other.initialMaxStreamsBidi &&
+          initialMaxStreamsUni == other.initialMaxStreamsUni &&
+          initialMaxData == other.initialMaxData;
+}
+
 /// UDP-level statistics
 class QuicUdpStats {
   final BigInt datagrams;

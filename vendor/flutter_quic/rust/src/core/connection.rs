@@ -114,6 +114,20 @@ impl QuicConnection {
         let quinn_stats = self.inner.stats();
         QuicConnectionStats::from(quinn_stats)
     }
+
+    /// Get the peer's advertised transport parameters relevant to stream credits.
+    ///
+    /// Exposes fields of the remote peer's QUIC transport parameters that matter
+    /// for diagnosing `open_bi()` credit starvation, which upstream quinn 0.11
+    /// does not surface publicly. Requires the patched vendored quinn/quinn-proto
+    /// in `vendor/flutter_quic/rust/vendor/`.
+    pub fn peer_transport_params(&self) -> QuicPeerTransportParams {
+        QuicPeerTransportParams {
+            initial_max_streams_bidi: self.inner.peer_params_initial_max_streams_bidi(),
+            initial_max_streams_uni: self.inner.peer_params_initial_max_streams_uni(),
+            initial_max_data: self.inner.peer_params_initial_max_data(),
+        }
+    }
     
     /// Get a reference to the inner Quinn connection
     pub(crate) fn inner(&self) -> &quinn::Connection {
@@ -167,6 +181,24 @@ pub struct QuicFrameStats {
     pub streams_blocked_bidi: u64,
     pub streams_blocked_uni: u64,
     pub stop_sending: u64,
+}
+
+/// Peer-advertised QUIC transport parameters relevant to stream/data credits.
+///
+/// These come from the remote peer's `transport_parameters` TLS extension and
+/// represent the *initial* limits the peer granted us at handshake time. They
+/// may be raised at runtime by `MAX_STREAMS` / `MAX_DATA` frames, which are
+/// reflected in [`QuicFrameStats`] (`max_streams_bidi`, `max_streams_uni`,
+/// `max_data`), not here.
+#[derive(Debug, Clone)]
+pub struct QuicPeerTransportParams {
+    /// Peer's `initial_max_streams_bidi`: the total number of client-initiated
+    /// bidirectional streams we may open before needing a `MAX_STREAMS` update.
+    pub initial_max_streams_bidi: u64,
+    /// Peer's `initial_max_streams_uni`.
+    pub initial_max_streams_uni: u64,
+    /// Peer's `initial_max_data` (connection-level flow-control window, bytes).
+    pub initial_max_data: u64,
 }
 
 /// UDP-level statistics

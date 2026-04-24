@@ -280,6 +280,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         // back into _connection; without await the arc would be stale for any
         // subsequent FFI call (e.g. _startAuxStreamsOpen).
         await _logConnectionStats('post-connect');
+        // Log the peer's advertised transport parameters so we know up front
+        // how many bidi streams the server will allow us to open before it
+        // needs to send MAX_STREAMS. If the peer advertised <= 1 (just enough
+        // for the control stream) there is no point attempting aux opens:
+        // `open_bi()` would block indefinitely waiting for credit.
+        await _logPeerTransportParams('post-connect');
         return;
       } catch (error) {
         debugPrint(
@@ -307,12 +313,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       serverName: serverName,
     );
     final connected = await connect.timeout(timeout);
-    final streamResult = await connectionOpenBi(connection: connected.$2);
+    final (conn, sendStream, recvStream) = await connectionOpenBi(connection: connected.$2);
     return _QuicConnectResult(
       endpoint: connected.$1,
-      connection: streamResult.$1,
-      sendStream: streamResult.$2,
-      recvStream: streamResult.$3,
+      connection: conn,
+      sendStream: sendStream,
+      recvStream: recvStream,
     );
   }
 
@@ -665,6 +671,50 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       _lastMaxStreamsBidiFrameCount = rxMaxBidi;
     } catch (error) {
       debugPrint('QUIC connection stats error [$context]: $error');
+    }
+  }
+
+  /// Logs the peer's advertised QUIC transport parameters (initial stream
+  /// credits and connection flow-control window) for diagnostics.
+  ///
+  /// Exposed via our patched vendored quinn/quinn-proto (upstream quinn 0.11
+  /// does not surface peer transport parameters). If the peer advertised only
+  /// enough bidi streams for the control stream (<= 1), pre-flags aux stream
+  /// opens as blocked so `_startAuxStreamsOpen` can decline immediately
+  /// instead of burning a 10s timeout on `connectionOpenBi`.
+  Future<void> _logPeerTransportParams(String context) async {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+    try {
+      final result =
+          await connectionPeerTransportParams(connection: connection);
+      _connection = result.$1;
+      final params = result.$2;
+      final bidi = params.initialMaxStreamsBidi;
+      final uni = params.initialMaxStreamsUni;
+      final data = params.initialMaxData;
+      debugPrint(
+        'QUIC peer transport params [$context]: '
+        'initial_max_streams_bidi=$bidi '
+        'initial_max_streams_uni=$uni '
+        'initial_max_data=$data',
+      );
+      // The control stream consumes client-initiated bidi stream id 0, so we
+      // need the peer to have advertised at least 2 to open aux slot 0.
+      if (bidi <= BigInt.one) {
+        _auxStreamsBlocked = true;
+        debugPrint(
+          'QUIC peer transport params [$context]: '
+          'peer advertised initial_max_streams_bidi=$bidi (<= 1); '
+          'aux stream opens are pre-flagged as blocked, '
+          'waiting for server MAX_STREAMS(bidi) frame before attempting',
+        );
+        _startMaxStreamsWatcher();
+      }
+    } catch (error) {
+      debugPrint('QUIC peer transport params error [$context]: $error');
     }
   }
 

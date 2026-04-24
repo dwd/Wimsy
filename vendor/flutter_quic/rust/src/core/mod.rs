@@ -9,6 +9,6 @@ pub mod stream;
 pub mod config;
 
 pub use endpoint::QuicEndpoint;
-pub use connection::{QuicConnection, QuicConnectionStats, QuicPathStats, QuicFrameStats, QuicUdpStats};
+pub use connection::{QuicConnection, QuicConnectionStats, QuicPathStats, QuicFrameStats, QuicUdpStats, QuicPeerTransportParams};
 pub use stream::{QuicSendStream, QuicRecvStream};
 pub use config::{QuicServerConfig, QuicTransportConfig, QuicEndpointConfig}; 
