@@ -476,12 +476,18 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       try {
         debugPrint('QUIC aux stream slot=$slot awaiting open lock (reason=$reason)');
         await previousLock;
-        final connection = _connection;
-        if (connection == null || _closed) {
+        if (_connection == null || _closed) {
           throw StateError('QUIC connection is not established');
         }
         debugPrint('QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)');
-        _logConnectionStats('pre-open slot=$slot');
+        await _logConnectionStats('pre-open slot=$slot');
+        // Re-read _connection after the stats call: _logConnectionStats
+        // consumes the arc via Auto_Owned and stores the returned arc back
+        // into _connection, so the local variable captured above is stale.
+        final freshConnection = _connection;
+        if (freshConnection == null || _closed) {
+          throw StateError('QUIC connection lost during pre-open stats');
+        }
         // connectionOpenBi (Quinn open_bi) will BLOCK until the peer has
         // granted enough bidirectional-stream credits for a new stream to be
         // opened. If the server advertises a low initial_max_streams_bidi and
@@ -501,12 +507,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           );
         });
         try {
-          final opened = await connectionOpenBi(connection: connection)
+          final opened = await connectionOpenBi(connection: freshConnection)
               .timeout(const Duration(seconds: 10), onTimeout: () {
             // Mark that we are credit-starved and log stats so we can see
             // the server's MAX_STREAMS frame count at the moment of timeout.
             _auxStreamsBlocked = true;
-            _logConnectionStats('aux-open-timeout slot=$slot');
             _startMaxStreamsWatcher();
             throw TimeoutException(
               'connectionOpenBi timed out for aux slot $slot after 10s '
@@ -538,6 +543,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             '${elapsed.inMilliseconds}ms error=$error',
           );
           debugPrint('QUIC aux stream open stack slot=$slot: $stack');
+          // Log stats after a timeout/error so we can see the connection
+          // state at the moment of failure. Use unawaited here since we are
+          // in a catch block and the arc may already be consumed; errors are
+          // swallowed by _logConnectionStats itself.
+          unawaited(_logConnectionStats('post-open-error slot=$slot'));
           rethrow;
         } finally {
           progressTimer.cancel();
@@ -623,35 +633,36 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   /// Logs key connection stats (MAX_STREAMS frame counts) for diagnostics.
-  void _logConnectionStats(String context) {
+  /// Returns a Future that completes after the stats have been fetched and
+  /// _connection updated with the returned arc. Callers inside async contexts
+  /// should await this so that _connection is valid for the next FFI call.
+  Future<void> _logConnectionStats(String context) async {
     final connection = _connection;
     if (connection == null) {
       return;
     }
-    connectionStats(connection: connection).then(
-      (result) {
-        _connection = result.$1;
-        final stats = result.$2;
-        final rxMaxBidi = stats.frameRx.maxStreamsBidi;
-        final rxMaxUni = stats.frameRx.maxStreamsUni;
-        final rxBlockedBidi = stats.frameRx.streamsBlockedBidi;
-        final txBlockedBidi = stats.frameTx.streamsBlockedBidi;
-        final txStream = stats.frameTx.stream;
-        final rxStream = stats.frameRx.stream;
-        debugPrint(
-          'QUIC connection stats [$context]: '
-          'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
-          'MAX_STREAMS(uni) frames received=$rxMaxUni '
-          'STREAMS_BLOCKED(bidi) sent by us=$txBlockedBidi '
-          'STREAMS_BLOCKED(bidi) received from server=$rxBlockedBidi '
-          'STREAM frames sent=$txStream received=$rxStream',
-        );
-        _lastMaxStreamsBidiFrameCount = rxMaxBidi;
-      },
-      onError: (Object error) {
-        debugPrint('QUIC connection stats error [$context]: $error');
-      },
-    );
+    try {
+      final result = await connectionStats(connection: connection);
+      _connection = result.$1;
+      final stats = result.$2;
+      final rxMaxBidi = stats.frameRx.maxStreamsBidi;
+      final rxMaxUni = stats.frameRx.maxStreamsUni;
+      final rxBlockedBidi = stats.frameRx.streamsBlockedBidi;
+      final txBlockedBidi = stats.frameTx.streamsBlockedBidi;
+      final txStream = stats.frameTx.stream;
+      final rxStream = stats.frameRx.stream;
+      debugPrint(
+        'QUIC connection stats [$context]: '
+        'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
+        'MAX_STREAMS(uni) frames received=$rxMaxUni '
+        'STREAMS_BLOCKED(bidi) sent by us=$txBlockedBidi '
+        'STREAMS_BLOCKED(bidi) received from server=$rxBlockedBidi '
+        'STREAM frames sent=$txStream received=$rxStream',
+      );
+      _lastMaxStreamsBidiFrameCount = rxMaxBidi;
+    } catch (error) {
+      debugPrint('QUIC connection stats error [$context]: $error');
+    }
   }
 
   /// Starts a periodic watcher that detects when the server sends a new
@@ -665,43 +676,31 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       'waiting for server MAX_STREAMS(bidi) frame',
     );
     _maxStreamsWatchTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_closed) {
+      if (_closed || _connection == null) {
         _maxStreamsWatchTimer?.cancel();
         _maxStreamsWatchTimer = null;
         return;
       }
-      final connection = _connection;
-      if (connection == null) {
-        _maxStreamsWatchTimer?.cancel();
-        _maxStreamsWatchTimer = null;
-        return;
-      }
-      connectionStats(connection: connection).then(
-        (result) {
-          _connection = result.$1;
-          final rxMaxBidi = result.$2.frameRx.maxStreamsBidi;
+      final prevCount = _lastMaxStreamsBidiFrameCount;
+      unawaited(_logConnectionStats('max-streams-watcher').then((_) {
+        final rxMaxBidi = _lastMaxStreamsBidiFrameCount;
+        debugPrint(
+          'QUIC aux stream watcher: '
+          'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
+          '(was $prevCount)',
+        );
+        if (rxMaxBidi > prevCount) {
+          _auxStreamsBlocked = false;
+          _maxStreamsWatchTimer?.cancel();
+          _maxStreamsWatchTimer = null;
           debugPrint(
-            'QUIC aux stream watcher: '
-            'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
-            '(was $_lastMaxStreamsBidiFrameCount)',
+            'QUIC aux stream watcher: server granted more bidi stream credits '
+            '(MAX_STREAMS frame count increased to $rxMaxBidi); '
+            'resuming aux stream opens',
           );
-          if (rxMaxBidi > _lastMaxStreamsBidiFrameCount) {
-            _lastMaxStreamsBidiFrameCount = rxMaxBidi;
-            _auxStreamsBlocked = false;
-            _maxStreamsWatchTimer?.cancel();
-            _maxStreamsWatchTimer = null;
-            debugPrint(
-              'QUIC aux stream watcher: server granted more bidi stream credits '
-              '(MAX_STREAMS frame count increased to $rxMaxBidi); '
-              'resuming aux stream opens',
-            );
-            unawaited(_openAuxStreamsSequentially());
-          }
-        },
-        onError: (Object error) {
-          debugPrint('QUIC aux stream watcher stats error: $error');
-        },
-      );
+          unawaited(_openAuxStreamsSequentially());
+        }
+      }));
     });
   }
 
