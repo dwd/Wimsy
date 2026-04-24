@@ -481,6 +481,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           throw StateError('QUIC connection is not established');
         }
         debugPrint('QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)');
+        _logConnectionStats('pre-open slot=$slot');
         // connectionOpenBi (Quinn open_bi) will BLOCK until the peer has
         // granted enough bidirectional-stream credits for a new stream to be
         // opened. If the server advertises a low initial_max_streams_bidi and
@@ -635,12 +636,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         final rxMaxUni = stats.frameRx.maxStreamsUni;
         final rxBlockedBidi = stats.frameRx.streamsBlockedBidi;
         final txBlockedBidi = stats.frameTx.streamsBlockedBidi;
+        final txStream = stats.frameTx.stream;
+        final rxStream = stats.frameRx.stream;
         debugPrint(
           'QUIC connection stats [$context]: '
           'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
           'MAX_STREAMS(uni) frames received=$rxMaxUni '
           'STREAMS_BLOCKED(bidi) sent by us=$txBlockedBidi '
-          'STREAMS_BLOCKED(bidi) received from server=$rxBlockedBidi',
+          'STREAMS_BLOCKED(bidi) received from server=$rxBlockedBidi '
+          'STREAM frames sent=$txStream received=$rxStream',
         );
         _lastMaxStreamsBidiFrameCount = rxMaxBidi;
       },
