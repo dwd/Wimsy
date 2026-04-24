@@ -887,6 +887,7 @@ fn wire__crate__api__bridge__endpoint_connect_impl(
             let api__endpoint = <QuicEndpoint>::sse_decode(&mut deserializer);
             let api_addr = <String>::sse_decode(&mut deserializer);
             let api_server_name = <String>::sse_decode(&mut deserializer);
+            let api_qlog_path = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicError>(
@@ -895,6 +896,7 @@ fn wire__crate__api__bridge__endpoint_connect_impl(
                             api__endpoint,
                             api_addr,
                             api_server_name,
+                            api_qlog_path,
                         )
                         .await?;
                         Ok(output_ok)

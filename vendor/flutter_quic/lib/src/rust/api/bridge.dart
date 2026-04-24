@@ -86,16 +86,24 @@ Future<(QuicConnection, QuicSendStream)> connectionOpenUni({
   connection: connection,
 );
 
-/// Connect to a server using a QUIC endpoint
-/// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge
+/// Connect to a server using a QUIC endpoint.
+///
+/// If `qlog_path` is `Some`, Quinn will write a full QUIC event trace (in
+/// qlog JSON-SEQ format) to that file for the lifetime of the connection.
+/// The resulting file can be analysed offline with tools such as
+/// [qvis](https://qvis.quictools.info/) or Wireshark's qlog importer.
+///
+/// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge.
 Future<(QuicEndpoint, QuicConnection)> endpointConnect({
   required QuicEndpoint endpoint,
   required String addr,
   required String serverName,
+  String? qlogPath,
 }) => RustLib.instance.api.crateApiBridgeEndpointConnect(
   endpoint: endpoint,
   addr: addr,
   serverName: serverName,
+  qlogPath: qlogPath,
 );
 
 /// Send a datagram on a QUIC connection

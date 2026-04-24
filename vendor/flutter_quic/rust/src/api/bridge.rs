@@ -97,17 +97,24 @@ pub async fn connection_open_uni(
     Ok((connection, send_stream))
 }
 
-/// Connect to a server using a QUIC endpoint
-/// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge
+/// Connect to a server using a QUIC endpoint.
+///
+/// If `qlog_path` is `Some`, Quinn will write a full QUIC event trace (in
+/// qlog JSON-SEQ format) to that file for the lifetime of the connection.
+/// The resulting file can be analysed offline with tools such as
+/// [qvis](https://qvis.quictools.info/) or Wireshark's qlog importer.
+///
+/// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge.
 pub async fn endpoint_connect(
     _endpoint: QuicEndpoint,
     addr: String,
     server_name: String,
+    qlog_path: Option<String>,
 ) -> Result<(QuicEndpoint, QuicConnection), QuicError> {
     // Build the endpoint inside the async executor context.
     let remote_addr: SocketAddr = addr.parse()
         .map_err(|e| QuicError::Connection(format!("Invalid address: {:?}", e)))?;
-    let endpoint = QuicEndpoint::client_for_remote(remote_addr)?;
+    let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path)?;
     let connection = endpoint.connect(addr, server_name).await?;
     Ok((endpoint, connection))
 }

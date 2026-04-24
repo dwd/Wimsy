@@ -307,10 +307,17 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     required Duration timeout,
   }) async {
     final endpoint = await createClientEndpoint();
+    // Build a per-connection qlog path so each QUIC session gets its own
+    // trace file.  The file is written by Quinn in qlog JSON-SEQ format and
+    // can be analysed with qvis (https://qvis.quictools.info/) or Wireshark.
+    final qlogPath =
+        '/tmp/wimsy_quic_${DateTime.now().millisecondsSinceEpoch}.qlog';
+    debugPrint('QUIC qlog: writing trace to $qlogPath');
     final connect = endpointConnect(
       endpoint: endpoint,
       addr: _formatSocketAddress(address, port),
       serverName: serverName,
+      qlogPath: qlogPath,
     );
     final connected = await connect.timeout(timeout);
     final (conn, sendStream, recvStream) = await connectionOpenBi(connection: connected.$2);

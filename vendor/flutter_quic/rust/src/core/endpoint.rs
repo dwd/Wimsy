@@ -32,20 +32,29 @@ impl QuicEndpoint {
     /// Create a new client endpoint with insecure configuration (for testing)
     pub fn client() -> Result<Self, QuicError> {
         let bind_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
-        Self::client_with_bind_addr(bind_addr)
+        Self::client_with_bind_addr(bind_addr, None)
     }
 
     /// Create a client endpoint suitable for the target remote address family.
     pub fn client_for_remote(remote_addr: SocketAddr) -> Result<Self, QuicError> {
+        Self::client_for_remote_with_qlog(remote_addr, None)
+    }
+
+    /// Create a client endpoint suitable for the target remote address family,
+    /// optionally writing a qlog trace to `qlog_path`.
+    pub fn client_for_remote_with_qlog(
+        remote_addr: SocketAddr,
+        qlog_path: Option<String>,
+    ) -> Result<Self, QuicError> {
         let bind_addr = if remote_addr.is_ipv6() {
             SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
         } else {
             SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)
         };
-        Self::client_with_bind_addr(bind_addr)
+        Self::client_with_bind_addr(bind_addr, qlog_path)
     }
 
-    fn client_with_bind_addr(bind_addr: SocketAddr) -> Result<Self, QuicError> {
+    fn client_with_bind_addr(bind_addr: SocketAddr, qlog_path: Option<String>) -> Result<Self, QuicError> {
         // Ensure crypto provider is installed
         if rustls::crypto::CryptoProvider::get_default().is_none() {
             rustls::crypto::ring::default_provider()
@@ -73,6 +82,28 @@ impl QuicEndpoint {
         transport.max_idle_timeout(Some(idle_timeout));
         transport.max_concurrent_bidi_streams(25u32.into());
         transport.max_concurrent_uni_streams(25u32.into());
+
+        // If a qlog path was provided, open the file and attach a qlog stream
+        // so Quinn writes a full QUIC trace (transport events, stream opens,
+        // flow-control frames, etc.) to that file for offline analysis with
+        // tools like qvis (https://qvis.quictools.info/).
+        if let Some(ref path) = qlog_path {
+            match std::fs::File::create(path) {
+                Ok(file) => {
+                    let mut qlog_config = quinn_proto::QlogConfig::default();
+                    qlog_config.writer(Box::new(file));
+                    qlog_config.title(Some("Wimsy QUIC trace".to_string()));
+                    qlog_config.description(Some(format!("QUIC connection to {}", path)));
+                    if let Some(stream) = qlog_config.into_stream() {
+                        transport.qlog_stream(Some(stream));
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("qlog: failed to create file {:?}: {}", path, e);
+                }
+            }
+        }
+
         config.transport_config(Arc::new(transport));
         
         // Create endpoint with default socket
