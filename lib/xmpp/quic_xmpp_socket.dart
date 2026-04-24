@@ -275,8 +275,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         _sendStream = connected.sendStream;
         _recvStream = connected.recvStream;
         // Log initial connection stats so we can see the server's stream-credit
-        // situation immediately after the handshake.
-        _logConnectionStats('post-connect');
+        // situation immediately after the handshake. Must be awaited: the call
+        // consumes _connection via Auto_Owned and stores the replacement arc
+        // back into _connection; without await the arc would be stale for any
+        // subsequent FFI call (e.g. _startAuxStreamsOpen).
+        await _logConnectionStats('post-connect');
         return;
       } catch (error) {
         debugPrint(
