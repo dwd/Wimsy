@@ -409,14 +409,19 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (existing == null) {
       // Kick off opening the aux stream for future sends, but send this
       // payload on the control stream right now.
-      unawaited(
-        _ensureAuxStream(slot, reason: 'on-demand routing for $toBare')
-            .catchError((Object error) {
+      // ignore: unawaited_futures
+      _ensureAuxStream(slot, reason: 'on-demand routing for $toBare').then(
+        (_) {},
+        onError: (Object error) {
+          // Log but do not rethrow: this future is unawaited, so rethrowing
+          // would surface as an unhandled fatal error via PlatformDispatcher.
+          // Aux stream open failures are expected during teardown (disposed
+          // RustArc, closed connection, timeout) and are non-fatal — the
+          // payload was already sent on the control stream.
           debugPrint(
             'QUIC aux stream on-demand open failed slot=$slot error=$error',
           );
-          throw error;
-        }),
+        },
       );
       return _QuicSendTarget(
         stream: control,
