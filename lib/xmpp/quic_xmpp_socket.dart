@@ -385,6 +385,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           }
         } finally {
           if (isControl) {
+            await _logQuicCloseReason();
             if (!_quicStreamController.isClosed) {
               await _quicStreamController.close();
             }
@@ -783,11 +784,68 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     return _rustInitFuture!;
   }
 
+  /// Logs a human-readable message explaining who closed the QUIC connection
+  /// and why, using Quinn's [ConnectionError] variant embedded in the Debug
+  /// string returned by [connectionCloseReason].
+  ///
+  /// Variant meanings:
+  ///  - `LocallyClosed`      — **we** called `connection.close()` (client-side)
+  ///  - `ApplicationClosed`  — the **remote peer** sent a QUIC APPLICATION_CLOSE
+  ///  - `TimedOut`           — idle timeout expired (no keepalive from either side)
+  ///  - `Reset`              — stateless reset from the remote peer
+  ///  - `TransportError`     — QUIC transport-level protocol error
+  ///  - `VersionMismatch`    — QUIC version negotiation failed
+  ///  - null / unknown       — stream ended cleanly or reason unavailable
+  Future<void> _logQuicCloseReason() async {
+    final conn = _connection;
+    if (conn == null) {
+      debugPrint('QUIC connection closed (no connection arc available for close-reason query)');
+      return;
+    }
+    try {
+      final (updatedConn, reason) = await connectionCloseReason(connection: conn);
+      _connection = updatedConn;
+      if (reason == null) {
+        debugPrint('QUIC connection closed cleanly (no error reported)');
+        return;
+      }
+      final String who;
+      final String detail;
+      if (reason.contains('LocallyClosed')) {
+        who = 'LOCAL (we closed it)';
+        detail = reason;
+      } else if (reason.contains('ApplicationClosed')) {
+        who = 'REMOTE (peer sent APPLICATION_CLOSE)';
+        detail = reason;
+      } else if (reason.contains('TimedOut')) {
+        who = 'TIMEOUT (idle timeout — neither side sent keepalive in time)';
+        detail = reason;
+      } else if (reason.contains('Reset')) {
+        who = 'REMOTE (stateless reset from peer)';
+        detail = reason;
+      } else if (reason.contains('TransportError')) {
+        who = 'TRANSPORT ERROR (QUIC protocol error)';
+        detail = reason;
+      } else if (reason.contains('VersionMismatch')) {
+        who = 'VERSION MISMATCH';
+        detail = reason;
+      } else {
+        who = 'UNKNOWN';
+        detail = reason;
+      }
+      debugPrint('QUIC connection closed: $who — $detail');
+    } catch (e) {
+      debugPrint('QUIC connection closed (could not query close reason: $e)');
+    }
+  }
+
   bool _isQuicConnectionClosure(Object error) {
     final message = error.toString();
     return message.contains('QuicReadException.connectionLost') ||
         message.contains('ConnectionLost') ||
-        message.contains('TimedOut');
+        message.contains('TimedOut') ||
+        message.contains('ApplicationClosed') ||
+        message.contains('Reset');
   }
 }
 
