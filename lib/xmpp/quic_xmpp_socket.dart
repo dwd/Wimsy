@@ -369,6 +369,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             if (isControl) {
               _captureBindResult(chunk);
             }
+            final recvLabel =
+                isControl ? 'quic-control' : 'quic-aux-${slot ?? '?'}';
+            Log.xmppp_receiving(chunk, channel: recvLabel);
             _quicStreamController.add(_map(chunk));
           }
         } catch (error, stackTrace) {

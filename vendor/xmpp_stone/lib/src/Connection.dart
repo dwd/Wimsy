@@ -245,7 +245,9 @@ class Connection {
   String prepareStreamResponse(String response) {
     // Accumulate with any previously incomplete data
     final combined = restOfResponse + response;
-    Log.xmppp_receiving(response);
+    // Receive logging (with channel label) is done at the transport layer
+    // (XmppWebsocketIo.listen for TCP/WS, _startRecvLoop for QUIC) so that
+    // the log line can identify which stream the data arrived on.
 
     if (combined.contains('</stream:stream>')) {
       restOfResponse = '';

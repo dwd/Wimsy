@@ -128,18 +128,24 @@ class XmppWebSocketIo extends XmppWebSocket {
   @override
   StreamSubscription<String> listen(void Function(String event)? onData,
       {Function? onError, void Function()? onDone, bool? cancelOnError}) {
+    final channel = _useWebSocket ? 'ws' : 'tcp';
+    void logAndDeliver(String event) {
+      Log.xmppp_receiving(event, channel: channel);
+      onData?.call(event);
+    }
+
     if (_useWebSocket) {
       return _webSocket!.stream
           .map((event) => event.toString())
           .map(_map)
-          .listen(onData,
+          .listen(logAndDeliver,
               onError: onError, onDone: onDone, cancelOnError: cancelOnError);
     }
     return _tcpSocket!
         .cast<List<int>>()
         .transform(utf8.decoder)
         .map(_map)
-        .listen(onData,
+        .listen(logAndDeliver,
             onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 

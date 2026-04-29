@@ -50,9 +50,13 @@ class Log {
     }
   }
 
-  static void xmppp_receiving(String message) {
+  static void xmppp_receiving(String message, {String? channel}) {
     if (logXmpp) {
-      _emit('---Xmpp Receiving:---');
+      if (channel == null) {
+        _emit('---Xmpp Receiving:---');
+      } else {
+        _emit('---Xmpp Receiving [$channel]:---');
+      }
       _emit('$message');
     }
   }
