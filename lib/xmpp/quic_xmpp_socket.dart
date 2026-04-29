@@ -408,8 +408,23 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       );
     }
 
+    // Per XEP-0467 §Multiple Streams: only stanzas (`message`/`presence`/`iq`)
+    // may be routed onto an aux stream. Top-level non-stanzas — stream errors,
+    // CSI (`<active/>`/`<inactive/>`), XEP-0198 `<r/>`/`<a/>`, SASL frames,
+    // `<stream:stream>` openers, etc. — MUST be sent on the initial (control)
+    // stream regardless of any `to=` they might carry. We check the element
+    // name first so a future extension that puts a `to=` on a non-stanza top
+    // level element does not accidentally route off the control stream.
+    if (!_isStanzaPayload(payload)) {
+      return _QuicSendTarget(
+        stream: control,
+        update: (updated) => _sendStream = updated,
+        label: 'quic-control',
+      );
+    }
+
     final toBare = extractToBareJidForRouting(payload);
-    // Keep on the control stream when:
+    // Keep stanzas on the control stream when:
     //  * the stanza has no `to` (server-directed, typical for negotiation IQs)
     //  * the `to` is our own bare JID (self-directed)
     //  * the `to` is our own server's bare domain (e.g. disco#info to the
@@ -824,6 +839,57 @@ List<InternetAddress> buildQuicHappyEyeballsPlan(
   }
   return plan;
 }
+
+/// Returns true when [payload] begins with a top-level XMPP stanza element
+/// (`message`, `presence`, or `iq`).
+///
+/// Per XEP-0467 §Multiple Streams, only stanzas may be sent on aux streams;
+/// every other top level element (stream errors, CSI, `<r/>`/`<a/>`, SASL
+/// frames, the `<stream:stream>` opener, etc.) MUST be sent on the initial
+/// stream. This helper looks at the first XML element name in the payload,
+/// skipping any leading `<?xml…?>` prolog and whitespace, and matching the
+/// XMPP-defined stanza local-names case-sensitively as required by the
+/// `jabber:client` namespace.
+bool isStanzaPayload(String payload) {
+  var i = 0;
+  final length = payload.length;
+  while (i < length) {
+    final ch = payload.codeUnitAt(i);
+    // Skip whitespace.
+    if (ch == 0x20 || ch == 0x09 || ch == 0x0a || ch == 0x0d) {
+      i++;
+      continue;
+    }
+    if (ch != 0x3c /* '<' */) {
+      return false;
+    }
+    // Skip XML prolog `<?xml … ?>`.
+    if (i + 1 < length && payload.codeUnitAt(i + 1) == 0x3f /* '?' */) {
+      final end = payload.indexOf('?>', i + 2);
+      if (end < 0) {
+        return false;
+      }
+      i = end + 2;
+      continue;
+    }
+    // First real element starts at i+1.
+    final nameStart = i + 1;
+    var j = nameStart;
+    while (j < length) {
+      final c = payload.codeUnitAt(j);
+      if (c == 0x20 || c == 0x09 || c == 0x0a || c == 0x0d ||
+          c == 0x2f /* '/' */ || c == 0x3e /* '>' */) {
+        break;
+      }
+      j++;
+    }
+    final name = payload.substring(nameStart, j);
+    return name == 'message' || name == 'presence' || name == 'iq';
+  }
+  return false;
+}
+
+bool _isStanzaPayload(String payload) => isStanzaPayload(payload);
 
 String? extractToBareJidForRouting(String payload) {
   final toMatch = RegExp('\\bto=(["\\\'])([^"\\\']+)\\1').firstMatch(payload);

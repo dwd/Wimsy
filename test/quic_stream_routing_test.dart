@@ -35,6 +35,58 @@ void main() {
     });
   });
 
+  group('isStanzaPayload', () {
+    test('recognises message stanza', () {
+      expect(isStanzaPayload('<message to="x@y"/>'), isTrue);
+    });
+
+    test('recognises presence stanza', () {
+      expect(isStanzaPayload('<presence/>'), isTrue);
+    });
+
+    test('recognises iq stanza', () {
+      expect(isStanzaPayload('<iq id="1" type="get"/>'), isTrue);
+    });
+
+    test('skips XML prolog before stanza', () {
+      expect(
+        isStanzaPayload("<?xml version='1.0'?><iq id='1' type='get'/>"),
+        isTrue,
+      );
+    });
+
+    test('rejects stream:stream opener', () {
+      expect(
+        isStanzaPayload(
+          "<?xml version='1.0'?><stream:stream xmlns='jabber:client'/>",
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects XEP-0198 r/a even if they ever carry a to attribute', () {
+      expect(isStanzaPayload('<r xmlns="urn:xmpp:sm:3" to="x@y"/>'), isFalse);
+      expect(isStanzaPayload('<a xmlns="urn:xmpp:sm:3" h="1"/>'), isFalse);
+    });
+
+    test('rejects CSI elements', () {
+      expect(isStanzaPayload('<active xmlns="urn:xmpp:csi:0"/>'), isFalse);
+      expect(isStanzaPayload('<inactive xmlns="urn:xmpp:csi:0"/>'), isFalse);
+    });
+
+    test('rejects SASL frames', () {
+      expect(
+        isStanzaPayload('<auth xmlns="urn:ietf:params:xml:ns:xmpp-sasl"/>'),
+        isFalse,
+      );
+    });
+
+    test('rejects empty payload', () {
+      expect(isStanzaPayload(''), isFalse);
+      expect(isStanzaPayload('   '), isFalse);
+    });
+  });
+
   group('quicAuxSlotForBareJid', () {
     test('is deterministic for the same jid', () {
       final first = quicAuxSlotForBareJid('room@example.com', 20);
