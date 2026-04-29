@@ -28,7 +28,6 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   bool _useQuic = false;
   bool _closed = false;
   bool _postBindReady = false;
-  bool _auxOpenStarted = false;
   // Set to true when connectionOpenBi times out (peer has not granted bidi
   // stream credits). Cleared when we detect the server has sent a new
   // MAX_STREAMS frame (frameRx.maxStreamsBidi increases in connectionStats).
@@ -158,7 +157,6 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     // The connection will be released naturally once all local references drop.
     _endpoint = null;
     _postBindReady = false;
-    _auxOpenStarted = false;
     _auxStreamsBlocked = false;
     _lastMaxStreamsBidiFrameCount = BigInt.zero;
     _maxStreamsWatchTimer?.cancel();
@@ -488,10 +486,23 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (existing != null) {
       return Future.value(existing);
     }
+    // If the peer is known to be credit-starved (advertised
+    // initial_max_streams_bidi <= 1, or a previous open hit the timeout),
+    // skip even attempting connectionOpenBi: it will block until the server
+    // grants more credits via a MAX_STREAMS frame, which `_maxStreamsWatchTimer`
+    // is monitoring. Failing fast lets the caller fall back to the control
+    // stream rather than queueing on the FFI lock.
+    if (_auxStreamsBlocked) {
+      return Future.error(
+        StateError(
+          'QUIC aux streams blocked: peer has not granted bidi stream credits',
+        ),
+      );
+    }
     // Coalesce concurrent opens for the same slot: if one is already in
     // flight, return the same future so callers share the result rather than
     // each trying to consume _connection via Auto_Owned FFI transfer.
-    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot, reason: reason ?? 'pre-open'));
+    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot, reason: reason ?? 'on-demand'));
   }
 
   Future<_QuicStreamChannel> _openAuxStream(int slot, {String reason = 'pre-open'}) async {
@@ -617,50 +628,24 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
     _accountBareJid = bare;
     _postBindReady = true;
-    debugPrint('QUIC post-bind multi-stream enabled; accountBareJid=$bare');
-    _startAuxStreamsOpen();
-  }
-
-  void _startAuxStreamsOpen() {
-    if (_auxOpenStarted || _closed) {
-      return;
-    }
-    _auxOpenStarted = true;
-    // Open aux streams one at a time (sequentially). Opening all 20 slots
-    // concurrently previously caused every slot after the first to fail with
-    // DroppableDisposedException because the Auto_Owned FFI arc was consumed
-    // by slot 0's timed-out call. Sequential opening also means we stop
-    // immediately when we hit a credit-starvation timeout rather than
-    // queuing 19 more doomed calls behind it.
-    unawaited(_openAuxStreamsSequentially());
-  }
-
-  Future<void> _openAuxStreamsSequentially() async {
-    for (var slot = 0; slot < _auxStreamSlots; slot++) {
-      if (_closed) {
-        return;
-      }
-      if (_auxStreamsBlocked) {
-        debugPrint(
-          'QUIC aux stream pre-open stopping at slot=$slot: '
-          'peer has not granted bidi stream credits '
-          '(will retry when MAX_STREAMS frame is received)',
-        );
-        return;
-      }
-      try {
-        await _ensureAuxStream(
-          slot,
-          reason: 'post-bind pre-open slot $slot of $_auxStreamSlots',
-        );
-      } catch (error) {
-        debugPrint('QUIC aux stream open failed slot=$slot error=$error');
-        if (_auxStreamsBlocked) {
-          // Timeout set the flag; stop trying further slots.
-          return;
-        }
-      }
-    }
+    debugPrint(
+      'QUIC post-bind multi-stream enabled; accountBareJid=$bare; '
+      'aux streams will be opened lazily on demand',
+    );
+    // Per XEP-0467 §Multiple Streams, aux streams "MAY be opened ... after
+    // resource binding" — they are not required to be eagerly pre-opened.
+    // We previously opened all _auxStreamSlots immediately post-bind, which
+    // was permissible but suboptimal:
+    //   * On a credit-starved server it burned the first slot on a 10s
+    //     timeout and then chained DroppableDisposedException across the
+    //     remaining 19 (see WIMSY-1B/1C/1D Sentry chain).
+    //   * It opened streams the client did not actually need yet.
+    // Aux streams are now opened lazily by `_selectSendTarget` the first
+    // time a stanza is routed to a destination bare JID that hashes to a
+    // slot we have not yet opened. This matches the spec's intent ("opened
+    // when needed for a destination bare-JID pair") and naturally limits
+    // how many credits we consume to the number of distinct bare JIDs we
+    // are actually communicating with.
   }
 
   /// Logs key connection stats (MAX_STREAMS frame counts) for diagnostics.
@@ -771,9 +756,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           debugPrint(
             'QUIC aux stream watcher: server granted more bidi stream credits '
             '(MAX_STREAMS frame count increased to $rxMaxBidi); '
-            'resuming aux stream opens',
+            'lazy aux stream opens via _selectSendTarget will now succeed',
           );
-          unawaited(_openAuxStreamsSequentially());
         }
       }));
     });
