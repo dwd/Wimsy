@@ -83,6 +83,13 @@ impl QuicEndpoint {
         let idle_timeout = quinn::IdleTimeout::try_from(Duration::from_secs(600))
             .map_err(|e| QuicError::Config(format!("Invalid idle timeout: {:?}", e)))?;
         transport.max_idle_timeout(Some(idle_timeout));
+        // Send a QUIC PING every 240 seconds to keep the connection alive.
+        // The negotiated idle timeout is min(ours=600s, server's=300s) = 300s,
+        // so 240s gives a comfortable margin without being chatty.  In practice
+        // the XMPP-level pings (30s foreground / 5min background) will fire
+        // more often, but this ensures the QUIC transport layer itself never
+        // idles out even when the XMPP layer is quiet.
+        transport.keep_alive_interval(Some(Duration::from_secs(240)));
         transport.max_concurrent_bidi_streams(25u32.into());
         transport.max_concurrent_uni_streams(25u32.into());
 
