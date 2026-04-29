@@ -77,7 +77,10 @@ impl QuicEndpoint {
         
         // Configure transport parameters for better performance
         let mut transport = quinn::TransportConfig::default();
-        let idle_timeout = quinn::IdleTimeout::try_from(Duration::from_secs(300))
+        // Per XEP-0467, the QUIC connection migration timeout SHOULD be set to
+        // the maximum 600 seconds, so we advertise that as our max_idle_timeout.
+        // The negotiated value will be the minimum of ours and the peer's.
+        let idle_timeout = quinn::IdleTimeout::try_from(Duration::from_secs(600))
             .map_err(|e| QuicError::Config(format!("Invalid idle timeout: {:?}", e)))?;
         transport.max_idle_timeout(Some(idle_timeout));
         transport.max_concurrent_bidi_streams(25u32.into());
