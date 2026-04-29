@@ -110,9 +110,19 @@ class StreamManagementModule extends Negotiator {
 
   @override
   void negotiate(List<Nonza> nonzas) {
-    // XEP-0198 stream management is incompatible with QUIC transport (XEP-0467),
-    // which provides its own reliability guarantees at the transport layer.
-    // We must still emit DONE so the negotiator queue advances.
+    // Per XEP-0467 §Stream Management: XEP-0198 cannot apply to QUIC
+    // connections, and "MUST NOT be advertised or negotiated" over QUIC.
+    // QUIC provides its own per-stream reliability and ordering at the
+    // transport layer, so SM's resumption / per-stanza acknowledgement
+    // machinery is redundant (and would in fact misbehave across the
+    // multiple aux streams introduced by XEP-0467 §Multiple Streams).
+    //
+    // We never emit `<enable/>` on QUIC and we ignore any `<sm/>` feature
+    // the server might still advertise. The doap.xml entry for XEP-0198
+    // remains because we DO support SM on TCP — only the QUIC path opts out.
+    //
+    // We must still transition to DONE so the negotiator queue advances
+    // (otherwise the connection never reaches Ready post-bind).
     if (_connection.isQuic) {
       state = NegotiatorState.DONE;
       return;
