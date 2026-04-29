@@ -407,6 +407,14 @@ class StreamManagementModule extends Negotiator {
     }
     if (state == XmppConnectionState.Ready ||
         state == XmppConnectionState.Resumed) {
+      // On QUIC, XEP-0198 SM is disabled (see negotiate()), so there is no
+      // SM ack machinery.  QUIC also has its own transport-level keepalive
+      // (PING frames, configured in flutter_quic's endpoint.rs), so we do
+      // not need — and must not start — the XMPP-level ping keepalive timer
+      // here.  Starting it would fire a ping every 30 s whose reply is never
+      // matched (the IQ router does not see the reply on QUIC), causing a
+      // keepaliveTimeout reconnect loop every ~60 s.
+      if (_connection.isQuic) return;
       _restartKeepaliveTimer();
       probeKeepalive(shortTimeout: false);
     }
