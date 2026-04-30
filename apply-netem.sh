@@ -45,10 +45,11 @@ tc class add dev "$IFACE" parent 1: classid 1:1 htb rate "$RATE" ceil "$RATE"
 tc qdisc add dev "$IFACE" parent 1:1 handle 10: netem delay "$DELAY" loss "$LOSS"
 
 # Match IPv6 UDP/5224 → remote IPv6 → impaired class
-tc filter add dev "$IFACE" protocol ipv6 parent 1: prio 1 u32 \
-    match ip6 protocol 17 0xff \
-    match ip6 dport "$PORT" 0xffff \
-    match ip6 dst "$IPV6" \
+# (flower is used for IPv6 because u32 cannot match 128-bit addresses)
+tc filter add dev "$IFACE" protocol ipv6 parent 1: prio 1 flower \
+    ip_proto udp \
+    dst_port "$PORT" \
+    dst_ip "$IPV6" \
     flowid 1:1
 
 # Match IPv4 UDP/5224 → remote IPv4 → impaired class
@@ -83,10 +84,11 @@ tc class add dev ifb0 parent 2: classid 2:1 htb rate "$RATE" ceil "$RATE"
 tc qdisc add dev ifb0 parent 2:1 handle 20: netem delay "$DELAY" loss "$LOSS"
 
 # Match IPv6 UDP/5224 ← remote IPv6 → impaired class
-tc filter add dev ifb0 protocol ipv6 parent 2: prio 1 u32 \
-    match ip6 protocol 17 0xff \
-    match ip6 sport "$PORT" 0xffff \
-    match ip6 src "$IPV6" \
+# (flower is used for IPv6 because u32 cannot match 128-bit addresses)
+tc filter add dev ifb0 protocol ipv6 parent 2: prio 1 flower \
+    ip_proto udp \
+    src_port "$PORT" \
+    src_ip "$IPV6" \
     flowid 2:1
 
 # Match IPv4 UDP/5224 ← remote IPv4 → impaired class
