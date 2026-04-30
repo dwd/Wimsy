@@ -242,6 +242,36 @@ class Connection {
 
   String restOfResponse = '';
 
+  /// Returns a new independent stream-response mapper closure.
+  /// Each QUIC aux stream must get its own mapper so that partial XML
+  /// fragments from different streams are buffered independently and do not
+  /// corrupt each other's parse state.
+  String Function(String) makeStreamResponseMapper() {
+    var buffer = '';
+    return (String response) {
+      final combined = buffer + response;
+      if (combined.contains('</stream:stream>')) {
+        buffer = '';
+        close();
+        return '';
+      }
+      String wrapped = combined;
+      if (wrapped.contains('stream:stream') &&
+          !wrapped.contains('</stream:stream>')) {
+        wrapped = '$wrapped</stream:stream>';
+      }
+      wrapped = '<xmpp_stone>$wrapped</xmpp_stone>';
+      try {
+        xml.XmlDocument.parse(wrapped.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''));
+        buffer = '';
+        return wrapped;
+      } catch (_) {
+        buffer = combined;
+        return '';
+      }
+    };
+  }
+
   String prepareStreamResponse(String response) {
     // Accumulate with any previously incomplete data
     final combined = restOfResponse + response;
@@ -384,6 +414,14 @@ class Connection {
             tlsHost: endpoint.tlsHost ?? account.domain,
             map: prepareStreamResponse,
           );
+          // Supply a per-aux-stream mapper factory so each QUIC aux stream
+          // gets its own independent XML buffer. Without this, all streams
+          // share the single restOfResponse field in prepareStreamResponse,
+          // causing interleaved chunks from different streams to corrupt
+          // each other's parse state and silently drop stanzas.
+          if (socket.isQuic) {
+            (socket as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
+          }
           _attachOpenedSocket(socket);
           return;
         } catch (error) {

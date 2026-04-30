@@ -39,6 +39,20 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   String? _accountBareJid;
   String _controlBuffer = '';
   late String Function(String event) _map;
+  // Factory that produces an independent mapper closure (with its own buffer)
+  // for each aux QUIC stream. Set by Connection after connect() via
+  // setAuxMapperFactory(). Each call returns a new closure with its own
+  // partial-XML buffer, so interleaved chunks from different QUIC streams
+  // do not corrupt each other's parse state.
+  String Function(String) Function()? _makeAuxMapper;
+
+  /// Called by [Connection] after a successful QUIC connect to supply a
+  /// factory for per-aux-stream XML mappers. Each aux recv loop calls this
+  /// factory once to get its own independent buffer/mapper closure.
+  void setAuxMapperFactory(String Function(String) Function() factory) {
+    _makeAuxMapper = factory;
+  }
+
   Future<void> _writeQueue = Future<void>.value();
 
   // Kept as members so the winning endpoint/connection remain alive while
@@ -74,6 +88,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     String? tlsHost,
   }) async {
     _map = map ?? (element) => element;
+    // If the caller supplied a map factory (Connection.makeStreamResponseMapper),
+    // store it so aux recv loops can each get their own independent buffer.
+    _makeAuxMapper = null; // reset; Connection sets this via makeStreamResponseMapper
     _closed = false;
     if (!useQuic) {
       _useQuic = false;
@@ -332,13 +349,14 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (recvStream == null) {
       return;
     }
-    _startRecvLoop(recvStream, isControl: true);
+    _startRecvLoop(recvStream, isControl: true, mapper: _map);
   }
 
   void _startRecvLoop(
     QuicRecvStream initial, {
     required bool isControl,
     int? slot,
+    String Function(String)? mapper,
   }) {
     unawaited(
       Future<void>(() async {
@@ -372,7 +390,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             final recvLabel =
                 isControl ? 'quic-control' : 'quic-aux-${slot ?? '?'}';
             Log.xmppp_receiving(chunk, channel: recvLabel);
-            _quicStreamController.add(_map(chunk));
+            // Use the per-stream mapper if provided (aux streams), otherwise
+            // fall back to the shared _map (control stream). This ensures each
+            // QUIC stream's partial XML fragments are buffered independently
+            // and do not corrupt each other's parse state.
+            final mapped = (mapper ?? _map)(chunk);
+            _quicStreamController.add(mapped);
           }
         } catch (error, stackTrace) {
           if (!_quicStreamController.isClosed &&
@@ -580,7 +603,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             'QUIC aux stream opened (outbound) slot=$slot '
             'in ${elapsed.inMilliseconds}ms',
           );
-          _startRecvLoop(opened.$3, isControl: false, slot: slot);
+          // Give each aux recv loop its own independent XML mapper/buffer so
+          // that partial fragments from different QUIC streams do not
+          // interleave in the shared restOfResponse buffer of Connection's
+          // prepareStreamResponse. Fall back to _map if no factory was set
+          // (e.g. in tests that don't call setAuxMapperFactory).
+          final auxMapper = _makeAuxMapper?.call() ?? _map;
+          _startRecvLoop(opened.$3, isControl: false, slot: slot, mapper: auxMapper);
           return channel;
         } catch (error, stack) {
           final elapsed = DateTime.now().difference(openStart);
