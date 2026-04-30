@@ -636,6 +636,22 @@ class _WimsyHomeState extends State<WimsyHome> {
           appBar: AppBar(
             title: Text('Signed in as ${service.currentUserBareJid ?? ''}'),
             actions: [
+              if (service.quicRttHistory.isNotEmpty) ...[
+                _QuicStatsGraph(
+                  label: 'RTT',
+                  data: service.quicRttHistory,
+                  color: Colors.blue,
+                  unit: 'ms',
+                ),
+                const SizedBox(width: 8),
+                _QuicStatsGraph(
+                  label: 'Loss',
+                  data: service.quicLossHistory,
+                  color: Colors.red,
+                  unit: '',
+                ),
+                const SizedBox(width: 16),
+              ],
               _PresenceMenu(
                 service: service,
                 preferences: widget.preferences,
@@ -6044,4 +6060,90 @@ class _SpeakingPill extends StatelessWidget {
       ),
     );
   }
+}
+
+class _QuicStatsGraph extends StatelessWidget {
+  const _QuicStatsGraph({
+    required this.label,
+    required this.data,
+    required this.color,
+    required this.unit,
+  });
+
+  final String label;
+  final List<int> data;
+  final Color color;
+  final String unit;
+
+  @override
+  Widget build(BuildContext context) {
+    if (data.isEmpty) return const SizedBox.shrink();
+    final lastValue = data.last;
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: '$label: $lastValue$unit',
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '$lastValue$unit',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 1),
+          Container(
+            width: 36,
+            height: 12,
+            decoration: BoxDecoration(
+              border: Border.all(color: theme.colorScheme.outlineVariant, width: 0.5),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: CustomPaint(
+              painter: _SparklinePainter(data: data, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SparklinePainter extends CustomPainter {
+  _SparklinePainter({required this.data, required this.color});
+
+  final List<int> data;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.length < 2) return;
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    final maxVal = data.reduce((a, b) => a > b ? a : b).toDouble();
+    final minVal = data.reduce((a, b) => a < b ? a : b).toDouble();
+    final range = (maxVal - minVal).clamp(1.0, double.infinity);
+
+    final path = Path();
+    for (var i = 0; i < data.length; i++) {
+      final x = (i / (data.length - 1)) * size.width;
+      final y = size.height - ((data[i] - minVal) / range * size.height);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SparklinePainter oldDelegate) =>
+      oldDelegate.data != data;
 }

@@ -116,7 +116,21 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   @override
-  bool get isQuic => true;
+  bool get isQuic => _useQuic;
+
+  @override
+  Future<QuicConnectionStats?> getQuicStats() async {
+    final conn = _connection;
+    if (conn == null || !_useQuic) return null;
+    try {
+      final (updatedConn, stats) = await connectionStats(connection: conn);
+      _connection = updatedConn;
+      return stats;
+    } catch (e) {
+      // debugPrint('Error getting QUIC stats: $e');
+      return null;
+    }
+  }
 
   @override
   void write(Object? message) {

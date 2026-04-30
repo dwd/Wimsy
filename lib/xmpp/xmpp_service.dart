@@ -146,6 +146,15 @@ class XmppService extends ChangeNotifier {
   final Map<String, ChatState?> _chatStates = {};
   final Map<String, String> _lastDisplayedMarkerIdByChat = {};
   String? _activeChatBareJid;
+  final List<int> _quicRttHistory = [];
+  final List<int> _quicLossHistory = [];
+  BigInt _lastQuicLostPackets = BigInt.zero;
+  Timer? _quicStatsTimer;
+  static const int _maxQuicHistory = 60;
+
+  List<int> get quicRttHistory => _quicRttHistory;
+  List<int> get quicLossHistory => _quicLossHistory;
+
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
   void Function(String roomJid, ChatMessage message)?
   _incomingRoomMessageHandler;
@@ -951,6 +960,7 @@ class XmppService extends ChangeNotifier {
           _errorMessage = null;
           notifyListeners();
           _setupKeepalive();
+          _setupQuicStats();
           _setupDeliveryTracking();
           _setupJingle();
           _setupIbb();
@@ -982,6 +992,7 @@ class XmppService extends ChangeNotifier {
           _setupIbb();
           _setupPresence();
           _setupKeepalive();
+          _setupQuicStats();
           _setupDeliveryTracking();
           _setupPep();
           _setupBookmarks();
@@ -5648,6 +5659,36 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  void _setupQuicStats() {
+    _quicStatsTimer?.cancel();
+    _quicRttHistory.clear();
+    _quicLossHistory.clear();
+    _lastQuicLostPackets = BigInt.zero;
+
+    final socket = _connection?.socket;
+    if (socket == null || !socket.isQuic) return;
+
+    _quicStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      final stats = await socket.getQuicStats();
+      if (stats == null) return;
+
+      _quicRttHistory.add(stats.path.rttMillis.toInt());
+      if (_quicRttHistory.length > _maxQuicHistory) {
+        _quicRttHistory.removeAt(0);
+      }
+
+      final currentLoss = stats.path.lostPackets;
+      final deltaLoss = currentLoss - _lastQuicLostPackets;
+      _lastQuicLostPackets = currentLoss;
+      _quicLossHistory.add(deltaLoss.toInt());
+      if (_quicLossHistory.length > _maxQuicHistory) {
+        _quicLossHistory.removeAt(0);
+      }
+
+      notifyListeners();
+    });
+  }
+
   void _setupKeepalive() {
     final connection = _connection;
     if (connection == null) {
@@ -6906,6 +6947,11 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> _safeClose({required bool preserveCache}) async {
+    _quicStatsTimer?.cancel();
+    _quicStatsTimer = null;
+    _quicRttHistory.clear();
+    _quicLossHistory.clear();
+    _lastQuicLostPackets = BigInt.zero;
     _csiIdleTimer?.cancel();
     _csiIdleTimer = null;
     _mucSelfPingTimer?.cancel();

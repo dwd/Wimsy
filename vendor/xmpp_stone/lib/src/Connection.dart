@@ -210,6 +210,8 @@ class Connection {
   xmppSocket.XmppWebSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
 
+  xmppSocket.XmppWebSocket? get socket => _socket;
+
   // for testing purpose
   set socket(xmppSocket.XmppWebSocket? value) {
     _socket = value;
