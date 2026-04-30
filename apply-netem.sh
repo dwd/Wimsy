@@ -37,15 +37,15 @@ echo "[+] Setting outbound shaping on $IFACE"
 
 tc qdisc add dev "$IFACE" root handle 1: htb default 99
 
-# Bypass class: full line rate, no qdisc attached (uses default pfifo_fast)
+# Bypass class: explicit pfifo_fast leaf so HTB actually classifies packets
 tc class add dev "$IFACE" parent 1: classid 1:99 htb rate 1gbit ceil 1gbit
+tc qdisc add dev "$IFACE" parent 1:99 handle 99: pfifo_fast
 
 # Impaired class: rate-limited, with netem delay and loss
 tc class add dev "$IFACE" parent 1: classid 1:1 htb rate "$RATE" ceil "$RATE"
 tc qdisc add dev "$IFACE" parent 1:1 handle 10: netem delay "$DELAY" loss "$LOSS"
 
 # Match IPv6 UDP/5224 → remote IPv6 → impaired class
-# (flower is used for IPv6 because u32 cannot match 128-bit addresses)
 tc filter add dev "$IFACE" protocol ipv6 parent 1: prio 1 flower \
     ip_proto udp \
     dst_port "$PORT" \
@@ -53,10 +53,10 @@ tc filter add dev "$IFACE" protocol ipv6 parent 1: prio 1 flower \
     flowid 1:1
 
 # Match IPv4 UDP/5224 → remote IPv4 → impaired class
-tc filter add dev "$IFACE" protocol ip parent 1: prio 2 u32 \
-    match ip protocol 17 0xff \
-    match ip dport "$PORT" 0xffff \
-    match ip dst "$IPV4" \
+tc filter add dev "$IFACE" protocol ip parent 1: prio 2 flower \
+    ip_proto udp \
+    dst_port "$PORT" \
+    dst_ip "$IPV4" \
     flowid 1:1
 
 ###############################################
@@ -76,15 +76,15 @@ echo "[+] Setting inbound shaping on ifb0"
 
 tc qdisc add dev ifb0 root handle 2: htb default 99
 
-# Bypass class: full line rate, no qdisc attached
+# Bypass class: explicit pfifo_fast leaf so HTB actually classifies packets
 tc class add dev ifb0 parent 2: classid 2:99 htb rate 1gbit ceil 1gbit
+tc qdisc add dev ifb0 parent 2:99 handle 99: pfifo_fast
 
 # Impaired class: rate-limited, with netem delay and loss
 tc class add dev ifb0 parent 2: classid 2:1 htb rate "$RATE" ceil "$RATE"
 tc qdisc add dev ifb0 parent 2:1 handle 20: netem delay "$DELAY" loss "$LOSS"
 
 # Match IPv6 UDP/5224 ← remote IPv6 → impaired class
-# (flower is used for IPv6 because u32 cannot match 128-bit addresses)
 tc filter add dev ifb0 protocol ipv6 parent 2: prio 1 flower \
     ip_proto udp \
     src_port "$PORT" \
@@ -92,10 +92,10 @@ tc filter add dev ifb0 protocol ipv6 parent 2: prio 1 flower \
     flowid 2:1
 
 # Match IPv4 UDP/5224 ← remote IPv4 → impaired class
-tc filter add dev ifb0 protocol ip parent 2: prio 2 u32 \
-    match ip protocol 17 0xff \
-    match ip sport "$PORT" 0xffff \
-    match ip src "$IPV4" \
+tc filter add dev ifb0 protocol ip parent 2: prio 2 flower \
+    ip_proto udp \
+    src_port "$PORT" \
+    src_ip "$IPV4" \
     flowid 2:1
 
 echo "[+] Impairments applied (delay=$DELAY loss=$LOSS rate=$RATE on $IFACE)."
