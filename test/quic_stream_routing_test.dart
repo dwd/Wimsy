@@ -101,6 +101,21 @@ void main() {
     });
   });
 
+  group('QuicCapableXmppSocket server stream pool', () {
+    test('serverStreamPoolSize starts at zero', () {
+      final socket = QuicCapableXmppSocket();
+      expect(socket.serverStreamPoolSize, 0);
+    });
+
+    test('serverStreamPoolSize is zero after close()', () {
+      // close() on a non-QUIC socket is a no-op for the pool but the field
+      // must still be accessible and report 0 (pool was never populated).
+      final socket = QuicCapableXmppSocket();
+      socket.close();
+      expect(socket.serverStreamPoolSize, 0);
+    });
+  });
+
   group('connectionAcceptBi bridge export', () {
     // connectionAcceptBi requires a live QUIC connection and cannot be called
     // in a unit test. These tests verify that the symbol is exported from the

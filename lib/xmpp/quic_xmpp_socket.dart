@@ -84,6 +84,32 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   // was still being opened. Flushed onto the aux stream once it is ready.
   final Map<int, List<String>> _auxStreamPendingQueue = {};
 
+  // Pool of server-initiated bidirectional streams that have been accepted but
+  // not yet assigned to a slot. When we need to open an aux stream for a new
+  // bare-JID slot, we pop from this pool first rather than calling
+  // connectionOpenBi, saving a round-trip and a stream-credit.
+  final List<_QuicStreamChannel> _serverStreamPool = [];
+
+  /// Number of server-initiated streams currently waiting in the pool.
+  /// Exposed for testing only.
+  @visibleForTesting
+  int get serverStreamPoolSize => _serverStreamPool.length;
+
+  /// Injects a fake server-initiated stream into the pool for testing.
+  /// The [sendStream] and [recvStream] are the raw QUIC stream objects.
+  /// In production these come from [connectionAcceptBi]; in tests a fake
+  /// pair can be injected to verify pool-preference logic without a live
+  /// QUIC connection.
+  @visibleForTesting
+  void injectServerStreamForTesting(
+    QuicSendStream sendStream,
+    QuicRecvStream recvStream,
+  ) {
+    _serverStreamPool.add(
+      _QuicStreamChannel(sendStream: sendStream, recvStream: recvStream),
+    );
+  }
+
   @override
   Future<XmppWebSocket> connect<S>(
     String host,
@@ -212,6 +238,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _auxStreamsBySlot.clear();
     _auxStreamOpening.clear();
     _auxStreamPendingQueue.clear();
+    _serverStreamPool.clear();
     _auxOpenLock = Future<void>.value();
 
     if (controlStream != null) {
@@ -508,15 +535,32 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               debugPrint('QUIC server-stream accept loop: connection closed');
               break;
             }
+            final sendStream = result.$1;
             final label = 'quic-server-${streamIndex++}';
-            debugPrint('QUIC accepted server-initiated stream: $label');
-            final mapper = _makeAuxMapper?.call() ?? _map;
-            _startRecvLoop(
-              recvStream,
-              isControl: false,
-              mapper: mapper,
-              label: label,
+            debugPrint(
+              'QUIC accepted server-initiated stream: $label '
+              '(pooled for reuse as aux stream)',
             );
+            // Pool the stream pair. When _ensureAuxStream next needs a new
+            // slot it will pop from here instead of calling connectionOpenBi,
+            // saving a round-trip and a bidi-stream credit.
+            if (sendStream != null) {
+              _serverStreamPool.add(
+                _QuicStreamChannel(
+                  sendStream: sendStream,
+                  recvStream: recvStream,
+                ),
+              );
+            } else {
+              // No send stream — start a receive-only loop for completeness.
+              final mapper = _makeAuxMapper?.call() ?? _map;
+              _startRecvLoop(
+                recvStream,
+                isControl: false,
+                mapper: mapper,
+                label: label,
+              );
+            }
           } catch (error) {
             if (!_closed) {
               debugPrint('QUIC server-stream accept loop error: $error');
@@ -757,6 +801,27 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   Future<_QuicStreamChannel> _openAuxStream(int slot, {String reason = 'pre-open'}) async {
+    // Prefer a server-initiated stream from the pool over opening a new
+    // client-initiated stream. This avoids a connectionOpenBi round-trip and
+    // conserves bidi-stream credits.
+    if (_serverStreamPool.isNotEmpty) {
+      final pooled = _serverStreamPool.removeAt(0);
+      _auxStreamsBySlot[slot] = pooled;
+      debugPrint(
+        'QUIC aux stream slot=$slot assigned from server-stream pool '
+        '(${_serverStreamPool.length} remaining in pool)',
+      );
+      final auxMapper = _makeAuxMapper?.call() ?? _map;
+      _startRecvLoop(
+        pooled.recvStream,
+        isControl: false,
+        slot: slot,
+        mapper: auxMapper,
+      );
+      _auxStreamOpening.remove(slot);
+      return pooled;
+    }
+
     try {
       // Serialise all connectionOpenBi calls globally: the FFI function uses
       // Auto_Owned transfer, consuming _connection and returning a new arc.
