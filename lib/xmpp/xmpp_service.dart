@@ -216,7 +216,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, String> _vcardDisplayNames = {};
   final Set<String> _vcardRequests = {};
   final Set<String> _vcardUnavailable = {};
-  static const _vcardNoAvatar = 'none';
+  static const _vcardNoAvatar = vcardNoAvatarSentinel;
   String _selfVcardPhotoHash = '';
   bool _selfVcardPhotoKnown = false;
   final Map<String, _FileTransferSession> _fileTransfers = {};
@@ -2279,7 +2279,7 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     return RegExp(
-      r'[\u{00A9}\u{00AE}\u{203C}-\u{3299}\u{1F000}-\u{1FAFF}]',
+      r'[\u00A9\u00AE\u203C-\u3299\u1F000-\u1FAFF]',
       unicode: true,
     ).hasMatch(value);
   }
@@ -7605,7 +7605,11 @@ class XmppService extends ChangeNotifier {
     _requestVcardDetails(bareJid, preferName: false);
   }
 
-  void _requestVcardDetails(String bareJid, {required bool preferName}) {
+  void _requestVcardDetails(
+    String bareJid, {
+    required bool preferName,
+    String? advertisedHash,
+  }) {
     final connection = _connection;
     final storage = _storage;
     if (connection == null || storage == null) {
@@ -7615,6 +7619,19 @@ class XmppService extends ChangeNotifier {
       return;
     }
     if (_vcardRequests.contains(bareJid)) {
+      return;
+    }
+    // R4.1: Skip the IQ entirely when we already have the bytes cached for
+    // the advertised photo hash. `preferName == true` callers (e.g. self
+    // vCard fetch on Ready, or contact list "show details") bypass the cache
+    // because they want the FN/NICKNAME fields, not just the avatar.
+    if (!shouldFetchVcardForCache(
+      bareJid: bareJid,
+      preferName: preferName,
+      cachedAvatarBytes: _vcardAvatarBytes,
+      cachedAvatarState: _vcardAvatarState,
+      advertisedHash: advertisedHash,
+    )) {
       return;
     }
     _vcardRequests.add(bareJid);
@@ -7721,13 +7738,12 @@ class XmppService extends ChangeNotifier {
       }
       return;
     }
-    if (existing == hash && _vcardAvatarBytes.containsKey(bareJid)) {
-      return;
-    }
-    _vcardAvatarState[bareJid] = hash;
-    storage.storeVcardAvatarState(bareJid, hash);
+    // The centralised guard inside `_requestVcardDetails` (R4.1) handles the
+    // "same hash & bytes already cached" case by short-circuiting. Pass the
+    // advertised hash *before* mutating cached state so the guard can compare
+    // it against the previously recorded hash and refetch when they differ.
     _vcardRequests.remove(bareJid);
-    _requestVcardAvatar(bareJid);
+    _requestVcardDetails(bareJid, preferName: false, advertisedHash: hash);
   }
 
   Future<String?> updateSelfVcard({

@@ -1,0 +1,429 @@
+# Startup Fetch Review: Displayed sync, MAM/archiving, vCard/Avatar caches
+
+Date: 2026-05-01
+
+This document reviews how Wimsy interacts on startup with:
+
+* XEP-0490 Message Displayed Synchronization (MDS)
+* XEP-0313 MAM (catch-up and backfill)
+* XEP-0084 PEP user-avatar metadata + data
+* XEP-0153 vCard-temp avatar updates
+* The local message / avatar cache (Hive via `StorageService`)
+
+It identifies places where the client refetches data unnecessarily on every
+connect and proposes concrete fixes (or, where a fix is not currently
+possible, explains why).
+
+The review is based on a `flutter run` startup trace (`wimsy.log`) plus
+inspection of:
+
+* `lib/xmpp/xmpp_service.dart`
+* `lib/xmpp/mam_coordinator.dart`, `mam_query_planner.dart`,
+  `mam_cursor_store.dart`, `mam_merge_engine.dart`
+* `lib/pep/pep_manager.dart`, `pep_caps_manager.dart`
+* `lib/storage/storage_service.dart`
+
+---
+
+## TL;DR — biggest startup wins
+
+| # | Symptom | Where | Effort | Saved traffic |
+|---|---------|-------|--------|---------------|
+| 1 | vCard `<vCard xmlns="vcard-temp"/>` fetched for every roster entry on every connect, even when we already have the photo bytes and hash | `_ensureContact` → `_requestVcardAvatar`, `lib/xmpp/xmpp_service.dart:6741` | Low | N × (roster size) IQ + payload (a vCard photo can be tens of KB) |
+| 2 | vCard fetched again per presence even when the advertised `<photo>` hash matches the cached one | `_handleVcardPresenceUpdate`, `lib/xmpp/xmpp_service.dart:7694` | Low | One IQ per online roster contact each time presence is re-broadcast |
+| 3 | MDS published items requested via PubSub IQ on every Ready, despite caching `displayed_sync` in Hive and despite the server pushing +notify | `_setupDisplayedSync`, `lib/xmpp/xmpp_service.dart:5186` | Low | One IQ + payload per startup |
+| 4 | Per-chat MAM catch-up step is fired for every chat with cached messages, regardless of whether MDS displayed-id already matched a known local message (i.e. we are demonstrably up to date) | `_primeMamSync`, `lib/xmpp/xmpp_service.dart:7541` | Medium | One MAM `<query>` per cached chat, each producing a page of forwarded messages |
+| 5 | "Displayed sync miss" → we drop the displayed marker silently and never narrow the catch-up; next time MDS arrives we still cannot match | `_applyDisplayedStateForChat`, `lib/xmpp/xmpp_service.dart:5460` | Medium | Repeated MAM pages on every startup for the same chat |
+| 6 | Two duplicate self vCard fetches at session start (one in initial flush, one explicit) and `enable carbons:2` is sent twice | observed in log around `12:20:21–12:20:22` | Low | A handful of redundant IQs |
+
+Items 1–3 are pure waste. Items 4–5 are the structural ones that explain why
+"Displayed sync miss" log lines appear after every restart for chats with
+many unread messages, and why we end up pulling a new MAM page on every
+connect.
+
+---
+
+## 1. Displayed Sync (XEP-0490) — current behaviour
+
+### What we do today
+
+* On `XmppConnectionState.Ready` we call `_setupDisplayedSync()`
+  (`xmpp_service.dart:5186`). This sends an IQ:
+
+  ```xml
+  <iq type="get" to="self">
+    <pubsub xmlns="…/pubsub">
+      <items node="urn:xmpp:mds:displayed:0"/>
+    </pubsub>
+  </iq>
+  ```
+
+  i.e. it fetches **all** items from the displayed node every connect.
+
+* The result populates `_displayedStanzaIdByChat` and is persisted to
+  `displayed_sync` in `StorageService` via `storeDisplayedSync` —
+  `_displayedStanzaIdByChat` is also seeded from storage on app start.
+
+* For each item we call `_applyDisplayedStateForChat`, which walks the
+  in-memory message list for that chat looking for the `stanza-id`. If
+  found, we mark MAM catch-up complete for that chat. If not found, we log
+  "Displayed sync miss" (see `wimsy.log`) and **return false** without
+  taking further action.
+
+* PubSub event messages (`<event xmlns="…pubsub#event">`) for MDS are also
+  handled by `_handleDisplayedSyncEvent`, so live updates from carbons /
+  +notify already work.
+
+### Problems
+
+1. **Always-on full fetch.** We already cache the displayed map on disk,
+   yet every connect we still query the entire `urn:xmpp:mds:displayed:0`
+   node. There are two cheaper alternatives:
+
+   * **Subscribe to MDS via +notify** (the spec defines this). The server
+     will push `<event/>` items at our session and we don't need to poll.
+     We currently do not advertise `urn:xmpp:mds:displayed:0+notify` in
+     our `disco#info` features, and we do not subscribe via Carbons. We do
+     however receive PEP events (we already handle them), so the simplest
+     fix is just to add the `+notify` feature to our caps form, like we
+     do for `urn:xmpp:avatar:metadata+notify`.
+   * **Compare with the cached map** — if the published item count is
+     small (one item per chat) we still get a full PubSub items result on
+     IQ; we can skip the IQ when our cached map is non-empty and rely on
+     +notify for catch-up.
+
+2. **Misses are terminal.** When `_applyDisplayedStateForChat` cannot find
+   the displayed `stanza-id` in the local message list, it logs a miss
+   and gives up. As a consequence:
+
+   * The MAM catch-up tracker for that chat is never marked complete from
+     MDS, so the catch-up loop will keep running on every startup until
+     the user actually opens the chat and we backfill.
+   * The displayed marker is forgotten silently, so the next time MDS
+     pushes the same `id` we will short-circuit at
+     `_displayedStanzaIdByChat[id] == stanzaId` and never retry the match.
+   * This is exactly what we see in the log:
+     `Displayed sync miss for chat=xsf@muc.xmpp.org … messages=25
+     knownStanzaIds=[…5 ids…]` — we have only 25 cached messages and the
+     server's displayed marker points further back.
+
+### Recommendations
+
+* **R1.1 (easy).** Skip the explicit `_setupDisplayedSync` IQ when
+  `_displayedStanzaIdByChat` was successfully restored from disk; fall
+  back to the IQ only when the cache is empty.
+* **R1.2 (easy).** Advertise `urn:xmpp:mds:displayed:0+notify` in our
+  caps disco form and rely on PubSub auto-subscription. This eliminates
+  the IQ entirely on subsequent restarts.
+* **R1.3 (medium).** On a "Displayed sync miss":
+  * Persist the unresolved `(chatJid, stanzaId)` pair to disk
+    (e.g. `displayed_sync_pending`).
+  * On the next MAM page that contains this `stanza-id`, resolve and
+    remove the pending entry, then set the displayed timestamp and clear
+    the catch-up flag.
+  * Drive a single bounded MAM query toward this `stanza-id` (use it as
+    `before` and stop) instead of firing the generic catch-up step.
+
+This last point is the key structural fix: it converts an unbounded
+"catch-up since latest known mam-id" into a precise "fetch up to the
+displayed marker", which is exactly what MDS is for.
+
+---
+
+## 2. MAM catch-up on connect
+
+### What we do today
+
+In `_primeMamSync()` (`xmpp_service.dart:7541`), once the connection is
+Ready we iterate over every cached DM chat and every bookmark and:
+
+* If the chat has cached messages → call `_startMamCatchUp(jid, …)`,
+  which posts a MAM `<query>` using `MamQueryPlanner.catchUp`
+  (`afterId=<latestMamId>`). This is correct behaviour — we ask for
+  messages newer than what we already have.
+* If the chat has no cached messages → call
+  `_requestRoomMam(roomJid, max:25, before:'')` for rooms or
+  `_requestMamInitial(jid)` for DMs.
+
+`MamCursorStore` throttles repeats inside a session (5s for catch-up,
+30s for backfill) and keeps `prependOffset`/timer state. Cursors per chat
+are correctly persisted via `_seededMessageJids` and `latestMamIdFor`,
+so we are not re-pulling history we already have.
+
+### Where this is wasteful
+
+* The catch-up step fires **for every cached chat**, including chats the
+  user has not opened in months and is unlikely to open this session.
+  For a typical roster with dozens of contacts/MUCs this is dozens of
+  parallel `<iq><query xmlns="urn:xmpp:mam:2">` requests at startup.
+* Even when MDS already tells us "the last message you displayed in
+  chat X is stanza Y" and we have Y in our local cache, we still go and
+  ask MAM for newer messages. That part is correct in principle (we
+  could legitimately have new messages), but it means we are essentially
+  doing a fan-out poll on every connect.
+* For MUCs we additionally do a fan-out of `<presence/>` and chat-state /
+  caps disco, and then immediately ask the MUC's MAM. We already see in
+  the log that `summit@muc.xmpp.org` is dragging in a long backlog
+  (`queryid="VPNAXKAHR"`) on the aux QUIC stream, blocking other work.
+
+### Recommendations
+
+* **R2.1 (medium).** Defer per-chat MAM catch-up until the user actually
+  opens the chat (or makes the chat list visible), keeping only:
+  * A single global "last seen" anchor per account, similar to how
+    Conversations does it: query MAM with `start=<lastSyncAt>` (or a
+    server-side bounded period like 24h), get one merged stream, then
+    update per-chat anchors as messages come in.
+  * Plus a per-chat cap of e.g. 25 messages on the first time the chat
+    is opened.
+
+  We have most of the machinery already (`MamCursorStore`,
+  `mergeMamIdsIntoExisting`, `latestMamIdFor`); the missing piece is a
+  single global `last_mam_id_seen` and a corresponding initial query at
+  connect time.
+
+* **R2.2 (low).** When MDS displayed-id matches a local message *and* the
+  message's MAM id equals `latestMamIdFor(chat)`, skip the catch-up
+  query for that chat entirely — we already know we are caught up to
+  the displayed marker. (Today we set the displayed timestamp and clear
+  the pending flag, but `_primeMamSync` still iterates and fires
+  catch-up.)
+
+* **R2.3 (low).** Make `_primeMamSync` skip chats that the user has not
+  opened in the current session unless the user has explicitly enabled
+  "fetch all on startup" in preferences.
+
+* **R2.4 (low).** Sort/throttle the connect-time fan-out: bookmark joins
+  trigger MUC presence + MAM + caps disco; we should batch caps disco
+  hits via a single bounded queue (we already do this for vCards via
+  `_vcardRequests`). A tiny token-bucket limiter would smooth this out.
+
+### Why we cannot do "no MAM at all" today
+
+Without persisting a `last_mam_id_seen` per account in `StorageService`
+we do not have a single global anchor. Today the per-chat anchors are
+necessary because messages can arrive in chats we never explicitly
+loaded (e.g. via carbons while offline). We can build R2.1, but it
+requires adding one new key to `StorageService` and one new query path.
+
+---
+
+## 3. Avatar caching — PEP user-avatar (XEP-0084)
+
+### What we do today
+
+`PepManager` (`lib/pep/pep_manager.dart`) is the well-behaved bit:
+
+* On boot we seed `_metadataByJid` and `_avatarBlobs` from
+  `StorageService.loadAvatarMetadata()` / `loadAvatarBlobs()`.
+* `requestMetadataIfMissing(bareJid)` is a no-op when we already have
+  metadata for that JID.
+* `requestAvatarData(bareJid, hash)` is a no-op when we already have
+  the blob for that hash.
+* PubSub event messages with `urn:xmpp:avatar:metadata` update the cache
+  and request the data only when the hash is new.
+
+This is correct. The only minor improvements possible:
+
+* **R3.1 (very low).** We never expire stale blobs that are no longer
+  referenced by any metadata entry. For long-lived installs this is a
+  small but real disk leak. A periodic GC pass over `_avatarBlobs`
+  versus `_metadataByJid` would fix it.
+* **R3.2 (low).** We do not subscribe (`<subscribe>`) to anyone other
+  than ourselves. PEP +notify is enough for contacts who advertise our
+  caps via PEP, but for non-presence-subscribed contacts (open MUCs
+  etc.) we will pay a one-shot metadata IQ when we first see them. This
+  is unavoidable without a presence subscription.
+
+### Why some PEP avatar IQs *do* fail in the log
+
+The log shows several `<error code="404"><item-not-found/>` PEP avatar
+metadata responses (e.g. for `test1@dave.cridland.net`, `test2@…`). That
+is expected: those JIDs publish a vCard avatar but no PEP one. We
+*should* cache the 404 too, otherwise we will retry every connect.
+
+* **R3.3 (low).** Treat `item-not-found` on
+  `urn:xmpp:avatar:metadata` as "no PEP avatar" and store a sentinel in
+  `_metadataByJid` (e.g. an `AvatarMetadata` with empty `hash`) so
+  `requestMetadataIfMissing` short-circuits next startup.
+
+---
+
+## 4. Avatar caching — vCard-temp (XEP-0153)
+
+This is the worst offender on startup.
+
+### What we do today
+
+`xmpp_service.dart:7604–7653` defines `_requestVcardAvatar` /
+`_requestVcardDetails`. Triggers:
+
+* `_ensureContact` calls `_requestVcardAvatar(entry.jid)` for every
+  **new** roster entry (line 6741). However, on first connect after app
+  start, *every* roster entry is a "new" entry as far as in-memory
+  `_contacts` is concerned (we seed contacts from disk before
+  `_setupRoster` runs, so this is only fine if we persist contacts; we
+  do — but we still re-issue the vCard fetch elsewhere).
+* `_handleVcardPresenceUpdate` calls `_requestVcardAvatar` whenever a
+  presence stanza carries `<x xmlns='vcard-temp:x:update'><photo>`. The
+  guard at line 7724 is good (skip when hash matches and bytes
+  cached) — but the line 7727 `_vcardAvatarState[bareJid] = hash;` is
+  applied **before** we know whether bytes are cached, and the next call
+  to `_requestVcardAvatar` is unconditional.
+* `_setupRoster`-equivalent paths in `xmpp_service.dart:1286, 1453,
+  2339, 6741` all call `_requestVcardAvatar` / `_requestVcardDetails`
+  without consulting `_vcardAvatarBytes` or `_vcardAvatarState`.
+* The self vCard is fetched again at line 1036
+  (`_requestVcardDetails(_currentUserBareJid!, preferName: true)`) on
+  every Ready — duplicating any roster-driven self fetch.
+
+The persistence story is fine: `storeVcardAvatar`,
+`storeVcardAvatarState` keep both bytes and the hash in Hive, and we
+seed both maps at boot via `_seedVcardAvatars` / `_seedVcardAvatarState`.
+
+So we already *have* the data. We just don't *use* it as a guard.
+
+### Recommendations
+
+* **R4.1 (high impact, low effort).** Add a guard at the top of
+  `_requestVcardDetails`:
+
+  ```dart
+  if (!preferName &&
+      _vcardAvatarBytes.containsKey(bareJid) &&
+      (_vcardAvatarState[bareJid] ?? '').isNotEmpty &&
+      _vcardAvatarState[bareJid] != _vcardNoAvatar) {
+    return; // Already have bytes + hash; vCard advertises only avatar here.
+  }
+  ```
+
+  i.e. only fetch the vCard when we do not have cached bytes for the
+  current advertised hash, or when we genuinely need the name
+  (`preferName == true`).
+
+* **R4.2 (very low effort).** In `_handleVcardPresenceUpdate`:
+
+  ```dart
+  if (existing == hash && _vcardAvatarBytes.containsKey(bareJid)) {
+    return; // already there
+  }
+  ```
+
+  is already present and correct. The bug is that *other* call-sites
+  (line 6741, etc.) bypass this gate. Centralising the cache check in
+  `_requestVcardDetails` (R4.1) covers them all.
+
+* **R4.3 (low effort).** Cache "this JID has no vCard"
+  (`InvalidVCard`) across restarts. Today `_vcardUnavailable` is a
+  process-only `Set<String>`, so we will retry next startup. Persist
+  it (e.g. `storeVcardAvatarState(jid, _vcardNoAvatar)` already does
+  the equivalent for missing photos; extend it to missing vCards
+  altogether by adding a separate sentinel or storing a tag in
+  `vcardAvatarState`).
+
+* **R4.4 (low).** Coalesce duplicate self vCard fetches: `_setupRoster`
+  may re-add self to the contacts map, and we explicitly fetch it again
+  at line 1036. A single `_vcardRequests` guard already prevents two
+  outstanding requests, but we are still issuing one we don't need. Add
+  the same R4.1 guard.
+
+---
+
+## 5. Other startup multipliers seen in the log
+
+These are not strictly cache misses but they magnify the impact of the
+above:
+
+* **Carbons enabled twice.** `enable xmlns="urn:xmpp:carbons:2"` is sent
+  in two different code paths during initial flush (`KNBYYPMLT` and
+  `VSBVMXXRT` in the log). Harmless but wasteful. Track a
+  `_carbonsRequested` flag.
+* **Caps disco fan-out.** Every distinct `node#ver` from MUC presence
+  triggers a disco#info IQ. We do cache caps locally (`pep_caps_manager`
+  reads features), but we do not currently use a shared, persistent
+  caps cache à la Entity Capabilities (XEP-0115) verifier. Persisting
+  caps results across restarts (keyed by `node#ver`) would eliminate the
+  flurry of `disco#info` IQs visible in the log.
+* **Reactions PEP node fetched on every Ready** (`UJXJYDOXP` in the
+  log). Same +notify treatment as MDS would solve it.
+
+---
+
+## 6. Things we *cannot* avoid without more information
+
+Some of the startup chatter is simply structural and cannot be reduced
+without protocol-level changes or new server hints:
+
+1. **MUC presence broadcast on join.** When we re-enter a MUC we will
+   receive presence for every occupant. That is the protocol; we cannot
+   suppress it. The cost is in caps disco (which we *can* cache; see
+   above) and in MUC avatar updates (vCard-temp photos in MUC presence)
+   — those are addressable by R4.1.
+2. **Roster fetch.** The roster IQ is needed for subscription state; we
+   already use `ver=` (the log shows
+   `<query xmlns='jabber:iq:roster' ver='364576852'/>`) and the server
+   correctly returns an empty result when we are up to date. So this
+   one is already optimal.
+3. **MAM "tail" query for chats with no local cache.** If we have
+   nothing to anchor against, we have to ask the server for the most
+   recent N. Nothing to fix here.
+4. **Initial server stream features negotiation.** Out of scope for this
+   review. SASL2 / Bind 2 / FAST would amortise this and is being
+   tracked in `doc/plan-sasl2.md`.
+
+---
+
+## 7. Concrete plan / TODO
+
+Tackling in roughly priority order:
+
+1. **R4.1 — DONE.** Centralised vCard cache guard added to
+   `_requestVcardDetails` (`lib/xmpp/xmpp_service.dart`). The decision
+   logic was extracted as `shouldFetchVcardForCache` in
+   `lib/xmpp/vcard_utils.dart` and is exercised by unit tests in
+   `test/vcard_utils_test.dart`. `_handleVcardPresenceUpdate` now passes
+   the freshly advertised `<photo>` hash through to the guard so a hash
+   change still triggers a refetch. _Impact: removes most of the vCard
+   storm at connect._
+2. **R3.3** — persist "no PEP avatar" sentinel for 404s.
+3. **R1.1** — skip the MDS bootstrap IQ when the in-memory map is
+   already populated from disk; rely on +notify for live updates.
+4. **R1.2** — advertise `urn:xmpp:mds:displayed:0+notify` in our caps.
+5. **R1.3** — persist unresolved displayed markers and resolve them
+   from incoming MAM pages.
+6. **R2.2** — short-circuit `_primeMamSync` for chats whose latest
+   MAM id is already at the displayed marker.
+7. **R5 / caps cache** — persist XEP-0115 verified caps across restarts.
+8. **R2.1** — add a single global `last_mam_id_seen` and a unified
+   catch-up query, eventually allowing per-chat catch-up to be lazy.
+9. **R3.1** — periodic GC of unreferenced avatar blobs.
+
+Each of the above can ship as its own PR with tests:
+
+* `MamCursorStore` already has a deterministic `now`/`schedule` seam,
+  so R2.2 is unit-testable without a network.
+* `PepManager` is constructor-injectable with a mock `Connection`; the
+  +notify and 404 paths are easily testable.
+* The vCard cache guard (R4.1) needs a unit test that asserts no IQ is
+  emitted when bytes for the advertised hash are already cached, and
+  that an IQ *is* emitted when the advertised hash differs.
+
+---
+
+## Appendix: log evidence (excerpts from `wimsy.log`, 2026-05-01)
+
+* `Displayed sync miss for chat=xsf@muc.xmpp.org stanzaId=32d798f6-…
+  messages=25 knownStanzaIds=[5 ids]` — the local cache is too short to
+  resolve the displayed marker; we then re-pull MAM rather than
+  asking for "messages up to the displayed `stanza-id`".
+* Multiple `<iq type="get" … ><vCard xmlns="vcard-temp"/></iq>` blasted
+  to every roster entry within ~50ms of becoming Ready.
+* `enable xmlns="urn:xmpp:carbons:2"` sent twice (`KNBYYPMLT` and
+  `VSBVMXXRT`).
+* `urn:xmpp:avatar:metadata` 404s for `test1@…`, `test2@…`,
+  `test-dino@…` — these will repeat on every restart until R3.3 is
+  applied.
+* `summit@muc.xmpp.org` MAM page (`queryid="VPNAXKAHR"`) is a long
+  stream of forwarded historical messages running for several seconds
+  on the QUIC aux stream — this is exactly the kind of fan-out R2.1 is
+  designed to defer.
