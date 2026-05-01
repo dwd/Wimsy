@@ -619,6 +619,17 @@ class StorageService {
     await box.put(_avatarBlobsKey, next);
   }
 
+  /// R3.1: replace the entire avatar-blobs map with [blobs]. Used by the
+  /// PEP avatar GC pass that keeps only blobs referenced by a current
+  /// metadata entry.
+  Future<void> replaceAvatarBlobs(Map<String, String> blobs) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_avatarBlobsKey, Map<String, String>.from(blobs));
+  }
+
   Future<void> clearAvatars() async {
     final box = _box;
     if (box == null) {

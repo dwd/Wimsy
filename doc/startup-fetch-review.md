@@ -473,7 +473,14 @@ Tackling in roughly priority order:
    anchor it would need to read is now persisted and updated, so the
    follow-up can be a localised change inside `_primeMamSync` /
    `MamQueryPlanner` without touching the message-ingest paths.
-9. **R3.1** — periodic GC of unreferenced avatar blobs.
+9. **R3.1 — DONE.** `PepManager.gcUnreferencedAvatarBlobs()` evicts any
+   cached blob whose hash is not referenced by a current non-sentinel
+   `_metadataByJid` entry. The pass is invoked once from the constructor
+   immediately after the on-disk seeds are loaded, and is safe to call
+   ad-hoc (returns the eviction count). `StorageService` gained a small
+   `replaceAvatarBlobs(Map)` helper to persist the trimmed set in one
+   write. New tests in `test/pep_manager_test.dart` cover the eviction
+   semantics and idempotency on a clean cache.
 
 Each of the above can ship as its own PR with tests:
 

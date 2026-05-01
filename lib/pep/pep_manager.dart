@@ -17,6 +17,11 @@ class PepManager {
   }) : _onUpdate = onUpdate {
     _metadataByJid.addAll(storage.loadAvatarMetadata());
     _avatarBlobs.addAll(storage.loadAvatarBlobs());
+    // R3.1: drop any cached blobs whose hash isn't referenced by any
+    // current metadata entry. This keeps the on-disk avatar store from
+    // growing unbounded over the lifetime of the app as contacts rotate
+    // their avatars.
+    gcUnreferencedAvatarBlobs();
   }
 
   final Connection connection;
@@ -114,6 +119,37 @@ class PepManager {
     _pendingDataRequests.clear();
     _pendingMetadataRequests.clear();
     _onUpdate();
+  }
+
+  /// R3.1: drop any cached avatar blob whose hash is not referenced by a
+  /// current (non-sentinel) `_metadataByJid` entry. Keeps `_avatarBlobs`
+  /// and the persisted blob store from leaking when contacts rotate
+  /// avatars over the lifetime of the install.
+  ///
+  /// Returns the number of blobs evicted (helpful for tests and a future
+  /// telemetry hook). Calling this is safe at any time; in particular it
+  /// is invoked once from the constructor right after the on-disk seeds
+  /// are loaded.
+  int gcUnreferencedAvatarBlobs() {
+    if (_avatarBlobs.isEmpty) {
+      return 0;
+    }
+    final referenced = <String>{
+      for (final meta in _metadataByJid.values)
+        if (!meta.isNoPepAvatar && meta.hash.isNotEmpty) meta.hash,
+    };
+    final toRemove = <String>[
+      for (final hash in _avatarBlobs.keys)
+        if (!referenced.contains(hash)) hash,
+    ];
+    if (toRemove.isEmpty) {
+      return 0;
+    }
+    for (final hash in toRemove) {
+      _avatarBlobs.remove(hash);
+    }
+    storage.replaceAvatarBlobs(_avatarBlobs);
+    return toRemove.length;
   }
 
   void _sendSubscribe(String bareJid) {

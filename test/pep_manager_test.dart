@@ -26,6 +26,13 @@ class FakeStorageService extends StorageService {
   Future<void> storeAvatarBlob(String hash, String base64Data) async {
     blobs[hash] = base64Data;
   }
+
+  @override
+  Future<void> replaceAvatarBlobs(Map<String, String> next) async {
+    blobs
+      ..clear()
+      ..addAll(next);
+  }
 }
 
 class TestConnection extends Connection {
@@ -266,6 +273,80 @@ void main() {
       expect(restored.hash, AvatarMetadata.noPepAvatarHash);
       expect(restored.updatedAt, DateTime.utc(2026, 5, 1, 12, 30));
     });
+
+    test(
+      'gcUnreferencedAvatarBlobs (R3.1) drops blobs not referenced by metadata',
+      () async {
+        final storage = FakeStorageService();
+        // Two blobs cached; only one is referenced by current metadata.
+        storage.metadata['alice@example.com'] = AvatarMetadata(
+          hash: 'hash-alive',
+          mimeType: 'image/png',
+          bytes: 4,
+          updatedAt: DateTime.utc(2024, 1, 1),
+        );
+        storage.blobs['hash-alive'] = 'AAAA';
+        storage.blobs['hash-stale'] = 'BBBB';
+        // A noPepAvatar sentinel must NOT keep its (sentinel) hash alive.
+        storage.metadata['bob@example.com'] = AvatarMetadata.noPepAvatar();
+        storage.blobs[AvatarMetadata.noPepAvatarHash] = 'CCCC';
+        final account = XmppAccountSettings(
+          'test',
+          'user',
+          'example.com',
+          'pass',
+          5222,
+        );
+        final connection = TestConnection(account);
+        final pep = PepManager(
+          connection: connection,
+          storage: storage,
+          selfBareJid: 'user@example.com',
+          onUpdate: () {},
+        );
+        // Constructor invokes the GC; allow any unawaited persist future.
+        await Future<void>.delayed(Duration.zero);
+
+        expect(storage.blobs.keys, ['hash-alive']);
+        expect(pep.avatarBytesFor('alice@example.com'), [0, 0, 0]);
+        // Sentinel-only contacts still report no avatar.
+        expect(pep.avatarBytesFor('bob@example.com'), isNull);
+      },
+    );
+
+    test(
+      'gcUnreferencedAvatarBlobs (R3.1) is idempotent and a no-op on a clean cache',
+      () async {
+        final storage = FakeStorageService();
+        storage.metadata['alice@example.com'] = AvatarMetadata(
+          hash: 'hash-alive',
+          mimeType: 'image/png',
+          bytes: 4,
+          updatedAt: DateTime.utc(2024, 1, 1),
+        );
+        storage.blobs['hash-alive'] = 'AAAA';
+        final account = XmppAccountSettings(
+          'test',
+          'user',
+          'example.com',
+          'pass',
+          5222,
+        );
+        final connection = TestConnection(account);
+        final pep = PepManager(
+          connection: connection,
+          storage: storage,
+          selfBareJid: 'user@example.com',
+          onUpdate: () {},
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        // Second pass should not change anything.
+        final removed = pep.gcUnreferencedAvatarBlobs();
+        expect(removed, 0);
+        expect(storage.blobs.keys, ['hash-alive']);
+      },
+    );
 
     test(
       'AvatarMetadata.fromMap still rejects malformed legitimate entries',
