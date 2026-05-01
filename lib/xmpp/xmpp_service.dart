@@ -37,6 +37,7 @@ import 'jid_discovery.dart';
 import 'chat_message_mutations.dart';
 import 'message_intent_builder.dart';
 import 'message_stanza_parser.dart';
+import 'startup_fetch_helpers.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
@@ -5183,9 +5184,26 @@ class XmppService extends ChangeNotifier {
     _bookmarksManager?.requestBookmarks();
   }
 
-  void _setupDisplayedSync() {
+  /// Send the bootstrap `urn:xmpp:mds:displayed:0` PubSub items GET.
+  ///
+  /// R1.1: Skip the IQ entirely when `_displayedStanzaIdByChat` was
+  /// successfully restored from disk on startup. PEP +notify pushes (which
+  /// we already handle in `_handleDisplayedSyncEvent`) keep the cache live
+  /// after that, so the bootstrap fetch is only needed on a true cold
+  /// start — i.e. when the in-memory map is still empty.
+  ///
+  /// We also expose [force] for tests and for hypothetical callers that
+  /// want to refresh the entire MDS state regardless of the local cache.
+  void _setupDisplayedSync({bool force = false}) {
     final connection = _connection;
     if (connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    if (!shouldFetchDisplayedSyncBootstrap(
+      hasCachedDisplayedSync: _displayedStanzaIdByChat.isNotEmpty,
+      force: force,
+    )) {
+      // Cache was seeded from disk; rely on +notify for live updates.
       return;
     }
     final id = AbstractStanza.getRandomId();

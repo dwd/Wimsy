@@ -396,8 +396,12 @@ Tackling in roughly priority order:
    `avatarHashFor` treat sentinel entries as "no avatar". Real metadata
    events overwrite the sentinel. New tests in
    `test/pep_manager_test.dart` cover all four code paths.
-3. **R1.1** — skip the MDS bootstrap IQ when the in-memory map is
-   already populated from disk; rely on +notify for live updates.
+3. **R1.1 — DONE.** `_setupDisplayedSync` now early-returns when the
+   in-memory `_displayedStanzaIdByChat` map was successfully restored
+   from disk. The decision lives in `shouldFetchDisplayedSyncBootstrap`
+   (`lib/xmpp/startup_fetch_helpers.dart`) and is exercised by
+   `test/startup_fetch_helpers_test.dart`. A `force` flag preserves the
+   ability to manually re-pull the entire MDS state when desired.
 4. **R1.2** — advertise `urn:xmpp:mds:displayed:0+notify` in our caps.
 5. **R1.3** — persist unresolved displayed markers and resolve them
    from incoming MAM pages.
