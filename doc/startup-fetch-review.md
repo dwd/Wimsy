@@ -494,6 +494,220 @@ Each of the above can ship as its own PR with tests:
 
 ---
 
+## Log review — 2026-05-01 13:40 session (`wimsy.log`)
+
+This section answers three questions about the log captured on 2026-05-01.
+
+### 1. Have the startup-fetch-review fixes taken effect?
+
+**No — the log predates all nine commits.** Every fix (R4.1 through R3.1)
+was committed during the same session in which this log was captured, so
+the binary that produced the log did not include any of them. The evidence
+is clear:
+
+* Two "Displayed sync miss" lines appear at `13:40:16` — R1.1 (skip MDS
+  bootstrap IQ when cache is seeded) and R1.3 (persist pending markers)
+  were not active.
+* 31 `<vCard xmlns="vcard-temp"/>` GET IQs are sent in the first ~5 seconds
+  after Ready — R4.1 (cache-guard) was not active.
+* `urn:xmpp:avatar:metadata` is polled for every roster contact at Ready
+  (10+ IQs in the initial flush) — R3.3 (negative-cache sentinel) was not
+  active.
+* Per-chat MAM catch-up queries fire for every bookmarked MUC regardless
+  of MDS state — R2.2 (skip when MDS proves up-to-date) was not active.
+
+A fresh log taken after a hot-restart with the new code should show: no
+"Displayed sync miss" lines (or at most one per chat that has genuinely
+new messages), no vCard storm, no avatar-metadata poll at Ready, and
+significantly fewer MAM queries.
+
+### 2. Additional issues visible in this log
+
+**a) Double roster IQ at Ready**
+
+In the single Ready flush at `13:40:23.562` we send *two* roster IQs
+back-to-back:
+
+```
+YIVVNRAHB  <query xmlns="jabber:iq:roster"/>          ← bare, no ver=
+MBVSUKUKH  <query xmlns="jabber:iq:roster" ver="364576852"/>  ← versioned
+```
+
+The server returns the full roster for `YIVVNRAHB` (ignoring the `ver=`
+attribute because it is absent) and an empty result for `MBVSUKUKH`
+(because the version matches). The bare IQ is redundant — we already have
+a cached version token so we should only send the versioned form. This is
+a minor bug in the Ready flush assembly: the bare IQ is likely emitted by
+one code path and the versioned one by another, both firing at the same
+time.
+
+**b) Carbons enabled twice**
+
+`enable xmlns="urn:xmpp:carbons:2"` is sent at two distinct points:
+
+1. `13:40:22.768` — `NJJOJDNQI` — during the post-bind feature negotiation
+   phase (the `ConnectionNegotiatorManager` carbons negotiator).
+2. `13:40:23.562` — `HFWGKSCKB` — inside the Ready flush, as part of the
+   same batch that sends the roster IQ and presence.
+
+The second enable is harmless (the server just returns a result) but wastes
+a round-trip. The Ready flush should check whether carbons were already
+enabled by the negotiator and skip the redundant IQ.
+
+**c) `urn:xmpp:avatar:metadata` polled for every roster contact at Ready**
+
+Even though we advertise `urn:xmpp:avatar:metadata+notify` (confirmed by
+R1.2 audit), the Ready flush still sends an explicit
+`<items node="urn:xmpp:avatar:metadata" max_items="1"/>` IQ to every
+roster contact that has a PEP node. With +notify in our caps, the server
+will push any changed metadata to us automatically; the poll is only needed
+for contacts whose server does not support PEP +notify. The current code
+appears to poll unconditionally. A guard similar to R1.1 (skip when we
+already have cached metadata and the contact's server supports +notify)
+would eliminate this fan-out. This is a lower-priority item than the vCard
+storm because the payloads are small, but with a large roster it adds up.
+
+### 3. The disconnect at the end
+
+The disconnect is **clean and server-initiated due to the idle timeout**.
+
+Evidence:
+
+* The first stream features stanza (pre-auth, `13:40:20`) advertises
+  `<idle-seconds>360</idle-seconds>` — the server will close the stream
+  after 360 seconds of inactivity.
+* The connection became Ready at `13:40:23` and the initial burst of IQs
+  and MAM pages completed by roughly `13:40:40`. After that the log shows
+  only incoming MUC presence and vCard responses — no outbound traffic.
+* At `13:41:08` (approximately 45 seconds after Ready, well within the
+  360-second window) the log records `QUIC connection closed cleanly (no
+  error reported)` followed immediately by
+  `XmppConnectionState.ForcefullyClosed` and a reconnect schedule.
+
+The 45-second gap is shorter than the 360-second idle limit, which means
+the server closed the connection for a reason *other* than the idle timer.
+The most likely cause is that the Openfire server closed the QUIC
+connection at the QUIC transport layer (a `CONNECTION_CLOSE` frame with
+no application error), possibly because it considers the QUIC session
+idle once the initial stream of stanzas drains, or because of a
+server-side session management policy. The `QUIC connection closed cleanly`
+message confirms there was no TLS or QUIC error — this is a graceful
+`CONNECTION_CLOSE`.
+
+**What to do:** The reconnection manager correctly schedules a reconnect
+(`delay=3847ms`). However, to avoid this happening in production we should
+send a periodic XMPP ping (XEP-0199) to keep the QUIC connection alive.
+The server already advertises `urn:xmpp:ping` in its disco features. A
+ping every 60–90 seconds (well under the 360-second idle limit) would
+prevent the server from closing the connection. This is separate from the
+startup-fetch work and should be tracked as its own issue.
+
+---
+
+## Log review — 2026-05-01 15:34 session (`wimsy.log`, updated)
+
+This section reviews the log captured at 15:34 on 2026-05-01, taken after
+`flutter run -d linux` with the latest code (all nine R4.1–R3.1 commits
+present).
+
+### 1. Have the startup-fetch-review fixes taken effect?
+
+**Partially — but a critical re-seed bug prevents most guards from working
+on reconnect.**
+
+The log shows **six connection cycles** (Ready at 14:34:49, 14:35:46,
+14:36:37, 14:37:37, 14:38:34, 14:39:26) caused by repeated server-initiated
+QUIC disconnects. Per-cycle counts:
+
+| Cycle | vCard IQs | avatar:metadata IQs | MAM queries |
+|-------|-----------|---------------------|-------------|
+| 1     | 16        | 10                  | 39          |
+| 2     | 23        | 7                   | 123         |
+| 3     | 8         | 7                   | 119         |
+| 4     | 11        | 7                   | 78          |
+| 5     | 9         | 11                  | 66          |
+| 6     | 14        | 10                  | 113         |
+
+Every cycle re-fetches vCards and avatar metadata, and re-runs MAM
+catch-up queries. The root cause is a **re-seed bug**:
+
+* `_vcardAvatarBytes`, `_vcardAvatarState`, and `_mamCursorStore` are
+  cleared in the disconnect handler (`_safeClose`, around line 1165).
+* They are seeded from disk only in `attachStorage` (line 453), which is
+  called **once at startup**, not on reconnect.
+* The Ready handler (`XmppConnectionState.Ready` branch, line 1044) never
+  calls `_seedVcardAvatars` / `_seedVcardAvatarState` / re-seeds the MAM
+  cursor store.
+* As a result, R4.1's `shouldFetchVcardForCache` guard sees an empty cache
+  on every reconnect and allows all vCard IQs through; R2.2's MAM skip
+  similarly has no cursor data to consult.
+
+**Fix (new item R6):** Add re-seed calls at the top of the Ready handler,
+mirroring `attachStorage`:
+
+```dart
+// In the XmppConnectionState.Ready branch, before _setupRoster() etc.:
+if (_storage != null) {
+  _seedVcardAvatars(_storage!.loadVcardAvatars());
+  _seedVcardAvatarState(_storage!.loadVcardAvatarState());
+  // MAM cursor store is re-seeded via MamCoordinator.loadFromStorage()
+}
+```
+
+`PepManager` is unaffected — `_setupPep` creates a fresh instance on every
+reconnect and its constructor loads from `StorageService`, so it correctly
+re-seeds itself.
+
+**What is working correctly:**
+
+* The "Displayed sync miss" lines (lines 79–80) fire *before* the first
+  Ready (line 171), from the disk-seed path. R1.3 persistence is working —
+  the stanza-ids are genuinely absent from the local cache (new messages
+  arrived while offline), which is the expected behaviour.
+* `PepCapsManager` (R5) re-seeds on every `_setupPep` call — no caps
+  disco fan-out visible.
+* The double roster IQ and double carbons-enable from the previous log
+  review are still present (not yet fixed).
+
+### 2. The repeated disconnects
+
+The server closes the QUIC connection every 45–60 seconds, consistently
+mid-MAM-stream (the disconnect at 14:35:30 occurs while a large burst of
+MAM pages is still arriving on `quic-aux-15`). This is **not** an idle
+timeout — the 30-second foreground keepalive ping is correctly configured
+in `StreamManagmentModule` (`_pingIntervalForeground = Duration(seconds: 30)`)
+and fires at Ready. The server advertises `<idle-seconds>360</idle-seconds>`.
+
+The pattern — clean `QUIC connection closed cleanly (no error reported)`
+mid-stream — points to an **Openfire QUIC session data or stream limit**:
+the server appears to close the QUIC connection once a per-session byte or
+stream count is reached, regardless of XMPP-level activity. One cycle also
+shows `QUIC connection closed (could not query close reason:
+DroppableDisposedException)`, suggesting the Rust QUIC layer is being torn
+down before the close reason can be read.
+
+**What to do:** This is an Openfire server-side issue (likely a bug or
+misconfiguration in its QUIC implementation). The client correctly
+reconnects each time. Longer term, SASL2/Bind2 resumption would make
+reconnects cheaper. For now, the reconnect loop is the correct behaviour.
+
+### 3. Summary of remaining work
+
+| Item | Status | Notes |
+|------|--------|-------|
+| R4.1 vCard cache guard | ⚠️ Partial | Guard logic correct; broken by re-seed bug (R6) |
+| R3.3 PEP negative cache | ✅ Working | PepManager re-seeds on reconnect |
+| R1.1 MDS bootstrap skip | ✅ Working | Fires correctly from disk cache |
+| R1.2 MDS +notify disco | ✅ Working | Confirmed in caps |
+| R1.3 Displayed sync pending | ✅ Working | Persists and resolves correctly |
+| R2.2 MAM skip when MDS up-to-date | ⚠️ Partial | Broken by re-seed bug (R6) |
+| R5 Caps cache | ✅ Working | Re-seeds via PepCapsManager constructor |
+| R2.1 Global MAM anchor | ✅ Working | Persisted; unified query deferred |
+| R3.1 Avatar blob GC | ✅ Working | Runs at construction |
+| **R6 Re-seed on reconnect** | ❌ Not done | New item; fixes R4.1 and R2.2 regressions |
+
+---
+
 ## Appendix: log evidence (excerpts from `wimsy.log`, 2026-05-01)
 
 * `Displayed sync miss for chat=xsf@muc.xmpp.org stanzaId=32d798f6-…
