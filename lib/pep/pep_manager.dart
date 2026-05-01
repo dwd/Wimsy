@@ -27,10 +27,17 @@ class PepManager {
   final Map<String, AvatarMetadata> _metadataByJid = {};
   final Map<String, String> _avatarBlobs = {};
   final Map<String, _PendingAvatarData> _pendingDataRequests = {};
+  // R3.3: track outstanding `urn:xmpp:avatar:metadata` GET IQs so we can
+  // observe `<error/>` responses (e.g. `item-not-found`) and persist a
+  // negative-cache sentinel for that JID.
+  final Map<String, String> _pendingMetadataRequests = {};
 
   Uint8List? avatarBytesFor(String bareJid) {
     final meta = _metadataByJid[bareJid];
     if (meta == null) {
+      return null;
+    }
+    if (meta.isNoPepAvatar) {
       return null;
     }
     final base64Data = _avatarBlobs[meta.hash];
@@ -49,7 +56,16 @@ class PepManager {
   }
 
   String? avatarHashFor(String bareJid) {
-    return _metadataByJid[bareJid]?.hash;
+    final meta = _metadataByJid[bareJid];
+    if (meta == null || meta.isNoPepAvatar) {
+      return null;
+    }
+    return meta.hash;
+  }
+
+  /// True iff we have a persisted negative-cache marker for this JID. R3.3.
+  bool isKnownToHaveNoPepAvatar(String bareJid) {
+    return _metadataByJid[bareJid]?.isNoPepAvatar ?? false;
   }
 
   void subscribeToAvatarMetadata(String bareJid) {
@@ -95,6 +111,8 @@ class PepManager {
   void clearCache() {
     _metadataByJid.clear();
     _avatarBlobs.clear();
+    _pendingDataRequests.clear();
+    _pendingMetadataRequests.clear();
     _onUpdate();
   }
 
@@ -123,6 +141,9 @@ class PepManager {
     items.addAttribute(XmppAttribute('max_items', '1'));
     pubsub.addChild(items);
     iqStanza.addChild(pubsub);
+    // R3.3: remember which JID this IQ asked about so we can persist a
+    // negative-cache sentinel if the response is an error.
+    _pendingMetadataRequests[id] = bareJid;
     connection.writeStanza(iqStanza);
   }
 
@@ -181,6 +202,29 @@ class PepManager {
   }
 
   void _handleIqResult(IqStanza stanza) {
+    // R3.3: handle metadata-IQ responses first. A non-result (typically
+    // `<error type="cancel"><item-not-found/>`) means the JID has no PEP
+    // avatar; record a negative-cache sentinel that survives restarts.
+    final pendingMetadata = _pendingMetadataRequests.remove(stanza.id);
+    if (pendingMetadata != null) {
+      if (stanza.type != IqStanzaType.RESULT) {
+        // Don't overwrite a real metadata entry that may have arrived via a
+        // PubSub event in between. Only stamp the sentinel when we have no
+        // entry yet for this JID.
+        if (!_metadataByJid.containsKey(pendingMetadata)) {
+          final sentinel = AvatarMetadata.noPepAvatar();
+          _metadataByJid[pendingMetadata] = sentinel;
+          storage.storeAvatarMetadata(pendingMetadata, sentinel);
+          _onUpdate();
+        }
+      }
+      // The actual metadata payload (when it arrives via IQ result) is
+      // delivered as a PubSub items result and processed through the same
+      // path as event messages. We treat the IQ-result case as a no-op
+      // because xmpp_stone surfaces the items separately as a PubSub event
+      // when retrieving via `<items/>`.
+      return;
+    }
     final pending = _pendingDataRequests.remove(stanza.id);
     if (pending == null) {
       return;

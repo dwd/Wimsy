@@ -150,4 +150,157 @@ void main() {
 
     expect(pep.avatarHashFor('alice@example.com'), 'hash123');
   });
+
+  group('R3.3 negative cache for "no PEP avatar"', () {
+    test('error response to metadata IQ persists noPepAvatar sentinel', () {
+      final storage = FakeStorageService();
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      var updates = 0;
+      final pep = PepManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: 'user@example.com',
+        onUpdate: () => updates++,
+      );
+
+      pep.requestMetadataIfMissing('test1@example.com');
+      // The IQ went out; capture its id from the wire so we can build a
+      // matching error response.
+      final outgoing = connection.lastWrittenStanza;
+      expect(outgoing, isA<IqStanza>());
+      final outgoingId = (outgoing as IqStanza).id!;
+
+      final errorReply = IqStanza(outgoingId, IqStanzaType.ERROR);
+      pep.handleStanza(errorReply);
+
+      // We now know this JID has no PEP avatar.
+      expect(pep.isKnownToHaveNoPepAvatar('test1@example.com'), isTrue);
+      // Persisted to disk so the next session won't retry.
+      expect(
+        storage.metadata['test1@example.com']?.isNoPepAvatar ?? false,
+        isTrue,
+      );
+      // No-op for callers who only care about avatar bytes / hash.
+      expect(pep.avatarBytesFor('test1@example.com'), isNull);
+      expect(pep.avatarHashFor('test1@example.com'), isNull);
+      // Listener was notified once for the negative cache write.
+      expect(updates, 1);
+    });
+
+    test(
+      'requestMetadataIfMissing skips IQ when sentinel is already cached',
+      () {
+        final storage = FakeStorageService();
+        // Pre-seed the sentinel (e.g. from a previous session that cached it
+        // to disk).
+        storage.metadata['test1@example.com'] = AvatarMetadata.noPepAvatar();
+        final account = XmppAccountSettings(
+          'test',
+          'user',
+          'example.com',
+          'pass',
+          5222,
+        );
+        final connection = TestConnection(account);
+        final pep = PepManager(
+          connection: connection,
+          storage: storage,
+          selfBareJid: 'user@example.com',
+          onUpdate: () {},
+        );
+
+        pep.requestMetadataIfMissing('test1@example.com');
+        // No IQ should have been written: the in-memory cache already
+        // contains the sentinel, so requestMetadataIfMissing short-circuits.
+        expect(connection.lastWrittenStanza, isNull);
+      },
+    );
+
+    test(
+      'real metadata event clears the sentinel on next pubsub update',
+      () {
+        final storage = FakeStorageService();
+        // Pre-seed the sentinel.
+        storage.metadata['test1@example.com'] = AvatarMetadata.noPepAvatar();
+        final account = XmppAccountSettings(
+          'test',
+          'user',
+          'example.com',
+          'pass',
+          5222,
+        );
+        final connection = TestConnection(account);
+        final pep = PepManager(
+          connection: connection,
+          storage: storage,
+          selfBareJid: 'user@example.com',
+          onUpdate: () {},
+        );
+
+        // Now an event arrives advertising a real avatar.
+        final event = _buildMetadataEvent(
+          fromJid: 'test1@example.com',
+          hash: 'real-hash',
+        );
+        pep.handleStanza(event);
+
+        expect(pep.isKnownToHaveNoPepAvatar('test1@example.com'), isFalse);
+        expect(pep.avatarHashFor('test1@example.com'), 'real-hash');
+      },
+    );
+
+    test('AvatarMetadata.noPepAvatar round-trips through fromMap', () {
+      final original = AvatarMetadata.noPepAvatar(
+        updatedAt: DateTime.utc(2026, 5, 1, 12, 30),
+      );
+      final restored = AvatarMetadata.fromMap(original.toMap());
+      expect(restored, isNotNull);
+      expect(restored!.isNoPepAvatar, isTrue);
+      expect(restored.hash, AvatarMetadata.noPepAvatarHash);
+      expect(restored.updatedAt, DateTime.utc(2026, 5, 1, 12, 30));
+    });
+
+    test(
+      'AvatarMetadata.fromMap still rejects malformed legitimate entries',
+      () {
+        // empty hash
+        expect(
+          AvatarMetadata.fromMap({
+            'hash': '',
+            'mimeType': 'image/png',
+            'bytes': 4,
+            'updatedAt': DateTime.utc(2026).toIso8601String(),
+          }),
+          isNull,
+        );
+        // empty mime
+        expect(
+          AvatarMetadata.fromMap({
+            'hash': 'abc',
+            'mimeType': '',
+            'bytes': 4,
+            'updatedAt': DateTime.utc(2026).toIso8601String(),
+          }),
+          isNull,
+        );
+        // zero bytes
+        expect(
+          AvatarMetadata.fromMap({
+            'hash': 'abc',
+            'mimeType': 'image/png',
+            'bytes': 0,
+            'updatedAt': DateTime.utc(2026).toIso8601String(),
+          }),
+          isNull,
+        );
+      },
+    );
+  });
 }

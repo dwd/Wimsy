@@ -385,7 +385,17 @@ Tackling in roughly priority order:
    the freshly advertised `<photo>` hash through to the guard so a hash
    change still triggers a refetch. _Impact: removes most of the vCard
    storm at connect._
-2. **R3.3** — persist "no PEP avatar" sentinel for 404s.
+2. **R3.3 — DONE.** `AvatarMetadata.noPepAvatar()` sentinel added in
+   `lib/models/avatar_metadata.dart` (with a guarded `fromMap` round-trip
+   so the sentinel survives across restarts even though `bytes` is `-1`).
+   `PepManager` now tracks pending `urn:xmpp:avatar:metadata` GET IQs
+   and, on a non-`RESULT` reply (e.g. `<error type="cancel"
+   ><item-not-found/>`), persists the sentinel via
+   `StorageService.storeAvatarMetadata`. `requestMetadataIfMissing`
+   short-circuits when the sentinel is in-cache. `avatarBytesFor` /
+   `avatarHashFor` treat sentinel entries as "no avatar". Real metadata
+   events overwrite the sentinel. New tests in
+   `test/pep_manager_test.dart` cover all four code paths.
 3. **R1.1** — skip the MDS bootstrap IQ when the in-memory map is
    already populated from disk; rely on +notify for live updates.
 4. **R1.2** — advertise `urn:xmpp:mds:displayed:0+notify` in our caps.
