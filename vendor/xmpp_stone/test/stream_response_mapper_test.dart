@@ -203,6 +203,86 @@ void main() {
     });
   });
 
+  group('makeStreamResponseMapper — burst with trailing partial (regression)', () {
+    // This is the core bug: under high latency a burst of complete stanzas
+    // arrives followed by a partial fragment. The old implementation would
+    // hold back ALL complete stanzas until the partial was completed, causing
+    // stanza starvation. The new implementation must emit the complete stanzas
+    // immediately and only buffer the trailing partial.
+
+    test('emits complete stanzas even when followed by a partial fragment', () {
+      final connection = _newConnection();
+      final mapper = connection.makeStreamResponseMapper();
+
+      // Two complete stanzas followed by an incomplete one — all in one chunk.
+      const chunk =
+          '<presence/>'
+          '<presence type="unavailable"/>'
+          '<message to="x@y.com" id="m1"'; // incomplete — no closing >
+      final result = mapper(chunk);
+      expect(result, isNotEmpty,
+          reason: 'complete stanzas must be emitted despite trailing partial');
+      expect(result, contains('unavailable'),
+          reason: 'both complete stanzas must be present in output');
+    });
+
+    test('trailing partial is buffered and completed on next chunk', () {
+      final connection = _newConnection();
+      final mapper = connection.makeStreamResponseMapper();
+
+      // First chunk: two complete stanzas + start of a third.
+      const chunk1 =
+          '<presence/>'
+          '<iq id="ping" type="get"/>'
+          '<message to="x@y.com" id="m1"';
+      final result1 = mapper(chunk1);
+      expect(result1, isNotEmpty,
+          reason: 'complete stanzas in chunk1 must be emitted immediately');
+      expect(result1, contains('ping'));
+
+      // Second chunk: completes the partial message stanza.
+      final result2 = mapper('/>');
+      expect(result2, isNotEmpty,
+          reason: 'completing the partial stanza must produce output');
+      expect(result2, contains('message'));
+    });
+
+    test('prepareStreamResponse also emits complete stanzas before partial', () {
+      final connection = _newConnection();
+
+      const chunk =
+          '<presence/>'
+          '<iq id="q1" type="result"/>'
+          '<message to="a@b.com"'; // incomplete
+      final result = connection.prepareStreamResponse(chunk);
+      expect(result, isNotEmpty,
+          reason: 'prepareStreamResponse must not hold back complete stanzas');
+      expect(result, contains('q1'));
+    });
+
+    test('many complete stanzas followed by partial — all complete ones emitted', () {
+      final connection = _newConnection();
+      final mapper = connection.makeStreamResponseMapper();
+
+      // Simulate a MUC presence flood: 10 complete presence stanzas + partial.
+      final buffer = StringBuffer();
+      for (var i = 0; i < 10; i++) {
+        buffer.write('<presence from="room@conf.example.com/user$i"/>');
+      }
+      buffer.write('<presence from="room@conf.example.com/user10"'); // partial
+
+      final result = mapper(buffer.toString());
+      expect(result, isNotEmpty,
+          reason: 'all 10 complete presence stanzas must be emitted');
+      // All 10 complete ones should be present.
+      for (var i = 0; i < 10; i++) {
+        expect(result, contains('user$i'));
+      }
+      // The partial one must NOT be in the output yet.
+      expect(result, isNot(contains('user10')));
+    });
+  });
+
   group('makeStreamResponseMapper vs prepareStreamResponse — parity', () {
     test('both produce the same output for a complete stanza', () {
       final connection = _newConnection();
