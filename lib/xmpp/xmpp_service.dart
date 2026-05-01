@@ -7668,6 +7668,15 @@ class XmppService extends ChangeNotifier {
       if (entry.value.isEmpty) {
         continue;
       }
+      // R2.2: skip the catch-up query when MDS already proves we are
+      // caught up to the displayed marker for this chat.
+      if (!shouldFetchMamCatchUpForChat(
+        displayedStanzaId: _displayedStanzaIdByChat[bareJid],
+        latestLocalMamId: latestMamIdFor(bareJid),
+        stanzaIdAtLatestMamId: _stanzaIdAtLatestMamId(bareJid, isRoom: false),
+      )) {
+        continue;
+      }
       _startMamCatchUp(bareJid, isRoom: false);
     }
 
@@ -7676,11 +7685,48 @@ class XmppService extends ChangeNotifier {
       final roomMessages = _roomMessages[roomJid];
       if (roomMessages == null || roomMessages.isEmpty) {
         _requestRoomMam(roomJid, max: 25, before: '');
-      } else {
-        _startMamCatchUp(roomJid, isRoom: true);
+        continue;
       }
+      // R2.2: same short-circuit for MUCs.
+      if (!shouldFetchMamCatchUpForChat(
+        displayedStanzaId: _displayedStanzaIdByChat[roomJid],
+        latestLocalMamId: _latestRoomMamIdFor(roomJid),
+        stanzaIdAtLatestMamId: _stanzaIdAtLatestMamId(roomJid, isRoom: true),
+      )) {
+        continue;
+      }
+      _startMamCatchUp(roomJid, isRoom: true);
     }
     _finishMamSyncIfIdle();
+  }
+
+  /// Returns the stanza-id of the message in [bareJid]'s message list whose
+  /// MAM id equals the chat's latest MAM id. Used by R2.2 to compare the
+  /// displayed marker against the newest local message we have. Returns
+  /// null when no local message has both a matching MAM id and a non-empty
+  /// stanza-id.
+  String? _stanzaIdAtLatestMamId(String bareJid, {required bool isRoom}) {
+    final normalized = _bareJid(bareJid);
+    final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return null;
+    }
+    final latestMamId = isRoom
+        ? _latestRoomMamIdFor(normalized)
+        : latestMamIdFor(normalized);
+    if (latestMamId == null || latestMamId.isEmpty) {
+      return null;
+    }
+    for (final message in list.reversed) {
+      if (message.mamId == latestMamId) {
+        final sid = message.stanzaId;
+        if (sid != null && sid.isNotEmpty) {
+          return sid;
+        }
+        return null;
+      }
+    }
+    return null;
   }
 
   void _seedVcardAvatars(Map<String, String> base64ByJid) {

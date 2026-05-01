@@ -436,8 +436,16 @@ Tackling in roughly priority order:
    later live message) and avoids changing MAM query routing in this
    batch. The bounded-query optimisation would land cleanly as a
    subsequent change, on top of the persistence introduced here.
-6. **R2.2** — short-circuit `_primeMamSync` for chats whose latest
-   MAM id is already at the displayed marker.
+6. **R2.2 — DONE.** `_primeMamSync` now consults
+   `shouldFetchMamCatchUpForChat` (`lib/xmpp/startup_fetch_helpers.dart`,
+   already shipped with R1.1) for every cached DM and every bookmarked
+   MUC; if the persisted displayed marker matches the stanza-id of the
+   newest local message, the per-chat MAM `<query/>` is skipped
+   entirely. A small new helper
+   `_stanzaIdAtLatestMamId(bareJid, {isRoom})` looks up the stanza-id of
+   the message at the latest MAM id, with a `null` fallback whenever
+   that information isn't available (in which case the catch-up still
+   fires, exactly as before).
 7. **R5 / caps cache** — persist XEP-0115 verified caps across restarts.
 8. **R2.1** — add a single global `last_mam_id_seen` and a unified
    catch-up query, eventually allowing per-chat catch-up to be lazy.
