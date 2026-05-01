@@ -37,4 +37,33 @@ void main() {
       );
     });
   });
+
+  group('QuicCapableXmppSocket connect tuning defaults', () {
+    test('defaults expose increased timeout and 3 retry attempts', () {
+      final socket = QuicCapableXmppSocket();
+
+      // Per-attempt timeout was bumped from 3s to 5s so QUIC handshakes
+      // (which can include packet loss + RTT * 2 for the TLS round trip)
+      // get a realistic budget on both IPv4 and IPv6.
+      expect(socket.quicConnectTimeout, const Duration(seconds: 5));
+
+      // Happy Eyeballs stagger between candidate launches.
+      expect(socket.happyEyeballsDelay, const Duration(milliseconds: 250));
+
+      // The whole Happy Eyeballs round is retried up to 3 times before
+      // we give up and fall back to TCP.
+      expect(socket.quicConnectMaxAttempts, 3);
+    });
+
+    test('explicit overrides are honoured', () {
+      final socket = QuicCapableXmppSocket(
+        quicConnectTimeout: const Duration(seconds: 10),
+        happyEyeballsDelay: const Duration(milliseconds: 100),
+        quicConnectMaxAttempts: 7,
+      );
+      expect(socket.quicConnectTimeout, const Duration(seconds: 10));
+      expect(socket.happyEyeballsDelay, const Duration(milliseconds: 100));
+      expect(socket.quicConnectMaxAttempts, 7);
+    });
+  });
 }

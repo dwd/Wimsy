@@ -10,12 +10,18 @@ import 'package:xmpp_stone/src/logger/Log.dart';
 
 class QuicCapableXmppSocket extends XmppWebSocket {
   QuicCapableXmppSocket({
-    this.quicConnectTimeout = const Duration(seconds: 3),
+    this.quicConnectTimeout = const Duration(seconds: 5),
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
+    this.quicConnectMaxAttempts = 3,
   });
 
   final Duration quicConnectTimeout;
   final Duration happyEyeballsDelay;
+
+  /// How many times to retry the full Happy Eyeballs round (across all
+  /// candidate addresses) before giving up. Each retry races every
+  /// candidate again with a fresh staggered start.
+  final int quicConnectMaxAttempts;
   final XmppWebSocketIo _fallbackSocket = XmppWebSocketIo();
   final StreamController<String> _quicStreamController =
       StreamController<String>.broadcast();
@@ -279,25 +285,29 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       throw SocketException('No addresses found for QUIC host $host');
     }
     final candidates = buildQuicHappyEyeballsPlan(addresses);
+
+    final maxAttempts = quicConnectMaxAttempts < 1 ? 1 : quicConnectMaxAttempts;
     Object? lastError;
-    for (var i = 0; i < candidates.length; i++) {
-      final address = candidates[i];
-      final timeout = (i == 0 && candidates.length > 1)
-          ? (happyEyeballsDelay * 2)
-          : quicConnectTimeout;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       debugPrint(
-        'QUIC connect attempt ${i + 1}/${candidates.length}: '
-        '${address.address}:$port type=${address.type} timeout=${timeout.inMilliseconds}ms',
+        'QUIC connect round $attempt/$maxAttempts: '
+        'racing ${candidates.length} candidate(s) '
+        'host=$host port=$port '
+        'stagger=${happyEyeballsDelay.inMilliseconds}ms '
+        'perAttemptTimeout=${quicConnectTimeout.inMilliseconds}ms',
       );
       try {
-        final connected = await _connectQuicAddress(
-          address,
+        final connected = await _raceQuicCandidates(
+          candidates,
           port,
           serverName,
-          timeout: timeout,
         );
+        final winnerAddress = connected.address;
         debugPrint(
-          'QUIC connect winner: ${address.address}:$port type=${address.type}',
+          'QUIC connect winner: '
+          '${winnerAddress?.address ?? '?'}:$port '
+          'type=${winnerAddress?.type ?? '?'} '
+          '(round $attempt/$maxAttempts)',
         );
         _endpoint = connected.endpoint;
         _connection = connected.connection;
@@ -317,16 +327,116 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         await _logPeerTransportParams('post-connect');
         return;
       } catch (error) {
-        debugPrint(
-          'QUIC connect failed: ${address.address}:$port '
-          'type=${address.type} error=$error',
-        );
         lastError = error;
+        debugPrint(
+          'QUIC connect round $attempt/$maxAttempts failed: $error',
+        );
       }
     }
     throw Exception(
-      'Failed QUIC connect host=$host port=$port error=$lastError',
+      'Failed QUIC connect host=$host port=$port '
+      'after $maxAttempts attempt(s) error=$lastError',
     );
+  }
+
+  /// Races every candidate address in parallel using a Happy Eyeballs style
+  /// staggered start: candidate `i` is launched after `i * happyEyeballsDelay`.
+  /// Each individual attempt is bounded by [quicConnectTimeout]. The first
+  /// attempt to succeed wins; the rest are abandoned (their Futures are
+  /// drained in the background to avoid unhandled-error noise).
+  ///
+  /// Throws if every candidate fails or times out.
+  Future<_QuicConnectResult> _raceQuicCandidates(
+    List<InternetAddress> candidates,
+    int port,
+    String serverName,
+  ) async {
+    if (candidates.isEmpty) {
+      throw SocketException('No QUIC candidates to attempt');
+    }
+    final completer = Completer<_QuicConnectResult>();
+    final errors = <String>[];
+    var pending = candidates.length;
+    final timers = <Timer>[];
+
+    void recordFailure(InternetAddress address, Object error) {
+      errors.add('${address.address}/${address.type.name}: $error');
+      pending--;
+      if (pending == 0 && !completer.isCompleted) {
+        completer.completeError(
+          Exception(
+            'All ${candidates.length} QUIC candidate(s) failed: '
+            '${errors.join('; ')}',
+          ),
+        );
+      }
+    }
+
+    void launch(InternetAddress address) {
+      if (completer.isCompleted) {
+        // Another candidate already won; do not start more attempts.
+        pending--;
+        return;
+      }
+      debugPrint(
+        'QUIC connect attempt: ${address.address}:$port '
+        'type=${address.type} timeout=${quicConnectTimeout.inMilliseconds}ms',
+      );
+      unawaited(
+        _connectQuicAddress(
+          address,
+          port,
+          serverName,
+          timeout: quicConnectTimeout,
+        ).then((result) {
+          if (completer.isCompleted) {
+            // We lost the race: discard this connection. Best-effort; we
+            // don't have a clean cancel path through the FFI, so just let
+            // the Rust side drop it when the arc goes out of scope.
+            debugPrint(
+              'QUIC connect discard (lost race): '
+              '${address.address}:$port type=${address.type}',
+            );
+            return;
+          }
+          completer.complete(
+            _QuicConnectResult(
+              address: address,
+              endpoint: result.endpoint,
+              connection: result.connection,
+              sendStream: result.sendStream,
+              recvStream: result.recvStream,
+            ),
+          );
+        }).catchError((Object error) {
+          debugPrint(
+            'QUIC connect failed: ${address.address}:$port '
+            'type=${address.type} error=$error',
+          );
+          if (!completer.isCompleted) {
+            recordFailure(address, error);
+          }
+        }),
+      );
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+      final address = candidates[i];
+      if (i == 0) {
+        launch(address);
+      } else {
+        final timer = Timer(happyEyeballsDelay * i, () => launch(address));
+        timers.add(timer);
+      }
+    }
+
+    try {
+      return await completer.future;
+    } finally {
+      for (final timer in timers) {
+        timer.cancel();
+      }
+    }
   }
 
   Future<_QuicConnectResult> _connectQuicAddress(
@@ -1016,12 +1126,16 @@ int quicAuxSlotForBareJid(String bareJid, int slotCount) {
 
 class _QuicConnectResult {
   const _QuicConnectResult({
+    this.address,
     required this.endpoint,
     required this.connection,
     required this.sendStream,
     required this.recvStream,
   });
 
+  /// Remote address that won the race. May be null for intermediate results
+  /// produced by [_connectQuicAddress] before the racer wraps them.
+  final InternetAddress? address;
   final QuicEndpoint endpoint;
   final QuicConnection connection;
   final QuicSendStream sendStream;
