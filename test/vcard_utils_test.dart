@@ -166,5 +166,51 @@ void main() {
         isTrue,
       );
     });
+
+    // R6: verify that after a re-seed (simulating the Ready-handler re-seed
+    // introduced by R6) the guard correctly suppresses the fetch.
+    test('R6: guard suppresses fetch after cache is re-seeded from disk', () {
+      final hash = 'abc123';
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      // Simulate what _seedVcardAvatars + _seedVcardAvatarState do on reconnect.
+      final cachedAvatarBytes = <String, Uint8List>{'alice@example.com': bytes};
+      final cachedAvatarState = <String, String>{'alice@example.com': hash};
+
+      // The presence update advertises the same hash we already have cached.
+      expect(
+        shouldFetchVcardForCache(
+          bareJid: 'alice@example.com',
+          preferName: false,
+          cachedAvatarBytes: cachedAvatarBytes,
+          cachedAvatarState: cachedAvatarState,
+          advertisedHash: hash,
+        ),
+        isFalse,
+        reason: 'should skip fetch when re-seeded cache matches advertised hash',
+      );
+    });
+
+    test('R6: guard allows fetch when re-seeded cache has different hash', () {
+      final oldHash = 'oldhash';
+      final newHash = 'newhash';
+      final bytes = Uint8List.fromList([1, 2, 3]);
+      final cachedAvatarBytes = <String, Uint8List>{'alice@example.com': bytes};
+      final cachedAvatarState = <String, String>{
+        'alice@example.com': oldHash,
+      };
+
+      // The presence update advertises a new hash — we must fetch.
+      expect(
+        shouldFetchVcardForCache(
+          bareJid: 'alice@example.com',
+          preferName: false,
+          cachedAvatarBytes: cachedAvatarBytes,
+          cachedAvatarState: cachedAvatarState,
+          advertisedHash: newHash,
+        ),
+        isTrue,
+        reason: 'should fetch when advertised hash differs from cached hash',
+      );
+    });
   });
 }

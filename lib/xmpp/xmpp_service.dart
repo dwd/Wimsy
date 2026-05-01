@@ -1058,6 +1058,16 @@ class XmppService extends ChangeNotifier {
           _blockingSupported = connection.getSupportedFeatures().any(
             (feature) => feature.xmppVar == blockingNamespace,
           );
+          // R6: Re-seed the vCard avatar caches from disk on every Ready
+          // event, not just at startup. The disconnect handler clears these
+          // maps so that stale in-memory state doesn't survive a resource
+          // rebind, but without re-seeding the R4.1 cache-guard sees an
+          // empty cache and re-fetches every vCard on reconnect.
+          final storage = _storage;
+          if (storage != null) {
+            _seedVcardAvatars(storage.loadVcardAvatars());
+            _seedVcardAvatarState(storage.loadVcardAvatarState());
+          }
           _setupRoster();
           _setupChatManager();
           _setupMuc();
