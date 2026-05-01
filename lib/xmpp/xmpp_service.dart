@@ -5148,6 +5148,10 @@ class XmppService extends ChangeNotifier {
     _pepCapsManager = PepCapsManager(
       connection: connection,
       pepManager: _pepManager!,
+      // R5: persist the XEP-0115 caps cache across restarts so MUC
+      // presence storms don't trigger a `disco#info` fan-out for caps
+      // we already verified in a previous session.
+      storage: storage,
     );
     _requestRecentReactionEmojis();
     _pepManager?.requestMetadataIfMissing(_currentUserBareJid!);

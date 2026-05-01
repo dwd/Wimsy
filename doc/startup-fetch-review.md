@@ -446,7 +446,17 @@ Tackling in roughly priority order:
    the message at the latest MAM id, with a `null` fallback whenever
    that information isn't available (in which case the catch-up still
    fires, exactly as before).
-7. **R5 / caps cache** — persist XEP-0115 verified caps across restarts.
+7. **R5 / caps cache — DONE.** New persisted Entity Capabilities cache
+   in `StorageService` (key `entity_caps`,
+   `loadEntityCaps`/`storeEntityCaps`/`clearEntityCaps`). `PepCapsManager`
+   accepts an optional `StorageService` (passed in by `xmpp_service.dart`),
+   seeds `_capsFeatures` from disk in its constructor, and persists every
+   successful `disco#info` result. When MUC presence advertises a
+   `node#ver` we already cached, the disco IQ is short-circuited and the
+   features become immediately available via `featuresForBareJid`. New
+   tests in `test/pep_caps_manager_test.dart` cover (a) persistence on
+   disco result, (b) seed-from-disk skipping the disco IQ, and (c)
+   unknown `node#ver` still triggering disco even with a seeded cache.
 8. **R2.1** — add a single global `last_mam_id_seen` and a unified
    catch-up query, eventually allowing per-chat catch-up to be lazy.
 9. **R3.1** — periodic GC of unreferenced avatar blobs.

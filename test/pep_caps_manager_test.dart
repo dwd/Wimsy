@@ -40,11 +40,27 @@ class FakePepManager extends PepManager {
 }
 
 class FakeStorageService extends StorageService {
+  final Map<String, Set<String>> entityCaps = {};
+
   @override
   Map<String, AvatarMetadata> loadAvatarMetadata() => {};
 
   @override
   Map<String, String> loadAvatarBlobs() => {};
+
+  @override
+  Map<String, Set<String>> loadEntityCaps() =>
+      Map<String, Set<String>>.from(entityCaps);
+
+  @override
+  Future<void> storeEntityCaps(String capsKey, Set<String> features) async {
+    entityCaps.putIfAbsent(capsKey, () => Set<String>.from(features));
+  }
+
+  @override
+  Future<void> clearEntityCaps() async {
+    entityCaps.clear();
+  }
 }
 
 PresenceStanza _presenceWithCaps({required String fromFullJid, required String node, required String ver}) {
@@ -168,5 +184,138 @@ void main() {
     final features = caps.featuresForFullJid('bob@example.com/phone');
     expect(features, isNotNull);
     expect(features!.contains('urn:xmpp:jingle:1'), isTrue);
+  });
+
+  group('R5: persisted entity-caps cache', () {
+    test('disco#info result is persisted to storage', () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final storage = FakeStorageService();
+      final pep = FakePepManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: 'user@example.com',
+        onUpdate: () {},
+      );
+      final caps = PepCapsManager(
+        connection: connection,
+        pepManager: pep,
+        storage: storage,
+      );
+
+      caps.handleStanza(
+        _presenceWithCaps(
+          fromFullJid: 'alice@example.com/r',
+          node: 'https://example.com/caps',
+          ver: 'PERSIST1',
+        ),
+      );
+      final iq = connection.written.last as IqStanza;
+      caps.handleStanza(
+        _discoInfoResult(
+          id: iq.id!,
+          capsKey: 'https://example.com/caps#PERSIST1',
+          feature: 'urn:xmpp:jingle:1',
+        ),
+      );
+
+      // Allow the unawaited storeEntityCaps future to complete.
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        storage.entityCaps['https://example.com/caps#PERSIST1'],
+        contains('urn:xmpp:jingle:1'),
+      );
+    });
+
+    test(
+      'caps seeded from storage suppress the disco#info IQ for known node#ver',
+      () {
+        final account = XmppAccountSettings(
+          'test',
+          'user',
+          'example.com',
+          'pass',
+          5222,
+        );
+        final connection = TestConnection(account);
+        final storage = FakeStorageService()
+          ..entityCaps['https://example.com/caps#KNOWN'] = {
+            'urn:xmpp:jingle:1',
+          };
+        final pep = FakePepManager(
+          connection: connection,
+          storage: storage,
+          selfBareJid: 'user@example.com',
+          onUpdate: () {},
+        );
+        final caps = PepCapsManager(
+          connection: connection,
+          pepManager: pep,
+          storage: storage,
+        );
+
+        caps.handleStanza(
+          _presenceWithCaps(
+            fromFullJid: 'alice@example.com/r',
+            node: 'https://example.com/caps',
+            ver: 'KNOWN',
+          ),
+        );
+
+        // The cache hit short-circuits before any disco#info IQ is sent.
+        expect(connection.written, isEmpty);
+        // Features are immediately available for the bare JID.
+        expect(
+          caps.featuresForBareJid('alice@example.com'),
+          contains('urn:xmpp:jingle:1'),
+        );
+      },
+    );
+
+    test(
+      'unknown node#ver still triggers disco#info even with seeded cache',
+      () {
+        final account = XmppAccountSettings(
+          'test',
+          'user',
+          'example.com',
+          'pass',
+          5222,
+        );
+        final connection = TestConnection(account);
+        final storage = FakeStorageService()
+          ..entityCaps['https://example.com/caps#KNOWN'] = {
+            'urn:xmpp:jingle:1',
+          };
+        final pep = FakePepManager(
+          connection: connection,
+          storage: storage,
+          selfBareJid: 'user@example.com',
+          onUpdate: () {},
+        );
+        final caps = PepCapsManager(
+          connection: connection,
+          pepManager: pep,
+          storage: storage,
+        );
+
+        caps.handleStanza(
+          _presenceWithCaps(
+            fromFullJid: 'bob@example.com/r',
+            node: 'https://example.com/caps',
+            ver: 'UNSEEN',
+          ),
+        );
+
+        expect(connection.written, isNotEmpty);
+      },
+    );
   });
 }

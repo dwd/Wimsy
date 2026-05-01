@@ -29,6 +29,9 @@ class StorageService {
   // lazily as messages with the matching stanza-id arrive (live or via
   // MAM) and are removed from disk once resolved.
   static const _displayedSyncPendingKey = 'displayed_sync_pending';
+  // R5: persisted Entity Capabilities (XEP-0115) cache, keyed by
+  // `node#ver`. Values are the disco#info feature lists.
+  static const _entityCapsKey = 'entity_caps';
   static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   final SecureStore _secureStorage = createSecureStore();
@@ -450,6 +453,81 @@ class StorageService {
       _displayedSyncPendingKey,
       Map<String, String>.from(pending),
     );
+  }
+
+  /// R5: load the persisted Entity Capabilities (XEP-0115) cache. The
+  /// returned map is keyed by `node#ver` and the values are the verified
+  /// `disco#info` feature lists.
+  ///
+  /// We persist this cache to skip the per-`node#ver` `disco#info` IQ
+  /// fan-out at connect time when MUC presence broadcasts caps for many
+  /// occupants. If the cache returns nothing for a given `node#ver` the
+  /// existing online query path still runs.
+  Map<String, Set<String>> loadEntityCaps() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(
+      _entityCapsKey,
+      defaultValue: const <String, dynamic>{},
+    );
+    if (data is Map) {
+      final result = <String, Set<String>>{};
+      for (final entry in data.entries) {
+        final key = entry.key.toString();
+        if (key.isEmpty) {
+          continue;
+        }
+        final value = entry.value;
+        if (value is List) {
+          final features = <String>{
+            for (final feature in value)
+              if (feature is String && feature.isNotEmpty) feature,
+          };
+          if (features.isNotEmpty) {
+            result[key] = features;
+          }
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+
+  /// R5: persist a single `node#ver` -> features mapping. Existing entries
+  /// for other `node#ver` keys are preserved. We never overwrite an
+  /// existing entry — Entity Capabilities are content-addressed by hash so
+  /// a stable key always corresponds to the same feature set.
+  Future<void> storeEntityCaps(String capsKey, Set<String> features) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (capsKey.isEmpty || features.isEmpty) {
+      return;
+    }
+    final existing = box.get(_entityCapsKey, defaultValue: <String, dynamic>{});
+    final next = <String, dynamic>{};
+    if (existing is Map) {
+      for (final entry in existing.entries) {
+        next[entry.key.toString()] = entry.value;
+      }
+    }
+    if (next.containsKey(capsKey)) {
+      return;
+    }
+    next[capsKey] = features.toList(growable: false);
+    await box.put(_entityCapsKey, next);
+  }
+
+  /// R5: clear the entire caps cache (e.g. for "forget account" flows).
+  Future<void> clearEntityCaps() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_entityCapsKey, const <String, dynamic>{});
   }
 
   Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {
