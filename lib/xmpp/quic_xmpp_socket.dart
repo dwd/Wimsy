@@ -73,12 +73,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   // In-flight futures for aux stream opens, keyed by slot. Concurrent callers
   // for the same slot await the same future rather than racing on _connection.
   final Map<int, Future<_QuicStreamChannel>> _auxStreamOpening = {};
-  // Global serialisation lock for connectionOpenBi calls. Because the FFI
-  // function uses Auto_Owned transfer (it consumes the RustArc and returns a
-  // new one), only one call may be in-flight at a time across ALL slots.
-  // Concurrent calls on different slots would both read the same _connection
-  // arc; the second would find it already disposed.
+  // Global serialisation lock for ALL FFI calls that consume _connection via
+  // Auto_Owned transfer (connectionOpenBi, connectionAcceptBi, connectionStats,
+  // connectionPeerTransportParams, connectionCloseReason). Only one such call
+  // may be in-flight at a time; concurrent callers would both read the same
+  // arc and the second would find it already disposed.
   Future<void> _auxOpenLock = Future<void>.value();
+
+  // Per-slot queue of stanzas that arrived while the aux stream for that slot
+  // was still being opened. Flushed onto the aux stream once it is ready.
+  final Map<int, List<String>> _auxStreamPendingQueue = {};
 
   @override
   Future<XmppWebSocket> connect<S>(
@@ -155,6 +159,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       }
       try {
         final target = await _selectSendTarget(payload);
+        if (target == null) {
+          // Payload has been enqueued for the aux stream; nothing to send now.
+          return;
+        }
         Log.xmppp_sending(payload, channel: target.label);
         final updated = await sendStreamWriteAll(
           stream: target.stream,
@@ -203,6 +211,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _controlBuffer = '';
     _auxStreamsBySlot.clear();
     _auxStreamOpening.clear();
+    _auxStreamPendingQueue.clear();
     _auxOpenLock = Future<void>.value();
 
     if (controlStream != null) {
@@ -475,19 +484,25 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// push large responses (e.g. MAM pages) without waiting for the client to
   /// open a stream first. Each accepted stream gets its own independent XML
   /// mapper so partial-chunk buffering does not corrupt other streams.
+  ///
+  /// Each `connectionAcceptBi` call uses a shared reference to `_connection`
+  /// (not Auto_Owned), so it does NOT consume the arc and can run concurrently
+  /// with `connectionOpenBi` calls without holding [_auxOpenLock].
   void _startServerStreamAcceptLoop() {
     final conn = _connection;
     if (conn == null) return;
+    var streamIndex = 0;
     unawaited(
       Future<void>(() async {
-        var connection = conn;
-        var streamIndex = 0;
         while (!_closed) {
+          final connection = _connection;
+          if (connection == null) break;
           try {
+            // connectionAcceptBi takes &QuicConnection (shared ref), so it
+            // does not consume the arc and is safe to call concurrently with
+            // connectionOpenBi / connectionStats.
             final result = await connectionAcceptBi(connection: connection);
-            connection = result.$1;
-            _connection = connection;
-            final recvStream = result.$3;
+            final recvStream = result.$2;
             if (recvStream == null) {
               // Connection closed — exit the accept loop.
               debugPrint('QUIC server-stream accept loop: connection closed');
@@ -592,7 +607,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
-  Future<_QuicSendTarget> _selectSendTarget(String payload) async {
+  Future<_QuicSendTarget?> _selectSendTarget(String payload) async {
     final control = _sendStream;
     if (control == null) {
       throw StateError('QUIC control send stream is not connected');
@@ -643,34 +658,44 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     final slot = quicAuxSlotForBareJid(toBare, _auxStreamSlots);
-    // Do not block the write queue if the aux stream is not yet open: if we
-    // cannot get the aux channel synchronously, fall back to the control
-    // stream. The write queue is a single serial chain; awaiting aux-stream
-    // creation here deadlocks every subsequent write (including critical
-    // negotiation stanzas) behind a potentially slow/failed aux open.
     final existing = _auxStreamsBySlot[slot];
     if (existing == null) {
-      // Kick off opening the aux stream for future sends, but send this
-      // payload on the control stream right now.
-      // ignore: unawaited_futures
+      // The aux stream for this slot is not yet open. Enqueue the payload so
+      // it is sent on the correct stream once it opens, rather than falling
+      // back to the control stream and mixing traffic.
+      _auxStreamPendingQueue.putIfAbsent(slot, () => []).add(payload);
+      // Kick off opening the aux stream (coalesced: concurrent calls for the
+      // same slot share one future). On success flush the pending queue.
       _ensureAuxStream(slot, reason: 'on-demand routing for $toBare').then(
-        (_) {},
+        (channel) => _flushAuxPendingQueue(slot, channel),
         onError: (Object error) {
-          // Log but do not rethrow: this future is unawaited, so rethrowing
-          // would surface as an unhandled fatal error via PlatformDispatcher.
-          // Aux stream open failures are expected during teardown (disposed
-          // RustArc, closed connection, timeout) and are non-fatal — the
-          // payload was already sent on the control stream.
+          // Aux stream open failed (disposed arc, timeout, closed connection).
+          // Drain the pending queue onto the control stream so stanzas are not
+          // silently dropped.
           debugPrint(
-            'QUIC aux stream on-demand open failed slot=$slot error=$error',
+            'QUIC aux stream on-demand open failed slot=$slot error=$error; '
+            'draining ${_auxStreamPendingQueue[slot]?.length ?? 0} queued '
+            'stanza(s) to control stream',
           );
+          final queued = _auxStreamPendingQueue.remove(slot) ?? [];
+          for (final qPayload in queued) {
+            Log.xmppp_sending(qPayload, channel: 'quic-control (fallback)');
+            _writeQueue = _writeQueue.then((_) async {
+              if (_closed || _sendStream == null) return;
+              try {
+                final updated = await sendStreamWriteAll(
+                  stream: _sendStream!,
+                  data: utf8.encode(qPayload),
+                );
+                _sendStream = updated;
+              } catch (_) {}
+            });
+          }
         },
       );
-      return _QuicSendTarget(
-        stream: control,
-        update: (updated) => _sendStream = updated,
-        label: 'quic-control',
-      );
+      // Return a null-target sentinel: the write() caller must not send the
+      // payload now — it has been enqueued above.
+      return null;
     }
     final channel = existing;
     return _QuicSendTarget(
@@ -678,6 +703,33 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       update: (updated) => channel.sendStream = updated,
       label: 'quic-aux-$slot',
     );
+  }
+
+  /// Flushes stanzas queued for [slot] onto [channel] now that the aux stream
+  /// is open. Each stanza is sent in order via the write queue.
+  void _flushAuxPendingQueue(int slot, _QuicStreamChannel channel) {
+    final queued = _auxStreamPendingQueue.remove(slot);
+    if (queued == null || queued.isEmpty) return;
+    debugPrint(
+      'QUIC aux stream slot=$slot flushing ${queued.length} queued stanza(s)',
+    );
+    for (final qPayload in queued) {
+      Log.xmppp_sending(qPayload, channel: 'quic-aux-$slot (flushed)');
+      _writeQueue = _writeQueue.then((_) async {
+        if (_closed) return;
+        try {
+          final updated = await sendStreamWriteAll(
+            stream: channel.sendStream,
+            data: utf8.encode(qPayload),
+          );
+          channel.sendStream = updated;
+        } catch (error, stackTrace) {
+          if (!_quicStreamController.isClosed) {
+            _quicStreamController.addError(error, stackTrace);
+          }
+        }
+      });
+    }
   }
 
   Future<_QuicStreamChannel> _ensureAuxStream(int slot, {String? reason}) {

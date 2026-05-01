@@ -106,6 +106,9 @@ void main() {
     // in a unit test. These tests verify that the symbol is exported from the
     // flutter_quic bridge with the expected type so that compile-time regressions
     // are caught immediately.
+    //
+    // The function now takes a shared reference (&QuicConnection) so it does
+    // NOT consume the arc and can run concurrently with connectionOpenBi.
     test('connectionAcceptBi is a Function', () {
       // If the codegen did not produce the symbol this line would not compile.
       expect(connectionAcceptBi, isA<Function>());

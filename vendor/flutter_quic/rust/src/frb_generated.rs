@@ -282,13 +282,35 @@ fn wire__crate__api__bridge__connection_accept_bi_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicError>(
                     (move || async move {
+                        let mut api_connection_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_connection,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_connection_guard =
+                                        Some(api_connection.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_connection_guard = api_connection_guard.unwrap();
                         let output_ok =
-                            crate::api::bridge::connection_accept_bi(api_connection).await?;
+                            crate::api::bridge::connection_accept_bi(&*api_connection_guard)
+                                .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -2228,22 +2250,6 @@ impl SseDecode for (QuicConnection, QuicSendStream, QuicRecvStream) {
     }
 }
 
-impl SseDecode
-    for (
-        QuicConnection,
-        Option<QuicSendStream>,
-        Option<QuicRecvStream>,
-    )
-{
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <Option<QuicSendStream>>::sse_decode(deserializer);
-        let mut var_field2 = <Option<QuicRecvStream>>::sse_decode(deserializer);
-        return (var_field0, var_field1, var_field2);
-    }
-}
-
 impl SseDecode for (QuicConnection, Option<usize>) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2355,6 +2361,15 @@ impl SseDecode for (QuicSendStream, usize) {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_field0 = <QuicSendStream>::sse_decode(deserializer);
         let mut var_field1 = <usize>::sse_decode(deserializer);
+        return (var_field0, var_field1);
+    }
+}
+
+impl SseDecode for (Option<QuicSendStream>, Option<QuicRecvStream>) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field0 = <Option<QuicSendStream>>::sse_decode(deserializer);
+        let mut var_field1 = <Option<QuicRecvStream>>::sse_decode(deserializer);
         return (var_field0, var_field1);
     }
 }
@@ -3527,21 +3542,6 @@ impl SseEncode for (QuicConnection, QuicSendStream, QuicRecvStream) {
     }
 }
 
-impl SseEncode
-    for (
-        QuicConnection,
-        Option<QuicSendStream>,
-        Option<QuicRecvStream>,
-    )
-{
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <Option<QuicSendStream>>::sse_encode(self.1, serializer);
-        <Option<QuicRecvStream>>::sse_encode(self.2, serializer);
-    }
-}
-
 impl SseEncode for (QuicConnection, Option<usize>) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3640,6 +3640,14 @@ impl SseEncode for (QuicSendStream, usize) {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <QuicSendStream>::sse_encode(self.0, serializer);
         <usize>::sse_encode(self.1, serializer);
+    }
+}
+
+impl SseEncode for (Option<QuicSendStream>, Option<QuicRecvStream>) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<QuicSendStream>>::sse_encode(self.0, serializer);
+        <Option<QuicRecvStream>>::sse_encode(self.1, serializer);
     }
 }
 

@@ -94,13 +94,18 @@ pub async fn connection_open_bi(
 /// connection is closed. Returns `None` (as a missing tuple) when the
 /// connection has been terminated.
 ///
+/// Unlike `connection_open_bi`, this function takes a shared reference so it
+/// does NOT consume the `QuicConnection` arc. This allows `accept_bi` to block
+/// waiting for a server-initiated stream concurrently with `open_bi` calls
+/// without holding the Auto_Owned ownership lock.
+///
 /// This exposes the QuicConnection.accept_bi() method to flutter_rust_bridge.
 pub async fn connection_accept_bi(
-    connection: QuicConnection,
-) -> Result<(QuicConnection, Option<QuicSendStream>, Option<QuicRecvStream>), QuicError> {
+    connection: &QuicConnection,
+) -> Result<(Option<QuicSendStream>, Option<QuicRecvStream>), QuicError> {
     match connection.accept_bi().await {
-        Some((send_stream, recv_stream)) => Ok((connection, Some(send_stream), Some(recv_stream))),
-        None => Ok((connection, None, None)),
+        Some((send_stream, recv_stream)) => Ok((Some(send_stream), Some(recv_stream))),
+        None => Ok((None, None)),
     }
 }
 

@@ -84,8 +84,13 @@ Future<(QuicConnection, QuicSendStream, QuicRecvStream)> connectionOpenBi({
 /// connection is closed. Returns `None` (as a missing tuple) when the
 /// connection has been terminated.
 ///
+/// Unlike `connection_open_bi`, this function takes a shared reference so it
+/// does NOT consume the `QuicConnection` arc. This allows `accept_bi` to block
+/// waiting for a server-initiated stream concurrently with `open_bi` calls
+/// without holding the Auto_Owned ownership lock.
+///
 /// This exposes the QuicConnection.accept_bi() method to flutter_rust_bridge.
-Future<(QuicConnection, QuicSendStream?, QuicRecvStream?)> connectionAcceptBi({
+Future<(QuicSendStream?, QuicRecvStream?)> connectionAcceptBi({
   required QuicConnection connection,
 }) => RustLib.instance.api.crateApiBridgeConnectionAcceptBi(
   connection: connection,
