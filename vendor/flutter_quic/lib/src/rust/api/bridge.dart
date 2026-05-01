@@ -78,6 +78,19 @@ Future<(QuicConnection, QuicSendStream, QuicRecvStream)> connectionOpenBi({
 }) =>
     RustLib.instance.api.crateApiBridgeConnectionOpenBi(connection: connection);
 
+/// Accept the next server-initiated bidirectional stream on a QUIC connection.
+///
+/// Blocks until the remote peer opens a new bidirectional stream or the
+/// connection is closed. Returns `None` (as a missing tuple) when the
+/// connection has been terminated.
+///
+/// This exposes the QuicConnection.accept_bi() method to flutter_rust_bridge.
+Future<(QuicConnection, QuicSendStream?, QuicRecvStream?)> connectionAcceptBi({
+  required QuicConnection connection,
+}) => RustLib.instance.api.crateApiBridgeConnectionAcceptBi(
+  connection: connection,
+);
+
 /// Open a unidirectional stream on a QUIC connection
 /// This exposes the QuicConnection.open_uni() method to flutter_rust_bridge
 Future<(QuicConnection, QuicSendStream)> connectionOpenUni({

@@ -28,6 +28,21 @@ impl QuicConnection {
         Ok((QuicSendStream::new(send_stream), QuicRecvStream::new(recv_stream)))
     }
     
+    /// Accept the next server-initiated bidirectional stream.
+    ///
+    /// Blocks until the remote peer opens a new bidirectional stream or the
+    /// connection is closed. Returns `None` when the connection has been
+    /// terminated (mirrors Quinn's `accept_bi()` returning
+    /// `ConnectionError::LocallyClosed` / `ConnectionError::Reset`).
+    pub async fn accept_bi(&self) -> Option<(QuicSendStream, QuicRecvStream)> {
+        match self.inner.accept_bi().await {
+            Ok((send_stream, recv_stream)) => {
+                Some((QuicSendStream::new(send_stream), QuicRecvStream::new(recv_stream)))
+            }
+            Err(_) => None,
+        }
+    }
+
     /// Open a unidirectional stream for sending
     pub async fn open_uni(&self) -> Result<QuicSendStream, QuicError> {
         let send_stream = self.inner

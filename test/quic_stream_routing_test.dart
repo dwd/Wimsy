@@ -1,3 +1,4 @@
+import 'package:flutter_quic/flutter_quic.dart' show connectionAcceptBi;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wimsy/xmpp/quic_xmpp_socket.dart';
 
@@ -97,6 +98,17 @@ void main() {
     test('stays within bounds', () {
       final slot = quicAuxSlotForBareJid('contact@example.com', 20);
       expect(slot, inInclusiveRange(0, 19));
+    });
+  });
+
+  group('connectionAcceptBi bridge export', () {
+    // connectionAcceptBi requires a live QUIC connection and cannot be called
+    // in a unit test. These tests verify that the symbol is exported from the
+    // flutter_quic bridge with the expected type so that compile-time regressions
+    // are caught immediately.
+    test('connectionAcceptBi is a Function', () {
+      // If the codegen did not produce the symbol this line would not compile.
+      expect(connectionAcceptBi, isA<Function>());
     });
   });
 }

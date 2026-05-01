@@ -118,6 +118,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     await _ensureRustInitialized();
     await _connectQuic(host, port, tlsHost ?? host);
     _startControlRecvLoop();
+    _startServerStreamAcceptLoop();
     return this;
   }
 
@@ -468,6 +469,50 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
+  /// Accepts server-initiated bidirectional QUIC streams and routes their
+  /// data into [_quicStreamController] exactly like client-initiated aux
+  /// streams. Per XEP-0467 §Multiple Streams the server may open streams to
+  /// push large responses (e.g. MAM pages) without waiting for the client to
+  /// open a stream first. Each accepted stream gets its own independent XML
+  /// mapper so partial-chunk buffering does not corrupt other streams.
+  void _startServerStreamAcceptLoop() {
+    final conn = _connection;
+    if (conn == null) return;
+    unawaited(
+      Future<void>(() async {
+        var connection = conn;
+        var streamIndex = 0;
+        while (!_closed) {
+          try {
+            final result = await connectionAcceptBi(connection: connection);
+            connection = result.$1;
+            _connection = connection;
+            final recvStream = result.$3;
+            if (recvStream == null) {
+              // Connection closed — exit the accept loop.
+              debugPrint('QUIC server-stream accept loop: connection closed');
+              break;
+            }
+            final label = 'quic-server-${streamIndex++}';
+            debugPrint('QUIC accepted server-initiated stream: $label');
+            final mapper = _makeAuxMapper?.call() ?? _map;
+            _startRecvLoop(
+              recvStream,
+              isControl: false,
+              mapper: mapper,
+              label: label,
+            );
+          } catch (error) {
+            if (!_closed) {
+              debugPrint('QUIC server-stream accept loop error: $error');
+            }
+            break;
+          }
+        }
+      }),
+    );
+  }
+
   void _startControlRecvLoop() {
     final recvStream = _recvStream;
     if (recvStream == null) {
@@ -480,6 +525,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     QuicRecvStream initial, {
     required bool isControl,
     int? slot,
+    String? label,
     String Function(String)? mapper,
   }) {
     unawaited(
@@ -511,8 +557,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             if (isControl) {
               _captureBindResult(chunk);
             }
-            final recvLabel =
-                isControl ? 'quic-control' : 'quic-aux-${slot ?? '?'}';
+            final recvLabel = isControl
+                ? 'quic-control'
+                : (label ?? 'quic-aux-${slot ?? '?'}');
             Log.xmppp_receiving(chunk, channel: recvLabel);
             // Use the per-stream mapper if provided (aux streams), otherwise
             // fall back to the shared _map (control stream). This ensures each
@@ -536,8 +583,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             if (!_quicStreamController.isClosed) {
               await _quicStreamController.close();
             }
-          } else if (slot != null) {
-            debugPrint('QUIC aux stream recv loop ended slot=$slot');
+          } else {
+            final endLabel = label ?? (slot != null ? 'quic-aux-$slot' : 'quic-aux-?');
+            debugPrint('QUIC aux stream recv loop ended label=$endLabel');
           }
         }
       }),

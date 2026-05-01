@@ -88,6 +88,22 @@ pub async fn connection_open_bi(
     Ok((connection, send_stream, recv_stream))
 }
 
+/// Accept the next server-initiated bidirectional stream on a QUIC connection.
+///
+/// Blocks until the remote peer opens a new bidirectional stream or the
+/// connection is closed. Returns `None` (as a missing tuple) when the
+/// connection has been terminated.
+///
+/// This exposes the QuicConnection.accept_bi() method to flutter_rust_bridge.
+pub async fn connection_accept_bi(
+    connection: QuicConnection,
+) -> Result<(QuicConnection, Option<QuicSendStream>, Option<QuicRecvStream>), QuicError> {
+    match connection.accept_bi().await {
+        Some((send_stream, recv_stream)) => Ok((connection, Some(send_stream), Some(recv_stream))),
+        None => Ok((connection, None, None)),
+    }
+}
+
 /// Open a unidirectional stream on a QUIC connection
 /// This exposes the QuicConnection.open_uni() method to flutter_rust_bridge
 pub async fn connection_open_uni(

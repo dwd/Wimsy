@@ -42,7 +42,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 851053613;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 421219948;
 
 // Section: executor
 
@@ -256,6 +256,43 @@ fn wire__crate__api__bridge___expose_types_for_frb_generation_impl(
                     })?;
                     Ok(output_ok)
                 })())
+            }
+        },
+    )
+}
+fn wire__crate__api__bridge__connection_accept_bi_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "connection_accept_bi",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::errors::QuicError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::bridge::connection_accept_bi(api_connection).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
             }
         },
     )
@@ -1838,6 +1875,28 @@ impl SseDecode for Option<String> {
     }
 }
 
+impl SseDecode for Option<QuicRecvStream> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<QuicRecvStream>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<QuicSendStream> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<QuicSendStream>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<usize> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2169,6 +2228,22 @@ impl SseDecode for (QuicConnection, QuicSendStream, QuicRecvStream) {
     }
 }
 
+impl SseDecode
+    for (
+        QuicConnection,
+        Option<QuicSendStream>,
+        Option<QuicRecvStream>,
+    )
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
+        let mut var_field1 = <Option<QuicSendStream>>::sse_decode(deserializer);
+        let mut var_field2 = <Option<QuicRecvStream>>::sse_decode(deserializer);
+        return (var_field0, var_field1, var_field2);
+    }
+}
+
 impl SseDecode for (QuicConnection, Option<usize>) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2395,127 +2470,128 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        7 => wire__crate__api__bridge__connection_close_reason_impl(
+        7 => wire__crate__api__bridge__connection_accept_bi_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__bridge__connection_close_reason_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        8 => wire__crate__api__bridge__connection_datagram_send_buffer_space_impl(
+        9 => wire__crate__api__bridge__connection_datagram_send_buffer_space_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        9 => wire__crate__api__bridge__connection_local_ip_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__bridge__connection_max_datagram_size_impl(
+        10 => wire__crate__api__bridge__connection_local_ip_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__bridge__connection_max_datagram_size_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        11 => wire__crate__api__bridge__connection_open_bi_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__bridge__connection_open_uni_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__bridge__connection_peer_transport_params_impl(
+        12 => wire__crate__api__bridge__connection_open_bi_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__bridge__connection_open_uni_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__bridge__connection_peer_transport_params_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__api__bridge__connection_read_datagram_impl(
+        15 => wire__crate__api__bridge__connection_read_datagram_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => wire__crate__api__bridge__connection_remote_address_impl(
+        16 => wire__crate__api__bridge__connection_remote_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        16 => {
+        17 => {
             wire__crate__api__bridge__connection_rtt_millis_impl(port, ptr, rust_vec_len, data_len)
         }
-        17 => wire__crate__api__bridge__connection_send_datagram_impl(
+        18 => wire__crate__api__bridge__connection_send_datagram_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__api__bridge__connection_send_datagram_wait_impl(
+        19 => wire__crate__api__bridge__connection_send_datagram_wait_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        19 => {
+        20 => {
             wire__crate__api__bridge__connection_stable_id_impl(port, ptr, rust_vec_len, data_len)
         }
-        20 => wire__crate__api__bridge__connection_stats_impl(port, ptr, rust_vec_len, data_len),
-        21 => {
+        21 => wire__crate__api__bridge__connection_stats_impl(port, ptr, rust_vec_len, data_len),
+        22 => {
             wire__crate__api__bridge__create_client_endpoint_impl(port, ptr, rust_vec_len, data_len)
         }
-        22 => {
+        23 => {
             wire__crate__api__bridge__create_server_endpoint_impl(port, ptr, rust_vec_len, data_len)
         }
-        23 => wire__crate__api__bridge__endpoint_config_new_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__bridge__endpoint_connect_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__bridge__init_app_impl(port, ptr, rust_vec_len, data_len),
-        26 => {
+        24 => wire__crate__api__bridge__endpoint_config_new_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__bridge__endpoint_connect_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__bridge__init_app_impl(port, ptr, rust_vec_len, data_len),
+        27 => {
             wire__crate__api__bridge__quic_client_clear_pool_impl(port, ptr, rust_vec_len, data_len)
         }
-        27 => wire__crate__api__bridge__quic_client_config_impl(port, ptr, rust_vec_len, data_len),
-        28 => {
+        28 => wire__crate__api__bridge__quic_client_config_impl(port, ptr, rust_vec_len, data_len),
+        29 => {
             wire__crate__api__bridge__quic_client_config_new_impl(port, ptr, rust_vec_len, data_len)
         }
-        29 => wire__crate__api__bridge__quic_client_create_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__bridge__quic_client_create_with_config_impl(
+        30 => wire__crate__api__bridge__quic_client_create_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__bridge__quic_client_create_with_config_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        31 => wire__crate__api__bridge__quic_client_get_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__bridge__quic_client_get_with_timeout_impl(
+        32 => wire__crate__api__bridge__quic_client_get_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__bridge__quic_client_get_with_timeout_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__api__bridge__quic_client_post_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__bridge__quic_client_post_with_timeout_impl(
+        34 => wire__crate__api__bridge__quic_client_post_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__bridge__quic_client_post_with_timeout_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__api__bridge__quic_client_send_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__bridge__quic_client_send_with_timeout_impl(
+        36 => wire__crate__api__bridge__quic_client_send_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__bridge__quic_client_send_with_timeout_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__api__bridge__recv_stream_read_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__bridge__recv_stream_read_to_end_impl(
+        38 => wire__crate__api__bridge__recv_stream_read_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__bridge__recv_stream_read_to_end_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        39 => wire__crate__api__bridge__send_stream_finish_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__bridge__send_stream_write_impl(port, ptr, rust_vec_len, data_len),
-        41 => {
+        40 => wire__crate__api__bridge__send_stream_finish_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__bridge__send_stream_write_impl(port, ptr, rust_vec_len, data_len),
+        42 => {
             wire__crate__api__bridge__send_stream_write_all_impl(port, ptr, rust_vec_len, data_len)
         }
-        42 => wire__crate__api__bridge__server_config_with_single_cert_impl(
+        43 => wire__crate__api__bridge__server_config_with_single_cert_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => {
+        44 => {
             wire__crate__api__bridge__transport_config_new_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -3171,6 +3247,26 @@ impl SseEncode for Option<String> {
     }
 }
 
+impl SseEncode for Option<QuicRecvStream> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <QuicRecvStream>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<QuicSendStream> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <QuicSendStream>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<usize> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3428,6 +3524,21 @@ impl SseEncode for (QuicConnection, QuicSendStream, QuicRecvStream) {
         <QuicConnection>::sse_encode(self.0, serializer);
         <QuicSendStream>::sse_encode(self.1, serializer);
         <QuicRecvStream>::sse_encode(self.2, serializer);
+    }
+}
+
+impl SseEncode
+    for (
+        QuicConnection,
+        Option<QuicSendStream>,
+        Option<QuicRecvStream>,
+    )
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <QuicConnection>::sse_encode(self.0, serializer);
+        <Option<QuicSendStream>>::sse_encode(self.1, serializer);
+        <Option<QuicRecvStream>>::sse_encode(self.2, serializer);
     }
 }
 
