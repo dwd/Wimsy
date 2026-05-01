@@ -49,6 +49,9 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberPassword = false;
   bool _useWebSocket = kIsWeb;
   bool _useDirectTls = false;
+  /// Whether to attempt plain TCP (`_xmpp-client._tcp` SRV records and the
+  /// non-TLS fallback). When false, plain-TCP SRV records are ignored.
+  bool _useTcp = true;
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   bool _useQuic = true;
   bool _advancedOptionsExpanded = false;
@@ -99,6 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _resourceController.text = account.resource;
         _useWebSocket = kIsWeb ? true : account.useWebSocket;
         _useDirectTls = kIsWeb ? false : account.directTls;
+        _useTcp = kIsWeb ? true : account.useTcp;
         _useQuic = account.useQuic;
         _wsEndpointController.text = account.wsEndpoint;
         if (account.wsProtocols.isNotEmpty) {
@@ -115,6 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final port = int.tryParse(_portController.text.trim()) ?? 5222;
     final useWebSocket = kIsWeb || _useWebSocket;
     final useDirectTls = kIsWeb ? false : _useDirectTls;
+    final useTcp = kIsWeb ? true : _useTcp;
     final wsProtocols = _wsProtocolsController.text
         .split(',')
         .map((entry) => entry.trim())
@@ -134,6 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
       wsEndpoint: _wsEndpointController.text.trim(),
       wsProtocols: wsProtocols,
       useQuic: _useQuic,
+      useTcp: useTcp,
     );
     widget.storage.storeAccount(account.toMap());
     unawaited(widget.preferences.setLastJid(account.jid));
@@ -148,6 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
       wsEndpoint: account.wsEndpoint,
       wsProtocols: wsProtocols,
       useQuic: _useQuic,
+      useTcp: useTcp,
     );
   }
 
@@ -278,7 +285,8 @@ class _LoginScreenState extends State<LoginScreen> {
             dense: true,
             title: const Text('Direct TLS (XEP-0368)'),
             subtitle: const Text(
-              'Uses direct TLS when the server advertises it via SRV.',
+              'Uses direct TLS when the server advertises it via SRV. '
+              'When off, _xmpps-client._tcp SRV records are ignored.',
             ),
             value: _useDirectTls,
             onChanged: service.isConnecting || kIsWeb
@@ -289,6 +297,27 @@ class _LoginScreenState extends State<LoginScreen> {
                     }
                     setState(() {
                       _useDirectTls = value;
+                    });
+                  },
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Plain TCP'),
+            subtitle: const Text(
+              'Allows plain TCP connections via _xmpp-client._tcp SRV. '
+              'When off, plain-TCP SRV records are ignored and no plain-TCP '
+              'connection will be attempted.',
+            ),
+            value: kIsWeb ? true : _useTcp,
+            onChanged: service.isConnecting || kIsWeb
+                ? null
+                : (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _useTcp = value;
                     });
                   },
           ),

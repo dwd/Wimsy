@@ -11,6 +11,7 @@ class AccountRecord {
     required this.wsEndpoint,
     required this.wsProtocols,
     this.useQuic = true,
+    this.useTcp = true,
   });
 
   final String jid;
@@ -26,6 +27,11 @@ class AccountRecord {
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   final bool useQuic;
 
+  /// Whether to attempt plain TCP (`_xmpp-client._tcp` SRV records and the
+  /// non-TLS fallback). When false, plain-TCP SRV records are ignored and
+  /// no plain-TCP fallback connection will be attempted.
+  final bool useTcp;
+
   Map<String, dynamic> toMap() {
     return {
       'jid': jid,
@@ -39,6 +45,7 @@ class AccountRecord {
       'wsEndpoint': wsEndpoint,
       'wsProtocols': wsProtocols,
       'useQuic': useQuic,
+      'useTcp': useTcp,
     };
   }
 
@@ -56,6 +63,7 @@ class AccountRecord {
     final directTlsRaw = map['directTls'];
     final wsEndpoint = map['wsEndpoint']?.toString() ?? '';
     final useQuicRaw = map['useQuic'];
+    final useTcpRaw = map['useTcp'];
     final wsProtocolsRaw = map['wsProtocols'];
     final port = portRaw is int ? portRaw : int.tryParse(portRaw?.toString() ?? '') ?? 5222;
     if (jid.isEmpty) {
@@ -69,6 +77,7 @@ class AccountRecord {
         : wsEndpoint.isNotEmpty;
     final directTls = directTlsRaw is bool ? directTlsRaw : false;
     final useQuic = useQuicRaw is bool ? useQuicRaw : true;
+    final useTcp = useTcpRaw is bool ? useTcpRaw : true;
     final wsProtocols = <String>[];
     if (wsProtocolsRaw is List) {
       for (final entry in wsProtocolsRaw) {
@@ -90,6 +99,7 @@ class AccountRecord {
       wsEndpoint: wsEndpoint,
       wsProtocols: wsProtocols,
       useQuic: useQuic,
+      useTcp: useTcp,
     );
   }
 }

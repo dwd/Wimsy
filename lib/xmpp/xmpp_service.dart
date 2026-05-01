@@ -762,6 +762,7 @@ class XmppService extends ChangeNotifier {
     String? wsEndpoint,
     List<String>? wsProtocols,
     bool useQuic = true,
+    bool useTcp = true,
   }) async {
     final quicTransportAvailable =
         !kIsWeb &&
@@ -814,6 +815,24 @@ class XmppService extends ChangeNotifier {
         quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
       }
       tcpSrvCandidates = await resolveXmppSrvCandidates(domain);
+      // Filter SRV candidates by the user's transport allow-flags.
+      // - When Direct TLS is off, drop _xmpps-client._tcp records.
+      // - When Plain TCP is off, drop _xmpp-client._tcp records.
+      // The two flags act as independent allow-lists; the user is only
+      // allowed to actually connect via a transport they've enabled.
+      final filteredTcpSrv = filterTcpSrvCandidatesByTransport(
+        tcpSrvCandidates,
+        allowDirectTls: directTls,
+        allowPlainTcp: useTcp,
+      );
+      if (filteredTcpSrv.length != tcpSrvCandidates.length) {
+        debugPrint(
+          'XMPP SRV: filtered TCP candidates by user flags '
+          '(directTls=$directTls useTcp=$useTcp): '
+          '${tcpSrvCandidates.length} -> ${filteredTcpSrv.length}',
+        );
+      }
+      tcpSrvCandidates = filteredTcpSrv;
       _finishSpan(srvSpan);
       if (quicTransportAvailable && quicSrvCandidates.isNotEmpty) {
         final first = quicSrvCandidates.first;
@@ -827,6 +846,20 @@ class XmppService extends ChangeNotifier {
         resolvedDirectTls = first.directTls;
       } else if (resolvedPort == 0 || resolvedPort == 5222) {
         resolvedPort = directTls ? 5223 : 5222;
+      }
+      // If after filtering we have no usable transport at all (no QUIC,
+      // no surviving TCP SRV records, and the user has disabled the
+      // transport that the fallback port would use), bail out with a
+      // clear error rather than silently falling through.
+      final hasQuic = quicTransportAvailable && quicSrvCandidates.isNotEmpty;
+      final hasTcp = tcpSrvCandidates.isNotEmpty;
+      final fallbackAllowed = directTls || useTcp;
+      if (!hasQuic && !hasTcp && !fallbackAllowed) {
+        _setError(
+          'No transport enabled: both Direct TLS and Plain TCP are '
+          'disabled and no QUIC/WebSocket endpoint is available.',
+        );
+        return;
       }
     }
 
