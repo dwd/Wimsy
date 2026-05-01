@@ -7709,24 +7709,40 @@ class XmppService extends ChangeNotifier {
     }
     _lastGlobalMamSyncAt = now;
 
-    for (final entry in _messages.entries) {
-      final bareJid = _bareJid(entry.key);
-      if (isBookmark(bareJid)) {
-        continue;
+    // R2.1: When we have a global MAM anchor (_lastMamIdSeen), issue a single
+    // unified catch-up query against the user's own server archive
+    // (`afterId=_lastMamIdSeen`, no `to=` JID). The server returns all missed
+    // DM messages across every contact in one paginated stream, which the
+    // existing _addMessage routing dispatches to the correct chat by JID.
+    // This replaces the O(N) per-chat fan-out with a single O(1) IQ.
+    //
+    // When _lastMamIdSeen is null (fresh install / first session) we fall back
+    // to the per-chat fan-out so each chat still gets its initial tail.
+    final anchor = _lastMamIdSeen;
+    if (anchor != null && anchor.isNotEmpty) {
+      _startUnifiedDmCatchUp(anchor);
+    } else {
+      // Fallback: no anchor yet — fan out per-chat as before.
+      for (final entry in _messages.entries) {
+        final bareJid = _bareJid(entry.key);
+        if (isBookmark(bareJid)) {
+          continue;
+        }
+        if (entry.value.isEmpty) {
+          continue;
+        }
+        // R2.2: skip the catch-up query when MDS already proves we are
+        // caught up to the displayed marker for this chat.
+        if (!shouldFetchMamCatchUpForChat(
+          displayedStanzaId: _displayedStanzaIdByChat[bareJid],
+          latestLocalMamId: latestMamIdFor(bareJid),
+          stanzaIdAtLatestMamId:
+              _stanzaIdAtLatestMamId(bareJid, isRoom: false),
+        )) {
+          continue;
+        }
+        _startMamCatchUp(bareJid, isRoom: false);
       }
-      if (entry.value.isEmpty) {
-        continue;
-      }
-      // R2.2: skip the catch-up query when MDS already proves we are
-      // caught up to the displayed marker for this chat.
-      if (!shouldFetchMamCatchUpForChat(
-        displayedStanzaId: _displayedStanzaIdByChat[bareJid],
-        latestLocalMamId: latestMamIdFor(bareJid),
-        stanzaIdAtLatestMamId: _stanzaIdAtLatestMamId(bareJid, isRoom: false),
-      )) {
-        continue;
-      }
-      _startMamCatchUp(bareJid, isRoom: false);
     }
 
     for (final bookmark in _bookmarks) {
@@ -7747,6 +7763,112 @@ class XmppService extends ChangeNotifier {
       _startMamCatchUp(roomJid, isRoom: true);
     }
     _finishMamSyncIfIdle();
+  }
+
+  /// R2.1: Issue a single unified MAM catch-up query against the user's own
+  /// server archive, starting after [anchor] (the globally newest MAM id we
+  /// have seen). On completion the RSM `<last>` id is used to advance
+  /// [_lastMamIdSeen] so the next session's anchor is up to date.
+  ///
+  /// The query is built manually so we can capture the IQ id and register an
+  /// [IqRouter] response handler — [MessageArchiveManager.queryById] writes
+  /// the stanza internally and does not expose the id.
+  void _startUnifiedDmCatchUp(String anchor) {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+
+    // Build the MAM IQ: <iq type="set"><query xmlns="urn:xmpp:mam:2">
+    //   <x type="submit"><field var="FORM_TYPE"…/><field var="after-id"…/>
+    //   </x><set xmlns="…rsm"><max>50</max></set></query></iq>
+    final id = AbstractStanza.getRandomId();
+    final iq = IqStanza(id, IqStanzaType.SET);
+    // No toJid — queries the user's own server archive.
+
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:mam:2'));
+    query.addAttribute(XmppAttribute('queryid', AbstractStanza.getRandomId()));
+
+    final x = XmppElement()..name = 'x';
+    x.addAttribute(
+      XmppAttribute('xmlns', 'jabber:x:data'),
+    );
+    x.addAttribute(XmppAttribute('type', 'submit'));
+
+    final formType = XmppElement()..name = 'field';
+    formType.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
+    formType.addAttribute(XmppAttribute('type', 'hidden'));
+    final formTypeValue = XmppElement()
+      ..name = 'value'
+      ..textValue = 'urn:xmpp:mam:2';
+    formType.addChild(formTypeValue);
+    x.addChild(formType);
+
+    final afterIdField = XmppElement()..name = 'field';
+    afterIdField.addAttribute(XmppAttribute('var', 'after-id'));
+    final afterIdValue = XmppElement()
+      ..name = 'value'
+      ..textValue = anchor;
+    afterIdField.addChild(afterIdValue);
+    x.addChild(afterIdField);
+
+    query.addChild(x);
+
+    // RSM: request up to 50 messages per page.
+    final set = XmppElement()..name = 'set';
+    set.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/rsm'),
+    );
+    final max = XmppElement()
+      ..name = 'max'
+      ..textValue = '50';
+    set.addChild(max);
+    query.addChild(set);
+
+    iq.addChild(query);
+
+    // Register a response handler so we can advance _lastMamIdSeen once the
+    // server returns the <fin> result.
+    final router = IqRouter.getInstance(connection);
+    router.registerResponseHandler(id, (response) {
+      if (response == null) {
+        return;
+      }
+      if (response.type != IqStanzaType.RESULT) {
+        return;
+      }
+      // Parse <fin xmlns="urn:xmpp:mam:2"><set …><last>…</last></set></fin>
+      final fin = response.children.firstWhere(
+        (child) =>
+            child.name == 'fin' &&
+            child.getAttribute('xmlns')?.value == 'urn:xmpp:mam:2',
+        orElse: () => XmppElement(),
+      );
+      if (fin.name != 'fin') {
+        return;
+      }
+      final rsmSet = fin.children.firstWhere(
+        (child) =>
+            child.name == 'set' &&
+            child.getAttribute('xmlns')?.value ==
+                'http://jabber.org/protocol/rsm',
+        orElse: () => XmppElement(),
+      );
+      if (rsmSet.name != 'set') {
+        return;
+      }
+      final lastEl = rsmSet.children.firstWhere(
+        (child) => child.name == 'last',
+        orElse: () => XmppElement(),
+      );
+      final lastId = lastEl.name == 'last' ? lastEl.textValue?.trim() : null;
+      if (lastId != null && lastId.isNotEmpty) {
+        _bumpLastMamIdSeen(lastId);
+      }
+    });
+
+    connection.writeStanza(iq);
   }
 
   /// Returns the stanza-id of the message in [bareJid]'s message list whose

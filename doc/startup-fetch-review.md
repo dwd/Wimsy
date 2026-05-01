@@ -457,7 +457,7 @@ Tackling in roughly priority order:
    tests in `test/pep_caps_manager_test.dart` cover (a) persistence on
    disco result, (b) seed-from-disk skipping the disco IQ, and (c)
    unknown `node#ver` still triggering disco even with a seeded cache.
-8. **R2.1 — DONE (partially).** Added the persisted global anchor
+8. **R2.1 — DONE.** Added the persisted global anchor
    `last_mam_id_seen` to `StorageService`
    (`loadLastMamIdSeen` / `storeLastMamIdSeen` / `clearLastMamIdSeen`).
    `XmppService` seeds `_lastMamIdSeen` from disk in `attachStorage`,
@@ -467,12 +467,19 @@ Tackling in roughly priority order:
    compare-and-swap). New tests in `test/last_mam_id_seen_test.dart`
    cover the storage round-trip.
 
-   _Not done in this commit:_ the actual unified catch-up query that
-   uses this anchor instead of fanning out per-chat. That would change
-   MAM query routing and is intentionally left as a follow-up — the
-   anchor it would need to read is now persisted and updated, so the
-   follow-up can be a localised change inside `_primeMamSync` /
-   `MamQueryPlanner` without touching the message-ingest paths.
+   The unified catch-up query is now also implemented: `_primeMamSync`
+   issues a single `queryById(afterId: _lastMamIdSeen)` against the
+   user's own server archive (no `to=` JID) when the anchor is present,
+   replacing the O(N) per-chat DM fan-out with a single IQ. The server
+   returns all missed DM messages in one paginated stream; the existing
+   `_addMessage` routing dispatches each forwarded message to the
+   correct chat by JID. On completion the RSM `<last>` id from the
+   `<fin>` result advances `_lastMamIdSeen`. When no anchor exists
+   (fresh install) the per-chat fan-out is used as a fallback. MUC
+   archives remain per-room (protocol requirement). New tests in
+   `test/unified_mam_catchup_test.dart` (6 tests covering `<fin>`
+   parsing) and `vendor/xmpp_stone/test/mam_query_xml_test.dart`
+   (1 test for the unified IQ XML shape).
 9. **R3.1 — DONE.** `PepManager.gcUnreferencedAvatarBlobs()` evicts any
    cached blob whose hash is not referenced by a current non-sentinel
    `_metadataByJid` entry. The pass is invoked once from the constructor
@@ -702,7 +709,7 @@ reconnects cheaper. For now, the reconnect loop is the correct behaviour.
 | R1.3 Displayed sync pending | ✅ Working | Persists and resolves correctly |
 | R2.2 MAM skip when MDS up-to-date | ⚠️ Partial | Broken by re-seed bug (R6) |
 | R5 Caps cache | ✅ Working | Re-seeds via PepCapsManager constructor |
-| R2.1 Global MAM anchor | ✅ Working | Persisted; unified query deferred |
+| R2.1 Global MAM anchor | ✅ Done | Anchor persisted; unified DM catch-up query implemented |
 | R3.1 Avatar blob GC | ✅ Working | Runs at construction |
 | **R6 Re-seed on reconnect** | ❌ Not done | New item; fixes R4.1 and R2.2 regressions |
 
