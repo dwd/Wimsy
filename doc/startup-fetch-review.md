@@ -402,7 +402,15 @@ Tackling in roughly priority order:
    (`lib/xmpp/startup_fetch_helpers.dart`) and is exercised by
    `test/startup_fetch_helpers_test.dart`. A `force` flag preserves the
    ability to manually re-pull the entire MDS state when desired.
-4. **R1.2** — advertise `urn:xmpp:mds:displayed:0+notify` in our caps.
+4. **R1.2 — DONE.** On audit it turned out
+   `urn:xmpp:mds:displayed:0+notify` was already present in
+   `vendor/xmpp_stone/lib/src/features/servicediscovery/ServiceDiscoverySupport.dart`
+   (alongside `urn:xmpp:avatar:metadata+notify`). The Section 1 narrative
+   above ("we currently do not advertise") was incorrect at the time the
+   review was written. To prevent silent regressions, a regression
+   suite `test/service_discovery_features_test.dart` now asserts that
+   the +notify entries (and other core disco features) remain in the
+   list. `doap.xml` already lists XEP-0490 as supported.
 5. **R1.3** — persist unresolved displayed markers and resolve them
    from incoming MAM pages.
 6. **R2.2** — short-circuit `_primeMamSync` for chats whose latest
