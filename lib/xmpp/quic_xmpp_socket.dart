@@ -539,26 +539,27 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             final label = 'quic-server-${streamIndex++}';
             debugPrint(
               'QUIC accepted server-initiated stream: $label '
-              '(pooled for reuse as aux stream)',
+              '(recv loop started immediately; send stream pooled for reuse)',
             );
-            // Pool the stream pair. When _ensureAuxStream next needs a new
-            // slot it will pop from here instead of calling connectionOpenBi,
-            // saving a round-trip and a bidi-stream credit.
+            // Start the recv loop immediately so inbound stanzas pushed by
+            // the server on this stream are processed right away, regardless
+            // of whether the send side is ever assigned to a slot.
+            final mapper = _makeAuxMapper?.call() ?? _map;
+            _startRecvLoop(
+              recvStream,
+              isControl: false,
+              mapper: mapper,
+              label: label,
+            );
             if (sendStream != null) {
+              // Pool the send stream (with its already-running recv loop) so
+              // that _openAuxStream can reuse it for outbound traffic without
+              // calling connectionOpenBi.
               _serverStreamPool.add(
                 _QuicStreamChannel(
                   sendStream: sendStream,
                   recvStream: recvStream,
                 ),
-              );
-            } else {
-              // No send stream — start a receive-only loop for completeness.
-              final mapper = _makeAuxMapper?.call() ?? _map;
-              _startRecvLoop(
-                recvStream,
-                isControl: false,
-                mapper: mapper,
-                label: label,
               );
             }
           } catch (error) {
@@ -809,15 +810,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       _auxStreamsBySlot[slot] = pooled;
       debugPrint(
         'QUIC aux stream slot=$slot assigned from server-stream pool '
-        '(${_serverStreamPool.length} remaining in pool)',
+        '(recv loop already running; ${_serverStreamPool.length} remaining in pool)',
       );
-      final auxMapper = _makeAuxMapper?.call() ?? _map;
-      _startRecvLoop(
-        pooled.recvStream,
-        isControl: false,
-        slot: slot,
-        mapper: auxMapper,
-      );
+      // The recv loop for this stream was started immediately when the server
+      // stream was accepted — do NOT start a second one here.
       _auxStreamOpening.remove(slot);
       return pooled;
     }
