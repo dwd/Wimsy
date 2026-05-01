@@ -24,6 +24,11 @@ class StorageService {
   static const _vcardAvatarStateKey = 'vcard_avatar_state';
   static const _bookmarksKey = 'bookmarks';
   static const _displayedSyncKey = 'displayed_sync';
+  // R1.3: pending (chatJid -> stanza-id) markers we received via MDS but
+  // could not yet match against any local message. These are resolved
+  // lazily as messages with the matching stanza-id arrive (live or via
+  // MAM) and are removed from disk once resolved.
+  static const _displayedSyncPendingKey = 'displayed_sync_pending';
   static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   final SecureStore _secureStorage = createSecureStore();
@@ -346,6 +351,9 @@ class StorageService {
       return;
     }
     await box.put(_displayedSyncKey, const <String, dynamic>{});
+    // R1.3: also wipe the pending-resolution map so disconnect/forget
+    // genuinely clears all MDS-related state.
+    await box.put(_displayedSyncPendingKey, const <String, dynamic>{});
   }
 
   Future<void> clearRoomMessages() async {
@@ -403,6 +411,45 @@ class StorageService {
       return;
     }
     await box.put(_displayedSyncKey, Map<String, String>.from(sync));
+  }
+
+  /// R1.3: load pending displayed-sync markers — i.e. (chatJid -> stanzaId)
+  /// pairs we received from the MDS node but could not yet match against
+  /// any locally cached message. The XmppService resolves these as
+  /// matching messages arrive (live, via MAM, or via Carbons).
+  Map<String, String> loadDisplayedSyncPending() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(
+      _displayedSyncPendingKey,
+      defaultValue: const <String, dynamic>{},
+    );
+    if (data is Map) {
+      final result = <String, String>{};
+      for (final entry in data.entries) {
+        final key = entry.key.toString();
+        final value = entry.value?.toString() ?? '';
+        if (key.isNotEmpty && value.isNotEmpty) {
+          result[key] = value;
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+
+  /// R1.3: persist the pending-resolution map.
+  Future<void> storeDisplayedSyncPending(Map<String, String> pending) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(
+      _displayedSyncPendingKey,
+      Map<String, String>.from(pending),
+    );
   }
 
   Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {

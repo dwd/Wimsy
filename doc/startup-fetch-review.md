@@ -411,8 +411,31 @@ Tackling in roughly priority order:
    suite `test/service_discovery_features_test.dart` now asserts that
    the +notify entries (and other core disco features) remain in the
    list. `doap.xml` already lists XEP-0490 as supported.
-5. **R1.3** — persist unresolved displayed markers and resolve them
-   from incoming MAM pages.
+5. **R1.3 — DONE (partially).** A new on-disk key
+   `displayed_sync_pending` is added to `StorageService`
+   (`loadDisplayedSyncPending` / `storeDisplayedSyncPending`,
+   wiped alongside the existing displayed_sync map by
+   `clearDisplayedSync`). `_applyDisplayedStateForChat` now records the
+   unresolved (chatJid, stanzaId) pair in an in-memory
+   `_displayedSyncPending` map (seeded from disk in `attachStorage` and
+   cleared everywhere `_displayedStanzaIdByChat` was). A new
+   `_resolveDisplayedSyncPending` helper is invoked from every
+   message-append path (DM and MUC, including the MAM-prepend path)
+   and re-runs the matcher when the new message's stanza-id matches.
+   On a successful match the displayed timestamp is set and MAM catch-up
+   is marked complete for the chat — exactly as if MDS had matched on
+   first sight.
+
+   Tests in `test/displayed_sync_pending_test.dart` cover the storage
+   round-trip and that `clearDisplayedSync` wipes both maps.
+
+   _Not done in this commit:_ driving a single bounded MAM query
+   towards the persisted `stanza-id` (using it as `before=`). The
+   resolver above is sufficient for the most common case (the missing
+   message comes back through the existing per-chat catch-up, or a
+   later live message) and avoids changing MAM query routing in this
+   batch. The bounded-query optimisation would land cleanly as a
+   subsequent change, on top of the persistence introduced here.
 6. **R2.2** — short-circuit `_primeMamSync` for chats whose latest
    MAM id is already at the displayed marker.
 7. **R5 / caps cache** — persist XEP-0115 verified caps across restarts.

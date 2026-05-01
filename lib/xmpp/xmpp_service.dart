@@ -194,6 +194,12 @@ class XmppService extends ChangeNotifier {
   String? _rosterVersion;
   final Map<String, String> _displayedStanzaIdByChat = {};
   final Map<String, DateTime> _displayedAtByChat = {};
+  // R1.3: pending displayed-sync markers we received from MDS but could
+  // not yet match to any locally cached message. Resolved as messages
+  // with the matching stanza-id are appended (live or via MAM). Persisted
+  // through `StorageService.storeDisplayedSyncPending` so the resolution
+  // survives restarts.
+  final Map<String, String> _displayedSyncPending = {};
   final Map<String, DateTime> _roomLastTrafficAt = {};
   final Map<String, DateTime> _roomLastPingAt = {};
   final Map<String, DateTime> _roomHistoryCutoffAt = {};
@@ -444,6 +450,11 @@ class XmppService extends ChangeNotifier {
     _displayedStanzaIdByChat
       ..clear()
       ..addAll(storage.loadDisplayedSync());
+    // R1.3: seed pending displayed-sync markers from disk so we can keep
+    // trying to resolve them as messages arrive in this session.
+    _displayedSyncPending
+      ..clear()
+      ..addAll(storage.loadDisplayedSyncPending());
   }
 
   List<ChatMessage> messagesFor(String bareJid) {
@@ -1138,6 +1149,7 @@ class XmppService extends ChangeNotifier {
     _bookmarkPersistor?.call(const []);
     _storage?.storeRosterVersion(null);
     _displayedStanzaIdByChat.clear();
+    _displayedSyncPending.clear();
     _displayedAtByChat.clear();
     _storage?.clearDisplayedSync();
     notifyListeners();
@@ -2280,7 +2292,7 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     return RegExp(
-      r'[\u00A9\u00AE\u203C-\u3299\u1F000-\u1FAFF]',
+      r'[\u00A9\u00AE\u203C-\u3299\u{1F000}-\u{1FAFF}]',
       unicode: true,
     ).hasMatch(value);
   }
@@ -5485,6 +5497,8 @@ class XmppService extends ChangeNotifier {
         ? _roomMessages[normalized]
         : _messages[normalized];
     if (list == null || list.isEmpty) {
+      // R1.3: persist the pending marker so we can resolve it later.
+      _markDisplayedSyncPending(normalized, stanzaId);
       return false;
     }
     ChatMessage? matched;
@@ -5505,17 +5519,75 @@ class XmppService extends ChangeNotifier {
         'Displayed sync miss for chat=$normalized stanzaId=$stanzaId '
             'messages=${list.length} knownStanzaIds=$knownStanzaIds',
       );
+      // R1.3: persist the (chat, stanzaId) pair. We will retry resolution
+      // every time a new message is appended (live or via MAM) for this
+      // chat — see `_resolveDisplayedSyncPending`.
+      _markDisplayedSyncPending(normalized, stanzaId);
       return false;
     }
     final existing = _displayedAtByChat[normalized];
     if (existing != null && !matched.timestamp.isAfter(existing)) {
+      // Even if we don't update the timestamp, we *did* successfully match
+      // the marker — so clear the pending entry.
+      _clearDisplayedSyncPending(normalized);
       return false;
     }
     _displayedAtByChat[normalized] = matched.timestamp;
     final isRoom =
         _roomMessages.containsKey(normalized) || isBookmark(normalized);
     _markMamCatchUpCompleted(normalized, isRoom: isRoom);
+    _clearDisplayedSyncPending(normalized);
     return true;
+  }
+
+  /// R1.3: record an unresolved (chat, stanza-id) pair and persist it so
+  /// the next session (or the next MAM page in this session) can resolve
+  /// it as messages arrive.
+  void _markDisplayedSyncPending(String bareJid, String stanzaId) {
+    if (bareJid.isEmpty || stanzaId.isEmpty) {
+      return;
+    }
+    if (_displayedSyncPending[bareJid] == stanzaId) {
+      return;
+    }
+    _displayedSyncPending[bareJid] = stanzaId;
+    _storage?.storeDisplayedSyncPending(
+      Map<String, String>.from(_displayedSyncPending),
+    );
+  }
+
+  /// R1.3: clear a resolved pending marker and persist the smaller map.
+  void _clearDisplayedSyncPending(String bareJid) {
+    if (!_displayedSyncPending.containsKey(bareJid)) {
+      return;
+    }
+    _displayedSyncPending.remove(bareJid);
+    _storage?.storeDisplayedSyncPending(
+      Map<String, String>.from(_displayedSyncPending),
+    );
+  }
+
+  /// R1.3: called from the message-append code paths whenever we add a
+  /// message with a known [stanzaId] to [bareJid]'s list. If the stanza-id
+  /// matches the chat's pending displayed-sync marker, kick the marker
+  /// resolution path. Cheap O(1) lookup; safe to call unconditionally.
+  void _resolveDisplayedSyncPending(String bareJid, String? stanzaId) {
+    if (stanzaId == null || stanzaId.isEmpty) {
+      return;
+    }
+    final normalized = _bareJid(bareJid);
+    final pending = _displayedSyncPending[normalized];
+    if (pending == null || pending != stanzaId) {
+      return;
+    }
+    // Re-run the matcher; on success it clears the pending entry, sets the
+    // displayed timestamp, and marks MAM catch-up complete for this chat.
+    if (_applyDisplayedStateForChat(normalized)) {
+      _storage?.storeDisplayedSync(
+        Map<String, String>.from(_displayedStanzaIdByChat),
+      );
+      notifyListeners();
+    }
   }
 
   void _setupPrivacyLists() {
@@ -6155,6 +6227,10 @@ class XmppService extends ChangeNotifier {
     }
     notifyListeners();
     _messagePersistor?.call(normalized, List.unmodifiable(list));
+    // R1.3: this newly-appended DM message may resolve a pending displayed
+    // marker (typical case after a restart for a chat where the marker
+    // pointed beyond our 25-message tail).
+    _resolveDisplayedSyncPending(normalized, stanzaId);
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
         _isMamCatchUpComplete(normalized, isRoom: false)) {
@@ -6284,6 +6360,9 @@ class XmppService extends ChangeNotifier {
       _mamCursorStore.incrementPrependOffset(normalized);
       notifyListeners();
       _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+      // R1.3: a MAM-page-prepended MUC message can resolve a pending
+      // displayed marker for this room.
+      _resolveDisplayedSyncPending(normalized, stanzaId);
       if (!outgoing) {
         _incomingRoomMessageHandler?.call(normalized, list[insertIndex]);
       }
@@ -6309,6 +6388,9 @@ class XmppService extends ChangeNotifier {
     _insertMessageOrdered(list, newMessage);
     notifyListeners();
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    // R1.3: a freshly-appended MUC message may resolve a pending displayed
+    // marker for this room.
+    _resolveDisplayedSyncPending(normalized, stanzaId);
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
         _isMamCatchUpComplete(normalized, isRoom: true) &&
@@ -7093,6 +7175,7 @@ class XmppService extends ChangeNotifier {
     _roomHistoryCutoffAt.clear();
     _lastDisplayedMarkerIdByChat.clear();
     _displayedStanzaIdByChat.clear();
+    _displayedSyncPending.clear();
     _displayedAtByChat.clear();
     if (!preserveCache) {
       _recentReactionEmojis.clear();
