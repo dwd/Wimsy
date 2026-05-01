@@ -457,8 +457,22 @@ Tackling in roughly priority order:
    tests in `test/pep_caps_manager_test.dart` cover (a) persistence on
    disco result, (b) seed-from-disk skipping the disco IQ, and (c)
    unknown `node#ver` still triggering disco even with a seeded cache.
-8. **R2.1** — add a single global `last_mam_id_seen` and a unified
-   catch-up query, eventually allowing per-chat catch-up to be lazy.
+8. **R2.1 — DONE (partially).** Added the persisted global anchor
+   `last_mam_id_seen` to `StorageService`
+   (`loadLastMamIdSeen` / `storeLastMamIdSeen` / `clearLastMamIdSeen`).
+   `XmppService` seeds `_lastMamIdSeen` from disk in `attachStorage`,
+   exposes it via the new `lastMamIdSeen` getter, and bumps it from
+   every message-append path (DM, MUC tail, MUC MAM-prepend) via the
+   new private helper `_bumpLastMamIdSeen` (a lexicographic
+   compare-and-swap). New tests in `test/last_mam_id_seen_test.dart`
+   cover the storage round-trip.
+
+   _Not done in this commit:_ the actual unified catch-up query that
+   uses this anchor instead of fanning out per-chat. That would change
+   MAM query routing and is intentionally left as a follow-up — the
+   anchor it would need to read is now persisted and updated, so the
+   follow-up can be a localised change inside `_primeMamSync` /
+   `MamQueryPlanner` without touching the message-ingest paths.
 9. **R3.1** — periodic GC of unreferenced avatar blobs.
 
 Each of the above can ship as its own PR with tests:

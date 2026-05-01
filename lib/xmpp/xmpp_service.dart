@@ -200,6 +200,12 @@ class XmppService extends ChangeNotifier {
   // through `StorageService.storeDisplayedSyncPending` so the resolution
   // survives restarts.
   final Map<String, String> _displayedSyncPending = {};
+  // R2.1: globally newest MAM id we have ingested across all chats.
+  // Persisted via `StorageService.storeLastMamIdSeen` so future sessions
+  // can issue a single unified catch-up query (`afterId=` this anchor)
+  // instead of fanning out per-chat. The unified-query wiring is a
+  // follow-up; this commit lays the persistence foundation.
+  String? _lastMamIdSeen;
   final Map<String, DateTime> _roomLastTrafficAt = {};
   final Map<String, DateTime> _roomLastPingAt = {};
   final Map<String, DateTime> _roomHistoryCutoffAt = {};
@@ -455,6 +461,29 @@ class XmppService extends ChangeNotifier {
     _displayedSyncPending
       ..clear()
       ..addAll(storage.loadDisplayedSyncPending());
+    // R2.1: seed the globally-newest MAM id anchor.
+    _lastMamIdSeen = storage.loadLastMamIdSeen();
+  }
+
+  /// R2.1: returns the globally newest MAM id we have ingested across all
+  /// chats, persisted across restarts. May be null on a fresh install.
+  String? get lastMamIdSeen => _lastMamIdSeen;
+
+  /// R2.1: update the global MAM-id anchor. We compare lexicographically
+  /// because XEP-0359 stanza ids are unique, server-assigned strings; the
+  /// MAM ids we get from a single archive are typically allocated in
+  /// monotonic order, so a string-greater-than comparison is good enough
+  /// to discard out-of-order updates without spurious disk writes.
+  void _bumpLastMamIdSeen(String? mamId) {
+    if (mamId == null || mamId.isEmpty) {
+      return;
+    }
+    final current = _lastMamIdSeen;
+    if (current != null && current.compareTo(mamId) >= 0) {
+      return;
+    }
+    _lastMamIdSeen = mamId;
+    _storage?.storeLastMamIdSeen(mamId);
   }
 
   List<ChatMessage> messagesFor(String bareJid) {
@@ -6235,6 +6264,8 @@ class XmppService extends ChangeNotifier {
     // marker (typical case after a restart for a chat where the marker
     // pointed beyond our 25-message tail).
     _resolveDisplayedSyncPending(normalized, stanzaId);
+    // R2.1: bump the global MAM-id anchor.
+    _bumpLastMamIdSeen(mamId);
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
         _isMamCatchUpComplete(normalized, isRoom: false)) {
@@ -6367,6 +6398,8 @@ class XmppService extends ChangeNotifier {
       // R1.3: a MAM-page-prepended MUC message can resolve a pending
       // displayed marker for this room.
       _resolveDisplayedSyncPending(normalized, stanzaId);
+      // R2.1: bump the global MAM-id anchor for prepended MAM messages.
+      _bumpLastMamIdSeen(mamId);
       if (!outgoing) {
         _incomingRoomMessageHandler?.call(normalized, list[insertIndex]);
       }
@@ -6395,6 +6428,8 @@ class XmppService extends ChangeNotifier {
     // R1.3: a freshly-appended MUC message may resolve a pending displayed
     // marker for this room.
     _resolveDisplayedSyncPending(normalized, stanzaId);
+    // R2.1: bump the global MAM-id anchor.
+    _bumpLastMamIdSeen(mamId);
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
         _isMamCatchUpComplete(normalized, isRoom: true) &&

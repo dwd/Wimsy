@@ -32,6 +32,12 @@ class StorageService {
   // R5: persisted Entity Capabilities (XEP-0115) cache, keyed by
   // `node#ver`. Values are the disco#info feature lists.
   static const _entityCapsKey = 'entity_caps';
+  // R2.1: single global anchor for the newest MAM id we've ingested
+  // across all chats. The intent is to enable a unified MAM catch-up
+  // query (`<query><x type=submit><field var=after-id>...`) that
+  // replaces the per-chat fan-out at connect time. We persist the
+  // anchor today; the unified query is a follow-up.
+  static const _lastMamIdSeenKey = 'last_mam_id_seen';
   static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   final SecureStore _secureStorage = createSecureStore();
@@ -528,6 +534,45 @@ class StorageService {
       return;
     }
     await box.put(_entityCapsKey, const <String, dynamic>{});
+  }
+
+  /// R2.1: load the persisted "newest MAM id we've seen" anchor across
+  /// all chats. Returns null when there is no recorded anchor.
+  String? loadLastMamIdSeen() {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final value = box.get(_lastMamIdSeenKey)?.toString();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  /// R2.1: persist the global anchor. Callers should only call this with
+  /// an id that is genuinely newer than the previous anchor; the helper
+  /// performs no ordering check (MAM ids are server-assigned and only
+  /// totally ordered within a single MAM archive, so the value passed
+  /// here must come from the caller's append path).
+  Future<void> storeLastMamIdSeen(String mamId) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (mamId.isEmpty) {
+      return;
+    }
+    await box.put(_lastMamIdSeenKey, mamId);
+  }
+
+  /// R2.1: clear the anchor (forget-account flows).
+  Future<void> clearLastMamIdSeen() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.delete(_lastMamIdSeenKey);
   }
 
   Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {
