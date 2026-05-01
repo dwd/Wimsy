@@ -42,22 +42,22 @@ tc class add dev "$IFACE" parent 1: classid 1:99 htb rate 1gbit ceil 1gbit
 tc qdisc add dev "$IFACE" parent 1:99 handle 99: pfifo_fast
 
 # Impaired class: rate-limited, with netem delay and loss
-tc class add dev "$IFACE" parent 1: classid 1:1 htb rate "$RATE" ceil "$RATE"
+tc class add dev "$IFACE" parent 1:99 classid 1:1 htb rate "$RATE" ceil "$RATE"
 tc qdisc add dev "$IFACE" parent 1:1 handle 10: netem delay "$DELAY" loss "$LOSS"
 
 # Match IPv6 UDP/5224 → remote IPv6 → impaired class
-tc filter add dev "$IFACE" protocol ipv6 parent 1: prio 1 flower \
+tc filter add dev "$IFACE" protocol ipv6 parent 1:1 prio 1 flower \
     ip_proto udp \
     dst_port "$PORT" \
     dst_ip "$IPV6" \
-    flowid 1:1
+    flowid 1:99
 
 # Match IPv4 UDP/5224 → remote IPv4 → impaired class
-tc filter add dev "$IFACE" protocol ip parent 1: prio 2 flower \
+tc filter add dev "$IFACE" protocol ip parent 1:1 prio 2 flower \
     ip_proto udp \
     dst_port "$PORT" \
     dst_ip "$IPV4" \
-    flowid 1:1
+    flowid 1:99
 
 ###############################################
 # INBOUND SHAPING (ingress → IFB)

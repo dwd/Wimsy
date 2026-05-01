@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IFACE="${1:?Interface required}"
-BW="${2:?Bandwidth required (e.g. 10mbit)}"
-LAT="${3:?Latency required (e.g. 50ms)}"
-LOSS="${4:?Loss required (e.g. 1%)}"
+# IFACE="${1:?Interface required}"
+BW="${1:?Bandwidth required (e.g. 10mbit)}"
+LAT="${2:?Latency required (e.g. 50ms)}"
+LOSS="${3:?Loss required (e.g. 1%)}"
 
-# Remote QUIC endpoint
-IPV6="2a02:8010:300a::3"
-IPV4="88.98.37.179"
-PORT="5224"
+source shape-cfg.sh
 
 echo "[*] Loading IFB module"
 modprobe ifb || true
