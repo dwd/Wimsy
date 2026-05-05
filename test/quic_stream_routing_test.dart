@@ -1,4 +1,4 @@
-import 'package:flutter_quic/flutter_quic.dart' show connectionAcceptBi;
+import 'package:flutter_quic/flutter_quic.dart' show connectionAcceptBi, connectionOpenBi, connectionStats, connectionCloseReason, connectionRttMillis;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wimsy/xmpp/quic_xmpp_socket.dart';
 
@@ -116,17 +116,31 @@ void main() {
     });
   });
 
-  group('connectionAcceptBi bridge export', () {
-    // connectionAcceptBi requires a live QUIC connection and cannot be called
-    // in a unit test. These tests verify that the symbol is exported from the
-    // flutter_quic bridge with the expected type so that compile-time regressions
-    // are caught immediately.
-    //
-    // The function now takes a shared reference (&QuicConnection) so it does
-    // NOT consume the arc and can run concurrently with connectionOpenBi.
+  group('connection bridge shared-ref exports', () {
+    // These functions all take &QuicConnection (shared reference) in Rust so
+    // multiple calls can be in-flight concurrently without DroppableDisposedException.
+    // The tests below are compile-time guards: if the codegen did not produce
+    // the symbol, or changed its type, the import or isA<Function>() check fails.
     test('connectionAcceptBi is a Function', () {
-      // If the codegen did not produce the symbol this line would not compile.
       expect(connectionAcceptBi, isA<Function>());
+    });
+
+    test('connectionOpenBi is a Function', () {
+      // connectionOpenBi now takes &QuicConnection — concurrent opens are safe.
+      expect(connectionOpenBi, isA<Function>());
+    });
+
+    test('connectionStats is a Function', () {
+      // connectionStats now takes &QuicConnection — no arc consumed, no re-read needed.
+      expect(connectionStats, isA<Function>());
+    });
+
+    test('connectionCloseReason is a Function', () {
+      expect(connectionCloseReason, isA<Function>());
+    });
+
+    test('connectionRttMillis is a Function', () {
+      expect(connectionRttMillis, isA<Function>());
     });
   });
 }

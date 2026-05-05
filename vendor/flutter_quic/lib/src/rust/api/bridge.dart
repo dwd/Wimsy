@@ -71,9 +71,14 @@ Future<(QuicRecvStream, Uint8List)> recvStreamReadToEnd({
   maxLength: maxLength,
 );
 
-/// Open a bidirectional stream on a QUIC connection
-/// This exposes the QuicConnection.open_bi() method to flutter_rust_bridge
-Future<(QuicConnection, QuicSendStream, QuicRecvStream)> connectionOpenBi({
+/// Open a bidirectional stream on a QUIC connection.
+///
+/// Takes a shared reference so multiple concurrent `open_bi` calls can be in
+/// flight simultaneously without racing on the Auto_Owned arc. Quinn's
+/// `Connection::open_bi` only needs `&self` internally.
+///
+/// This exposes the QuicConnection.open_bi() method to flutter_rust_bridge.
+Future<(QuicSendStream, QuicRecvStream)> connectionOpenBi({
   required QuicConnection connection,
 }) =>
     RustLib.instance.api.crateApiBridgeConnectionOpenBi(connection: connection);
@@ -96,9 +101,12 @@ Future<(QuicSendStream?, QuicRecvStream?)> connectionAcceptBi({
   connection: connection,
 );
 
-/// Open a unidirectional stream on a QUIC connection
-/// This exposes the QuicConnection.open_uni() method to flutter_rust_bridge
-Future<(QuicConnection, QuicSendStream)> connectionOpenUni({
+/// Open a unidirectional stream on a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.open_uni() method to flutter_rust_bridge.
+Future<QuicSendStream> connectionOpenUni({
   required QuicConnection connection,
 }) => RustLib.instance.api.crateApiBridgeConnectionOpenUni(
   connection: connection,
@@ -124,9 +132,12 @@ Future<(QuicEndpoint, QuicConnection)> endpointConnect({
   qlogPath: qlogPath,
 );
 
-/// Send a datagram on a QUIC connection
-/// This exposes the QuicConnection.send_datagram() method to flutter_rust_bridge
-Future<QuicConnection> connectionSendDatagram({
+/// Send a datagram on a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.send_datagram() method to flutter_rust_bridge.
+Future<void> connectionSendDatagram({
   required QuicConnection connection,
   required List<int> data,
 }) => RustLib.instance.api.crateApiBridgeConnectionSendDatagram(
@@ -134,9 +145,12 @@ Future<QuicConnection> connectionSendDatagram({
   data: data,
 );
 
-/// Send a datagram with backpressure on a QUIC connection
-/// This exposes the QuicConnection.send_datagram_wait() method to flutter_rust_bridge
-Future<QuicConnection> connectionSendDatagramWait({
+/// Send a datagram with backpressure on a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.send_datagram_wait() method to flutter_rust_bridge.
+Future<void> connectionSendDatagramWait({
   required QuicConnection connection,
   required List<int> data,
 }) => RustLib.instance.api.crateApiBridgeConnectionSendDatagramWait(
@@ -144,73 +158,96 @@ Future<QuicConnection> connectionSendDatagramWait({
   data: data,
 );
 
-/// Read a datagram from a QUIC connection
-/// This exposes the QuicConnection.read_datagram() method to flutter_rust_bridge
-Future<(QuicConnection, Uint8List?)> connectionReadDatagram({
+/// Read a datagram from a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.read_datagram() method to flutter_rust_bridge.
+Future<Uint8List?> connectionReadDatagram({
   required QuicConnection connection,
 }) => RustLib.instance.api.crateApiBridgeConnectionReadDatagram(
   connection: connection,
 );
 
-/// Get datagram send buffer space
-/// This exposes the QuicConnection.datagram_send_buffer_space() method to flutter_rust_bridge
-Future<(QuicConnection, BigInt)> connectionDatagramSendBufferSpace({
+/// Get datagram send buffer space.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.datagram_send_buffer_space() method to flutter_rust_bridge.
+Future<BigInt> connectionDatagramSendBufferSpace({
   required QuicConnection connection,
 }) => RustLib.instance.api.crateApiBridgeConnectionDatagramSendBufferSpace(
   connection: connection,
 );
 
-/// Get maximum datagram size
-/// This exposes the QuicConnection.max_datagram_size() method to flutter_rust_bridge
-Future<(QuicConnection, BigInt?)> connectionMaxDatagramSize({
+/// Get maximum datagram size.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.max_datagram_size() method to flutter_rust_bridge.
+Future<BigInt?> connectionMaxDatagramSize({
   required QuicConnection connection,
 }) => RustLib.instance.api.crateApiBridgeConnectionMaxDatagramSize(
   connection: connection,
 );
 
-/// Get the remote address of a QUIC connection
-/// This exposes the QuicConnection.remote_address() method to flutter_rust_bridge
-Future<(QuicConnection, SocketAddress)> connectionRemoteAddress({
+/// Get the remote address of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.remote_address() method to flutter_rust_bridge.
+Future<SocketAddress> connectionRemoteAddress({
   required QuicConnection connection,
 }) => RustLib.instance.api.crateApiBridgeConnectionRemoteAddress(
   connection: connection,
 );
 
-/// Get the local IP address of a QUIC connection
-/// This exposes the QuicConnection.local_ip() method to flutter_rust_bridge
-Future<(QuicConnection, String?)> connectionLocalIp({
-  required QuicConnection connection,
-}) => RustLib.instance.api.crateApiBridgeConnectionLocalIp(
-  connection: connection,
-);
+/// Get the local IP address of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.local_ip() method to flutter_rust_bridge.
+Future<String?> connectionLocalIp({required QuicConnection connection}) =>
+    RustLib.instance.api.crateApiBridgeConnectionLocalIp(
+      connection: connection,
+    );
 
-/// Get the RTT of a QUIC connection in milliseconds
-/// This exposes the QuicConnection.rtt() method to flutter_rust_bridge
-Future<(QuicConnection, BigInt)> connectionRttMillis({
-  required QuicConnection connection,
-}) => RustLib.instance.api.crateApiBridgeConnectionRttMillis(
-  connection: connection,
-);
+/// Get the RTT of a QUIC connection in milliseconds.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.rtt() method to flutter_rust_bridge.
+Future<BigInt> connectionRttMillis({required QuicConnection connection}) =>
+    RustLib.instance.api.crateApiBridgeConnectionRttMillis(
+      connection: connection,
+    );
 
-/// Get the stable ID of a QUIC connection
-/// This exposes the QuicConnection.stable_id() method to flutter_rust_bridge
-Future<(QuicConnection, BigInt)> connectionStableId({
-  required QuicConnection connection,
-}) => RustLib.instance.api.crateApiBridgeConnectionStableId(
-  connection: connection,
-);
+/// Get the stable ID of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.stable_id() method to flutter_rust_bridge.
+Future<BigInt> connectionStableId({required QuicConnection connection}) =>
+    RustLib.instance.api.crateApiBridgeConnectionStableId(
+      connection: connection,
+    );
 
-/// Get the close reason of a QUIC connection
-/// This exposes the QuicConnection.close_reason() method to flutter_rust_bridge
-Future<(QuicConnection, String?)> connectionCloseReason({
-  required QuicConnection connection,
-}) => RustLib.instance.api.crateApiBridgeConnectionCloseReason(
-  connection: connection,
-);
+/// Get the close reason of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.close_reason() method to flutter_rust_bridge.
+Future<String?> connectionCloseReason({required QuicConnection connection}) =>
+    RustLib.instance.api.crateApiBridgeConnectionCloseReason(
+      connection: connection,
+    );
 
-/// Get the statistics of a QUIC connection
-/// This exposes the QuicConnection.stats() method to flutter_rust_bridge
-Future<(QuicConnection, QuicConnectionStats)> connectionStats({
+/// Get the statistics of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.stats() method to flutter_rust_bridge.
+Future<QuicConnectionStats> connectionStats({
   required QuicConnection connection,
 }) =>
     RustLib.instance.api.crateApiBridgeConnectionStats(connection: connection);
@@ -220,11 +257,13 @@ Future<(QuicConnection, QuicConnectionStats)> connectionStats({
 /// Exposes [`QuicConnection::peer_transport_params`] across the FFI. Useful for
 /// diagnosing `connection_open_bi` hangs caused by the peer advertising a small
 /// `initial_max_streams_bidi` and never raising it with `MAX_STREAMS`.
-Future<(QuicConnection, QuicPeerTransportParams)>
-connectionPeerTransportParams({required QuicConnection connection}) => RustLib
-    .instance
-    .api
-    .crateApiBridgeConnectionPeerTransportParams(connection: connection);
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+Future<QuicPeerTransportParams> connectionPeerTransportParams({
+  required QuicConnection connection,
+}) => RustLib.instance.api.crateApiBridgeConnectionPeerTransportParams(
+  connection: connection,
+);
 
 /// Create a new server config with single certificate
 Future<QuicServerConfig> serverConfigWithSingleCert({

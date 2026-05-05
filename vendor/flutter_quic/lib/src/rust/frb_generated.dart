@@ -110,61 +110,61 @@ abstract class RustLibApi extends BaseApi {
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, String?)> crateApiBridgeConnectionCloseReason({
+  Future<String?> crateApiBridgeConnectionCloseReason({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, BigInt)>
-  crateApiBridgeConnectionDatagramSendBufferSpace({
+  Future<BigInt> crateApiBridgeConnectionDatagramSendBufferSpace({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, String?)> crateApiBridgeConnectionLocalIp({
+  Future<String?> crateApiBridgeConnectionLocalIp({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, BigInt?)> crateApiBridgeConnectionMaxDatagramSize({
+  Future<BigInt?> crateApiBridgeConnectionMaxDatagramSize({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, QuicSendStream, QuicRecvStream)>
-  crateApiBridgeConnectionOpenBi({required QuicConnection connection});
-
-  Future<(QuicConnection, QuicSendStream)> crateApiBridgeConnectionOpenUni({
+  Future<(QuicSendStream, QuicRecvStream)> crateApiBridgeConnectionOpenBi({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, QuicPeerTransportParams)>
-  crateApiBridgeConnectionPeerTransportParams({
+  Future<QuicSendStream> crateApiBridgeConnectionOpenUni({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, Uint8List?)> crateApiBridgeConnectionReadDatagram({
+  Future<QuicPeerTransportParams> crateApiBridgeConnectionPeerTransportParams({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, SocketAddress)>
-  crateApiBridgeConnectionRemoteAddress({required QuicConnection connection});
-
-  Future<(QuicConnection, BigInt)> crateApiBridgeConnectionRttMillis({
+  Future<Uint8List?> crateApiBridgeConnectionReadDatagram({
     required QuicConnection connection,
   });
 
-  Future<QuicConnection> crateApiBridgeConnectionSendDatagram({
+  Future<SocketAddress> crateApiBridgeConnectionRemoteAddress({
     required QuicConnection connection,
-    required List<int> data,
   });
 
-  Future<QuicConnection> crateApiBridgeConnectionSendDatagramWait({
+  Future<BigInt> crateApiBridgeConnectionRttMillis({
+    required QuicConnection connection,
+  });
+
+  Future<void> crateApiBridgeConnectionSendDatagram({
     required QuicConnection connection,
     required List<int> data,
   });
 
-  Future<(QuicConnection, BigInt)> crateApiBridgeConnectionStableId({
+  Future<void> crateApiBridgeConnectionSendDatagramWait({
+    required QuicConnection connection,
+    required List<int> data,
+  });
+
+  Future<BigInt> crateApiBridgeConnectionStableId({
     required QuicConnection connection,
   });
 
-  Future<(QuicConnection, QuicConnectionStats)> crateApiBridgeConnectionStats({
+  Future<QuicConnectionStats> crateApiBridgeConnectionStats({
     required QuicConnection connection,
   });
 
@@ -595,14 +595,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, String?)> crateApiBridgeConnectionCloseReason({
+  Future<String?> crateApiBridgeConnectionCloseReason({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -614,8 +614,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string,
+          decodeSuccessData: sse_decode_opt_String,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionCloseReasonConstMeta,
@@ -632,15 +631,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, BigInt)>
-  crateApiBridgeConnectionDatagramSendBufferSpace({
+  Future<BigInt> crateApiBridgeConnectionDatagramSendBufferSpace({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -652,8 +650,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize,
+          decodeSuccessData: sse_decode_usize,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionDatagramSendBufferSpaceConstMeta,
@@ -670,14 +667,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, String?)> crateApiBridgeConnectionLocalIp({
+  Future<String?> crateApiBridgeConnectionLocalIp({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -689,8 +686,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string,
+          decodeSuccessData: sse_decode_opt_String,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionLocalIpConstMeta,
@@ -707,14 +703,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, BigInt?)> crateApiBridgeConnectionMaxDatagramSize({
+  Future<BigInt?> crateApiBridgeConnectionMaxDatagramSize({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -726,8 +722,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize,
+          decodeSuccessData: sse_decode_opt_box_autoadd_usize,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionMaxDatagramSizeConstMeta,
@@ -744,13 +739,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, QuicSendStream, QuicRecvStream)>
-  crateApiBridgeConnectionOpenBi({required QuicConnection connection}) {
+  Future<(QuicSendStream, QuicRecvStream)> crateApiBridgeConnectionOpenBi({
+    required QuicConnection connection,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -763,7 +759,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         },
         codec: SseCodec(
           decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream,
+              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream,
           decodeErrorData: sse_decode_quic_error,
         ),
         constMeta: kCrateApiBridgeConnectionOpenBiConstMeta,
@@ -780,14 +776,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, QuicSendStream)> crateApiBridgeConnectionOpenUni({
+  Future<QuicSendStream> crateApiBridgeConnectionOpenUni({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -800,7 +796,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         },
         codec: SseCodec(
           decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream,
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream,
           decodeErrorData: sse_decode_quic_error,
         ),
         constMeta: kCrateApiBridgeConnectionOpenUniConstMeta,
@@ -817,15 +813,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, QuicPeerTransportParams)>
-  crateApiBridgeConnectionPeerTransportParams({
+  Future<QuicPeerTransportParams> crateApiBridgeConnectionPeerTransportParams({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -837,8 +832,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params,
+          decodeSuccessData: sse_decode_quic_peer_transport_params,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionPeerTransportParamsConstMeta,
@@ -855,14 +849,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, Uint8List?)> crateApiBridgeConnectionReadDatagram({
+  Future<Uint8List?> crateApiBridgeConnectionReadDatagram({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -874,8 +868,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict,
+          decodeSuccessData: sse_decode_opt_list_prim_u_8_strict,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionReadDatagramConstMeta,
@@ -892,13 +885,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, SocketAddress)>
-  crateApiBridgeConnectionRemoteAddress({required QuicConnection connection}) {
+  Future<SocketAddress> crateApiBridgeConnectionRemoteAddress({
+    required QuicConnection connection,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -910,8 +904,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address,
+          decodeSuccessData: sse_decode_socket_address,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionRemoteAddressConstMeta,
@@ -928,14 +921,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, BigInt)> crateApiBridgeConnectionRttMillis({
+  Future<BigInt> crateApiBridgeConnectionRttMillis({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -947,8 +940,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64,
+          decodeSuccessData: sse_decode_u_64,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionRttMillisConstMeta,
@@ -965,7 +957,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<QuicConnection> crateApiBridgeConnectionSendDatagram({
+  Future<void> crateApiBridgeConnectionSendDatagram({
     required QuicConnection connection,
     required List<int> data,
   }) {
@@ -973,7 +965,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -986,8 +978,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection,
+          decodeSuccessData: sse_decode_unit,
           decodeErrorData: sse_decode_quic_datagram_exception,
         ),
         constMeta: kCrateApiBridgeConnectionSendDatagramConstMeta,
@@ -1004,7 +995,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<QuicConnection> crateApiBridgeConnectionSendDatagramWait({
+  Future<void> crateApiBridgeConnectionSendDatagramWait({
     required QuicConnection connection,
     required List<int> data,
   }) {
@@ -1012,7 +1003,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -1025,8 +1016,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection,
+          decodeSuccessData: sse_decode_unit,
           decodeErrorData: sse_decode_quic_datagram_exception,
         ),
         constMeta: kCrateApiBridgeConnectionSendDatagramWaitConstMeta,
@@ -1043,14 +1033,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, BigInt)> crateApiBridgeConnectionStableId({
+  Future<BigInt> crateApiBridgeConnectionStableId({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -1062,8 +1052,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize,
+          decodeSuccessData: sse_decode_usize,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionStableIdConstMeta,
@@ -1080,14 +1069,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<(QuicConnection, QuicConnectionStats)> crateApiBridgeConnectionStats({
+  Future<QuicConnectionStats> crateApiBridgeConnectionStats({
     required QuicConnection connection,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
             connection,
             serializer,
           );
@@ -1099,8 +1088,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData:
-              sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats,
+          decodeSuccessData: sse_decode_quic_connection_stats,
           decodeErrorData: null,
         ),
         constMeta: kCrateApiBridgeConnectionStatsConstMeta,
@@ -2497,193 +2485,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  (QuicConnection, QuicSendStream)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
-        arr[1],
-      ),
-    );
-  }
-
-  @protected
-  (QuicConnection, QuicSendStream, QuicRecvStream)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 3) {
-      throw Exception('Expected 3 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
-        arr[1],
-      ),
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
-        arr[2],
-      ),
-    );
-  }
-
-  @protected
-  (QuicConnection, BigInt?)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_opt_box_autoadd_usize(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, Uint8List?)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_opt_list_prim_u_8_strict(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, String?)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_opt_String(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, QuicConnectionStats)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_quic_connection_stats(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, QuicPeerTransportParams)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_quic_peer_transport_params(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, SocketAddress)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_socket_address(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, BigInt)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_u_64(arr[1]),
-    );
-  }
-
-  @protected
-  (QuicConnection, BigInt)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2) {
-      throw Exception('Expected 2 elements, got ${arr.length}');
-    }
-    return (
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-        arr[0],
-      ),
-      dco_decode_usize(arr[1]),
-    );
-  }
-
-  @protected
   (QuicEndpoint, QuicConnection)
   dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_endpoint_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection(
     dynamic raw,
@@ -2736,6 +2537,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         arr[0],
       ),
       dco_decode_opt_list_prim_u_8_strict(arr[1]),
+    );
+  }
+
+  @protected
+  (QuicSendStream, QuicRecvStream)
+  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2) {
+      throw Exception('Expected 2 elements, got ${arr.length}');
+    }
+    return (
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+        arr[0],
+      ),
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+        arr[1],
+      ),
     );
   }
 
@@ -3455,156 +3276,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  (QuicConnection, QuicSendStream)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
-          deserializer,
-        );
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, QuicSendStream, QuicRecvStream)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
-          deserializer,
-        );
-    var var_field2 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
-          deserializer,
-        );
-    return (var_field0, var_field1, var_field2);
-  }
-
-  @protected
-  (QuicConnection, BigInt?)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_opt_box_autoadd_usize(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, Uint8List?)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_opt_list_prim_u_8_strict(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, String?)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_opt_String(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, QuicConnectionStats)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_quic_connection_stats(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, QuicPeerTransportParams)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_quic_peer_transport_params(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, SocketAddress)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_socket_address(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, BigInt)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_u_64(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
-  (QuicConnection, BigInt)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_field0 =
-        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-          deserializer,
-        );
-    var var_field1 = sse_decode_usize(deserializer);
-    return (var_field0, var_field1);
-  }
-
-  @protected
   (QuicEndpoint, QuicConnection)
   sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_endpoint_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection(
     SseDeserializer deserializer,
@@ -3646,6 +3317,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           deserializer,
         );
     var var_field1 = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    return (var_field0, var_field1);
+  }
+
+  @protected
+  (QuicSendStream, QuicRecvStream)
+  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field0 =
+        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+          deserializer,
+        );
+    var var_field1 =
+        sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+          deserializer,
+        );
     return (var_field0, var_field1);
   }
 
@@ -4335,156 +4023,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream(
-    (QuicConnection, QuicSendStream) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
-      self.$2,
-      serializer,
-    );
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
-    (QuicConnection, QuicSendStream, QuicRecvStream) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
-      self.$2,
-      serializer,
-    );
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
-      self.$3,
-      serializer,
-    );
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize(
-    (QuicConnection, BigInt?) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_opt_box_autoadd_usize(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict(
-    (QuicConnection, Uint8List?) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_opt_list_prim_u_8_strict(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string(
-    (QuicConnection, String?) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_opt_String(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
-    (QuicConnection, QuicConnectionStats) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_quic_connection_stats(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
-    (QuicConnection, QuicPeerTransportParams) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_quic_peer_transport_params(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address(
-    (QuicConnection, SocketAddress) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_socket_address(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64(
-    (QuicConnection, BigInt) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_u_64(self.$2, serializer);
-  }
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize(
-    (QuicConnection, BigInt) self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
-      self.$1,
-      serializer,
-    );
-    sse_encode_usize(self.$2, serializer);
-  }
-
-  @protected
-  void
   sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_endpoint_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection(
     (QuicEndpoint, QuicConnection) self,
     SseSerializer serializer,
@@ -4526,6 +4064,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_opt_list_prim_u_8_strict(self.$2, serializer);
+  }
+
+  @protected
+  void
+  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    (QuicSendStream, QuicRecvStream) self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+      self.$1,
+      serializer,
+    );
+    sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+      self.$2,
+      serializer,
+    );
   }
 
   @protected

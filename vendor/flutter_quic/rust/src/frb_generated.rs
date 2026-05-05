@@ -341,12 +341,33 @@ fn wire__crate__api__bridge__connection_close_reason_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(
-                        crate::api::bridge::connection_close_reason(api_connection),
+                        crate::api::bridge::connection_close_reason(&*api_connection_guard),
                     )?;
                     Ok(output_ok)
                 })())
@@ -376,12 +397,35 @@ fn wire__crate__api__bridge__connection_datagram_send_buffer_space_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(
-                        crate::api::bridge::connection_datagram_send_buffer_space(api_connection),
+                        crate::api::bridge::connection_datagram_send_buffer_space(
+                            &*api_connection_guard,
+                        ),
                     )?;
                     Ok(output_ok)
                 })())
@@ -411,12 +455,33 @@ fn wire__crate__api__bridge__connection_local_ip_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(crate::api::bridge::connection_local_ip(
-                        api_connection,
+                        &*api_connection_guard,
                     ))?;
                     Ok(output_ok)
                 })())
@@ -446,12 +511,33 @@ fn wire__crate__api__bridge__connection_max_datagram_size_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(
-                        crate::api::bridge::connection_max_datagram_size(api_connection),
+                        crate::api::bridge::connection_max_datagram_size(&*api_connection_guard),
                     )?;
                     Ok(output_ok)
                 })())
@@ -481,13 +567,34 @@ fn wire__crate__api__bridge__connection_open_bi_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicError>(
                     (move || async move {
+                        let mut api_connection_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_connection,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_connection_guard =
+                                        Some(api_connection.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_connection_guard = api_connection_guard.unwrap();
                         let output_ok =
-                            crate::api::bridge::connection_open_bi(api_connection).await?;
+                            crate::api::bridge::connection_open_bi(&*api_connection_guard).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -518,13 +625,34 @@ fn wire__crate__api__bridge__connection_open_uni_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicError>(
                     (move || async move {
+                        let mut api_connection_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_connection,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_connection_guard =
+                                        Some(api_connection.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_connection_guard = api_connection_guard.unwrap();
                         let output_ok =
-                            crate::api::bridge::connection_open_uni(api_connection).await?;
+                            crate::api::bridge::connection_open_uni(&*api_connection_guard).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -555,13 +683,35 @@ fn wire__crate__api__bridge__connection_peer_transport_params_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
-                    let output_ok = Result::<_, ()>::Ok(
-                        crate::api::bridge::connection_peer_transport_params(api_connection),
-                    )?;
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::bridge::connection_peer_transport_params(
+                            &*api_connection_guard,
+                        ))?;
                     Ok(output_ok)
                 })())
             }
@@ -590,13 +740,35 @@ fn wire__crate__api__bridge__connection_read_datagram_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, ()>(
                     (move || async move {
+                        let mut api_connection_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_connection,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_connection_guard =
+                                        Some(api_connection.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_connection_guard = api_connection_guard.unwrap();
                         let output_ok = Result::<_, ()>::Ok(
-                            crate::api::bridge::connection_read_datagram(api_connection).await,
+                            crate::api::bridge::connection_read_datagram(&*api_connection_guard)
+                                .await,
                         )?;
                         Ok(output_ok)
                     })()
@@ -628,12 +800,33 @@ fn wire__crate__api__bridge__connection_remote_address_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(
-                        crate::api::bridge::connection_remote_address(api_connection),
+                        crate::api::bridge::connection_remote_address(&*api_connection_guard),
                     )?;
                     Ok(output_ok)
                 })())
@@ -663,12 +856,33 @@ fn wire__crate__api__bridge__connection_rtt_millis_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(
-                        crate::api::bridge::connection_rtt_millis(api_connection),
+                        crate::api::bridge::connection_rtt_millis(&*api_connection_guard),
                     )?;
                     Ok(output_ok)
                 })())
@@ -698,13 +912,36 @@ fn wire__crate__api__bridge__connection_send_datagram_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             let api_data = <Vec<u8>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, crate::errors::QuicDatagramException>((move || {
-                    let output_ok =
-                        crate::api::bridge::connection_send_datagram(api_connection, api_data)?;
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
+                    let output_ok = crate::api::bridge::connection_send_datagram(
+                        &*api_connection_guard,
+                        api_data,
+                    )?;
                     Ok(output_ok)
                 })(
                 ))
@@ -734,14 +971,35 @@ fn wire__crate__api__bridge__connection_send_datagram_wait_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             let api_data = <Vec<u8>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicDatagramException>(
                     (move || async move {
+                        let mut api_connection_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_connection,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_connection_guard =
+                                        Some(api_connection.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_connection_guard = api_connection_guard.unwrap();
                         let output_ok = crate::api::bridge::connection_send_datagram_wait(
-                            api_connection,
+                            &*api_connection_guard,
                             api_data,
                         )
                         .await?;
@@ -775,12 +1033,33 @@ fn wire__crate__api__bridge__connection_stable_id_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
                     let output_ok = Result::<_, ()>::Ok(crate::api::bridge::connection_stable_id(
-                        api_connection,
+                        &*api_connection_guard,
                     ))?;
                     Ok(output_ok)
                 })())
@@ -810,12 +1089,34 @@ fn wire__crate__api__bridge__connection_stats_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_connection = <QuicConnection>::sse_decode(&mut deserializer);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
-                    let output_ok =
-                        Result::<_, ()>::Ok(crate::api::bridge::connection_stats(api_connection))?;
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(crate::api::bridge::connection_stats(
+                        &*api_connection_guard,
+                    ))?;
                     Ok(output_ok)
                 })())
             }
@@ -2231,104 +2532,6 @@ impl SseDecode for (QuicClient, String) {
     }
 }
 
-impl SseDecode for (QuicConnection, QuicSendStream) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <QuicSendStream>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, QuicSendStream, QuicRecvStream) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <QuicSendStream>::sse_decode(deserializer);
-        let mut var_field2 = <QuicRecvStream>::sse_decode(deserializer);
-        return (var_field0, var_field1, var_field2);
-    }
-}
-
-impl SseDecode for (QuicConnection, Option<usize>) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <Option<usize>>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, Option<Vec<u8>>) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <Option<Vec<u8>>>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, Option<String>) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <Option<String>>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, crate::core::connection::QuicConnectionStats) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 =
-            <crate::core::connection::QuicConnectionStats>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode
-    for (
-        QuicConnection,
-        crate::core::connection::QuicPeerTransportParams,
-    )
-{
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 =
-            <crate::core::connection::QuicPeerTransportParams>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, crate::models::types::SocketAddress) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <crate::models::types::SocketAddress>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, u64) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <u64>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
-impl SseDecode for (QuicConnection, usize) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_field0 = <QuicConnection>::sse_decode(deserializer);
-        let mut var_field1 = <usize>::sse_decode(deserializer);
-        return (var_field0, var_field1);
-    }
-}
-
 impl SseDecode for (QuicEndpoint, QuicConnection) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2352,6 +2555,15 @@ impl SseDecode for (QuicRecvStream, Option<Vec<u8>>) {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_field0 = <QuicRecvStream>::sse_decode(deserializer);
         let mut var_field1 = <Option<Vec<u8>>>::sse_decode(deserializer);
+        return (var_field0, var_field1);
+    }
+}
+
+impl SseDecode for (QuicSendStream, QuicRecvStream) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_field0 = <QuicSendStream>::sse_decode(deserializer);
+        let mut var_field1 = <QuicRecvStream>::sse_decode(deserializer);
         return (var_field0, var_field1);
     }
 }
@@ -3525,92 +3737,6 @@ impl SseEncode for (QuicClient, String) {
     }
 }
 
-impl SseEncode for (QuicConnection, QuicSendStream) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <QuicSendStream>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, QuicSendStream, QuicRecvStream) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <QuicSendStream>::sse_encode(self.1, serializer);
-        <QuicRecvStream>::sse_encode(self.2, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, Option<usize>) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <Option<usize>>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, Option<Vec<u8>>) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <Option<Vec<u8>>>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, Option<String>) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <Option<String>>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, crate::core::connection::QuicConnectionStats) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <crate::core::connection::QuicConnectionStats>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode
-    for (
-        QuicConnection,
-        crate::core::connection::QuicPeerTransportParams,
-    )
-{
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <crate::core::connection::QuicPeerTransportParams>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, crate::models::types::SocketAddress) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <crate::models::types::SocketAddress>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, u64) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <u64>::sse_encode(self.1, serializer);
-    }
-}
-
-impl SseEncode for (QuicConnection, usize) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <QuicConnection>::sse_encode(self.0, serializer);
-        <usize>::sse_encode(self.1, serializer);
-    }
-}
-
 impl SseEncode for (QuicEndpoint, QuicConnection) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3632,6 +3758,14 @@ impl SseEncode for (QuicRecvStream, Option<Vec<u8>>) {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <QuicRecvStream>::sse_encode(self.0, serializer);
         <Option<Vec<u8>>>::sse_encode(self.1, serializer);
+    }
+}
+
+impl SseEncode for (QuicSendStream, QuicRecvStream) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <QuicSendStream>::sse_encode(self.0, serializer);
+        <QuicRecvStream>::sse_encode(self.1, serializer);
     }
 }
 

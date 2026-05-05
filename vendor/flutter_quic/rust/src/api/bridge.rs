@@ -79,13 +79,18 @@ pub async fn recv_stream_read_to_end(
     Ok((stream, data))
 }
 
-/// Open a bidirectional stream on a QUIC connection
-/// This exposes the QuicConnection.open_bi() method to flutter_rust_bridge
+/// Open a bidirectional stream on a QUIC connection.
+///
+/// Takes a shared reference so multiple concurrent `open_bi` calls can be in
+/// flight simultaneously without racing on the Auto_Owned arc. Quinn's
+/// `Connection::open_bi` only needs `&self` internally.
+///
+/// This exposes the QuicConnection.open_bi() method to flutter_rust_bridge.
 pub async fn connection_open_bi(
-    connection: QuicConnection,
-) -> Result<(QuicConnection, QuicSendStream, QuicRecvStream), QuicError> {
+    connection: &QuicConnection,
+) -> Result<(QuicSendStream, QuicRecvStream), QuicError> {
     let (send_stream, recv_stream) = connection.open_bi().await?;
-    Ok((connection, send_stream, recv_stream))
+    Ok((send_stream, recv_stream))
 }
 
 /// Accept the next server-initiated bidirectional stream on a QUIC connection.
@@ -109,13 +114,16 @@ pub async fn connection_accept_bi(
     }
 }
 
-/// Open a unidirectional stream on a QUIC connection
-/// This exposes the QuicConnection.open_uni() method to flutter_rust_bridge
+/// Open a unidirectional stream on a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.open_uni() method to flutter_rust_bridge.
 pub async fn connection_open_uni(
-    connection: QuicConnection,
-) -> Result<(QuicConnection, QuicSendStream), QuicError> {
+    connection: &QuicConnection,
+) -> Result<QuicSendStream, QuicError> {
     let send_stream = connection.open_uni().await?;
-    Ok((connection, send_stream))
+    Ok(send_stream)
 }
 
 /// Connect to a server using a QUIC endpoint.
@@ -140,111 +148,135 @@ pub async fn endpoint_connect(
     Ok((endpoint, connection))
 }
 
-/// Send a datagram on a QUIC connection
-/// This exposes the QuicConnection.send_datagram() method to flutter_rust_bridge
+/// Send a datagram on a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.send_datagram() method to flutter_rust_bridge.
 pub fn connection_send_datagram(
-    connection: QuicConnection,
+    connection: &QuicConnection,
     data: Vec<u8>,
-) -> Result<QuicConnection, QuicDatagramException> {
+) -> Result<(), QuicDatagramException> {
     connection.send_datagram(data)?;
-    Ok(connection)
+    Ok(())
 }
 
-/// Send a datagram with backpressure on a QUIC connection
-/// This exposes the QuicConnection.send_datagram_wait() method to flutter_rust_bridge
+/// Send a datagram with backpressure on a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.send_datagram_wait() method to flutter_rust_bridge.
 pub async fn connection_send_datagram_wait(
-    connection: QuicConnection,
+    connection: &QuicConnection,
     data: Vec<u8>,
-) -> Result<QuicConnection, QuicDatagramException> {
+) -> Result<(), QuicDatagramException> {
     connection.send_datagram_wait(data).await?;
-    Ok(connection)
+    Ok(())
 }
 
-/// Read a datagram from a QUIC connection
-/// This exposes the QuicConnection.read_datagram() method to flutter_rust_bridge
+/// Read a datagram from a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.read_datagram() method to flutter_rust_bridge.
 pub async fn connection_read_datagram(
-    connection: QuicConnection,
-) -> (QuicConnection, Option<Vec<u8>>) {
-    let data = connection.read_datagram().await;
-    (connection, data)
+    connection: &QuicConnection,
+) -> Option<Vec<u8>> {
+    connection.read_datagram().await
 }
 
-/// Get datagram send buffer space
-/// This exposes the QuicConnection.datagram_send_buffer_space() method to flutter_rust_bridge
+/// Get datagram send buffer space.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.datagram_send_buffer_space() method to flutter_rust_bridge.
 pub fn connection_datagram_send_buffer_space(
-    connection: QuicConnection,
-) -> (QuicConnection, usize) {
-    let space = connection.datagram_send_buffer_space();
-    (connection, space)
+    connection: &QuicConnection,
+) -> usize {
+    connection.datagram_send_buffer_space()
 }
 
-/// Get maximum datagram size
-/// This exposes the QuicConnection.max_datagram_size() method to flutter_rust_bridge
+/// Get maximum datagram size.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.max_datagram_size() method to flutter_rust_bridge.
 pub fn connection_max_datagram_size(
-    connection: QuicConnection,
-) -> (QuicConnection, Option<usize>) {
-    let max_size = connection.max_datagram_size();
-    (connection, max_size)
+    connection: &QuicConnection,
+) -> Option<usize> {
+    connection.max_datagram_size()
 }
 
 // Connection Info bridge functions
 
-/// Get the remote address of a QUIC connection
-/// This exposes the QuicConnection.remote_address() method to flutter_rust_bridge
+/// Get the remote address of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.remote_address() method to flutter_rust_bridge.
 pub fn connection_remote_address(
-    connection: QuicConnection,
-) -> (QuicConnection, crate::models::types::SocketAddress) {
+    connection: &QuicConnection,
+) -> crate::models::types::SocketAddress {
     let addr = connection.remote_address();
-    let socket_addr = crate::models::types::SocketAddress {
+    crate::models::types::SocketAddress {
         ip: addr.ip().to_string(),
         port: addr.port(),
-    };
-    (connection, socket_addr)
+    }
 }
 
-/// Get the local IP address of a QUIC connection
-/// This exposes the QuicConnection.local_ip() method to flutter_rust_bridge
+/// Get the local IP address of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.local_ip() method to flutter_rust_bridge.
 pub fn connection_local_ip(
-    connection: QuicConnection,
-) -> (QuicConnection, Option<String>) {
-    let ip = connection.local_ip();
-    (connection, ip.map(|ip| ip.to_string()))
+    connection: &QuicConnection,
+) -> Option<String> {
+    connection.local_ip().map(|ip| ip.to_string())
 }
 
-/// Get the RTT of a QUIC connection in milliseconds
-/// This exposes the QuicConnection.rtt() method to flutter_rust_bridge
+/// Get the RTT of a QUIC connection in milliseconds.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.rtt() method to flutter_rust_bridge.
 pub fn connection_rtt_millis(
-    connection: QuicConnection,
-) -> (QuicConnection, u64) {
-    let rtt = connection.rtt();
-    (connection, rtt.as_millis() as u64)
+    connection: &QuicConnection,
+) -> u64 {
+    connection.rtt().as_millis() as u64
 }
 
-/// Get the stable ID of a QUIC connection
-/// This exposes the QuicConnection.stable_id() method to flutter_rust_bridge
+/// Get the stable ID of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.stable_id() method to flutter_rust_bridge.
 pub fn connection_stable_id(
-    connection: QuicConnection,
-) -> (QuicConnection, usize) {
-    let id = connection.stable_id();
-    (connection, id)
+    connection: &QuicConnection,
+) -> usize {
+    connection.stable_id()
 }
 
-/// Get the close reason of a QUIC connection
-/// This exposes the QuicConnection.close_reason() method to flutter_rust_bridge
+/// Get the close reason of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.close_reason() method to flutter_rust_bridge.
 pub fn connection_close_reason(
-    connection: QuicConnection,
-) -> (QuicConnection, Option<String>) {
-    let reason = connection.close_reason();
-    (connection, reason)
+    connection: &QuicConnection,
+) -> Option<String> {
+    connection.close_reason()
 }
 
-/// Get the statistics of a QUIC connection
-/// This exposes the QuicConnection.stats() method to flutter_rust_bridge
+/// Get the statistics of a QUIC connection.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+///
+/// This exposes the QuicConnection.stats() method to flutter_rust_bridge.
 pub fn connection_stats(
-    connection: QuicConnection,
-) -> (QuicConnection, QuicConnectionStats) {
-    let stats = connection.stats();
-    (connection, stats)
+    connection: &QuicConnection,
+) -> QuicConnectionStats {
+    connection.stats()
 }
 
 /// Get the peer's advertised QUIC transport parameters relevant to stream credits.
@@ -252,11 +284,12 @@ pub fn connection_stats(
 /// Exposes [`QuicConnection::peer_transport_params`] across the FFI. Useful for
 /// diagnosing `connection_open_bi` hangs caused by the peer advertising a small
 /// `initial_max_streams_bidi` and never raising it with `MAX_STREAMS`.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
 pub fn connection_peer_transport_params(
-    connection: QuicConnection,
-) -> (QuicConnection, QuicPeerTransportParams) {
-    let params = connection.peer_transport_params();
-    (connection, params)
+    connection: &QuicConnection,
+) -> QuicPeerTransportParams {
+    connection.peer_transport_params()
 }
 
 // Configuration builder functions

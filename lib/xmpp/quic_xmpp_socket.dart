@@ -71,15 +71,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   QuicRecvStream? _recvStream;
   final Map<int, _QuicStreamChannel> _auxStreamsBySlot = {};
   // In-flight futures for aux stream opens, keyed by slot. Concurrent callers
-  // for the same slot await the same future rather than racing on _connection.
+  // for the same slot await the same future rather than issuing duplicate
+  // connectionOpenBi calls for the same JID hash.
   final Map<int, Future<_QuicStreamChannel>> _auxStreamOpening = {};
-  // Global serialisation lock for ALL FFI calls that consume _connection via
-  // Auto_Owned transfer (connectionOpenBi, connectionAcceptBi, connectionStats,
-  // connectionPeerTransportParams, connectionCloseReason). Only one such call
-  // may be in-flight at a time; concurrent callers would both read the same
-  // arc and the second would find it already disposed.
-  Future<void> _auxOpenLock = Future<void>.value();
-
   // Per-slot queue of stanzas that arrived while the aux stream for that slot
   // was still being opened. Flushed onto the aux stream once it is ready.
   final Map<int, List<String>> _auxStreamPendingQueue = {};
@@ -160,9 +154,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     final conn = _connection;
     if (conn == null || !_useQuic) return null;
     try {
-      final (updatedConn, stats) = await connectionStats(connection: conn);
-      _connection = updatedConn;
-      return stats;
+      return await connectionStats(connection: conn);
     } catch (e) {
       // debugPrint('Error getting QUIC stats: $e');
       return null;
@@ -239,7 +231,6 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _auxStreamOpening.clear();
     _auxStreamPendingQueue.clear();
     _serverStreamPool.clear();
-    _auxOpenLock = Future<void>.value();
 
     if (controlStream != null) {
       unawaited(
@@ -496,10 +487,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       qlogPath: qlogPath,
     );
     final connected = await connect.timeout(timeout);
-    final (conn, sendStream, recvStream) = await connectionOpenBi(connection: connected.$2);
+    final (sendStream, recvStream) = await connectionOpenBi(connection: connected.$2);
     return _QuicConnectResult(
       endpoint: connected.$1,
-      connection: conn,
+      connection: connected.$2,
       sendStream: sendStream,
       recvStream: recvStream,
     );
@@ -513,8 +504,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// mapper so partial-chunk buffering does not corrupt other streams.
   ///
   /// Each `connectionAcceptBi` call uses a shared reference to `_connection`
-  /// (not Auto_Owned), so it does NOT consume the arc and can run concurrently
-  /// with `connectionOpenBi` calls without holding [_auxOpenLock].
+  /// so it can run concurrently with `connectionOpenBi` calls.
   void _startServerStreamAcceptLoop() {
     final conn = _connection;
     if (conn == null) return;
@@ -525,9 +515,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           final connection = _connection;
           if (connection == null) break;
           try {
-            // connectionAcceptBi takes &QuicConnection (shared ref), so it
-            // does not consume the arc and is safe to call concurrently with
-            // connectionOpenBi / connectionStats.
+            // connectionAcceptBi takes &QuicConnection (shared ref).
             final result = await connectionAcceptBi(connection: connection);
             final recvStream = result.$2;
             if (recvStream == null) {
@@ -819,101 +807,77 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     try {
-      // Serialise all connectionOpenBi calls globally: the FFI function uses
-      // Auto_Owned transfer, consuming _connection and returning a new arc.
-      // Two concurrent calls on different slots would both capture the same
-      // (soon-to-be-consumed) arc, causing DroppableDisposedException on the
-      // second call.
-      final completer = Completer<void>();
-      final previousLock = _auxOpenLock;
-      _auxOpenLock = completer.future;
+      final connection = _connection;
+      if (connection == null || _closed) {
+        throw StateError('QUIC connection is not established');
+      }
+      debugPrint('QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)');
+      // connectionOpenBi now takes &QuicConnection (shared ref) so multiple
+      // concurrent opens on different slots are safe — no serialisation lock
+      // needed. Quinn's open_bi only needs &self internally.
+      //
+      // connectionOpenBi (Quinn open_bi) will BLOCK until the peer has
+      // granted enough bidirectional-stream credits for a new stream to be
+      // opened. If the server advertises a low initial_max_streams_bidi and
+      // does not proactively send MAX_STREAMS frames, this future can hang
+      // indefinitely. Add progress logging and a hard timeout so this
+      // failure mode is visible and recoverable.
+      final openStart = DateTime.now();
+      Timer? progressTimer;
+      progressTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+        final elapsed = DateTime.now().difference(openStart);
+        debugPrint(
+          'QUIC aux stream slot=$slot connectionOpenBi still pending after '
+          '${elapsed.inMilliseconds}ms — peer has likely not granted bidi '
+          'stream credits yet',
+        );
+      });
       try {
-        debugPrint('QUIC aux stream slot=$slot awaiting open lock (reason=$reason)');
-        await previousLock;
-        if (_connection == null || _closed) {
-          throw StateError('QUIC connection is not established');
-        }
-        debugPrint('QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)');
-        await _logConnectionStats('pre-open slot=$slot');
-        // Re-read _connection after the stats call: _logConnectionStats
-        // consumes the arc via Auto_Owned and stores the returned arc back
-        // into _connection, so the local variable captured above is stale.
-        final freshConnection = _connection;
-        if (freshConnection == null || _closed) {
-          throw StateError('QUIC connection lost during pre-open stats');
-        }
-        // connectionOpenBi (Quinn open_bi) will BLOCK until the peer has
-        // granted enough bidirectional-stream credits for a new stream to be
-        // opened. If the server advertises a low initial_max_streams_bidi and
-        // does not proactively send MAX_STREAMS frames, this future can hang
-        // indefinitely — which previously held _auxOpenLock forever and
-        // prevented every subsequent aux slot from even logging that it was
-        // trying to open. Add progress logging and a hard timeout so this
-        // failure mode is visible and recoverable.
-        final openStart = DateTime.now();
-        Timer? progressTimer;
-        progressTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-          final elapsed = DateTime.now().difference(openStart);
-          debugPrint(
-            'QUIC aux stream slot=$slot connectionOpenBi still pending after '
-            '${elapsed.inMilliseconds}ms — peer has likely not granted bidi '
-            'stream credits yet',
+        final (sendStream, recvStream) = await connectionOpenBi(connection: connection)
+            .timeout(const Duration(seconds: 10), onTimeout: () {
+          // Mark that we are credit-starved and log stats so we can see
+          // the server's MAX_STREAMS frame count at the moment of timeout.
+          _auxStreamsBlocked = true;
+          _startMaxStreamsWatcher();
+          throw TimeoutException(
+            'connectionOpenBi timed out for aux slot $slot after 10s '
+            '(peer likely did not grant additional bidi stream credits)',
           );
         });
-        try {
-          final opened = await connectionOpenBi(connection: freshConnection)
-              .timeout(const Duration(seconds: 10), onTimeout: () {
-            // Mark that we are credit-starved and log stats so we can see
-            // the server's MAX_STREAMS frame count at the moment of timeout.
-            _auxStreamsBlocked = true;
-            _startMaxStreamsWatcher();
-            throw TimeoutException(
-              'connectionOpenBi timed out for aux slot $slot after 10s '
-              '(peer likely did not grant additional bidi stream credits)',
-            );
-          });
-          // Re-check after the async gap: close() may have fired while we awaited.
-          if (_closed) {
-            // Discard the newly opened streams; the connection is being torn down.
-            throw StateError('QUIC socket closed during aux stream open');
-          }
-          _connection = opened.$1;
-          final channel = _QuicStreamChannel(
-            sendStream: opened.$2,
-            recvStream: opened.$3,
-          );
-          _auxStreamsBySlot[slot] = channel;
-          final elapsed = DateTime.now().difference(openStart);
-          debugPrint(
-            'QUIC aux stream opened (outbound) slot=$slot '
-            'in ${elapsed.inMilliseconds}ms',
-          );
-          // Give each aux recv loop its own independent XML mapper/buffer so
-          // that partial fragments from different QUIC streams do not
-          // interleave in the shared restOfResponse buffer of Connection's
-          // prepareStreamResponse. Fall back to _map if no factory was set
-          // (e.g. in tests that don't call setAuxMapperFactory).
-          final auxMapper = _makeAuxMapper?.call() ?? _map;
-          _startRecvLoop(opened.$3, isControl: false, slot: slot, mapper: auxMapper);
-          return channel;
-        } catch (error, stack) {
-          final elapsed = DateTime.now().difference(openStart);
-          debugPrint(
-            'QUIC aux stream open error slot=$slot after '
-            '${elapsed.inMilliseconds}ms error=$error',
-          );
-          debugPrint('QUIC aux stream open stack slot=$slot: $stack');
-          // Log stats after a timeout/error so we can see the connection
-          // state at the moment of failure. Use unawaited here since we are
-          // in a catch block and the arc may already be consumed; errors are
-          // swallowed by _logConnectionStats itself.
-          unawaited(_logConnectionStats('post-open-error slot=$slot'));
-          rethrow;
-        } finally {
-          progressTimer.cancel();
+        // Re-check after the async gap: close() may have fired while we awaited.
+        if (_closed) {
+          // Discard the newly opened streams; the connection is being torn down.
+          throw StateError('QUIC socket closed during aux stream open');
         }
+        final channel = _QuicStreamChannel(
+          sendStream: sendStream,
+          recvStream: recvStream,
+        );
+        _auxStreamsBySlot[slot] = channel;
+        final elapsed = DateTime.now().difference(openStart);
+        debugPrint(
+          'QUIC aux stream opened (outbound) slot=$slot '
+          'in ${elapsed.inMilliseconds}ms',
+        );
+        // Give each aux recv loop its own independent XML mapper/buffer so
+        // that partial fragments from different QUIC streams do not
+        // interleave in the shared restOfResponse buffer of Connection's
+        // prepareStreamResponse. Fall back to _map if no factory was set
+        // (e.g. in tests that don't call setAuxMapperFactory).
+        final auxMapper = _makeAuxMapper?.call() ?? _map;
+        _startRecvLoop(recvStream, isControl: false, slot: slot, mapper: auxMapper);
+        return channel;
+      } catch (error, stack) {
+        final elapsed = DateTime.now().difference(openStart);
+        debugPrint(
+          'QUIC aux stream open error slot=$slot after '
+          '${elapsed.inMilliseconds}ms error=$error',
+        );
+        debugPrint('QUIC aux stream open stack slot=$slot: $stack');
+        unawaited(_logConnectionStats('post-open-error slot=$slot'));
+        rethrow;
       } finally {
-        completer.complete();
+        progressTimer.cancel();
       }
     } finally {
       _auxStreamOpening.remove(slot);
@@ -967,18 +931,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   /// Logs key connection stats (MAX_STREAMS frame counts) for diagnostics.
-  /// Returns a Future that completes after the stats have been fetched and
-  /// _connection updated with the returned arc. Callers inside async contexts
-  /// should await this so that _connection is valid for the next FFI call.
   Future<void> _logConnectionStats(String context) async {
     final connection = _connection;
     if (connection == null) {
       return;
     }
     try {
-      final result = await connectionStats(connection: connection);
-      _connection = result.$1;
-      final stats = result.$2;
+      final stats = await connectionStats(connection: connection);
       final rxMaxBidi = stats.frameRx.maxStreamsBidi;
       final rxMaxUni = stats.frameRx.maxStreamsUni;
       final rxBlockedBidi = stats.frameRx.streamsBlockedBidi;
@@ -1013,10 +972,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return;
     }
     try {
-      final result =
-          await connectionPeerTransportParams(connection: connection);
-      _connection = result.$1;
-      final params = result.$2;
+      final params = await connectionPeerTransportParams(connection: connection);
       final bidi = params.initialMaxStreamsBidi;
       final uni = params.initialMaxStreamsUni;
       final data = params.initialMaxData;
@@ -1117,8 +1073,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return;
     }
     try {
-      final (updatedConn, reason) = await connectionCloseReason(connection: conn);
-      _connection = updatedConn;
+      final reason = await connectionCloseReason(connection: conn);
       if (reason == null) {
         debugPrint('QUIC connection closed cleanly (no error reported)');
         return;
