@@ -7832,9 +7832,6 @@ class XmppService extends ChangeNotifier {
     // server returns the <fin> result.
     final router = IqRouter.getInstance(connection);
     router.registerResponseHandler(id, (response) {
-      if (response == null) {
-        return;
-      }
       if (response.type != IqStanzaType.RESULT) {
         return;
       }

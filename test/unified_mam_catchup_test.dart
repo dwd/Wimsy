@@ -10,7 +10,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 void main() {
   group('R2.1: <fin> RSM <last> parsing', () {
     /// Build a fake MAM <fin> IQ result with the given RSM <last> value.
-    IqStanza _buildFinResult({String? lastId, bool includeRsm = true}) {
+    IqStanza buildFinResult({String? lastId, bool includeRsm = true}) {
       final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.RESULT);
 
       final fin = XmppElement()..name = 'fin';
@@ -35,7 +35,7 @@ void main() {
     }
 
     /// Replicate the parsing logic from `_startUnifiedDmCatchUp`.
-    String? _parseFinLastId(IqStanza response) {
+    String? parseFinLastId(IqStanza response) {
       if (response.type != IqStanzaType.RESULT) {
         return null;
       }
@@ -68,8 +68,8 @@ void main() {
     }
 
     test('extracts <last> id from a well-formed <fin> result', () {
-      final iq = _buildFinResult(lastId: 'mam-id-42');
-      expect(_parseFinLastId(iq), equals('mam-id-42'));
+      final iq = buildFinResult(lastId: 'mam-id-42');
+      expect(parseFinLastId(iq), equals('mam-id-42'));
     });
 
     test('returns null when IQ type is not RESULT', () {
@@ -77,27 +77,27 @@ void main() {
       final fin = XmppElement()..name = 'fin';
       fin.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:mam:2'));
       iq.addChild(fin);
-      expect(_parseFinLastId(iq), isNull);
+      expect(parseFinLastId(iq), isNull);
     });
 
     test('returns null when <fin> element is absent', () {
       final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.RESULT);
-      expect(_parseFinLastId(iq), isNull);
+      expect(parseFinLastId(iq), isNull);
     });
 
     test('returns null when RSM <set> is absent from <fin>', () {
-      final iq = _buildFinResult(lastId: 'mam-id-1', includeRsm: false);
-      expect(_parseFinLastId(iq), isNull);
+      final iq = buildFinResult(lastId: 'mam-id-1', includeRsm: false);
+      expect(parseFinLastId(iq), isNull);
     });
 
     test('returns null when <last> is absent from RSM <set>', () {
-      final iq = _buildFinResult(lastId: null);
-      expect(_parseFinLastId(iq), isNull);
+      final iq = buildFinResult(lastId: null);
+      expect(parseFinLastId(iq), isNull);
     });
 
     test('trims whitespace from <last> text value', () {
-      final iq = _buildFinResult(lastId: '  mam-id-trimmed  ');
-      expect(_parseFinLastId(iq), equals('mam-id-trimmed'));
+      final iq = buildFinResult(lastId: '  mam-id-trimmed  ');
+      expect(parseFinLastId(iq), equals('mam-id-trimmed'));
     });
   });
 }
