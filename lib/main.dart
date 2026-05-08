@@ -2540,7 +2540,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (isBookmark && !(roomEntry?.joined ?? false)) {
       return;
     }
-    final selection = await FilePicker.platform.pickFiles(withData: true);
+    final selection = await FilePicker.pickFiles(withData: true);
     if (selection == null || selection.files.isEmpty) {
       return;
     }
@@ -2583,7 +2583,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     final suggested = message.fileName?.isNotEmpty == true
         ? message.fileName!
         : 'file';
-    final path = await FilePicker.platform.saveFile(
+    final path = await FilePicker.saveFile(
       dialogTitle: 'Save file',
       fileName: suggested,
     );
@@ -4886,7 +4886,7 @@ class _PresenceMenu extends StatelessWidget {
                           onPressed: saving
                               ? null
                               : () async {
-                                  final result = await FilePicker.platform
+                                  final result = await FilePicker
                                       .pickFiles(
                                         type: FileType.image,
                                         withData: true,
