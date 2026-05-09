@@ -6188,12 +6188,20 @@ class XmppService extends ChangeNotifier {
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
         }
+        debugPrint(
+          'NewMsg[DM-dedup] chat=$normalized outgoing=$outgoing '
+          'messageId=$messageId mamId=$mamId — merged existing, early return',
+        );
         return;
       }
     }
     if (mamId != null &&
         mamId.isNotEmpty &&
         list.any((message) => message.mamId == mamId)) {
+      debugPrint(
+        'NewMsg[DM-dedup] chat=$normalized outgoing=$outgoing '
+        'mamId=$mamId — duplicate mamId, early return',
+      );
       return;
     }
     if (stanzaId != null &&
@@ -6203,6 +6211,10 @@ class XmppService extends ChangeNotifier {
               message.stanzaId == stanzaId &&
               _bareJid(message.from) == _bareJid(from),
         )) {
+      debugPrint(
+        'NewMsg[DM-dedup] chat=$normalized outgoing=$outgoing '
+        'stanzaId=$stanzaId — duplicate stanzaId, early return',
+      );
       return;
     }
     final hasIncomingIds =
@@ -6224,6 +6236,10 @@ class XmppService extends ChangeNotifier {
         stanzaId: stanzaId,
       );
       if (merged) {
+        debugPrint(
+          'NewMsg[DM-dedup] chat=$normalized outgoing=$outgoing '
+          'mamId=$mamId stanzaId=$stanzaId — mergeMamIds matched, early return',
+        );
         notifyListeners();
         _messagePersistor?.call(normalized, List.unmodifiable(list));
         return;
@@ -6232,6 +6248,11 @@ class XmppService extends ChangeNotifier {
     final prependOffset = _mamCursorStore.prependOffsetFor(normalized);
     if (mamId != null && mamId.isNotEmpty && prependOffset != null) {
       final insertIndex = prependOffset.clamp(0, list.length);
+      debugPrint(
+        'NewMsg[DM-prepend] chat=$normalized outgoing=$outgoing '
+        'mamId=$mamId stanzaId=$stanzaId timestamp=$timestamp '
+        'insertIndex=$insertIndex — early return, no handler fired',
+      );
       list.insert(
         insertIndex,
         ChatMessage(
