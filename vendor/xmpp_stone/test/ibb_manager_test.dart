@@ -39,21 +39,25 @@ void main() {
         '</iq>';
     connection.handleResponse(connection.prepareStreamResponse(closeIq));
 
-    final openEvent = await openCompleter.future.timeout(const Duration(seconds: 1));
+    final openEvent =
+        await openCompleter.future.timeout(const Duration(seconds: 1));
     expect(openEvent.sid, 'sid1');
     expect(openEvent.blockSize, 4096);
 
-    final dataEvent = await dataCompleter.future.timeout(const Duration(seconds: 1));
+    final dataEvent =
+        await dataCompleter.future.timeout(const Duration(seconds: 1));
     expect(dataEvent.sid, 'sid1');
     expect(String.fromCharCodes(dataEvent.bytes), 'hi');
 
-    final closeEvent = await closeCompleter.future.timeout(const Duration(seconds: 1));
+    final closeEvent =
+        await closeCompleter.future.timeout(const Duration(seconds: 1));
     expect(closeEvent.sid, 'sid1');
   });
 }
 
 class _FakeSocket extends Stream<String> implements XmppWebSocket {
-  final StreamController<String> _controller = StreamController<String>.broadcast();
+  final StreamController<String> _controller =
+      StreamController<String>.broadcast();
 
   @override
   StreamSubscription<String> listen(void Function(String event)? onData,
@@ -69,6 +73,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) async {
     return this;
@@ -79,6 +84,10 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
 
   @override
   void close() {}
+  @override
+  Future<dynamic> getQuicStats() => Future.value(null);
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure(

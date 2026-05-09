@@ -65,7 +65,9 @@ void main() {
     expect(responses.first.type, IqStanzaType.RESULT);
   });
 
-  test('IQ router returns internal-server-error on handler exception and reports', () async {
+  test(
+      'IQ router returns internal-server-error on handler exception and reports',
+      () async {
     final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
     final connection = Connection(account);
     connection.socket = _FakeSocket();
@@ -199,10 +201,12 @@ void main() {
     final manager = RosterManager.getInstance(connection);
 
     final requestIdFuture = _waitForRosterRequestId(connection);
-    final future = manager.addRosterItem(Buddy(Jid.fromFullJid('alice@example.com')));
+    final future =
+        manager.addRosterItem(Buddy(Jid.fromFullJid('alice@example.com')));
     final requestId = await requestIdFuture;
 
-    final response = '<iq type="result" id="$requestId" from="peer@example.com/res">'
+    final response =
+        '<iq type="result" id="$requestId" from="peer@example.com/res">'
         '<query xmlns="jabber:iq:roster"/></iq>';
     connection.handleResponse(connection.prepareStreamResponse(response));
 
@@ -279,7 +283,8 @@ Future<String> _waitForRosterRequestId(Connection connection) {
 }
 
 class _FakeSocket extends Stream<String> implements XmppWebSocket {
-  final StreamController<String> _controller = StreamController<String>.broadcast();
+  final StreamController<String> _controller =
+      StreamController<String>.broadcast();
 
   @override
   StreamSubscription<String> listen(void Function(String event)? onData,
@@ -295,6 +300,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) async {
     return this;
@@ -305,6 +311,10 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
 
   @override
   void close() {}
+  @override
+  Future<dynamic> getQuicStats() => Future.value(null);
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure(

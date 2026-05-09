@@ -48,6 +48,27 @@ Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
   return ordered;
 }
 
+Future<List<XmppSrvTarget>> resolveXmppQuicSrvCandidates(String domain) async {
+  debugPrint('QUIC SRV lookup: domain=$domain');
+  final records = await _lookupSrv(
+    '_xmpp-client._quic.$domain',
+    directTls: false,
+  );
+  if (records.isEmpty) {
+    debugPrint('QUIC SRV lookup: no records found');
+    return const [];
+  }
+  final ordered = orderXmppSrvTargets(records);
+  final orderSummary = ordered
+      .map(
+        (record) =>
+            '${record.host}:${record.port}/p${record.priority}/w${record.weight}',
+      )
+      .join(', ');
+  debugPrint('QUIC SRV lookup: ordered candidates=[$orderSummary]');
+  return ordered;
+}
+
 Future<List<XmppSrvTarget>> _lookupSrv(
   String name, {
   required bool directTls,

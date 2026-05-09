@@ -28,35 +28,13 @@ bool mergeMamIdsIntoExisting(
           (oobDescription != null && oobDescription.isNotEmpty)
           ? oobDescription
           : existing.oobDescription;
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
+      list[i] = existing.copyWith(
         mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
         stanzaId: (stanzaId != null && stanzaId.isNotEmpty)
             ? stanzaId
             : existing.stanzaId,
-        oobUrl: existing.oobUrl,
         oobDescription: nextOobDescription,
         rawXml: nextRawXml,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
-        fileBytes: existing.fileBytes,
-        fileState: existing.fileState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
-        acked: existing.acked,
-        receiptReceived: existing.receiptReceived,
-        displayed: existing.displayed,
       );
       return true;
     }
@@ -75,34 +53,11 @@ bool mergeMamIdsIntoExisting(
         (existing.stanzaId ?? '').isNotEmpty) {
       continue;
     }
-    list[i] = ChatMessage(
-      from: existing.from,
-      to: existing.to,
-      body: existing.body,
-      outgoing: existing.outgoing,
-      timestamp: existing.timestamp,
+    list[i] = existing.copyWith(
       mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
       stanzaId: (stanzaId != null && stanzaId.isNotEmpty)
           ? stanzaId
           : existing.stanzaId,
-      oobUrl: existing.oobUrl,
-      oobDescription: existing.oobDescription,
-      rawXml: existing.rawXml,
-      fileTransferId: existing.fileTransferId,
-      fileName: existing.fileName,
-      fileSize: existing.fileSize,
-      fileMime: existing.fileMime,
-      fileBytes: existing.fileBytes,
-      fileState: existing.fileState,
-      edited: existing.edited,
-      editedAt: existing.editedAt,
-      reactions: existing.reactions ?? const {},
-      replyToId: existing.replyToId,
-      replyToJid: existing.replyToJid,
-      replyFallback: existing.replyFallback,
-      acked: existing.acked,
-      receiptReceived: existing.receiptReceived,
-      displayed: existing.displayed,
     );
     return true;
   }

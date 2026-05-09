@@ -1,15 +1,28 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
+import '../storage/storage_service.dart';
 import 'pep_manager.dart';
 
 class PepCapsManager {
   PepCapsManager({
     required this.connection,
     required this.pepManager,
-  });
+    StorageService? storage,
+  }) : _storage = storage {
+    // R5: seed the in-memory cache from disk so MUC presence storms at
+    // connect time don't trigger a `disco#info` fan-out for caps we
+    // already verified in a previous session.
+    final cached = storage?.loadEntityCaps();
+    if (cached != null) {
+      for (final entry in cached.entries) {
+        _capsFeatures[entry.key] = Set<String>.from(entry.value);
+      }
+    }
+  }
 
   final Connection connection;
   final PepManager pepManager;
+  final StorageService? _storage;
 
   final Map<String, Set<String>> _capsFeatures = {};
   final Map<String, Set<String>> _capsKeyBareJids = {};
@@ -107,6 +120,9 @@ class PepCapsManager {
       }
     }
     _capsFeatures[pending.capsKey] = features;
+    // R5: persist the verified caps so we can avoid the disco#info IQ
+    // for this `node#ver` on the next session.
+    _storage?.storeEntityCaps(pending.capsKey, features);
     _recordFeaturesForBareJid(pending.bareJid, features);
     final linkedBareJids = _capsKeyBareJids[pending.capsKey];
     if (linkedBareJids != null) {

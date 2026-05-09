@@ -4,7 +4,6 @@ import 'package:universal_io/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
 
-
 export 'XmppWebsocketApi.dart';
 
 XmppWebSocket createSocket() {
@@ -31,6 +30,7 @@ class XmppWebSocketHtml extends XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = true,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) {
     final uri = wsUri ??

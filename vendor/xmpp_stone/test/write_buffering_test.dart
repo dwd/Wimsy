@@ -71,6 +71,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
+    bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
   }) async {
@@ -86,6 +87,10 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   void close() {
     _controller.close();
   }
+  @override
+  Future<dynamic> getQuicStats() => Future.value(null);
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure({

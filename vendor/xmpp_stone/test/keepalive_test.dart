@@ -21,6 +21,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
+    bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
   }) async {
@@ -34,6 +35,10 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
 
   @override
   void close() {}
+  @override
+  Future<dynamic> getQuicStats() => Future.value(null);
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure({

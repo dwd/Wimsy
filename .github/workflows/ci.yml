@@ -193,11 +193,15 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev
+          sudo apt-get install -y curl clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
       - name: Set Build Version
         shell: bash
         run: |
@@ -217,8 +221,16 @@ jobs:
           echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
+      - name: Show compiler versions
+        run: |
+          clang --version || true
+          gcc --version || true
+          cmake --version || true
       - name: Build Linux
-        run: flutter build linux
+        env:
+          CC: clang
+          CXX: clang++
+        run: flutter build linux -v
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -234,6 +246,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
       - name: Set Build Version
         shell: bash
         run: |
@@ -270,6 +286,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Set Build Version
         shell: bash
         run: |
@@ -306,6 +326,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
       - name: Set Build Version
         shell: bash
         run: |
@@ -342,6 +366,12 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
       - name: Set Build Version
         shell: bash
         run: |

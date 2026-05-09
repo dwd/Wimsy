@@ -4,7 +4,7 @@ class Log {
   static LogLevel logLevel = LogLevel.VERBOSE;
 
   static bool logXmpp = true;
-  static bool logToConsole = false;
+  static bool logToConsole = true;
 
   static String _timestamp() {
     return DateTime.now().toUtc().toIso8601String();
@@ -50,16 +50,24 @@ class Log {
     }
   }
 
-  static void xmppp_receiving(String message) {
+  static void xmppp_receiving(String message, {String? channel}) {
     if (logXmpp) {
-      _emit('---Xmpp Receiving:---');
+      if (channel == null) {
+        _emit('---Xmpp Receiving:---');
+      } else {
+        _emit('---Xmpp Receiving [$channel]:---');
+      }
       _emit('$message');
     }
   }
 
-  static void xmppp_sending(String message) {
+  static void xmppp_sending(String message, {String? channel}) {
     if (logXmpp) {
-      _emit('---Xmpp Sending:---');
+      if (channel == null) {
+        _emit('---Xmpp Sending:---');
+      } else {
+        _emit('---Xmpp Sending [$channel]:---');
+      }
       _emit('$message');
     }
   }

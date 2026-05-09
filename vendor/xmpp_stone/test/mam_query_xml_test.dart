@@ -77,6 +77,38 @@ void main() {
     expect(_childText(set, 'max'), equals('10'));
     expect(_childText(set, 'before'), equals(''));
   });
+
+  // R2.1: unified server-archive catch-up query shape.
+  test('R2.1: unified server-archive query has after-id field and no toJid',
+      () async {
+    final connection = _buildConnection();
+    final manager = MessageArchiveManager.getInstance(connection);
+    final sent = _waitForOutgoingIq(connection);
+
+    // Simulate what _startUnifiedDmCatchUp does: queryById with afterId only,
+    // no toJid and no jid — targets the user's own server archive.
+    manager.queryById(
+      afterId: 'anchor-mam-id-99',
+      max: 50,
+    );
+
+    final iq = await sent;
+    final xml = iq.buildXmlString();
+
+    // Must NOT have a to= attribute (server archive, not a specific JID).
+    expect(iq.toJid, isNull,
+        reason: 'unified query must not target a specific JID');
+
+    // Must carry the after-id field.
+    expect(xml, contains('var="after-id"'));
+    expect(xml, contains('<value>anchor-mam-id-99</value>'));
+
+    // Must carry RSM max.
+    expect(xml, contains('<max>50</max>'));
+
+    // Must use MAM:2 namespace.
+    expect(xml, contains('urn:xmpp:mam:2'));
+  });
 }
 
 Connection _buildConnection() {
@@ -131,6 +163,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
+    bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
   }) async {
@@ -142,6 +175,10 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
 
   @override
   void close() {}
+  @override
+  Future<dynamic> getQuicStats() => Future.value(null);
+  @override
+  bool get isQuic => false;
 
   @override
   Future<SecureSocket?> secure({

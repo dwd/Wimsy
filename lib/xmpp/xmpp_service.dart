@@ -37,11 +37,14 @@ import 'jid_discovery.dart';
 import 'chat_message_mutations.dart';
 import 'message_intent_builder.dart';
 import 'message_stanza_parser.dart';
+import 'startup_fetch_helpers.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
 import 'srv_target.dart';
 import 'alt_connection.dart';
+import 'quic_endpoint_plan.dart';
+import 'quic_xmpp_socket.dart';
 import 'tcp_endpoint_plan.dart';
 
 class ReplyReference {
@@ -144,6 +147,15 @@ class XmppService extends ChangeNotifier {
   final Map<String, ChatState?> _chatStates = {};
   final Map<String, String> _lastDisplayedMarkerIdByChat = {};
   String? _activeChatBareJid;
+  final List<int> _quicRttHistory = [];
+  final List<int> _quicLossHistory = [];
+  BigInt _lastQuicLostPackets = BigInt.zero;
+  Timer? _quicStatsTimer;
+  static const int _maxQuicHistory = 60;
+
+  List<int> get quicRttHistory => _quicRttHistory;
+  List<int> get quicLossHistory => _quicLossHistory;
+
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
   void Function(String roomJid, ChatMessage message)?
   _incomingRoomMessageHandler;
@@ -182,6 +194,18 @@ class XmppService extends ChangeNotifier {
   String? _rosterVersion;
   final Map<String, String> _displayedStanzaIdByChat = {};
   final Map<String, DateTime> _displayedAtByChat = {};
+  // R1.3: pending displayed-sync markers we received from MDS but could
+  // not yet match to any locally cached message. Resolved as messages
+  // with the matching stanza-id are appended (live or via MAM). Persisted
+  // through `StorageService.storeDisplayedSyncPending` so the resolution
+  // survives restarts.
+  final Map<String, String> _displayedSyncPending = {};
+  // R2.1: globally newest MAM id we have ingested across all chats.
+  // Persisted via `StorageService.storeLastMamIdSeen` so future sessions
+  // can issue a single unified catch-up query (`afterId=` this anchor)
+  // instead of fanning out per-chat. The unified-query wiring is a
+  // follow-up; this commit lays the persistence foundation.
+  String? _lastMamIdSeen;
   final Map<String, DateTime> _roomLastTrafficAt = {};
   final Map<String, DateTime> _roomLastPingAt = {};
   final Map<String, DateTime> _roomHistoryCutoffAt = {};
@@ -205,7 +229,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, String> _vcardDisplayNames = {};
   final Set<String> _vcardRequests = {};
   final Set<String> _vcardUnavailable = {};
-  static const _vcardNoAvatar = 'none';
+  static const _vcardNoAvatar = vcardNoAvatarSentinel;
   String _selfVcardPhotoHash = '';
   bool _selfVcardPhotoKnown = false;
   final Map<String, _FileTransferSession> _fileTransfers = {};
@@ -432,6 +456,34 @@ class XmppService extends ChangeNotifier {
     _displayedStanzaIdByChat
       ..clear()
       ..addAll(storage.loadDisplayedSync());
+    // R1.3: seed pending displayed-sync markers from disk so we can keep
+    // trying to resolve them as messages arrive in this session.
+    _displayedSyncPending
+      ..clear()
+      ..addAll(storage.loadDisplayedSyncPending());
+    // R2.1: seed the globally-newest MAM id anchor.
+    _lastMamIdSeen = storage.loadLastMamIdSeen();
+  }
+
+  /// R2.1: returns the globally newest MAM id we have ingested across all
+  /// chats, persisted across restarts. May be null on a fresh install.
+  String? get lastMamIdSeen => _lastMamIdSeen;
+
+  /// R2.1: update the global MAM-id anchor. We compare lexicographically
+  /// because XEP-0359 stanza ids are unique, server-assigned strings; the
+  /// MAM ids we get from a single archive are typically allocated in
+  /// monotonic order, so a string-greater-than comparison is good enough
+  /// to discard out-of-order updates without spurious disk writes.
+  void _bumpLastMamIdSeen(String? mamId) {
+    if (mamId == null || mamId.isEmpty) {
+      return;
+    }
+    final current = _lastMamIdSeen;
+    if (current != null && current.compareTo(mamId) >= 0) {
+      return;
+    }
+    _lastMamIdSeen = mamId;
+    _storage?.storeLastMamIdSeen(mamId);
   }
 
   List<ChatMessage> messagesFor(String bareJid) {
@@ -750,7 +802,16 @@ class XmppService extends ChangeNotifier {
     bool directTls = false,
     String? wsEndpoint,
     List<String>? wsProtocols,
+    bool useQuic = true,
+    bool useTcp = true,
   }) async {
+    final quicTransportAvailable =
+        !kIsWeb &&
+        (Platform.isAndroid ||
+            Platform.isIOS ||
+            Platform.isLinux ||
+            Platform.isMacOS ||
+            Platform.isWindows);
     final shouldUseWebSocket = kIsWeb || useWebSocket;
     WsEndpointConfig? wsConfig;
     if (shouldUseWebSocket) {
@@ -770,7 +831,8 @@ class XmppService extends ChangeNotifier {
     var resolvedHost = host?.trim().isNotEmpty == true ? host!.trim() : '';
     var resolvedPort = port;
     var resolvedDirectTls = directTls;
-    List<XmppSrvTarget> srvCandidates = const [];
+    List<XmppSrvTarget> quicSrvCandidates = const [];
+    List<XmppSrvTarget> tcpSrvCandidates = const [];
 
     _finishSpan(_connectTransaction);
     _connectTransaction = _startTransaction(
@@ -790,15 +852,55 @@ class XmppService extends ChangeNotifier {
         'xmpp.srv_lookup',
         description: domain,
       );
-      srvCandidates = await resolveXmppSrvCandidates(domain);
+      if (quicTransportAvailable && useQuic) {
+        quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
+      }
+      tcpSrvCandidates = await resolveXmppSrvCandidates(domain);
+      // Filter SRV candidates by the user's transport allow-flags.
+      // - When Direct TLS is off, drop _xmpps-client._tcp records.
+      // - When Plain TCP is off, drop _xmpp-client._tcp records.
+      // The two flags act as independent allow-lists; the user is only
+      // allowed to actually connect via a transport they've enabled.
+      final filteredTcpSrv = filterTcpSrvCandidatesByTransport(
+        tcpSrvCandidates,
+        allowDirectTls: directTls,
+        allowPlainTcp: useTcp,
+      );
+      if (filteredTcpSrv.length != tcpSrvCandidates.length) {
+        debugPrint(
+          'XMPP SRV: filtered TCP candidates by user flags '
+          '(directTls=$directTls useTcp=$useTcp): '
+          '${tcpSrvCandidates.length} -> ${filteredTcpSrv.length}',
+        );
+      }
+      tcpSrvCandidates = filteredTcpSrv;
       _finishSpan(srvSpan);
-      if (srvCandidates.isNotEmpty) {
-        final first = srvCandidates.first;
+      if (quicTransportAvailable && quicSrvCandidates.isNotEmpty) {
+        final first = quicSrvCandidates.first;
+        resolvedHost = first.host;
+        resolvedPort = first.port;
+        resolvedDirectTls = false;
+      } else if (tcpSrvCandidates.isNotEmpty) {
+        final first = tcpSrvCandidates.first;
         resolvedHost = first.host;
         resolvedPort = first.port;
         resolvedDirectTls = first.directTls;
       } else if (resolvedPort == 0 || resolvedPort == 5222) {
         resolvedPort = directTls ? 5223 : 5222;
+      }
+      // If after filtering we have no usable transport at all (no QUIC,
+      // no surviving TCP SRV records, and the user has disabled the
+      // transport that the fallback port would use), bail out with a
+      // clear error rather than silently falling through.
+      final hasQuic = quicTransportAvailable && quicSrvCandidates.isNotEmpty;
+      final hasTcp = tcpSrvCandidates.isNotEmpty;
+      final fallbackAllowed = directTls || useTcp;
+      if (!hasQuic && !hasTcp && !fallbackAllowed) {
+        _setError(
+          'No transport enabled: both Direct TLS and Plain TCP are '
+          'disabled and no QUIC/WebSocket endpoint is available.',
+        );
+        return;
       }
     }
 
@@ -845,12 +947,18 @@ class XmppService extends ChangeNotifier {
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
       if (!shouldUseWebSocket) {
+        account.quicEndpoints = (quicTransportAvailable && useQuic)
+            ? buildQuicEndpointPlan(
+                domain: account.domain,
+                srvCandidates: quicSrvCandidates,
+              )
+            : const [];
         account.tcpEndpoints = buildTcpEndpointPlan(
           domain: account.domain,
           resolvedHost: resolvedHost,
           resolvedPort: resolvedPort,
           directTls: resolvedDirectTls,
-          srvCandidates: srvCandidates,
+          srvCandidates: tcpSrvCandidates,
         );
       }
       if (wsConfig != null) {
@@ -862,7 +970,13 @@ class XmppService extends ChangeNotifier {
         account.wsProtocols = protocols.isEmpty ? null : protocols;
       }
 
-      final connection = Connection.getInstance(account);
+      final connection =
+          quicTransportAvailable && (account.quicEndpoints?.isNotEmpty ?? false)
+          ? Connection.getInstance(
+              account,
+              socketFactory: () => QuicCapableXmppSocket(),
+            )
+          : Connection.getInstance(account);
       _connection = connection;
       connection.setReconnectPolicy(
         const ReconnectionPolicy(
@@ -920,6 +1034,7 @@ class XmppService extends ChangeNotifier {
           _errorMessage = null;
           notifyListeners();
           _setupKeepalive();
+          _setupQuicStats();
           _setupDeliveryTracking();
           _setupJingle();
           _setupIbb();
@@ -943,6 +1058,16 @@ class XmppService extends ChangeNotifier {
           _blockingSupported = connection.getSupportedFeatures().any(
             (feature) => feature.xmppVar == blockingNamespace,
           );
+          // R6: Re-seed the vCard avatar caches from disk on every Ready
+          // event, not just at startup. The disconnect handler clears these
+          // maps so that stale in-memory state doesn't survive a resource
+          // rebind, but without re-seeding the R4.1 cache-guard sees an
+          // empty cache and re-fetches every vCard on reconnect.
+          final storage = _storage;
+          if (storage != null) {
+            _seedVcardAvatars(storage.loadVcardAvatars());
+            _seedVcardAvatarState(storage.loadVcardAvatarState());
+          }
           _setupRoster();
           _setupChatManager();
           _setupMuc();
@@ -951,6 +1076,7 @@ class XmppService extends ChangeNotifier {
           _setupIbb();
           _setupPresence();
           _setupKeepalive();
+          _setupQuicStats();
           _setupDeliveryTracking();
           _setupPep();
           _setupBookmarks();
@@ -1062,6 +1188,7 @@ class XmppService extends ChangeNotifier {
     _bookmarkPersistor?.call(const []);
     _storage?.storeRosterVersion(null);
     _displayedStanzaIdByChat.clear();
+    _displayedSyncPending.clear();
     _displayedAtByChat.clear();
     _storage?.clearDisplayedSync();
     notifyListeners();
@@ -2204,7 +2331,7 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     return RegExp(
-      r'[\u{00A9}\u{00AE}\u{203C}-\u{3299}\u{1F000}-\u{1FAFF}]',
+      r'[\u00A9\u00AE\u203C-\u3299\u{1F000}-\u{1FAFF}]',
       unicode: true,
     ).hasMatch(value);
   }
@@ -5060,6 +5187,10 @@ class XmppService extends ChangeNotifier {
     _pepCapsManager = PepCapsManager(
       connection: connection,
       pepManager: _pepManager!,
+      // R5: persist the XEP-0115 caps cache across restarts so MUC
+      // presence storms don't trigger a `disco#info` fan-out for caps
+      // we already verified in a previous session.
+      storage: storage,
     );
     _requestRecentReactionEmojis();
     _pepManager?.requestMetadataIfMissing(_currentUserBareJid!);
@@ -5108,9 +5239,26 @@ class XmppService extends ChangeNotifier {
     _bookmarksManager?.requestBookmarks();
   }
 
-  void _setupDisplayedSync() {
+  /// Send the bootstrap `urn:xmpp:mds:displayed:0` PubSub items GET.
+  ///
+  /// R1.1: Skip the IQ entirely when `_displayedStanzaIdByChat` was
+  /// successfully restored from disk on startup. PEP +notify pushes (which
+  /// we already handle in `_handleDisplayedSyncEvent`) keep the cache live
+  /// after that, so the bootstrap fetch is only needed on a true cold
+  /// start — i.e. when the in-memory map is still empty.
+  ///
+  /// We also expose [force] for tests and for hypothetical callers that
+  /// want to refresh the entire MDS state regardless of the local cache.
+  void _setupDisplayedSync({bool force = false}) {
     final connection = _connection;
     if (connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    if (!shouldFetchDisplayedSyncBootstrap(
+      hasCachedDisplayedSync: _displayedStanzaIdByChat.isNotEmpty,
+      force: force,
+    )) {
+      // Cache was seeded from disk; rely on +notify for live updates.
       return;
     }
     final id = AbstractStanza.getRandomId();
@@ -5392,6 +5540,8 @@ class XmppService extends ChangeNotifier {
         ? _roomMessages[normalized]
         : _messages[normalized];
     if (list == null || list.isEmpty) {
+      // R1.3: persist the pending marker so we can resolve it later.
+      _markDisplayedSyncPending(normalized, stanzaId);
       return false;
     }
     ChatMessage? matched;
@@ -5412,17 +5562,75 @@ class XmppService extends ChangeNotifier {
         'Displayed sync miss for chat=$normalized stanzaId=$stanzaId '
             'messages=${list.length} knownStanzaIds=$knownStanzaIds',
       );
+      // R1.3: persist the (chat, stanzaId) pair. We will retry resolution
+      // every time a new message is appended (live or via MAM) for this
+      // chat — see `_resolveDisplayedSyncPending`.
+      _markDisplayedSyncPending(normalized, stanzaId);
       return false;
     }
     final existing = _displayedAtByChat[normalized];
     if (existing != null && !matched.timestamp.isAfter(existing)) {
+      // Even if we don't update the timestamp, we *did* successfully match
+      // the marker — so clear the pending entry.
+      _clearDisplayedSyncPending(normalized);
       return false;
     }
     _displayedAtByChat[normalized] = matched.timestamp;
     final isRoom =
         _roomMessages.containsKey(normalized) || isBookmark(normalized);
     _markMamCatchUpCompleted(normalized, isRoom: isRoom);
+    _clearDisplayedSyncPending(normalized);
     return true;
+  }
+
+  /// R1.3: record an unresolved (chat, stanza-id) pair and persist it so
+  /// the next session (or the next MAM page in this session) can resolve
+  /// it as messages arrive.
+  void _markDisplayedSyncPending(String bareJid, String stanzaId) {
+    if (bareJid.isEmpty || stanzaId.isEmpty) {
+      return;
+    }
+    if (_displayedSyncPending[bareJid] == stanzaId) {
+      return;
+    }
+    _displayedSyncPending[bareJid] = stanzaId;
+    _storage?.storeDisplayedSyncPending(
+      Map<String, String>.from(_displayedSyncPending),
+    );
+  }
+
+  /// R1.3: clear a resolved pending marker and persist the smaller map.
+  void _clearDisplayedSyncPending(String bareJid) {
+    if (!_displayedSyncPending.containsKey(bareJid)) {
+      return;
+    }
+    _displayedSyncPending.remove(bareJid);
+    _storage?.storeDisplayedSyncPending(
+      Map<String, String>.from(_displayedSyncPending),
+    );
+  }
+
+  /// R1.3: called from the message-append code paths whenever we add a
+  /// message with a known [stanzaId] to [bareJid]'s list. If the stanza-id
+  /// matches the chat's pending displayed-sync marker, kick the marker
+  /// resolution path. Cheap O(1) lookup; safe to call unconditionally.
+  void _resolveDisplayedSyncPending(String bareJid, String? stanzaId) {
+    if (stanzaId == null || stanzaId.isEmpty) {
+      return;
+    }
+    final normalized = _bareJid(bareJid);
+    final pending = _displayedSyncPending[normalized];
+    if (pending == null || pending != stanzaId) {
+      return;
+    }
+    // Re-run the matcher; on success it clears the pending entry, sets the
+    // displayed timestamp, and marks MAM catch-up complete for this chat.
+    if (_applyDisplayedStateForChat(normalized)) {
+      _storage?.storeDisplayedSync(
+        Map<String, String>.from(_displayedStanzaIdByChat),
+      );
+      notifyListeners();
+    }
   }
 
   void _setupPrivacyLists() {
@@ -5615,6 +5823,36 @@ class XmppService extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  void _setupQuicStats() {
+    _quicStatsTimer?.cancel();
+    _quicRttHistory.clear();
+    _quicLossHistory.clear();
+    _lastQuicLostPackets = BigInt.zero;
+
+    final socket = _connection?.socket;
+    if (socket == null || !socket.isQuic) return;
+
+    _quicStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      final stats = await socket.getQuicStats();
+      if (stats == null) return;
+
+      _quicRttHistory.add(stats.path.rttMillis.toInt());
+      if (_quicRttHistory.length > _maxQuicHistory) {
+        _quicRttHistory.removeAt(0);
+      }
+
+      final currentLoss = stats.path.lostPackets;
+      final deltaLoss = currentLoss - _lastQuicLostPackets;
+      _lastQuicLostPackets = currentLoss;
+      _quicLossHistory.add(deltaLoss.toInt());
+      if (_quicLossHistory.length > _maxQuicHistory) {
+        _quicLossHistory.removeAt(0);
+      }
+
+      notifyListeners();
+    });
   }
 
   void _setupKeepalive() {
@@ -5921,13 +6159,7 @@ class XmppService extends ChangeNotifier {
             nextReplyToId != existing.replyToId ||
             nextReplyToJid != existing.replyToJid ||
             nextReplyFallback != existing.replyFallback) {
-          list[existingIndex] = ChatMessage(
-            from: existing.from,
-            to: existing.to,
-            body: existing.body,
-            outgoing: existing.outgoing,
-            timestamp: existing.timestamp,
-            messageId: existing.messageId,
+          list[existingIndex] = existing.copyWith(
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
@@ -5936,21 +6168,9 @@ class XmppService extends ChangeNotifier {
             inviteRoomJid: nextInviteRoomJid,
             inviteReason: nextInviteReason,
             invitePassword: nextInvitePassword,
-            fileTransferId: existing.fileTransferId,
-            fileName: existing.fileName,
-            fileSize: existing.fileSize,
-            fileMime: existing.fileMime,
-            fileBytes: existing.fileBytes,
-            fileState: existing.fileState,
-            edited: existing.edited,
-            editedAt: existing.editedAt,
-            reactions: existing.reactions ?? const {},
             replyToId: nextReplyToId,
             replyToJid: nextReplyToJid,
             replyFallback: nextReplyFallback,
-            acked: existing.acked,
-            receiptReceived: existing.receiptReceived,
-            displayed: existing.displayed,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -6050,6 +6270,12 @@ class XmppService extends ChangeNotifier {
     }
     notifyListeners();
     _messagePersistor?.call(normalized, List.unmodifiable(list));
+    // R1.3: this newly-appended DM message may resolve a pending displayed
+    // marker (typical case after a restart for a chat where the marker
+    // pointed beyond our 25-message tail).
+    _resolveDisplayedSyncPending(normalized, stanzaId);
+    // R2.1: bump the global MAM-id anchor.
+    _bumpLastMamIdSeen(mamId);
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
         _isMamCatchUpComplete(normalized, isRoom: false)) {
@@ -6123,33 +6349,17 @@ class XmppService extends ChangeNotifier {
             nextReplyToId != existing.replyToId ||
             nextReplyToJid != existing.replyToJid ||
             nextReplyFallback != existing.replyFallback) {
-          final updated = ChatMessage(
-            from: existing.from,
-            to: existing.to,
-            body: existing.body,
-            outgoing: existing.outgoing,
+          final updated = existing.copyWith(
             timestamp: nextTimestamp,
-            messageId: existing.messageId,
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
             oobDescription: nextOobDescription,
             rawXml: nextRawXml,
-            fileTransferId: existing.fileTransferId,
-            fileName: existing.fileName,
-            fileSize: existing.fileSize,
-            fileMime: existing.fileMime,
-            fileBytes: existing.fileBytes,
-            fileState: existing.fileState,
-            edited: existing.edited,
-            editedAt: existing.editedAt,
-            reactions: existing.reactions ?? const {},
             replyToId: nextReplyToId,
             replyToJid: nextReplyToJid,
             replyFallback: nextReplyFallback,
-            acked: existing.acked,
             receiptReceived: nextReceiptReceived,
-            displayed: existing.displayed,
           );
           list.removeAt(existingIndex);
           _insertMessageOrdered(list, updated);
@@ -6195,6 +6405,11 @@ class XmppService extends ChangeNotifier {
       _mamCursorStore.incrementPrependOffset(normalized);
       notifyListeners();
       _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+      // R1.3: a MAM-page-prepended MUC message can resolve a pending
+      // displayed marker for this room.
+      _resolveDisplayedSyncPending(normalized, stanzaId);
+      // R2.1: bump the global MAM-id anchor for prepended MAM messages.
+      _bumpLastMamIdSeen(mamId);
       if (!outgoing) {
         _incomingRoomMessageHandler?.call(normalized, list[insertIndex]);
       }
@@ -6220,6 +6435,11 @@ class XmppService extends ChangeNotifier {
     _insertMessageOrdered(list, newMessage);
     notifyListeners();
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    // R1.3: a freshly-appended MUC message may resolve a pending displayed
+    // marker for this room.
+    _resolveDisplayedSyncPending(normalized, stanzaId);
+    // R2.1: bump the global MAM-id anchor.
+    _bumpLastMamIdSeen(mamId);
     if (!outgoing &&
         (mamId == null || mamId.isEmpty) &&
         _isMamCatchUpComplete(normalized, isRoom: true) &&
@@ -6335,36 +6555,9 @@ class XmppService extends ChangeNotifier {
       }
       final nextState = state ?? existing.fileState;
       final nextBytes = fileBytes ?? existing.fileBytes;
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
-        mamId: existing.mamId,
-        stanzaId: existing.stanzaId,
-        oobUrl: existing.oobUrl,
-        oobDescription: existing.oobDescription,
-        rawXml: existing.rawXml,
-        inviteRoomJid: existing.inviteRoomJid,
-        inviteReason: existing.inviteReason,
-        invitePassword: existing.invitePassword,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
+      list[i] = existing.copyWith(
         fileBytes: nextBytes,
         fileState: nextState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
-        acked: existing.acked,
-        receiptReceived: existing.receiptReceived,
-        displayed: existing.displayed,
       );
       notifyListeners();
       _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -6533,30 +6726,7 @@ class XmppService extends ChangeNotifier {
           nextDisplayed == existing.displayed) {
         return true;
       }
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
-        mamId: existing.mamId,
-        stanzaId: existing.stanzaId,
-        oobUrl: existing.oobUrl,
-        oobDescription: existing.oobDescription,
-        rawXml: existing.rawXml,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
-        fileBytes: existing.fileBytes,
-        fileState: existing.fileState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
+      list[i] = existing.copyWith(
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
@@ -6593,30 +6763,7 @@ class XmppService extends ChangeNotifier {
           nextDisplayed == existing.displayed) {
         return true;
       }
-      list[i] = ChatMessage(
-        from: existing.from,
-        to: existing.to,
-        body: existing.body,
-        outgoing: existing.outgoing,
-        timestamp: existing.timestamp,
-        messageId: existing.messageId,
-        mamId: existing.mamId,
-        stanzaId: existing.stanzaId,
-        oobUrl: existing.oobUrl,
-        oobDescription: existing.oobDescription,
-        rawXml: existing.rawXml,
-        fileTransferId: existing.fileTransferId,
-        fileName: existing.fileName,
-        fileSize: existing.fileSize,
-        fileMime: existing.fileMime,
-        fileBytes: existing.fileBytes,
-        fileState: existing.fileState,
-        edited: existing.edited,
-        editedAt: existing.editedAt,
-        reactions: existing.reactions ?? const {},
-        replyToId: existing.replyToId,
-        replyToJid: existing.replyToJid,
-        replyFallback: existing.replyFallback,
+      list[i] = existing.copyWith(
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
@@ -6982,6 +7129,11 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> _safeClose({required bool preserveCache}) async {
+    _quicStatsTimer?.cancel();
+    _quicStatsTimer = null;
+    _quicRttHistory.clear();
+    _quicLossHistory.clear();
+    _lastQuicLostPackets = BigInt.zero;
     _csiIdleTimer?.cancel();
     _csiIdleTimer = null;
     _mucSelfPingTimer?.cancel();
@@ -7072,6 +7224,7 @@ class XmppService extends ChangeNotifier {
     _roomHistoryCutoffAt.clear();
     _lastDisplayedMarkerIdByChat.clear();
     _displayedStanzaIdByChat.clear();
+    _displayedSyncPending.clear();
     _displayedAtByChat.clear();
     if (!preserveCache) {
       _recentReactionEmojis.clear();
@@ -7556,15 +7709,40 @@ class XmppService extends ChangeNotifier {
     }
     _lastGlobalMamSyncAt = now;
 
-    for (final entry in _messages.entries) {
-      final bareJid = _bareJid(entry.key);
-      if (isBookmark(bareJid)) {
-        continue;
+    // R2.1: When we have a global MAM anchor (_lastMamIdSeen), issue a single
+    // unified catch-up query against the user's own server archive
+    // (`afterId=_lastMamIdSeen`, no `to=` JID). The server returns all missed
+    // DM messages across every contact in one paginated stream, which the
+    // existing _addMessage routing dispatches to the correct chat by JID.
+    // This replaces the O(N) per-chat fan-out with a single O(1) IQ.
+    //
+    // When _lastMamIdSeen is null (fresh install / first session) we fall back
+    // to the per-chat fan-out so each chat still gets its initial tail.
+    final anchor = _lastMamIdSeen;
+    if (anchor != null && anchor.isNotEmpty) {
+      _startUnifiedDmCatchUp(anchor);
+    } else {
+      // Fallback: no anchor yet — fan out per-chat as before.
+      for (final entry in _messages.entries) {
+        final bareJid = _bareJid(entry.key);
+        if (isBookmark(bareJid)) {
+          continue;
+        }
+        if (entry.value.isEmpty) {
+          continue;
+        }
+        // R2.2: skip the catch-up query when MDS already proves we are
+        // caught up to the displayed marker for this chat.
+        if (!shouldFetchMamCatchUpForChat(
+          displayedStanzaId: _displayedStanzaIdByChat[bareJid],
+          latestLocalMamId: latestMamIdFor(bareJid),
+          stanzaIdAtLatestMamId:
+              _stanzaIdAtLatestMamId(bareJid, isRoom: false),
+        )) {
+          continue;
+        }
+        _startMamCatchUp(bareJid, isRoom: false);
       }
-      if (entry.value.isEmpty) {
-        continue;
-      }
-      _startMamCatchUp(bareJid, isRoom: false);
     }
 
     for (final bookmark in _bookmarks) {
@@ -7572,11 +7750,151 @@ class XmppService extends ChangeNotifier {
       final roomMessages = _roomMessages[roomJid];
       if (roomMessages == null || roomMessages.isEmpty) {
         _requestRoomMam(roomJid, max: 25, before: '');
-      } else {
-        _startMamCatchUp(roomJid, isRoom: true);
+        continue;
       }
+      // R2.2: same short-circuit for MUCs.
+      if (!shouldFetchMamCatchUpForChat(
+        displayedStanzaId: _displayedStanzaIdByChat[roomJid],
+        latestLocalMamId: _latestRoomMamIdFor(roomJid),
+        stanzaIdAtLatestMamId: _stanzaIdAtLatestMamId(roomJid, isRoom: true),
+      )) {
+        continue;
+      }
+      _startMamCatchUp(roomJid, isRoom: true);
     }
     _finishMamSyncIfIdle();
+  }
+
+  /// R2.1: Issue a single unified MAM catch-up query against the user's own
+  /// server archive, starting after [anchor] (the globally newest MAM id we
+  /// have seen). On completion the RSM `<last>` id is used to advance
+  /// [_lastMamIdSeen] so the next session's anchor is up to date.
+  ///
+  /// The query is built manually so we can capture the IQ id and register an
+  /// [IqRouter] response handler — [MessageArchiveManager.queryById] writes
+  /// the stanza internally and does not expose the id.
+  void _startUnifiedDmCatchUp(String anchor) {
+    final connection = _connection;
+    if (connection == null) {
+      return;
+    }
+
+    // Build the MAM IQ: <iq type="set"><query xmlns="urn:xmpp:mam:2">
+    //   <x type="submit"><field var="FORM_TYPE"…/><field var="after-id"…/>
+    //   </x><set xmlns="…rsm"><max>50</max></set></query></iq>
+    final id = AbstractStanza.getRandomId();
+    final iq = IqStanza(id, IqStanzaType.SET);
+    // No toJid — queries the user's own server archive.
+
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:mam:2'));
+    query.addAttribute(XmppAttribute('queryid', AbstractStanza.getRandomId()));
+
+    final x = XmppElement()..name = 'x';
+    x.addAttribute(
+      XmppAttribute('xmlns', 'jabber:x:data'),
+    );
+    x.addAttribute(XmppAttribute('type', 'submit'));
+
+    final formType = XmppElement()..name = 'field';
+    formType.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
+    formType.addAttribute(XmppAttribute('type', 'hidden'));
+    final formTypeValue = XmppElement()
+      ..name = 'value'
+      ..textValue = 'urn:xmpp:mam:2';
+    formType.addChild(formTypeValue);
+    x.addChild(formType);
+
+    final afterIdField = XmppElement()..name = 'field';
+    afterIdField.addAttribute(XmppAttribute('var', 'after-id'));
+    final afterIdValue = XmppElement()
+      ..name = 'value'
+      ..textValue = anchor;
+    afterIdField.addChild(afterIdValue);
+    x.addChild(afterIdField);
+
+    query.addChild(x);
+
+    // RSM: request up to 50 messages per page.
+    final set = XmppElement()..name = 'set';
+    set.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/rsm'),
+    );
+    final max = XmppElement()
+      ..name = 'max'
+      ..textValue = '50';
+    set.addChild(max);
+    query.addChild(set);
+
+    iq.addChild(query);
+
+    // Register a response handler so we can advance _lastMamIdSeen once the
+    // server returns the <fin> result.
+    final router = IqRouter.getInstance(connection);
+    router.registerResponseHandler(id, (response) {
+      if (response.type != IqStanzaType.RESULT) {
+        return;
+      }
+      // Parse <fin xmlns="urn:xmpp:mam:2"><set …><last>…</last></set></fin>
+      final fin = response.children.firstWhere(
+        (child) =>
+            child.name == 'fin' &&
+            child.getAttribute('xmlns')?.value == 'urn:xmpp:mam:2',
+        orElse: () => XmppElement(),
+      );
+      if (fin.name != 'fin') {
+        return;
+      }
+      final rsmSet = fin.children.firstWhere(
+        (child) =>
+            child.name == 'set' &&
+            child.getAttribute('xmlns')?.value ==
+                'http://jabber.org/protocol/rsm',
+        orElse: () => XmppElement(),
+      );
+      if (rsmSet.name != 'set') {
+        return;
+      }
+      final lastEl = rsmSet.children.firstWhere(
+        (child) => child.name == 'last',
+        orElse: () => XmppElement(),
+      );
+      final lastId = lastEl.name == 'last' ? lastEl.textValue?.trim() : null;
+      if (lastId != null && lastId.isNotEmpty) {
+        _bumpLastMamIdSeen(lastId);
+      }
+    });
+
+    connection.writeStanza(iq);
+  }
+
+  /// Returns the stanza-id of the message in [bareJid]'s message list whose
+  /// MAM id equals the chat's latest MAM id. Used by R2.2 to compare the
+  /// displayed marker against the newest local message we have. Returns
+  /// null when no local message has both a matching MAM id and a non-empty
+  /// stanza-id.
+  String? _stanzaIdAtLatestMamId(String bareJid, {required bool isRoom}) {
+    final normalized = _bareJid(bareJid);
+    final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return null;
+    }
+    final latestMamId = isRoom
+        ? _latestRoomMamIdFor(normalized)
+        : latestMamIdFor(normalized);
+    if (latestMamId == null || latestMamId.isEmpty) {
+      return null;
+    }
+    for (final message in list.reversed) {
+      if (message.mamId == latestMamId) {
+        final sid = message.stanzaId;
+        if (sid != null && sid.isNotEmpty) {
+          return sid;
+        }
+        return null;
+      }
+    }
+    return null;
   }
 
   void _seedVcardAvatars(Map<String, String> base64ByJid) {
@@ -7602,7 +7920,11 @@ class XmppService extends ChangeNotifier {
     _requestVcardDetails(bareJid, preferName: false);
   }
 
-  void _requestVcardDetails(String bareJid, {required bool preferName}) {
+  void _requestVcardDetails(
+    String bareJid, {
+    required bool preferName,
+    String? advertisedHash,
+  }) {
     final connection = _connection;
     final storage = _storage;
     if (connection == null || storage == null) {
@@ -7612,6 +7934,19 @@ class XmppService extends ChangeNotifier {
       return;
     }
     if (_vcardRequests.contains(bareJid)) {
+      return;
+    }
+    // R4.1: Skip the IQ entirely when we already have the bytes cached for
+    // the advertised photo hash. `preferName == true` callers (e.g. self
+    // vCard fetch on Ready, or contact list "show details") bypass the cache
+    // because they want the FN/NICKNAME fields, not just the avatar.
+    if (!shouldFetchVcardForCache(
+      bareJid: bareJid,
+      preferName: preferName,
+      cachedAvatarBytes: _vcardAvatarBytes,
+      cachedAvatarState: _vcardAvatarState,
+      advertisedHash: advertisedHash,
+    )) {
       return;
     }
     _vcardRequests.add(bareJid);
@@ -7718,13 +8053,12 @@ class XmppService extends ChangeNotifier {
       }
       return;
     }
-    if (existing == hash && _vcardAvatarBytes.containsKey(bareJid)) {
-      return;
-    }
-    _vcardAvatarState[bareJid] = hash;
-    storage.storeVcardAvatarState(bareJid, hash);
+    // The centralised guard inside `_requestVcardDetails` (R4.1) handles the
+    // "same hash & bytes already cached" case by short-circuiting. Pass the
+    // advertised hash *before* mutating cached state so the guard can compare
+    // it against the previously recorded hash and refetch when they differ.
     _vcardRequests.remove(bareJid);
-    _requestVcardAvatar(bareJid);
+    _requestVcardDetails(bareJid, preferName: false, advertisedHash: hash);
   }
 
   Future<String?> updateSelfVcard({

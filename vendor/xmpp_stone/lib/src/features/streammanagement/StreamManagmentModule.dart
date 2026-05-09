@@ -110,6 +110,23 @@ class StreamManagementModule extends Negotiator {
 
   @override
   void negotiate(List<Nonza> nonzas) {
+    // Per XEP-0467 §Stream Management: XEP-0198 cannot apply to QUIC
+    // connections, and "MUST NOT be advertised or negotiated" over QUIC.
+    // QUIC provides its own per-stream reliability and ordering at the
+    // transport layer, so SM's resumption / per-stanza acknowledgement
+    // machinery is redundant (and would in fact misbehave across the
+    // multiple aux streams introduced by XEP-0467 §Multiple Streams).
+    //
+    // We never emit `<enable/>` on QUIC and we ignore any `<sm/>` feature
+    // the server might still advertise. The doap.xml entry for XEP-0198
+    // remains because we DO support SM on TCP — only the QUIC path opts out.
+    //
+    // We must still transition to DONE so the negotiator queue advances
+    // (otherwise the connection never reaches Ready post-bind).
+    if (_connection.isQuic) {
+      state = NegotiatorState.DONE;
+      return;
+    }
     if (nonzas.isNotEmpty &&
         SMNonza.match(nonzas[0]) &&
         _connection.authenticated) {
@@ -125,6 +142,9 @@ class StreamManagementModule extends Negotiator {
 
   @override
   bool isReady() {
+    // Over QUIC, SM is skipped but we must still report ready so that
+    // negotiate() is called and can advance the negotiator queue to DONE.
+    if (_connection.isQuic) return true;
     return super.isReady() &&
         (isResumeAvailable() ||
             (_connection.fullJid.resource != null &&
@@ -387,6 +407,14 @@ class StreamManagementModule extends Negotiator {
     }
     if (state == XmppConnectionState.Ready ||
         state == XmppConnectionState.Resumed) {
+      // On QUIC, XEP-0198 SM is disabled (see negotiate()), so there is no
+      // SM ack machinery.  QUIC also has its own transport-level keepalive
+      // (PING frames, configured in flutter_quic's endpoint.rs), so we do
+      // not need — and must not start — the XMPP-level ping keepalive timer
+      // here.  Starting it would fire a ping every 30 s whose reply is never
+      // matched (the IQ router does not see the reply on QUIC), causing a
+      // keepaliveTimeout reconnect loop every ~60 s.
+      if (_connection.isQuic) return;
       _restartKeepaliveTimer();
       probeKeepalive(shortTimeout: false);
     }

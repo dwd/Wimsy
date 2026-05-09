@@ -101,6 +101,108 @@ void main() {
     expect(list.single.mamId, 'existing');
   });
 
+  test('does not merge by heuristic when body differs', () {
+    final list = <ChatMessage>[
+      _message(timestamp: DateTime.utc(2026, 1, 1, 10), body: 'hello'),
+    ];
+
+    final merged = mergeMamIdsIntoExisting(
+      list,
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'different body',
+      outgoing: false,
+      timestamp: DateTime.utc(2026, 1, 1, 10, 0, 30),
+      mamId: 'mam-x',
+      stanzaId: 'sid-x',
+    );
+
+    expect(merged, isFalse);
+    expect(list.single.mamId, isNull);
+  });
+
+  test('does not merge by heuristic when sender differs', () {
+    final list = <ChatMessage>[
+      _message(
+        timestamp: DateTime.utc(2026, 1, 1, 10),
+        from: 'alice@example.com',
+      ),
+    ];
+
+    final merged = mergeMamIdsIntoExisting(
+      list,
+      from: 'eve@example.com',
+      to: 'bob@example.com',
+      body: 'hello',
+      outgoing: false,
+      timestamp: DateTime.utc(2026, 1, 1, 10, 0, 30),
+      mamId: 'mam-y',
+      stanzaId: 'sid-y',
+    );
+
+    expect(merged, isFalse);
+    expect(list.single.mamId, isNull);
+  });
+
+  test('merges oobUrl and oobDescription via message-id match', () {
+    final list = <ChatMessage>[
+      _message(
+        timestamp: DateTime.utc(2026, 1, 1, 10),
+        messageId: 'msg-oob',
+      ),
+    ];
+
+    final merged = mergeMamIdsIntoExisting(
+      list,
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'hello',
+      outgoing: false,
+      timestamp: DateTime.utc(2026, 1, 1, 10, 0, 5),
+      messageId: 'msg-oob',
+      mamId: 'mam-oob',
+      stanzaId: 'sid-oob',
+      oobDescription: 'A photo',
+      rawXml: '<message id="msg-oob"/>',
+    );
+
+    expect(merged, isTrue);
+    expect(list.single.mamId, 'mam-oob');
+    expect(list.single.oobDescription, 'A photo');
+    expect(list.single.rawXml, '<message id="msg-oob"/>');
+  });
+
+  test(
+    'does not merge by message-id when both mamId and stanzaId already set',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          timestamp: DateTime.utc(2026, 1, 1, 10),
+          messageId: 'msg-full',
+          mamId: 'existing-mam',
+          stanzaId: 'existing-sid',
+        ),
+      ];
+
+      final merged = mergeMamIdsIntoExisting(
+        list,
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'hello',
+        outgoing: false,
+        timestamp: DateTime.utc(2026, 1, 1, 10, 0, 5),
+        messageId: 'msg-full',
+        mamId: 'new-mam',
+        stanzaId: 'new-sid',
+      );
+
+      // Message-id matched but both IDs already present — no overwrite.
+      expect(merged, isFalse);
+      expect(list.single.mamId, 'existing-mam');
+      expect(list.single.stanzaId, 'existing-sid');
+    },
+  );
+
   test('does not merge when message is outside merge window', () {
     final list = <ChatMessage>[
       _message(timestamp: DateTime.utc(2026, 1, 1, 10), messageId: 'local-1'),

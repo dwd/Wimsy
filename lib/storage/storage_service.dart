@@ -24,6 +24,20 @@ class StorageService {
   static const _vcardAvatarStateKey = 'vcard_avatar_state';
   static const _bookmarksKey = 'bookmarks';
   static const _displayedSyncKey = 'displayed_sync';
+  // R1.3: pending (chatJid -> stanza-id) markers we received via MDS but
+  // could not yet match against any local message. These are resolved
+  // lazily as messages with the matching stanza-id arrive (live or via
+  // MAM) and are removed from disk once resolved.
+  static const _displayedSyncPendingKey = 'displayed_sync_pending';
+  // R5: persisted Entity Capabilities (XEP-0115) cache, keyed by
+  // `node#ver`. Values are the disco#info feature lists.
+  static const _entityCapsKey = 'entity_caps';
+  // R2.1: single global anchor for the newest MAM id we've ingested
+  // across all chats. The intent is to enable a unified MAM catch-up
+  // query (`<query><x type=submit><field var=after-id>...`) that
+  // replaces the per-chat fan-out at connect time. We persist the
+  // anchor today; the unified query is a follow-up.
+  static const _lastMamIdSeenKey = 'last_mam_id_seen';
   static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   final SecureStore _secureStorage = createSecureStore();
@@ -346,6 +360,9 @@ class StorageService {
       return;
     }
     await box.put(_displayedSyncKey, const <String, dynamic>{});
+    // R1.3: also wipe the pending-resolution map so disconnect/forget
+    // genuinely clears all MDS-related state.
+    await box.put(_displayedSyncPendingKey, const <String, dynamic>{});
   }
 
   Future<void> clearRoomMessages() async {
@@ -405,6 +422,159 @@ class StorageService {
     await box.put(_displayedSyncKey, Map<String, String>.from(sync));
   }
 
+  /// R1.3: load pending displayed-sync markers — i.e. (chatJid -> stanzaId)
+  /// pairs we received from the MDS node but could not yet match against
+  /// any locally cached message. The XmppService resolves these as
+  /// matching messages arrive (live, via MAM, or via Carbons).
+  Map<String, String> loadDisplayedSyncPending() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(
+      _displayedSyncPendingKey,
+      defaultValue: const <String, dynamic>{},
+    );
+    if (data is Map) {
+      final result = <String, String>{};
+      for (final entry in data.entries) {
+        final key = entry.key.toString();
+        final value = entry.value?.toString() ?? '';
+        if (key.isNotEmpty && value.isNotEmpty) {
+          result[key] = value;
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+
+  /// R1.3: persist the pending-resolution map.
+  Future<void> storeDisplayedSyncPending(Map<String, String> pending) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(
+      _displayedSyncPendingKey,
+      Map<String, String>.from(pending),
+    );
+  }
+
+  /// R5: load the persisted Entity Capabilities (XEP-0115) cache. The
+  /// returned map is keyed by `node#ver` and the values are the verified
+  /// `disco#info` feature lists.
+  ///
+  /// We persist this cache to skip the per-`node#ver` `disco#info` IQ
+  /// fan-out at connect time when MUC presence broadcasts caps for many
+  /// occupants. If the cache returns nothing for a given `node#ver` the
+  /// existing online query path still runs.
+  Map<String, Set<String>> loadEntityCaps() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(
+      _entityCapsKey,
+      defaultValue: const <String, dynamic>{},
+    );
+    if (data is Map) {
+      final result = <String, Set<String>>{};
+      for (final entry in data.entries) {
+        final key = entry.key.toString();
+        if (key.isEmpty) {
+          continue;
+        }
+        final value = entry.value;
+        if (value is List) {
+          final features = <String>{
+            for (final feature in value)
+              if (feature is String && feature.isNotEmpty) feature,
+          };
+          if (features.isNotEmpty) {
+            result[key] = features;
+          }
+        }
+      }
+      return result;
+    }
+    return const {};
+  }
+
+  /// R5: persist a single `node#ver` -> features mapping. Existing entries
+  /// for other `node#ver` keys are preserved. We never overwrite an
+  /// existing entry — Entity Capabilities are content-addressed by hash so
+  /// a stable key always corresponds to the same feature set.
+  Future<void> storeEntityCaps(String capsKey, Set<String> features) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (capsKey.isEmpty || features.isEmpty) {
+      return;
+    }
+    final existing = box.get(_entityCapsKey, defaultValue: <String, dynamic>{});
+    final next = <String, dynamic>{};
+    if (existing is Map) {
+      for (final entry in existing.entries) {
+        next[entry.key.toString()] = entry.value;
+      }
+    }
+    if (next.containsKey(capsKey)) {
+      return;
+    }
+    next[capsKey] = features.toList(growable: false);
+    await box.put(_entityCapsKey, next);
+  }
+
+  /// R5: clear the entire caps cache (e.g. for "forget account" flows).
+  Future<void> clearEntityCaps() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_entityCapsKey, const <String, dynamic>{});
+  }
+
+  /// R2.1: load the persisted "newest MAM id we've seen" anchor across
+  /// all chats. Returns null when there is no recorded anchor.
+  String? loadLastMamIdSeen() {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final value = box.get(_lastMamIdSeenKey)?.toString();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  /// R2.1: persist the global anchor. Callers should only call this with
+  /// an id that is genuinely newer than the previous anchor; the helper
+  /// performs no ordering check (MAM ids are server-assigned and only
+  /// totally ordered within a single MAM archive, so the value passed
+  /// here must come from the caller's append path).
+  Future<void> storeLastMamIdSeen(String mamId) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (mamId.isEmpty) {
+      return;
+    }
+    await box.put(_lastMamIdSeenKey, mamId);
+  }
+
+  /// R2.1: clear the anchor (forget-account flows).
+  Future<void> clearLastMamIdSeen() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.delete(_lastMamIdSeenKey);
+  }
+
   Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {
     final box = _box;
     if (box == null) {
@@ -447,6 +617,17 @@ class StorageService {
     }
     next[hash] = base64Data;
     await box.put(_avatarBlobsKey, next);
+  }
+
+  /// R3.1: replace the entire avatar-blobs map with [blobs]. Used by the
+  /// PEP avatar GC pass that keeps only blobs referenced by a current
+  /// metadata entry.
+  Future<void> replaceAvatarBlobs(Map<String, String> blobs) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_avatarBlobsKey, Map<String, String>.from(blobs));
   }
 
   Future<void> clearAvatars() async {

@@ -51,8 +51,12 @@ class XmppWebSocketIo extends XmppWebSocket {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost}) async {
+    if (useQuic) {
+      throw UnsupportedError('QUIC is not implemented in XmppWebSocketIo');
+    }
     _useWebSocket = useWebSocket || wsUri != null || wsPath != null;
     Log.i(TAG,
         'Socket connect: host=$host port=$port useWebSocket=$_useWebSocket directTls=$directTls');
@@ -107,27 +111,41 @@ class XmppWebSocketIo extends XmppWebSocket {
   @override
   void write(Object? message) {
     if (_useWebSocket) {
-      _webSocket?.sink.add(message);
+      if (_webSocket == null) {
+        return;
+      }
+      Log.xmppp_sending(message.toString(), channel: 'ws');
+      _webSocket!.sink.add(message);
     } else {
-      _tcpSocket?.write(message);
+      if (_tcpSocket == null) {
+        return;
+      }
+      Log.xmppp_sending(message.toString(), channel: 'tcp');
+      _tcpSocket!.write(message);
     }
   }
 
   @override
   StreamSubscription<String> listen(void Function(String event)? onData,
       {Function? onError, void Function()? onDone, bool? cancelOnError}) {
+    final channel = _useWebSocket ? 'ws' : 'tcp';
+    void logAndDeliver(String event) {
+      Log.xmppp_receiving(event, channel: channel);
+      onData?.call(event);
+    }
+
     if (_useWebSocket) {
       return _webSocket!.stream
           .map((event) => event.toString())
           .map(_map)
-          .listen(onData,
+          .listen(logAndDeliver,
               onError: onError, onDone: onDone, cancelOnError: cancelOnError);
     }
     return _tcpSocket!
         .cast<List<int>>()
         .transform(utf8.decoder)
         .map(_map)
-        .listen(onData,
+        .listen(logAndDeliver,
             onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 

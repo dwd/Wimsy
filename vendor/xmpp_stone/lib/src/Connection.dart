@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:collection/collection.dart' show IterableExtension;
 import 'package:synchronized/synchronized.dart';
 import 'package:universal_io/io.dart';
@@ -77,10 +76,13 @@ class Connection {
 
   String? _serverName;
 
-  static Connection getInstance(XmppAccountSettings account) {
+  static Connection getInstance(
+    XmppAccountSettings account, {
+    XmppSocketFactory? socketFactory,
+  }) {
     var connection = instances[account.fullJid.userAtDomain];
     if (connection == null) {
-      connection = Connection(account);
+      connection = Connection(account, socketFactory: socketFactory);
       instances[account.fullJid.userAtDomain] = connection;
     }
     return connection;
@@ -202,9 +204,12 @@ class Connection {
 
   bool get iapAdvertisedInCurrentStream => _iapAdvertisedInCurrentStream;
   bool get sasl2PipelinedAuthInFlight => _sasl2PipelinedAuthInFlight;
+  bool get isQuic => _socket?.isQuic ?? false;
 
   xmppSocket.XmppWebSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
+
+  xmppSocket.XmppWebSocket? get socket => _socket;
 
   // for testing purpose
   set socket(xmppSocket.XmppWebSocket? value) {
@@ -238,26 +243,209 @@ class Connection {
 
   String restOfResponse = '';
 
-  String extractWholeChild(String response) {
-    return response;
+  /// Extracts all complete top-level XML elements from [input], returning them
+  /// wrapped in `<xmpp_stone>…</xmpp_stone>` and leaving any trailing
+  /// incomplete fragment in [remainder].
+  ///
+  /// This replaces the old "parse whole buffer, fail if incomplete" approach
+  /// which would hold back all complete stanzas whenever a partial fragment
+  /// was present at the end of the buffer — causing stanza starvation under
+  /// high latency / burst conditions (e.g. a large MUC presence flood).
+  ///
+  /// The algorithm:
+  ///  1. Strip any `<?xml … ?>` prolog.
+  ///  2. Walk the string character-by-character tracking element depth.
+  ///  3. Each time depth returns to 0 after opening at least one element,
+  ///     we have a complete top-level element — record its end offset.
+  ///  4. Emit all complete elements wrapped in `<xmpp_stone>`, keep the rest.
+  ///
+  /// Special cases:
+  ///  • `</stream:stream>` — signals connection close; caller handles it.
+  ///  • `<stream:stream …>` opener (depth never closes) — emitted as-is with
+  ///    a synthetic `</stream:stream>` appended so the XML parser accepts it.
+  static _ExtractResult _extractCompleteElements(
+    String input,
+  ) {
+    // Strip XML prolog(s) for depth-counting purposes but keep them in the
+    // output so the XML parser in handleResponse can strip them too.
+    final stripped = input.replaceAll(RegExp(r'<\?(xml[^?]*)\?>'), '');
+
+    int depth = 0;
+    bool inTag = false;
+    bool inClosingTag = false;
+    bool inSelfClosing = false;
+    bool inString = false;
+    String stringChar = '';
+    bool inComment = false;
+    int i = 0;
+    final len = stripped.length;
+    // Offsets (in `stripped`) where complete top-level elements end.
+    final List<int> completeEnds = [];
+    // Whether we have seen a `<stream:stream` opener that was never closed.
+    bool hasUnclosedStreamOpener = false;
+
+    while (i < len) {
+      final ch = stripped[i];
+
+      // Handle XML comments <!-- … -->
+      if (!inString && !inComment && i + 3 < len &&
+          ch == '<' && stripped[i + 1] == '!' &&
+          stripped[i + 2] == '-' && stripped[i + 3] == '-') {
+        final end = stripped.indexOf('-->', i + 4);
+        if (end < 0) break; // incomplete comment — stop
+        i = end + 3;
+        continue;
+      }
+
+      if (inComment) {
+        // (handled above)
+        i++;
+        continue;
+      }
+
+      if (inString) {
+        if (ch == stringChar) inString = false;
+        i++;
+        continue;
+      }
+
+      if (ch == '"' || ch == "'") {
+        if (inTag) {
+          inString = true;
+          stringChar = ch;
+        }
+        i++;
+        continue;
+      }
+
+      if (ch == '<') {
+        inClosingTag = i + 1 < len && stripped[i + 1] == '/';
+        inSelfClosing = false;
+        if (!inClosingTag) {
+          // Check for stream:stream opener — it never gets a closing tag in
+          // the normal flow, so we handle it specially.
+          if (depth == 0) {
+            final tagEnd = stripped.indexOf('>', i);
+            if (tagEnd >= 0) {
+              final tagContent = stripped.substring(i + 1, tagEnd);
+              if (tagContent.trimLeft().startsWith('stream:stream')) {
+                // Emit the opener with a synthetic close so the XML parser
+                // accepts it, then continue scanning after it.
+                hasUnclosedStreamOpener = true;
+                completeEnds.add(tagEnd + 1);
+                i = tagEnd + 1;
+                continue;
+              }
+            }
+          }
+          // Opening tag: increment depth now so self-closing can decrement it.
+          depth++;
+        }
+        inTag = true;
+        i++;
+        continue;
+      }
+
+      if (ch == '/' && inTag) {
+        // Could be self-closing `/>`
+        if (i + 1 < len && stripped[i + 1] == '>') {
+          inSelfClosing = true;
+        }
+        i++;
+        continue;
+      }
+
+      if (ch == '>') {
+        if (inTag) {
+          inTag = false;
+          if (inSelfClosing) {
+            // Self-closing tag <foo/>: depth was incremented when we saw `<`
+            // opening, so decrement it back. If depth returns to 0 this is a
+            // complete top-level element.
+            depth--;
+            if (depth == 0) completeEnds.add(i + 1);
+          } else if (inClosingTag) {
+            // Closing tag </foo>: decrement depth.
+            depth--;
+            if (depth == 0) completeEnds.add(i + 1);
+          }
+          // Opening tag: depth was already incremented when we saw `<`.
+          inSelfClosing = false;
+          inClosingTag = false;
+        }
+        i++;
+        continue;
+      }
+
+      i++;
+    }
+
+    if (completeEnds.isEmpty) {
+      // Nothing complete yet — keep buffering.
+      return _ExtractResult(emitted: '', remainder: input);
+    }
+
+    // The last complete element ends at completeEnds.last in `stripped`.
+    // We need the corresponding offset in the original `input`. Since we only
+    // stripped `<?xml…?>` prologs (which appear at the very start), the offset
+    // in `stripped` equals the offset in `input` plus the length of any
+    // stripped prologs that appeared before that position. For simplicity —
+    // and because prologs only appear at the very start — we use the original
+    // `input` string for slicing and just re-strip prologs in the output.
+    // Find the end offset in the original input by scanning for the same
+    // character position accounting for stripped prologs.
+    final prologLength = input.length - stripped.length;
+    final cutInStripped = completeEnds.last;
+    final cutInInput = cutInStripped + prologLength;
+
+    final completeRaw = input.substring(0, cutInInput);
+    final remainder = input.substring(cutInInput);
+
+    // Wrap complete elements for the XML parser in handleResponse.
+    String wrapped = completeRaw;
+    if (hasUnclosedStreamOpener) {
+      wrapped = '$wrapped</stream:stream>';
+    }
+    wrapped = '<xmpp_stone>$wrapped</xmpp_stone>';
+
+    return _ExtractResult(emitted: wrapped, remainder: remainder);
+  }
+
+  /// Returns a new independent stream-response mapper closure.
+  /// Each QUIC aux stream must get its own mapper so that partial XML
+  /// fragments from different streams are buffered independently and do not
+  /// corrupt each other's parse state.
+  String Function(String) makeStreamResponseMapper() {
+    var buffer = '';
+    return (String response) {
+      final combined = buffer + response;
+      if (combined.contains('</stream:stream>')) {
+        buffer = '';
+        close();
+        return '';
+      }
+      final result = _extractCompleteElements(combined);
+      buffer = result.remainder;
+      return result.emitted;
+    };
   }
 
   String prepareStreamResponse(String response) {
-    Log.xmppp_receiving(response);
-    var response1 = extractWholeChild(restOfResponse + response);
-    if (response1.contains('</stream:stream>')) {
+    // Accumulate with any previously incomplete data.
+    // Receive logging (with channel label) is done at the transport layer
+    // (XmppWebsocketIo.listen for TCP/WS, _startRecvLoop for QUIC) so that
+    // the log line can identify which stream the data arrived on.
+    final combined = restOfResponse + response;
+
+    if (combined.contains('</stream:stream>')) {
+      restOfResponse = '';
       close();
       return '';
     }
-    if (response1.contains('stream:stream') &&
-        !(response1.contains('</stream:stream>'))) {
-      response1 = response1 +
-          '</stream:stream>'; // fix for crashing xml library without ending
-    }
 
-    //fix for multiple roots issue
-    response1 = '<xmpp_stone>$response1</xmpp_stone>';
-    return response1;
+    final result = _extractCompleteElements(combined);
+    restOfResponse = result.remainder;
+    return result.emitted;
   }
 
   void reconnect() {
@@ -314,6 +502,11 @@ class Connection {
       final socketPort =
           useWebSocket ? (account.wsPort ?? account.port) : account.port;
       final wsUri = account.wsUrl != null ? Uri.tryParse(account.wsUrl!) : null;
+      final quicEndpoints = useWebSocket
+          ? const <XmppQuicEndpoint>[]
+          : (account.quicEndpoints != null && account.quicEndpoints!.isNotEmpty
+              ? account.quicEndpoints!
+              : const <XmppQuicEndpoint>[]);
       final endpoints = useWebSocket
           ? const <XmppTcpEndpoint>[]
           : (account.tcpEndpoints != null && account.tcpEndpoints!.isNotEmpty
@@ -345,6 +538,47 @@ class Connection {
       }
 
       Object? lastError;
+      for (final endpoint in quicEndpoints) {
+        final socket = _socketFactory();
+        try {
+          Log.i(
+            TAG,
+            'QUIC endpoint attempt host=${endpoint.host} port=${endpoint.port}',
+          );
+          await socket.connect(
+            endpoint.host,
+            endpoint.port,
+            useWebSocket: false,
+            useQuic: true,
+            directTls: false,
+            tlsHost: endpoint.tlsHost ?? account.domain,
+            map: prepareStreamResponse,
+          );
+          // Supply a per-aux-stream mapper factory so each QUIC aux stream
+          // gets its own independent XML buffer. Without this, all streams
+          // share the single restOfResponse field in prepareStreamResponse,
+          // causing interleaved chunks from different streams to corrupt
+          // each other's parse state and silently drop stanzas.
+          if (socket.isQuic) {
+            (socket as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
+          }
+          _attachOpenedSocket(socket);
+          return;
+        } catch (error) {
+          lastError = error;
+          try {
+            socket.close();
+          } catch (_) {
+            // ignore close errors while failing over endpoints
+          }
+          Log.w(
+            TAG,
+            'QUIC endpoint failed host=${endpoint.host} '
+            'port=${endpoint.port} error=$error',
+          );
+        }
+      }
+
       for (final endpoint in endpoints) {
         final socket = _socketFactory();
         try {
@@ -357,6 +591,7 @@ class Connection {
             endpoint.host,
             endpoint.port,
             useWebSocket: false,
+            useQuic: false,
             directTls: endpoint.directTls,
             tlsHost: endpoint.tlsHost ?? account.domain,
             map: prepareStreamResponse,
@@ -396,6 +631,7 @@ class Connection {
       _pendingWriteBuffer.clear();
       _flushScheduled = false;
       _inboundProcessingDepth = 0;
+      restOfResponse = '';
       _openStream();
     } else {
       Log.d(TAG, 'Closed in meantime');
@@ -467,35 +703,18 @@ class Connection {
     return (name == 'stream:features' || name == 'features');
   }
 
-  String _unparsedXmlResponse = '';
-
   void handleResponse(String response) {
     _inboundProcessingDepth++;
-    String fullResponse;
-    if (_unparsedXmlResponse.isNotEmpty) {
-      if (response.length > 12) {
-        fullResponse = '$_unparsedXmlResponse${response.substring(12)}'; //
-      } else {
-        fullResponse = _unparsedXmlResponse;
-      }
-      Log.v(TAG, 'full response = $fullResponse');
-      _unparsedXmlResponse = '';
-    } else {
-      fullResponse = response;
-    }
+    // prepareStreamResponse (the map function) already buffers incomplete
+    // chunks and returns '' until a complete, parseable XML fragment is ready.
+    final fullResponse = response;
 
     try {
       if (fullResponse.isNotEmpty) {
         xml.XmlNode? xmlResponse;
-        try {
-          xmlResponse = xml.XmlDocument.parse(
-                  fullResponse.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''))
-              .firstChild;
-        } catch (e) {
-          _unparsedXmlResponse += fullResponse.substring(
-              0, fullResponse.length - 13); //remove  xmpp_stone end tag
-          xmlResponse = xml.XmlElement(xml.XmlName('error'));
-        }
+        xmlResponse = xml.XmlDocument.parse(
+                fullResponse.replaceAll(RegExp(r'<\?(xml.+?)\>'), ''))
+            .firstChild;
 
         //TODO: Improve parser for children only
         xmlResponse!.descendants
@@ -550,7 +769,13 @@ class Connection {
   }
 
   void write(message) {
-    Log.xmppp_sending(message);
+    // Note: the actual "Xmpp Sending" log entry is emitted by the socket at the
+    // moment the data is handed to the transport (TCP/WS/QUIC). This gives an
+    // accurate picture of what is on the wire and, for QUIC, which stream
+    // (control vs aux slot) the data was written to. Logging here would only
+    // record queueing, which can differ significantly from actual send time
+    // when writes are buffered or routed to an aux QUIC stream that is still
+    // being opened.
     if (!isOpened()) {
       return;
     }
@@ -878,4 +1103,11 @@ class Connection {
     return state == XmppConnectionState.SocketOpening ||
         state == XmppConnectionState.Closing;
   }
+}
+
+/// Result type for [Connection._extractCompleteElements].
+class _ExtractResult {
+  const _ExtractResult({required this.emitted, required this.remainder});
+  final String emitted;
+  final String remainder;
 }

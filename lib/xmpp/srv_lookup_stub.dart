@@ -11,3 +11,7 @@ Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
 Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
   return const [];
 }
+
+Future<List<XmppSrvTarget>> resolveXmppQuicSrvCandidates(String domain) async {
+  return const [];
+}

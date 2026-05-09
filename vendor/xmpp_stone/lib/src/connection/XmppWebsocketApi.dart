@@ -16,12 +16,17 @@ abstract class XmppWebSocket extends Stream<String> {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useQuic = false,
       bool directTls = false,
       String? tlsHost});
 
   void write(Object? message);
 
   void close();
+
+  bool get isQuic => false;
+
+  Future<dynamic> getQuicStats() => Future.value(null);
 
   Future<SecureSocket?> secure(
       {host,
