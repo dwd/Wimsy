@@ -507,14 +507,27 @@ class XmppService extends ChangeNotifier {
 
   bool isMessageUnseen(String bareJid, ChatMessage message) {
     if (message.outgoing) {
+      debugPrint(
+        'NewMsg isMessageUnseen: chat=$bareJid messageId=${message.messageId} '
+        '→ false (outgoing)',
+      );
       return false;
     }
     final normalized = _bareJid(bareJid);
     final displayedAt = _displayedAtByChat[normalized];
     if (displayedAt == null) {
+      debugPrint(
+        'NewMsg isMessageUnseen: chat=$normalized messageId=${message.messageId} '
+        'timestamp=${message.timestamp} displayedAt=null → true (no displayedAt)',
+      );
       return true;
     }
-    return message.timestamp.isAfter(displayedAt);
+    final result = message.timestamp.isAfter(displayedAt);
+    debugPrint(
+      'NewMsg isMessageUnseen: chat=$normalized messageId=${message.messageId} '
+      'timestamp=${message.timestamp} displayedAt=$displayedAt → $result',
+    );
+    return result;
   }
 
   String displayNameFor(String bareJid) {
@@ -6276,10 +6289,25 @@ class XmppService extends ChangeNotifier {
     _resolveDisplayedSyncPending(normalized, stanzaId);
     // R2.1: bump the global MAM-id anchor.
     _bumpLastMamIdSeen(mamId);
-    if (!outgoing &&
-        (mamId == null || mamId.isEmpty) &&
-        _isMamCatchUpComplete(normalized, isRoom: false)) {
+    final hasMamId = mamId != null && mamId.isNotEmpty;
+    final catchUpComplete = _isMamCatchUpComplete(normalized, isRoom: false);
+    debugPrint(
+      'NewMsg[DM] chat=$normalized outgoing=$outgoing '
+      'hasMamId=$hasMamId catchUpComplete=$catchUpComplete '
+      'messageId=$messageId mamId=$mamId stanzaId=$stanzaId '
+      'timestamp=$timestamp',
+    );
+    if (!outgoing && !hasMamId && catchUpComplete) {
+      debugPrint(
+        'NewMsg[DM] firing incomingMessageHandler for chat=$normalized '
+        'messageId=$messageId',
+      );
       _incomingMessageHandler?.call(normalized, newMessage);
+    } else if (!outgoing) {
+      debugPrint(
+        'NewMsg[DM] suppressing incomingMessageHandler for chat=$normalized: '
+        'outgoing=$outgoing hasMamId=$hasMamId catchUpComplete=$catchUpComplete',
+      );
     }
   }
 
@@ -6410,7 +6438,16 @@ class XmppService extends ChangeNotifier {
       _resolveDisplayedSyncPending(normalized, stanzaId);
       // R2.1: bump the global MAM-id anchor for prepended MAM messages.
       _bumpLastMamIdSeen(mamId);
+      debugPrint(
+        'NewMsg[MUC-prepend] chat=$normalized outgoing=$outgoing '
+        'mamId=$mamId stanzaId=$stanzaId timestamp=$timestamp '
+        'insertIndex=$insertIndex — will fire handler: ${!outgoing}',
+      );
       if (!outgoing) {
+        debugPrint(
+          'NewMsg[MUC-prepend] firing incomingRoomMessageHandler for '
+          'chat=$normalized mamId=$mamId (no catchup/cutoff check)',
+        );
         _incomingRoomMessageHandler?.call(normalized, list[insertIndex]);
       }
       return;
@@ -6440,20 +6477,46 @@ class XmppService extends ChangeNotifier {
     _resolveDisplayedSyncPending(normalized, stanzaId);
     // R2.1: bump the global MAM-id anchor.
     _bumpLastMamIdSeen(mamId);
-    if (!outgoing &&
-        (mamId == null || mamId.isEmpty) &&
-        _isMamCatchUpComplete(normalized, isRoom: true) &&
-        _shouldNotifyRoomMessage(normalized, timestamp)) {
+    final hasMamIdRoom = mamId != null && mamId.isNotEmpty;
+    final catchUpCompleteRoom = _isMamCatchUpComplete(normalized, isRoom: true);
+    final shouldNotifyRoom = _shouldNotifyRoomMessage(normalized, timestamp);
+    debugPrint(
+      'NewMsg[MUC] chat=$normalized outgoing=$outgoing '
+      'hasMamId=$hasMamIdRoom catchUpComplete=$catchUpCompleteRoom '
+      'shouldNotifyRoom=$shouldNotifyRoom '
+      'messageId=$messageId mamId=$mamId stanzaId=$stanzaId '
+      'timestamp=$timestamp',
+    );
+    if (!outgoing && !hasMamIdRoom && catchUpCompleteRoom && shouldNotifyRoom) {
+      debugPrint(
+        'NewMsg[MUC] firing incomingRoomMessageHandler for chat=$normalized '
+        'messageId=$messageId',
+      );
       _incomingRoomMessageHandler?.call(normalized, newMessage);
+    } else if (!outgoing) {
+      debugPrint(
+        'NewMsg[MUC] suppressing incomingRoomMessageHandler for chat=$normalized: '
+        'outgoing=$outgoing hasMamId=$hasMamIdRoom '
+        'catchUpComplete=$catchUpCompleteRoom shouldNotify=$shouldNotifyRoom',
+      );
     }
   }
 
   bool _shouldNotifyRoomMessage(String roomJid, DateTime timestamp) {
     final cutoff = _roomHistoryCutoffAt[_bareJid(roomJid)];
     if (cutoff == null) {
+      debugPrint(
+        'NewMsg[MUC] _shouldNotifyRoomMessage: chat=$roomJid '
+        'cutoff=null → true (no cutoff set)',
+      );
       return true;
     }
-    return timestamp.isAfter(cutoff);
+    final result = timestamp.isAfter(cutoff);
+    debugPrint(
+      'NewMsg[MUC] _shouldNotifyRoomMessage: chat=$roomJid '
+      'timestamp=$timestamp cutoff=$cutoff → $result',
+    );
+    return result;
   }
 
   void _applyAckByMessageId(String messageId) {

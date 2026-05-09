@@ -165,12 +165,33 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   }
 
   void _handleIncomingMessage(String bareJid, ChatMessage message) {
-    if (!_shouldNotifyFor(bareJid)) {
+    final shouldNotify = _shouldNotifyFor(bareJid);
+    debugPrint(
+      'NewMsg[DM] _handleIncomingMessage: chat=$bareJid '
+      'messageId=${message.messageId} timestamp=${message.timestamp} '
+      'appIsForeground=$_appIsForeground '
+      'activeChat=${_service.activeChatBareJid} '
+      'shouldNotify=$shouldNotify',
+    );
+    if (!shouldNotify) {
+      debugPrint(
+        'NewMsg[DM] _handleIncomingMessage: suppressed by _shouldNotifyFor '
+        'chat=$bareJid',
+      );
       return;
     }
-    if (!_service.isMessageUnseen(bareJid, message)) {
+    final unseen = _service.isMessageUnseen(bareJid, message);
+    if (!unseen) {
+      debugPrint(
+        'NewMsg[DM] _handleIncomingMessage: suppressed by isMessageUnseen '
+        'chat=$bareJid messageId=${message.messageId}',
+      );
       return;
     }
+    debugPrint(
+      'NewMsg[DM] _handleIncomingMessage: showing notification for '
+      'chat=$bareJid messageId=${message.messageId}',
+    );
     final title = _service.displayNameFor(bareJid);
     _notifications.showMessage(
       id: bareJid.hashCode.abs() % (1 << 31),
@@ -182,12 +203,33 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   }
 
   void _handleIncomingRoomMessage(String roomJid, ChatMessage message) {
-    if (!_shouldNotifyFor(roomJid)) {
+    final shouldNotify = _shouldNotifyFor(roomJid);
+    debugPrint(
+      'NewMsg[MUC] _handleIncomingRoomMessage: chat=$roomJid '
+      'messageId=${message.messageId} timestamp=${message.timestamp} '
+      'appIsForeground=$_appIsForeground '
+      'activeChat=${_service.activeChatBareJid} '
+      'shouldNotify=$shouldNotify',
+    );
+    if (!shouldNotify) {
+      debugPrint(
+        'NewMsg[MUC] _handleIncomingRoomMessage: suppressed by _shouldNotifyFor '
+        'chat=$roomJid',
+      );
       return;
     }
-    if (!_service.isMessageUnseen(roomJid, message)) {
+    final unseen = _service.isMessageUnseen(roomJid, message);
+    if (!unseen) {
+      debugPrint(
+        'NewMsg[MUC] _handleIncomingRoomMessage: suppressed by isMessageUnseen '
+        'chat=$roomJid messageId=${message.messageId}',
+      );
       return;
     }
+    debugPrint(
+      'NewMsg[MUC] _handleIncomingRoomMessage: showing notification for '
+      'chat=$roomJid messageId=${message.messageId}',
+    );
     final title = '$roomJid • ${message.from}';
     _notifications.showMessage(
       id: roomJid.hashCode.abs() % (1 << 31),
