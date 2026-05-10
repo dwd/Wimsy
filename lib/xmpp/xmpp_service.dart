@@ -462,6 +462,12 @@ class XmppService extends ChangeNotifier {
     _displayedAtByChat
       ..clear()
       ..addAll(storage.loadDisplayedSyncTimestamps());
+    debugPrint(
+      'DisplayedSync[seed]: loaded ${_displayedStanzaIdByChat.length} stanzaIds, '
+      '${_displayedAtByChat.length} timestamps from disk. '
+      'stanzaIds=${_displayedStanzaIdByChat.keys.toList()} '
+      'timestamps=${_displayedAtByChat.map((k, v) => MapEntry(k, v.toIso8601String()))}',
+    );
     // R1.3: seed pending displayed-sync markers from disk so we can keep
     // trying to resolve them as messages arrive in this session.
     _displayedSyncPending
@@ -5495,6 +5501,22 @@ class XmppService extends ChangeNotifier {
         items.getAttribute('node')?.value != 'urn:xmpp:mds:displayed:0') {
       return;
     }
+    // Log the delay stamp if present — a delayed MDS event means the server
+    // is replaying an old PEP notification from a previous session. The delay
+    // stamp is the time the marker was originally published, which is a useful
+    // fallback cutoff when the referenced stanzaId has been evicted from cache.
+    final delay = stanza.children
+        .where((c) =>
+            c.name == 'delay' &&
+            c.getAttribute('xmlns')?.value == 'urn:xmpp:delay')
+        .firstOrNull;
+    final delayStamp = delay?.getAttribute('stamp')?.value;
+    debugPrint(
+      'DisplayedSync[event]: from=${stanza.fromJid} '
+      'itemCount=${items.children.where((c) => c.name == "item").length} '
+      'delayStamp=$delayStamp '
+      '(${delayStamp != null ? "REPLAYED offline event" : "live event"})',
+    );
     _applyDisplayedSyncItems(items);
   }
 
@@ -5587,6 +5609,12 @@ class XmppService extends ChangeNotifier {
       // R1.3: persist the (chat, stanzaId) pair. We will retry resolution
       // every time a new message is appended (live or via MAM) for this
       // chat — see `_resolveDisplayedSyncPending`.
+      final fallbackTs = _displayedAtByChat[normalized];
+      debugPrint(
+        'DisplayedSync[miss]: chat=$normalized stanzaId=$stanzaId '
+        'messages=${list.length} fallbackTimestamp=$fallbackTs '
+        '(${fallbackTs == null ? "NO FALLBACK — will treat all messages as unseen" : "fallback present — unread cutoff preserved"})',
+      );
       _markDisplayedSyncPending(normalized, stanzaId);
       return false;
     }
