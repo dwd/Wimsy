@@ -6942,6 +6942,30 @@ class XmppService extends ChangeNotifier {
     item.addChild(displayed);
     publish.addChild(item);
     pubsub.addChild(publish);
+    // publish-options: set max_items=max so the server retains one item per
+    // chat JID rather than overwriting a single global item (XEP-0490 §4).
+    final publishOptions = XmppElement()..name = 'publish-options';
+    final optForm = XmppElement()..name = 'x';
+    optForm.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+    optForm.addAttribute(XmppAttribute('type', 'submit'));
+    XmppElement buildField(String varName, String value, {String? type}) {
+      final f = XmppElement()..name = 'field';
+      f.addAttribute(XmppAttribute('var', varName));
+      if (type != null) f.addAttribute(XmppAttribute('type', type));
+      final v = XmppElement()..name = 'value';
+      v.textValue = value;
+      f.addChild(v);
+      return f;
+    }
+    optForm.addChild(buildField('FORM_TYPE',
+        'http://jabber.org/protocol/pubsub#publish-options',
+        type: 'hidden'));
+    optForm.addChild(buildField('pubsub#persist_items', 'true'));
+    optForm.addChild(buildField('pubsub#access_model', 'whitelist'));
+    optForm.addChild(buildField('pubsub#send_last_published_item', 'never'));
+    optForm.addChild(buildField('pubsub#max_items', 'max'));
+    publishOptions.addChild(optForm);
+    pubsub.addChild(publishOptions);
     iqStanza.addChild(pubsub);
     connection.writeStanza(iqStanza);
     notifyListeners();
