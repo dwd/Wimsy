@@ -1670,6 +1670,8 @@ class XmppService extends ChangeNotifier {
       Jid.fromFullJid(normalized),
       resolvedNick,
       password: resolvedPassword,
+      // Suppress server-side MUC history on join; MAM is used for catch-up.
+      suppressHistory: true,
     );
     final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
     _rooms[normalized] = existing.copyWith(joined: true, nick: resolvedNick);

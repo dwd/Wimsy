@@ -42,7 +42,12 @@ class MucManager {
     _connection.inStanzasStream.listen(_handleStanza);
   }
 
-  void joinRoom(Jid roomJid, String nick, {String? password}) {
+  void joinRoom(
+    Jid roomJid,
+    String nick, {
+    String? password,
+    bool suppressHistory = false,
+  }) {
     final stanza = PresenceStanza();
     stanza.toJid = Jid.fromFullJid('${roomJid.userAtDomain}/$nick');
     final x = XmppElement()..name = 'x';
@@ -51,6 +56,12 @@ class MucManager {
       final pass = XmppElement()..name = 'password';
       pass.textValue = password;
       x.addChild(pass);
+    }
+    if (suppressHistory) {
+      // Request no server-side history on join; we rely on MAM for catch-up.
+      final history = XmppElement()..name = 'history';
+      history.addAttribute(XmppAttribute('maxchars', '0'));
+      x.addChild(history);
     }
     stanza.addChild(x);
     _connection.writeStanza(stanza);
