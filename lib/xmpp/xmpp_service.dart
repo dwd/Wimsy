@@ -6302,12 +6302,11 @@ class XmppService extends ChangeNotifier {
     if (!outgoing) {
       _lastSeenAt[normalized] ??= timestamp;
     }
+    // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
+    // that _displayedAtByChat is populated before the UI reads unread counts.
+    _resolveDisplayedSyncPending(normalized, stanzaId);
     notifyListeners();
     _messagePersistor?.call(normalized, List.unmodifiable(list));
-    // R1.3: this newly-appended DM message may resolve a pending displayed
-    // marker (typical case after a restart for a chat where the marker
-    // pointed beyond our 25-message tail).
-    _resolveDisplayedSyncPending(normalized, stanzaId);
     // R2.1: bump the global MAM-id anchor.
     _bumpLastMamIdSeen(mamId);
     final hasMamId = mamId != null && mamId.isNotEmpty;
@@ -6452,11 +6451,11 @@ class XmppService extends ChangeNotifier {
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
+      // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
+      // that _displayedAtByChat is populated before the UI reads unread counts.
+      _resolveDisplayedSyncPending(normalized, stanzaId);
       notifyListeners();
       _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
-      // R1.3: a MAM-page-prepended MUC message can resolve a pending
-      // displayed marker for this room.
-      _resolveDisplayedSyncPending(normalized, stanzaId);
       // R2.1: bump the global MAM-id anchor for prepended MAM messages.
       _bumpLastMamIdSeen(mamId);
       debugPrint(
@@ -6491,11 +6490,11 @@ class XmppService extends ChangeNotifier {
       replyFallback: replyFallback,
     );
     _insertMessageOrdered(list, newMessage);
+    // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
+    // that _displayedAtByChat is populated before the UI reads unread counts.
+    _resolveDisplayedSyncPending(normalized, stanzaId);
     notifyListeners();
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
-    // R1.3: a freshly-appended MUC message may resolve a pending displayed
-    // marker for this room.
-    _resolveDisplayedSyncPending(normalized, stanzaId);
     // R2.1: bump the global MAM-id anchor.
     _bumpLastMamIdSeen(mamId);
     final hasMamIdRoom = mamId != null && mamId.isNotEmpty;
