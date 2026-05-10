@@ -5555,7 +5555,14 @@ class XmppService extends ChangeNotifier {
       if (stanzaId.isEmpty) {
         continue;
       }
-      if (_displayedStanzaIdByChat[id] == stanzaId) {
+      final existingStanzaId = _displayedStanzaIdByChat[id];
+      debugPrint(
+        'DisplayedSync[apply]: id=$id incomingStanzaId=$stanzaId '
+        'existingStanzaId=$existingStanzaId '
+        'existingDisplayedAt=${_displayedAtByChat[id]} '
+        '${existingStanzaId == stanzaId ? "SKIP (same)" : "APPLY (changed)"}',
+      );
+      if (existingStanzaId == stanzaId) {
         continue;
       }
       _displayedStanzaIdByChat[id] = stanzaId;
