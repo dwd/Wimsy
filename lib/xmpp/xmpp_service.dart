@@ -525,6 +525,16 @@ class XmppService extends ChangeNotifier {
       );
       return false;
     }
+    // Primary check: per-message readByMe flag (set when user opens the chat).
+    if (message.readByMe) {
+      debugPrint(
+        'NewMsg isMessageUnseen: chat=$bareJid messageId=${message.messageId} '
+        '→ false (readByMe=true)',
+      );
+      return false;
+    }
+    // Fallback: timestamp-based check using the displayed-sync cutoff, used
+    // for messages loaded from the archive before readByMe was persisted.
     final normalized = _bareJid(bareJid);
     final displayedAt = _displayedAtByChat[normalized];
     if (displayedAt == null) {
@@ -540,6 +550,33 @@ class XmppService extends ChangeNotifier {
       'timestamp=${message.timestamp} displayedAt=$displayedAt → $result',
     );
     return result;
+  }
+
+  /// Marks all incoming messages in [bareJid]'s chat as read by the local
+  /// user (sets [ChatMessage.readByMe] = true) and persists the updated list.
+  /// Called whenever the user opens or views a chat.
+  void markMessagesRead(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    final isRoom = isBookmark(normalized);
+    final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return;
+    }
+    var changed = false;
+    for (var i = 0; i < list.length; i++) {
+      final msg = list[i];
+      if (!msg.outgoing && !msg.readByMe) {
+        list[i] = msg.copyWith(readByMe: true);
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (isRoom) {
+        _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+      } else {
+        _messagePersistor?.call(normalized, List.unmodifiable(list));
+      }
+    }
   }
 
   String displayNameFor(String bareJid) {
@@ -6926,6 +6963,11 @@ class XmppService extends ChangeNotifier {
       }
       _lastDisplayedMarkerIdByChat[normalized] = message.messageId!;
       _sendMarker(normalized, message.messageId!, 'displayed');
+      // Record that the XEP-0333 displayed marker has been sent for this message.
+      if (!message.markerSent) {
+        list[i] = message.copyWith(markerSent: true);
+        _messagePersistor?.call(normalized, List.unmodifiable(list));
+      }
       return;
     }
   }

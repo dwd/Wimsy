@@ -823,18 +823,15 @@ class _WimsyHomeState extends State<WimsyHome> {
                         var unreadCount = 0;
                         if (!isActiveChat &&
                             service.isMamCatchUpCompleteFor(jid)) {
-                          if (lastReadAt == null) {
-                            for (final message in messages) {
-                              if (!message.outgoing) {
-                                unreadCount += 1;
+                          for (final message in messages) {
+                            if (!message.outgoing && !message.readByMe) {
+                              // Fall back to timestamp comparison for messages
+                              // loaded before readByMe was introduced.
+                              if (lastReadAt != null &&
+                                  !message.timestamp.isAfter(lastReadAt)) {
+                                continue;
                               }
-                            }
-                          } else {
-                            for (final message in messages) {
-                              if (!message.outgoing &&
-                                  message.timestamp.isAfter(lastReadAt)) {
-                                unreadCount += 1;
-                              }
+                              unreadCount += 1;
                             }
                           }
                         }
@@ -3197,6 +3194,9 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     _lastReadAtByChat[bareJid] = messages.last.timestamp;
+    // Mark all loaded messages as read by the local user so the per-message
+    // readByMe flag is persisted and survives reconnects.
+    widget.service.markMessagesRead(bareJid);
     unawaited(widget.notifications.cancelMessagesForTag(bareJid));
   }
 

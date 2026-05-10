@@ -29,6 +29,9 @@ class ChatMessage {
     this.acked = false,
     this.receiptReceived = false,
     this.displayed = false,
+    this.readByMe = false,
+    this.markerSent = false,
+    this.receiptSent = false,
   });
 
   final String from;
@@ -60,6 +63,12 @@ class ChatMessage {
   final bool acked;
   final bool receiptReceived;
   final bool displayed;
+  // Whether the local user has read this incoming message.
+  final bool readByMe;
+  // Whether a XEP-0333 displayed marker has been sent for this message.
+  final bool markerSent;
+  // Whether a XEP-0184 delivery receipt has been sent for this message.
+  final bool receiptSent;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -95,6 +104,9 @@ class ChatMessage {
     bool? acked,
     bool? receiptReceived,
     bool? displayed,
+    bool? readByMe,
+    bool? markerSent,
+    bool? receiptSent,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -160,6 +172,9 @@ class ChatMessage {
       acked: acked ?? this.acked,
       receiptReceived: receiptReceived ?? this.receiptReceived,
       displayed: displayed ?? this.displayed,
+      readByMe: readByMe ?? this.readByMe,
+      markerSent: markerSent ?? this.markerSent,
+      receiptSent: receiptSent ?? this.receiptSent,
     );
   }
 
@@ -194,6 +209,9 @@ class ChatMessage {
       'acked': acked,
       'receiptReceived': receiptReceived,
       'displayed': displayed,
+      'readByMe': readByMe,
+      'markerSent': markerSent,
+      'receiptSent': receiptSent,
     };
   }
 
@@ -230,6 +248,9 @@ class ChatMessage {
     final acked = map['acked'] == true;
     final receiptReceived = map['receiptReceived'] == true;
     final displayed = map['displayed'] == true;
+    final readByMe = map['readByMe'] == true;
+    final markerSent = map['markerSent'] == true;
+    final receiptSent = map['receiptSent'] == true;
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -285,6 +306,9 @@ class ChatMessage {
       acked: acked,
       receiptReceived: receiptReceived,
       displayed: displayed,
+      readByMe: readByMe,
+      markerSent: markerSent,
+      receiptSent: receiptSent,
     );
   }
 
