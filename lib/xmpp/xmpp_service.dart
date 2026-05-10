@@ -456,6 +456,12 @@ class XmppService extends ChangeNotifier {
     _displayedStanzaIdByChat
       ..clear()
       ..addAll(storage.loadDisplayedSync());
+    // Seed the persisted displayed-at timestamps so that on a sync miss
+    // (the stanzaId's message was evicted from the cache) we can still
+    // set _displayedAtByChat correctly without treating all messages as new.
+    _displayedAtByChat
+      ..clear()
+      ..addAll(storage.loadDisplayedSyncTimestamps());
     // R1.3: seed pending displayed-sync markers from disk so we can keep
     // trying to resolve them as messages arrive in this session.
     _displayedSyncPending
@@ -5539,6 +5545,9 @@ class XmppService extends ChangeNotifier {
       _storage?.storeDisplayedSync(
         Map<String, String>.from(_displayedStanzaIdByChat),
       );
+      _storage?.storeDisplayedSyncTimestamps(
+        Map<String, DateTime>.from(_displayedAtByChat),
+      );
       notifyListeners();
     }
   }
@@ -5641,6 +5650,9 @@ class XmppService extends ChangeNotifier {
     if (_applyDisplayedStateForChat(normalized)) {
       _storage?.storeDisplayedSync(
         Map<String, String>.from(_displayedStanzaIdByChat),
+      );
+      _storage?.storeDisplayedSyncTimestamps(
+        Map<String, DateTime>.from(_displayedAtByChat),
       );
       notifyListeners();
     }
@@ -6915,6 +6927,9 @@ class XmppService extends ChangeNotifier {
     _displayedAtByChat[normalized] = latest.timestamp;
     _storage?.storeDisplayedSync(
       Map<String, String>.from(_displayedStanzaIdByChat),
+    );
+    _storage?.storeDisplayedSyncTimestamps(
+      Map<String, DateTime>.from(_displayedAtByChat),
     );
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.SET);

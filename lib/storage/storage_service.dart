@@ -24,6 +24,10 @@ class StorageService {
   static const _vcardAvatarStateKey = 'vcard_avatar_state';
   static const _bookmarksKey = 'bookmarks';
   static const _displayedSyncKey = 'displayed_sync';
+  // Timestamps (ISO-8601) for each chat's last-displayed marker, stored
+  // alongside the stanzaId so we can fall back to timestamp comparison
+  // when the message itself has been evicted from the cache.
+  static const _displayedSyncTimestampsKey = 'displayed_sync_timestamps';
   // R1.3: pending (chatJid -> stanza-id) markers we received via MDS but
   // could not yet match against any local message. These are resolved
   // lazily as messages with the matching stanza-id arrive (live or via
@@ -360,6 +364,7 @@ class StorageService {
       return;
     }
     await box.put(_displayedSyncKey, const <String, dynamic>{});
+    await box.put(_displayedSyncTimestampsKey, const <String, dynamic>{});
     // R1.3: also wipe the pending-resolution map so disconnect/forget
     // genuinely clears all MDS-related state.
     await box.put(_displayedSyncPendingKey, const <String, dynamic>{});
@@ -412,6 +417,38 @@ class StorageService {
       return result;
     }
     return const {};
+  }
+
+  Map<String, DateTime> loadDisplayedSyncTimestamps() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(_displayedSyncTimestampsKey,
+        defaultValue: const <String, dynamic>{});
+    if (data is! Map) {
+      return const {};
+    }
+    final result = <String, DateTime>{};
+    for (final entry in data.entries) {
+      final ts = DateTime.tryParse(entry.value.toString());
+      if (ts != null) {
+        result[entry.key.toString()] = ts;
+      }
+    }
+    return result;
+  }
+
+  Future<void> storeDisplayedSyncTimestamps(
+      Map<String, DateTime> timestamps) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(
+      _displayedSyncTimestampsKey,
+      timestamps.map((k, v) => MapEntry(k, v.toIso8601String())),
+    );
   }
 
   Future<void> storeDisplayedSync(Map<String, String> sync) async {
