@@ -1,0 +1,23 @@
+# Flutter/Dart/Pub related
+pubspec.lock
+.dart_tool/
+.pub-cache/
+.pub/
+build/
+
+# Rust build artifacts
+rust/target/
+
+# Example app generated/ephemeral files
+example/pubspec.lock
+example/android/app/src/main/java/io/flutter/plugins/
+example/android/local.properties
+example/ios/Flutter/.last_build_id
+example/ios/Flutter/Generated.xcconfig
+example/ios/Flutter/ephemeral/
+example/ios/Flutter/flutter_export_environment.sh
+example/ios/Runner/GeneratedPluginRegistrant.h
+example/ios/Runner/GeneratedPluginRegistrant.m
+example/linux/flutter/ephemeral/
+example/macos/Flutter/ephemeral/
+example/windows/flutter/ephemeral/
