@@ -339,10 +339,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Builds the "Manual connection" expandable section.
   ///
-  /// Contains explicit override fields: host, port, resource, and (when
-  /// WebSocket is in use) the WebSocket endpoint URL and subprotocols.
+  /// On native platforms: host, port, resource, and (when WebSocket is
+  /// enabled) WebSocket endpoint URL and subprotocols.
+  ///
+  /// On web: only resource and WebSocket endpoint fields are shown, since
+  /// TCP host/port are not applicable and WebSocket is always active.
+  /// WebTransport is discovered automatically from host-meta and cannot be
+  /// overridden manually.
+  ///
   /// This section auto-opens when automatic discovery fails.
   Widget _buildManualConnection(XmppService service) {
+    // On web, WebSocket is always active; on native only when opted in.
     final showWsFields = _useWebSocket || kIsWeb;
 
     return Column(
@@ -369,30 +376,33 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         if (_manualConnectionExpanded) ...[
           const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _hostController,
-                  enabled: !service.isConnecting,
-                  decoration: const InputDecoration(
-                    labelText: 'Host (optional)',
+          // Host and port are only meaningful on native (TCP-based) platforms.
+          if (!kIsWeb) ...[
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _hostController,
+                    enabled: !service.isConnecting,
+                    decoration: const InputDecoration(
+                      labelText: 'Host (optional)',
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  controller: _portController,
-                  enabled: !service.isConnecting,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Port'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _portController,
+                    enabled: !service.isConnecting,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Port'),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           TextField(
             controller: _resourceController,
             enabled: !service.isConnecting,
@@ -416,6 +426,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 labelText: 'WebSocket subprotocols (optional)',
                 hintText: 'xmpp, stanza',
               ),
+            ),
+          ],
+          // On web, WebTransport is discovered automatically from host-meta
+          // (urn:xmpp:webtransport:0) and preferred over WebSocket when
+          // available.  No manual override is needed.
+          if (kIsWeb) ...[
+            const SizedBox(height: 8),
+            Text(
+              'WebTransport endpoint is discovered automatically from '
+              'host-meta when available.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
             ),
           ],
         ],
