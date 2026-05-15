@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 import 'package:web/web.dart' as web;
@@ -28,7 +29,8 @@ class XmppWebTransportHtml extends XmppWebSocket {
 
   /// Returns true if the current browser environment supports WebTransport.
   static bool isSupported() {
-    return web.window.has('WebTransport');
+    // Use globalContext from dart:js_interop_unsafe to check for WebTransport.
+    return globalContext.hasProperty('WebTransport'.toJS).toDart;
   }
 
   @override
@@ -39,7 +41,8 @@ class XmppWebTransportHtml extends XmppWebSocket {
     List<String>? wsProtocols,
     String? wsPath,
     Uri? wsUri,
-    bool useWebSocket = true,
+    bool useWebSocket = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
@@ -68,12 +71,12 @@ class XmppWebTransportHtml extends XmppWebSocket {
     await transport.ready.toDart;
 
     // Open a single bidirectional stream for the XMPP session.
-    final bidiStream =
-        await transport.createBidirectionalStream().toDart;
+    final bidiStream = await transport.createBidirectionalStream().toDart;
     _bidiStream = bidiStream;
 
     // Start pumping incoming bytes from the readable side into _controller.
-    _pumpIncoming(bidiStream.readable);
+    // readable is typed as JSObject in the web package; cast to ReadableStream.
+    _pumpIncoming(bidiStream.readable as web.ReadableStream);
 
     return this;
   }
@@ -81,7 +84,8 @@ class XmppWebTransportHtml extends XmppWebSocket {
   /// Reads chunks from the WebTransport readable stream and emits decoded
   /// UTF-8 strings into [_controller].
   void _pumpIncoming(web.ReadableStream readable) {
-    final reader = readable.getReader() as web.ReadableStreamDefaultReader;
+    final reader =
+        web.ReadableStreamDefaultReader(readable);
     Future<void> readNext() async {
       while (true) {
         final result = await reader.read().toDart;
@@ -93,12 +97,13 @@ class XmppWebTransportHtml extends XmppWebSocket {
         }
         final value = result.value;
         String chunk;
-        if (value is Uint8List) {
-          chunk = String.fromCharCodes(value);
-        } else if (value.dartify() case final Uint8List bytes) {
-          chunk = String.fromCharCodes(bytes);
+        final dartValue = value?.dartify();
+        if (dartValue is Uint8List) {
+          chunk = String.fromCharCodes(dartValue);
+        } else if (dartValue is List<int>) {
+          chunk = String.fromCharCodes(dartValue);
         } else {
-          chunk = value.toString();
+          chunk = dartValue?.toString() ?? '';
         }
         if (!_controller.isClosed) {
           _controller.add(_map(chunk));
@@ -117,7 +122,9 @@ class XmppWebTransportHtml extends XmppWebSocket {
   @override
   void write(Object? message) {
     if (_bidiStream == null) return;
-    final writer = _bidiStream!.writable.getWriter();
+    // writable is typed as JSObject; cast to WritableStream.
+    final writable = _bidiStream!.writable as web.WritableStream;
+    final writer = writable.getWriter();
     final List<int> bytes;
     if (message is String) {
       bytes = message.codeUnits;
