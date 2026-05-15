@@ -35,6 +35,7 @@ class XmppAccountSettings {
   String? host;
   int port;
   bool useWebSocket = false;
+  bool useWebTransport = false;
   bool directTls = false;
   String? wsUrl;
   String? wsHost;

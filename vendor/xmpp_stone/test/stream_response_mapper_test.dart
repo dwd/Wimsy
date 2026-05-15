@@ -17,6 +17,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
+      bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,

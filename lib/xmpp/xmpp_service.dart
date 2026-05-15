@@ -897,6 +897,7 @@ class XmppService extends ChangeNotifier {
             Platform.isWindows);
     final shouldUseWebSocket = kIsWeb || useWebSocket;
     WsEndpointConfig? wsConfig;
+    var useWebTransport = false;
     if (shouldUseWebSocket) {
       wsConfig = parseWsEndpoint(wsEndpoint ?? '');
     }
@@ -994,10 +995,28 @@ class XmppService extends ChangeNotifier {
         'xmpp.ws_discovery',
         description: domain,
       );
-      final discovered = await discoverWebSocketEndpoint(domain);
+      // Try WebTransport first; fall back to WebSocket if not advertised.
+      final discoveredWt = await discoverWebTransportEndpoint(domain);
       _finishSpan(wsSpan);
-      if (discovered != null) {
-        wsConfig = parseWsEndpoint(discovered.toString());
+      if (discoveredWt != null) {
+        // WebTransport uses https:// URIs; store the URI directly and mark
+        // the transport so Connection.dart routes through XmppWebTransportHtml.
+        final wtUri = discoveredWt.scheme == 'wss'
+            ? discoveredWt.replace(scheme: 'https')
+            : discoveredWt;
+        wsConfig = WsEndpointConfig(
+          uri: wtUri,
+          host: wtUri.host,
+          port: wtUri.hasPort ? wtUri.port : 443,
+          path: wtUri.path.isEmpty ? '/webtransport' : wtUri.path,
+          scheme: wtUri.scheme,
+        );
+        useWebTransport = true;
+      } else {
+        final discoveredWs = await discoverWebSocketEndpoint(domain);
+        if (discoveredWs != null) {
+          wsConfig = parseWsEndpoint(discoveredWs.toString());
+        }
       }
       if (wsConfig == null) {
         _setError('Enter a WebSocket endpoint like wss://host/path.');
@@ -1026,6 +1045,7 @@ class XmppService extends ChangeNotifier {
       account.port = resolvedPort;
       account.resource = resource;
       account.useWebSocket = shouldUseWebSocket;
+      account.useWebTransport = useWebTransport;
       account.directTls = resolvedDirectTls;
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;

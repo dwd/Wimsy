@@ -20,6 +20,23 @@ Future<Uri?> discoverWebSocketEndpoint(String domain) async {
   return null;
 }
 
+Future<Uri?> discoverWebTransportEndpoint(String domain) async {
+  final jsonUri = 'https://$domain/.well-known/host-meta.json';
+  final jsonResult = await _fetch(jsonUri);
+  if (jsonResult != null) {
+    final parsed = parseHostMetaWebTransportJson(jsonResult);
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+  final xmlUri = 'https://$domain/.well-known/host-meta';
+  final xmlResult = await _fetch(xmlUri);
+  if (xmlResult != null) {
+    return parseHostMetaWebTransportXml(xmlResult);
+  }
+  return null;
+}
+
 Future<String?> _fetch(String uri) async {
   try {
     final request = await HttpRequest.request(

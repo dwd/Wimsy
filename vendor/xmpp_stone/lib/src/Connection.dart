@@ -493,6 +493,7 @@ class Connection {
     setState(XmppConnectionState.SocketOpening);
     try {
       final useWebSocket = account.useWebSocket ||
+          account.useWebTransport ||
           account.wsUrl != null ||
           account.wsHost != null ||
           account.wsPath != null;
@@ -528,7 +529,8 @@ class Connection {
           wsProtocols: account.wsProtocols,
           wsPath: account.wsPath,
           wsUri: wsUri,
-          useWebSocket: true,
+          useWebSocket: !account.useWebTransport,
+          useWebTransport: account.useWebTransport,
           directTls: account.directTls,
           tlsHost: account.domain,
           map: prepareStreamResponse,

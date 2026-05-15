@@ -299,5 +299,13 @@
         <xmpp:status>partial</xmpp:status>
       </xmpp:SupportedXep>
     </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
+        <!-- XEP number TBD; tracked as urn:xmpp:webtransport:0 -->
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/inbox/xmpp-over-webtransport.html"/>
+        <xmpp:status>partial</xmpp:status>
+        <xmpp:note xml:lang="en">Phase 1: single bidirectional stream on web platform. Discovery via host-meta link relation urn:xmpp:webtransport:0. Multi-stream and datagrams are out of scope for this phase.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
   </doap:Project>
 </rdf:RDF>

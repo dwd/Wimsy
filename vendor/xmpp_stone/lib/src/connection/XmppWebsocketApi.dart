@@ -16,6 +16,7 @@ abstract class XmppWebSocket extends Stream<String> {
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
+      bool useWebTransport = false,
       bool useQuic = false,
       bool directTls = false,
       String? tlsHost});
