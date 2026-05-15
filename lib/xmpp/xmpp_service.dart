@@ -883,8 +883,7 @@ class XmppService extends ChangeNotifier {
     required int port,
     bool useWebSocket = false,
     bool directTls = false,
-    String? wsEndpoint,
-    List<String>? wsProtocols,
+    String? connectionUrl,
     bool useQuic = true,
     bool useTcp = true,
   }) async {
@@ -897,10 +896,12 @@ class XmppService extends ChangeNotifier {
             Platform.isWindows);
     final shouldUseWebSocket = kIsWeb || useWebSocket;
     WsEndpointConfig? wsConfig;
-    var useWebTransport = false;
     if (shouldUseWebSocket) {
-      wsConfig = parseWsEndpoint(wsEndpoint ?? '');
+      wsConfig = parseWsEndpoint(connectionUrl ?? '');
     }
+    // Derive transport type from the URL scheme: https/http → WebTransport,
+    // wss/ws → WebSocket.  This is re-evaluated after auto-discovery below.
+    var useWebTransport = wsConfig?.isWebTransport ?? false;
 
     final normalized = jid.trim();
     if (!_looksLikeJid(normalized)) {
@@ -1019,7 +1020,7 @@ class XmppService extends ChangeNotifier {
         }
       }
       if (wsConfig == null) {
-        _setError('Enter a WebSocket endpoint like wss://host/path.');
+        _setError('Enter a connection URL like wss://host/path or https://host/path.');
         return;
       }
     }
@@ -1069,8 +1070,6 @@ class XmppService extends ChangeNotifier {
         account.wsHost = wsConfig.host;
         account.wsPort = wsConfig.port;
         account.wsPath = wsConfig.path;
-        final protocols = wsProtocols ?? const [];
-        account.wsProtocols = protocols.isEmpty ? null : protocols;
       }
 
       final connection =

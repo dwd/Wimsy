@@ -134,7 +134,6 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     String host,
     int port, {
     String Function(String event)? map,
-    List<String>? wsProtocols,
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
@@ -154,7 +153,6 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         host,
         port,
         map: map,
-        wsProtocols: wsProtocols,
         wsPath: wsPath,
         wsUri: wsUri,
         useWebSocket: useWebSocket,

@@ -42,8 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _resourceController = TextEditingController(
     text: 'wimsy',
   );
-  final TextEditingController _wsEndpointController = TextEditingController();
-  final TextEditingController _wsProtocolsController = TextEditingController();
+  final TextEditingController _connectionUrlController = TextEditingController();
 
   bool _loadedAccount = false;
   bool _rememberPassword = false;
@@ -75,8 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _hostController.dispose();
     _portController.dispose();
     _resourceController.dispose();
-    _wsEndpointController.dispose();
-    _wsProtocolsController.dispose();
+    _connectionUrlController.dispose();
     super.dispose();
   }
 
@@ -105,12 +103,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _useDirectTls = kIsWeb ? false : account.directTls;
         _useTcp = kIsWeb ? true : account.useTcp;
         _useQuic = account.useQuic;
-        _wsEndpointController.text = account.wsEndpoint;
-        if (account.wsProtocols.isNotEmpty) {
-          _wsProtocolsController.text = account.wsProtocols.join(', ');
-        } else {
-          _wsProtocolsController.clear();
-        }
+        _connectionUrlController.text = account.connectionUrl;
       }
       _loadedAccount = true;
     });
@@ -121,11 +114,6 @@ class _LoginScreenState extends State<LoginScreen> {
     final useWebSocket = kIsWeb || _useWebSocket;
     final useDirectTls = kIsWeb ? false : _useDirectTls;
     final useTcp = kIsWeb ? true : _useTcp;
-    final wsProtocols = _wsProtocolsController.text
-        .split(',')
-        .map((entry) => entry.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList();
     final account = AccountRecord(
       jid: _jidController.text.trim(),
       password: _rememberPassword ? _passwordController.text : '',
@@ -137,8 +125,7 @@ class _LoginScreenState extends State<LoginScreen> {
       rememberPassword: _rememberPassword,
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
-      wsEndpoint: _wsEndpointController.text.trim(),
-      wsProtocols: wsProtocols,
+      connectionUrl: _connectionUrlController.text.trim(),
       useQuic: _useQuic,
       useTcp: useTcp,
     );
@@ -152,8 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
       port: port,
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
-      wsEndpoint: account.wsEndpoint,
-      wsProtocols: wsProtocols,
+      connectionUrl: account.connectionUrl,
       useQuic: _useQuic,
       useTcp: useTcp,
     );
@@ -197,7 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     if (_lastEndpointDiscoveryDomain == domain &&
-        _wsEndpointController.text.trim().isNotEmpty) {
+        _connectionUrlController.text.trim().isNotEmpty) {
       return;
     }
     setState(() {
@@ -212,7 +198,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (discovered != null) {
       final parsedEndpoint = parseWsEndpoint(discovered.toString());
       if (parsedEndpoint != null) {
-        _wsEndpointController.text = parsedEndpoint.uri.toString();
+        _connectionUrlController.text = parsedEndpoint.uri.toString();
       }
       setState(() {
         _endpointDiscoveryBusy = false;
@@ -411,31 +397,22 @@ class _LoginScreenState extends State<LoginScreen> {
           if (showWsFields) ...[
             const SizedBox(height: 12),
             TextField(
-              controller: _wsEndpointController,
+              controller: _connectionUrlController,
               enabled: !service.isConnecting,
               decoration: const InputDecoration(
-                labelText: 'WebSocket endpoint',
-                hintText: 'wss://host/xmpp-websocket',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _wsProtocolsController,
-              enabled: !service.isConnecting,
-              decoration: const InputDecoration(
-                labelText: 'WebSocket subprotocols (optional)',
-                hintText: 'xmpp, stanza',
+                labelText: 'Connection URL',
+                hintText: 'wss://host/xmpp-websocket  or  https://host/xmpp-webtransport',
               ),
             ),
           ],
-          // On web, WebTransport is discovered automatically from host-meta
-          // (urn:xmpp:webtransport:0) and preferred over WebSocket when
-          // available.  No manual override is needed.
+          // On web, show a hint explaining the URL scheme convention and
+          // that auto-discovery is used when the field is left blank.
           if (kIsWeb) ...[
             const SizedBox(height: 8),
             Text(
-              'WebTransport endpoint is discovered automatically from '
-              'host-meta when available.',
+              'Use wss:// for WebSocket or https:// for WebTransport. '
+              'When left blank, the endpoint is discovered automatically '
+              'from host-meta.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),

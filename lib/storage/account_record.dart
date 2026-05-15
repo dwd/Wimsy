@@ -8,8 +8,7 @@ class AccountRecord {
     required this.rememberPassword,
     required this.useWebSocket,
     required this.directTls,
-    required this.wsEndpoint,
-    required this.wsProtocols,
+    required this.connectionUrl,
     this.useQuic = true,
     this.useTcp = true,
   });
@@ -22,8 +21,9 @@ class AccountRecord {
   final bool rememberPassword;
   final bool useWebSocket;
   final bool directTls;
-  final String wsEndpoint;
-  final List<String> wsProtocols;
+  /// Manual connection URL override. The scheme determines the transport:
+  /// `wss://` / `ws://` → WebSocket; `https://` / `http://` → WebTransport.
+  final String connectionUrl;
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   final bool useQuic;
 
@@ -42,8 +42,7 @@ class AccountRecord {
       'rememberPassword': rememberPassword,
       'useWebSocket': useWebSocket,
       'directTls': directTls,
-      'wsEndpoint': wsEndpoint,
-      'wsProtocols': wsProtocols,
+      'connectionUrl': connectionUrl,
       'useQuic': useQuic,
       'useTcp': useTcp,
     };
@@ -61,10 +60,11 @@ class AccountRecord {
     final rememberPasswordRaw = map['rememberPassword'];
     final useWebSocketRaw = map['useWebSocket'];
     final directTlsRaw = map['directTls'];
-    final wsEndpoint = map['wsEndpoint']?.toString() ?? '';
+    // Support both the new 'connectionUrl' key and the legacy 'wsEndpoint' key.
+    final connectionUrl =
+        (map['connectionUrl'] ?? map['wsEndpoint'])?.toString() ?? '';
     final useQuicRaw = map['useQuic'];
     final useTcpRaw = map['useTcp'];
-    final wsProtocolsRaw = map['wsProtocols'];
     final port = portRaw is int ? portRaw : int.tryParse(portRaw?.toString() ?? '') ?? 5222;
     if (jid.isEmpty) {
       return null;
@@ -74,19 +74,10 @@ class AccountRecord {
         : password.isNotEmpty;
     final useWebSocket = useWebSocketRaw is bool
         ? useWebSocketRaw
-        : wsEndpoint.isNotEmpty;
+        : connectionUrl.isNotEmpty;
     final directTls = directTlsRaw is bool ? directTlsRaw : false;
     final useQuic = useQuicRaw is bool ? useQuicRaw : true;
     final useTcp = useTcpRaw is bool ? useTcpRaw : true;
-    final wsProtocols = <String>[];
-    if (wsProtocolsRaw is List) {
-      for (final entry in wsProtocolsRaw) {
-        final value = entry?.toString().trim() ?? '';
-        if (value.isNotEmpty) {
-          wsProtocols.add(value);
-        }
-      }
-    }
     return AccountRecord(
       jid: jid,
       password: rememberPassword ? password : '',
@@ -96,8 +87,7 @@ class AccountRecord {
       rememberPassword: rememberPassword,
       useWebSocket: useWebSocket,
       directTls: directTls,
-      wsEndpoint: wsEndpoint,
-      wsProtocols: wsProtocols,
+      connectionUrl: connectionUrl,
       useQuic: useQuic,
       useTcp: useTcp,
     );

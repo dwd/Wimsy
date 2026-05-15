@@ -47,7 +47,6 @@ class XmppWebSocketIo extends XmppWebSocket {
   @override
   Future<XmppWebSocket> connect<S>(String host, int port,
       {String Function(String event)? map,
-      List<String>? wsProtocols,
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,
@@ -70,7 +69,7 @@ class XmppWebSocketIo extends XmppWebSocket {
             path: wsPath,
           );
       Log.i(TAG, 'WebSocket URI: $uri');
-      _webSocket = _webSocketConnect(uri, protocols: wsProtocols);
+      _webSocket = _webSocketConnect(uri);
     } else {
       final connector = HappyEyeballsConnector(
         hostLookup: _hostLookup,

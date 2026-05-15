@@ -526,7 +526,6 @@ class Connection {
         await socket.connect(
           socketHost,
           socketPort,
-          wsProtocols: account.wsProtocols,
           wsPath: account.wsPath,
           wsUri: wsUri,
           useWebSocket: !account.useWebTransport,

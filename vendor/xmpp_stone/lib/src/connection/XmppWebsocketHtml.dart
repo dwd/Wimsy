@@ -31,7 +31,6 @@ class XmppWebSocketHtml extends XmppWebSocket {
   @override
   Future<XmppWebSocket> connect<S>(String host, int port,
       {String Function(String event)? map,
-      List<String>? wsProtocols,
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = true,
@@ -64,7 +63,7 @@ class XmppWebSocketHtml extends XmppWebSocket {
           port: port,
           path: wsPath,
         );
-    _socket = WebSocketChannel.connect(uri, protocols: wsProtocols);
+    _socket = WebSocketChannel.connect(uri);
 
     if (map != null) {
       _map = map;

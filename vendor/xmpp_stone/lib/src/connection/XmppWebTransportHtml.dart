@@ -38,7 +38,6 @@ class XmppWebTransportHtml extends XmppWebSocket {
     String host,
     int port, {
     String Function(String event)? map,
-    List<String>? wsProtocols,
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,

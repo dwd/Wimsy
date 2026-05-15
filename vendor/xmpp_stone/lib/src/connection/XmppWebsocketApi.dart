@@ -12,7 +12,6 @@ bool isTlsRequired() {
 abstract class XmppWebSocket extends Stream<String> {
   Future<XmppWebSocket> connect<S>(String host, int port,
       {String Function(String event)? map,
-      List<String>? wsProtocols,
       String? wsPath,
       Uri? wsUri,
       bool useWebSocket = false,

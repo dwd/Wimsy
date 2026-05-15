@@ -13,8 +13,7 @@ void main() {
         rememberPassword: false,
         useWebSocket: false,
         directTls: false,
-        wsEndpoint: '',
-        wsProtocols: const <String>[],
+        connectionUrl: '',
       );
       expect(record.useTcp, isTrue);
       // Direct TLS default unchanged.
@@ -33,8 +32,7 @@ void main() {
         rememberPassword: false,
         useWebSocket: false,
         directTls: false,
-        wsEndpoint: '',
-        wsProtocols: const <String>[],
+        connectionUrl: '',
         useTcp: false,
       );
       final restored = AccountRecord.fromMap(record.toMap());
@@ -56,10 +54,42 @@ void main() {
         'useWebSocket': false,
         'directTls': false,
         'wsEndpoint': '',
-        'wsProtocols': const <String>[],
       });
       expect(restored, isNotNull);
       expect(restored!.useTcp, isTrue);
+    });
+
+    test('fromMap reads legacy wsEndpoint key as connectionUrl', () {
+      final restored = AccountRecord.fromMap(<String, dynamic>{
+        'jid': 'user@example.org',
+        'password': '',
+        'host': '',
+        'port': 5222,
+        'resource': 'wimsy',
+        'rememberPassword': false,
+        'useWebSocket': true,
+        'directTls': false,
+        'wsEndpoint': 'wss://legacy.example.com/xmpp-websocket',
+      });
+      expect(restored, isNotNull);
+      expect(restored!.connectionUrl, 'wss://legacy.example.com/xmpp-websocket');
+    });
+
+    test('fromMap prefers connectionUrl over legacy wsEndpoint', () {
+      final restored = AccountRecord.fromMap(<String, dynamic>{
+        'jid': 'user@example.org',
+        'password': '',
+        'host': '',
+        'port': 5222,
+        'resource': 'wimsy',
+        'rememberPassword': false,
+        'useWebSocket': true,
+        'directTls': false,
+        'connectionUrl': 'https://new.example.com/xmpp-webtransport',
+        'wsEndpoint': 'wss://old.example.com/xmpp-websocket',
+      });
+      expect(restored, isNotNull);
+      expect(restored!.connectionUrl, 'https://new.example.com/xmpp-webtransport');
     });
 
     test('fromMap honours explicit useTcp=false', () {
@@ -73,7 +103,6 @@ void main() {
         'useWebSocket': false,
         'directTls': true,
         'wsEndpoint': '',
-        'wsProtocols': const <String>[],
         'useTcp': false,
       });
       expect(restored, isNotNull);

@@ -41,7 +41,6 @@ class XmppAccountSettings {
   String? wsHost;
   int? wsPort;
   String? wsPath;
-  List<String>? wsProtocols;
   List<XmppTcpEndpoint>? tcpEndpoints;
   List<XmppQuicEndpoint>? quicEndpoints;
   bool preferSasl2 = true;
@@ -76,7 +75,6 @@ class XmppAccountSettings {
     this.wsHost,
     this.wsPort,
     this.wsPath,
-    this.wsProtocols,
     this.tcpEndpoints,
     this.quicEndpoints,
   });
