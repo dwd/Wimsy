@@ -54,7 +54,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _useTcp = true;
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   bool _useQuic = true;
-  bool _advancedOptionsExpanded = false;
+  bool _discoveryOptionsExpanded = false;
+  bool _manualConnectionExpanded = false;
   bool _endpointDiscoveryBusy = false;
   String? _endpointDiscoveryMessage;
   String? _lastEndpointDiscoveryDomain;
@@ -223,8 +224,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _endpointDiscoveryBusy = false;
       _endpointDiscoveryMessage =
-          'Could not discover a WebSocket endpoint for $domain. Enter one in advanced options.';
-      _advancedOptionsExpanded = true;
+          'Could not discover a WebSocket endpoint for $domain. '
+          'Enter one manually below.';
+      _manualConnectionExpanded = true;
     });
   }
 
@@ -233,7 +235,15 @@ class _LoginScreenState extends State<LoginScreen> {
     return parts.length == 2 ? parts[1] : '';
   }
 
-  Widget _buildAdvancedOptions(XmppService service, ThemeData theme) {
+  /// Builds the "Discovery options" expandable section.
+  ///
+  /// Contains transport-selection toggles that control which protocols are
+  /// tried during automatic SRV / host-meta discovery: Plain TCP, Direct TLS,
+  /// and QUIC.  On web these are all fixed and the section is hidden.
+  Widget _buildDiscoveryOptions(XmppService service) {
+    // On web, discovery is always WebSocket/WebTransport — nothing to tune.
+    if (kIsWeb) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -242,19 +252,122 @@ class _LoginScreenState extends State<LoginScreen> {
               ? null
               : () {
                   setState(() {
-                    _advancedOptionsExpanded = !_advancedOptionsExpanded;
+                    _discoveryOptionsExpanded = !_discoveryOptionsExpanded;
                   });
                 },
           icon: Icon(
-            _advancedOptionsExpanded ? Icons.expand_less : Icons.expand_more,
+            _discoveryOptionsExpanded
+                ? Icons.expand_less
+                : Icons.expand_more,
           ),
           label: Text(
-            _advancedOptionsExpanded
-                ? 'Hide advanced options'
-                : 'Show advanced options',
+            _discoveryOptionsExpanded
+                ? 'Hide discovery options'
+                : 'Discovery options',
           ),
         ),
-        if (_advancedOptionsExpanded) ...[
+        if (_discoveryOptionsExpanded) ...[
+          const SizedBox(height: 4),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Plain TCP'),
+            subtitle: const Text(
+              'Allows plain TCP connections via _xmpp-client._tcp SRV. '
+              'When off, plain-TCP SRV records are ignored.',
+            ),
+            value: _useTcp,
+            onChanged: service.isConnecting
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() => _useTcp = value);
+                  },
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Direct TLS (XEP-0368)'),
+            subtitle: const Text(
+              'Uses direct TLS when the server advertises it via SRV. '
+              'When off, _xmpps-client._tcp SRV records are ignored.',
+            ),
+            value: _useDirectTls,
+            onChanged: service.isConnecting
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() => _useDirectTls = value);
+                  },
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('QUIC transport (XEP-0467)'),
+            subtitle: const Text(
+              'Enables QUIC when the server advertises it via SRV. '
+              'Disable to isolate QUIC issues.',
+            ),
+            value: _useQuic,
+            onChanged: service.isConnecting
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() => _useQuic = value);
+                  },
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('WebSocket transport'),
+            subtitle: const Text(
+              'Enables WebSocket when the server advertises it via host-meta. '
+              'Useful for testing server WebSocket support.',
+            ),
+            value: _useWebSocket,
+            onChanged: service.isConnecting
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    setState(() => _useWebSocket = value);
+                  },
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Builds the "Manual connection" expandable section.
+  ///
+  /// Contains explicit override fields: host, port, resource, and (when
+  /// WebSocket is in use) the WebSocket endpoint URL and subprotocols.
+  /// This section auto-opens when automatic discovery fails.
+  Widget _buildManualConnection(XmppService service) {
+    final showWsFields = _useWebSocket || kIsWeb;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton.icon(
+          onPressed: service.isConnecting
+              ? null
+              : () {
+                  setState(() {
+                    _manualConnectionExpanded = !_manualConnectionExpanded;
+                  });
+                },
+          icon: Icon(
+            _manualConnectionExpanded
+                ? Icons.expand_less
+                : Icons.expand_more,
+          ),
+          label: Text(
+            _manualConnectionExpanded
+                ? 'Hide manual connection'
+                : 'Manual connection',
+          ),
+        ),
+        if (_manualConnectionExpanded) ...[
           const SizedBox(height: 4),
           Row(
             children: [
@@ -280,94 +393,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Direct TLS (XEP-0368)'),
-            subtitle: const Text(
-              'Uses direct TLS when the server advertises it via SRV. '
-              'When off, _xmpps-client._tcp SRV records are ignored.',
-            ),
-            value: _useDirectTls,
-            onChanged: service.isConnecting || kIsWeb
-                ? null
-                : (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _useDirectTls = value;
-                    });
-                  },
-          ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Plain TCP'),
-            subtitle: const Text(
-              'Allows plain TCP connections via _xmpp-client._tcp SRV. '
-              'When off, plain-TCP SRV records are ignored and no plain-TCP '
-              'connection will be attempted.',
-            ),
-            value: kIsWeb ? true : _useTcp,
-            onChanged: service.isConnecting || kIsWeb
-                ? null
-                : (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _useTcp = value;
-                    });
-                  },
-          ),
-          const SizedBox(height: 12),
           TextField(
             controller: _resourceController,
             enabled: !service.isConnecting,
             decoration: const InputDecoration(labelText: 'Resource'),
           ),
-          const SizedBox(height: 12),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Use QUIC transport (XEP-0467)'),
-            subtitle: const Text(
-              'Enables QUIC when the server advertises it via SRV. Disable to isolate QUIC issues.',
-            ),
-            value: kIsWeb ? false : _useQuic,
-            onChanged: service.isConnecting || kIsWeb
-                ? null
-                : (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _useQuic = value;
-                    });
-                  },
-          ),
-          const SizedBox(height: 12),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Use WebSocket transport'),
-            subtitle: kIsWeb
-                ? const Text('Required for web builds.')
-                : const Text('Useful for testing server WebSocket support.'),
-            value: kIsWeb ? true : _useWebSocket,
-            onChanged: service.isConnecting || kIsWeb
-                ? null
-                : (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _useWebSocket = value;
-                    });
-                  },
-          ),
-          if (_useWebSocket || kIsWeb) ...[
+          if (showWsFields) ...[
             const SizedBox(height: 12),
             TextField(
               controller: _wsEndpointController,
@@ -509,7 +540,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _buildAdvancedOptions(service, theme),
+                        _buildDiscoveryOptions(service),
+                        _buildManualConnection(service),
                         const SizedBox(height: 12),
                         CheckboxListTile(
                           contentPadding: EdgeInsets.zero,
