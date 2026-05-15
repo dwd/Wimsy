@@ -132,6 +132,18 @@ Future<(QuicEndpoint, QuicConnection)> endpointConnect({
   qlogPath: qlogPath,
 );
 
+/// Rebind the endpoint's UDP socket to a fresh unspecified address on the
+/// same address family, triggering a QUIC PATH_CHALLENGE on the new path.
+/// This enables connection migration (RFC 9000 §9) after a network-interface
+/// change without tearing down the XMPP session.
+///
+/// This exposes the QuicEndpoint.rebind_to_current_address() method to flutter_rust_bridge.
+Future<void> endpointRebindToCurrentAddress({
+  required QuicEndpoint endpoint,
+}) => RustLib.instance.api.crateApiBridgeEndpointRebindToCurrentAddress(
+  endpoint: endpoint,
+);
+
 /// Send a datagram on a QUIC connection.
 ///
 /// Takes a shared reference — see `connection_open_bi` for rationale.

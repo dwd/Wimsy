@@ -130,6 +130,10 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       _service.setCallSessionEndedHandler(_handleCallSessionEnded);
       if (!kIsWeb && Platform.isAndroid) {
         _startAndroidForegroundService();
+      }
+      // Subscribe to connectivity changes on all non-web IO platforms so that
+      // iOS (Wi-Fi ↔ cellular) also triggers QUIC migration / reconnect.
+      if (!kIsWeb) {
         _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
           results,
         ) {

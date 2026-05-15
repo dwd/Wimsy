@@ -184,6 +184,10 @@ abstract class RustLibApi extends BaseApi {
     String? qlogPath,
   });
 
+  Future<void> crateApiBridgeEndpointRebindToCurrentAddress({
+    required QuicEndpoint endpoint,
+  });
+
   Future<void> crateApiBridgeInitApp();
 
   Future<QuicClient> crateApiBridgeQuicClientClearPool({
@@ -1240,6 +1244,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "endpoint_connect",
         argNames: ["endpoint", "addr", "serverName", "qlogPath"],
+      );
+
+  @override
+  Future<void> crateApiBridgeEndpointRebindToCurrentAddress({
+    required QuicEndpoint endpoint,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicEndpoint(
+            endpoint,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 45,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_quic_error,
+        ),
+        constMeta: kCrateApiBridgeEndpointRebindToCurrentAddressConstMeta,
+        argValues: [endpoint],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiBridgeEndpointRebindToCurrentAddressConstMeta =>
+      const TaskConstMeta(
+        debugName: "endpoint_rebind_to_current_address",
+        argNames: ["endpoint"],
       );
 
   @override
@@ -3873,6 +3913,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
       (self as QuicConnectionImpl).frbInternalSseEncode(move: false),
+      serializer,
+    );
+  }
+
+  @protected
+  void
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicEndpoint(
+    QuicEndpoint self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(
+      (self as QuicEndpointImpl).frbInternalSseEncode(move: false),
       serializer,
     );
   }

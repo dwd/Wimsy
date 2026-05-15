@@ -826,11 +826,32 @@ class XmppService extends ChangeNotifier {
     if (!_networkOnline) {
       return;
     }
-    _connection?.probeKeepalive(shortTimeout: true);
-    _connection?.requestReconnect(
-      reason: ReconnectionReason.networkChanged,
-      immediate: true,
-    );
+    // Attempt QUIC connection migration before falling back to a full reconnect.
+    // If the active socket is QUIC-capable, rebind the UDP socket so Quinn can
+    // send a PATH_CHALLENGE on the new network path (RFC 9000 §9).  Only on
+    // migration failure (or non-QUIC transport) do we tear down the session.
+    final socket = _connection?.socket;
+    if (socket is QuicCapableXmppSocket) {
+      debugPrint('QUIC migration: attempting migration after connectivity change');
+      socket.attemptMigration().then((result) {
+        if (result == MigrationResult.success) {
+          debugPrint('QUIC migration: success — keeping XMPP session');
+          _connection?.probeKeepalive(shortTimeout: true);
+        } else {
+          debugPrint('QUIC migration: failed — falling back to full reconnect');
+          _connection?.requestReconnect(
+            reason: ReconnectionReason.networkChanged,
+            immediate: true,
+          );
+        }
+      });
+    } else {
+      _connection?.probeKeepalive(shortTimeout: true);
+      _connection?.requestReconnect(
+        reason: ReconnectionReason.networkChanged,
+        immediate: true,
+      );
+    }
   }
 
   void noteUserActivity() {

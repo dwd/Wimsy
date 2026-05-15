@@ -139,6 +139,28 @@ impl QuicEndpoint {
         Ok(QuicConnection::new(connection))
     }
     
+    /// Rebind the endpoint's UDP socket to a fresh unspecified address on the
+    /// same address family as the current local socket.  Quinn will then
+    /// automatically send a PATH_CHALLENGE on the new path, enabling QUIC
+    /// connection migration (RFC 9000 §9) without tearing down the XMPP
+    /// session.
+    pub fn rebind_to_current_address(&self) -> Result<(), QuicError> {
+        // Determine the address family from the current local address so we
+        // bind the new socket on the same family (IPv4 vs IPv6).
+        let local_addr = self.inner.local_addr()
+            .map_err(|e| QuicError::Endpoint(format!("Failed to get local address: {:?}", e)))?;
+        let bind_addr = if local_addr.is_ipv6() {
+            std::net::SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
+        } else {
+            std::net::SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)
+        };
+        let socket = std::net::UdpSocket::bind(bind_addr)
+            .map_err(|e| QuicError::Endpoint(format!("Failed to bind new UDP socket: {:?}", e)))?;
+        self.inner.rebind(socket)
+            .map_err(|e| QuicError::Endpoint(format!("Failed to rebind endpoint: {:?}", e)))?;
+        Ok(())
+    }
+
     /// Get a reference to the inner Quinn endpoint
     pub(crate) fn inner(&self) -> &quinn::Endpoint {
         &self.inner

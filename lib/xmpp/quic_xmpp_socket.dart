@@ -8,11 +8,15 @@ import 'package:flutter_quic/flutter_quic.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 
+/// Result of a QUIC connection migration attempt.
+enum MigrationResult { success, failed }
+
 class QuicCapableXmppSocket extends XmppWebSocket {
   QuicCapableXmppSocket({
     this.quicConnectTimeout = const Duration(seconds: 5),
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
     this.quicConnectMaxAttempts = 3,
+    this.migrationProbeTimeout = const Duration(seconds: 2),
   });
 
   final Duration quicConnectTimeout;
@@ -22,6 +26,17 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// candidate addresses) before giving up. Each retry races every
   /// candidate again with a fresh staggered start.
   final int quicConnectMaxAttempts;
+
+  /// Maximum time to wait for a PATH_CHALLENGE acknowledgement after rebinding
+  /// the UDP socket during a migration attempt. Exposed for testing so tests
+  /// can use a short timeout without sleeping for the full 2 seconds.
+  @visibleForTesting
+  final Duration migrationProbeTimeout;
+
+  /// Override for [endpointRebindToCurrentAddress] used in tests to avoid
+  /// real FFI calls.  When null the real FFI function is used.
+  @visibleForTesting
+  Future<void> Function(QuicEndpoint endpoint)? rebindOverride;
   final XmppWebSocketIo _fallbackSocket = XmppWebSocketIo();
   final StreamController<String> _quicStreamController =
       StreamController<String>.broadcast();
@@ -104,6 +119,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
+  /// Directly sets the QUIC-active flag for unit tests that need to exercise
+  /// [attemptMigration] without going through a real [connect] call.
+  @visibleForTesting
+  set useQuicForTesting(bool value) => _useQuic = value;
+
+  /// Directly sets the endpoint for unit tests that need to exercise
+  /// [attemptMigration] without going through a real [connect] call.
+  @visibleForTesting
+  set endpointForTesting(QuicEndpoint? value) => _endpoint = value;
+
   @override
   Future<XmppWebSocket> connect<S>(
     String host,
@@ -159,6 +184,59 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       // debugPrint('Error getting QUIC stats: $e');
       return null;
     }
+  }
+
+  /// Attempt QUIC connection migration after a network-interface change.
+  ///
+  /// Rebinds the endpoint's UDP socket to a fresh unspecified address on the
+  /// same address family, which causes Quinn to send a PATH_CHALLENGE on the
+  /// new path (RFC 9000 §9).  Polls [getQuicStats] every 200 ms for up to
+  /// [migrationProbeTimeout] waiting for the `path_challenge` RX counter to
+  /// increment, which indicates the server has acknowledged the new path.
+  ///
+  /// Returns [MigrationResult.success] when the PATH_CHALLENGE is confirmed,
+  /// or [MigrationResult.failed] on timeout, FFI error, or when QUIC is not
+  /// active.
+  Future<MigrationResult> attemptMigration() async {
+    final endpoint = _endpoint;
+    if (!_useQuic || endpoint == null) {
+      return MigrationResult.failed;
+    }
+    // Snapshot the current path_challenge RX counter before rebinding.
+    BigInt baselinePathChallenge;
+    try {
+      final stats = await getQuicStats();
+      baselinePathChallenge = stats?.frameRx.pathChallenge ?? BigInt.zero;
+    } catch (_) {
+      baselinePathChallenge = BigInt.zero;
+    }
+    // Rebind the UDP socket to trigger PATH_CHALLENGE on the new path.
+    try {
+      final rebind = rebindOverride;
+      if (rebind != null) {
+        await rebind(endpoint);
+      } else {
+        await endpointRebindToCurrentAddress(endpoint: endpoint);
+      }
+    } catch (e) {
+      debugPrint('QUIC migration: rebind failed: $e');
+      return MigrationResult.failed;
+    }
+    // Poll for PATH_CHALLENGE acknowledgement.
+    final deadline = DateTime.now().add(migrationProbeTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      try {
+        final stats = await getQuicStats();
+        final current = stats?.frameRx.pathChallenge ?? BigInt.zero;
+        if (current > baselinePathChallenge) {
+          return MigrationResult.success;
+        }
+      } catch (_) {
+        // Ignore transient stat errors; keep polling until deadline.
+      }
+    }
+    return MigrationResult.failed;
   }
 
   @override

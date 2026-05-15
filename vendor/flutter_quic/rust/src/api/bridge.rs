@@ -148,6 +148,21 @@ pub async fn endpoint_connect(
     Ok((endpoint, connection))
 }
 
+/// Rebind the endpoint's UDP socket to a fresh unspecified address on the
+/// same address family, triggering a QUIC PATH_CHALLENGE on the new path.
+/// This enables connection migration (RFC 9000 §9) after a network-interface
+/// change without tearing down the XMPP session.
+///
+/// Takes a shared reference so the endpoint can remain in use while the
+/// rebind is in progress.
+///
+/// This exposes the QuicEndpoint.rebind_to_current_address() method to flutter_rust_bridge.
+pub fn endpoint_rebind_to_current_address(
+    endpoint: &QuicEndpoint,
+) -> Result<(), QuicError> {
+    endpoint.rebind_to_current_address()
+}
+
 /// Send a datagram on a QUIC connection.
 ///
 /// Takes a shared reference — see `connection_open_bi` for rationale.
