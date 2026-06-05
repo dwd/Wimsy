@@ -1218,7 +1218,11 @@ class XmppService extends ChangeNotifier {
       );
       connection.connect();
 
-      await completer.future.timeout(const Duration(seconds: 20));
+      // Allow enough time for the full XMPP negotiation sequence on high-latency
+      // paths: QUIC handshake + stream open + features + SASL exchange + resource
+      // bind can each take one RTT, so 20 s is too tight when latency is high.
+      // 120 s gives a realistic budget while still bounding a truly stuck connect.
+      await completer.future.timeout(const Duration(seconds: 120));
     } catch (error) {
       _finishSpan(
         _connectAwaitSpan,
