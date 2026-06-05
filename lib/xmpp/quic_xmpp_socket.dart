@@ -13,9 +13,10 @@ enum MigrationResult { success, failed }
 
 class QuicCapableXmppSocket extends XmppWebSocket {
   QuicCapableXmppSocket({
-    this.quicConnectTimeout = const Duration(seconds: 5),
+    this.quicConnectTimeout = const Duration(seconds: 15),
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
     this.quicConnectMaxAttempts = 3,
+    this.quicConnectParallelAttempts = 3,
     this.migrationProbeTimeout = const Duration(seconds: 2),
   });
 
@@ -26,6 +27,14 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// candidate addresses) before giving up. Each retry races every
   /// candidate again with a fresh staggered start.
   final int quicConnectMaxAttempts;
+
+  /// How many parallel connection attempts to launch per candidate address
+  /// within each Happy Eyeballs round. Under high packet loss the first QUIC
+  /// Initial packet may be dropped before Quinn's internal retransmit fires;
+  /// launching [quicConnectParallelAttempts] copies of each attempt (staggered
+  /// by [happyEyeballsDelay]) ensures that at least one Initial packet reaches
+  /// the server even on very lossy paths.
+  final int quicConnectParallelAttempts;
 
   /// Maximum time to wait for a PATH_CHALLENGE acknowledgement after rebinding
   /// the UDP socket during a migration attempt. Exposed for testing so tests
@@ -451,6 +460,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// attempt to succeed wins; the rest are abandoned (their Futures are
   /// drained in the background to avoid unhandled-error noise).
   ///
+  /// Each candidate is launched [quicConnectParallelAttempts] times with
+  /// additional staggering so that multiple QUIC Initial packets are in-flight
+  /// simultaneously. This improves reliability on high-loss paths where the
+  /// first Initial packet may be dropped before Quinn's internal retransmit
+  /// fires.
+  ///
   /// Throws if every candidate fails or times out.
   Future<_QuicConnectResult> _raceQuicCandidates(
     List<InternetAddress> candidates,
@@ -526,8 +541,32 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       );
     }
 
-    for (var i = 0; i < candidates.length; i++) {
-      final address = candidates[i];
+    // Build the expanded launch schedule: each candidate is repeated
+    // [quicConnectParallelAttempts] times. The schedule interleaves candidates
+    // and repetitions so that the stagger between any two consecutive launches
+    // is always [happyEyeballsDelay], regardless of how many candidates or
+    // parallel attempts are configured.
+    //
+    // Example with 2 candidates (A, B) and parallelAttempts=3:
+    //   t=0ms   A[0]
+    //   t=250ms B[0]
+    //   t=500ms A[1]
+    //   t=750ms B[1]
+    //   t=1000ms A[2]
+    //   t=1250ms B[2]
+    final parallelAttempts =
+        quicConnectParallelAttempts < 1 ? 1 : quicConnectParallelAttempts;
+    final schedule = <InternetAddress>[];
+    for (var rep = 0; rep < parallelAttempts; rep++) {
+      for (final address in candidates) {
+        schedule.add(address);
+      }
+    }
+    // Update pending to match the expanded schedule length.
+    pending = schedule.length;
+
+    for (var i = 0; i < schedule.length; i++) {
+      final address = schedule[i];
       if (i == 0) {
         launch(address);
       } else {
