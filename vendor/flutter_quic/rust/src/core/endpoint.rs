@@ -92,6 +92,17 @@ impl QuicEndpoint {
         transport.keep_alive_interval(Some(Duration::from_secs(240)));
         transport.max_concurrent_bidi_streams(25u32.into());
         transport.max_concurrent_uni_streams(25u32.into());
+        // Reduce buffer sizes to prevent bufferbloat on low-bandwidth / high-latency
+        // paths.  Quinn's defaults (send_window=16 MiB, stream/connection receive
+        // windows=8 MiB) can queue many seconds of data on a slow link, inflating
+        // application-perceived latency far above the wire RTT.  256 KiB send window
+        // and receive windows keep the in-flight queue shallow (≈2 RTTs at 1 Mbps)
+        // while still allowing full throughput on fast paths.  The receive windows
+        // also tell the server to slow its burst sending, which is the client-side
+        // lever for inbound bufferbloat without requiring server changes.
+        transport.send_window(256 * 1024);
+        transport.stream_receive_window(quinn::VarInt::from_u32(256 * 1024));
+        transport.receive_window(quinn::VarInt::from_u32(512 * 1024));
 
         // If a qlog path was provided, open the file and attach a qlog stream
         // so Quinn writes a full QUIC trace (transport events, stream opens,
