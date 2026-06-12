@@ -1190,6 +1190,12 @@ class XmppService extends ChangeNotifier {
           _setupJingle();
           _setupIbb();
           _setupPresence();
+          // If carbons were enabled inline during Bind2 (XEP-0280 + XEP-0386),
+          // mark them as already enabled so _requestCarbons() skips the
+          // redundant IQ round-trip.
+          if (connection.carbons2EnabledInline) {
+            _carbonsEnabled = true;
+          }
           _setupKeepalive();
           _setupQuicStats();
           _setupDeliveryTracking();
@@ -7871,7 +7877,7 @@ class XmppService extends ChangeNotifier {
 
   void _requestCarbons() {
     final connection = _connection;
-    if (connection == null || _carbonsRequestId != null) {
+    if (connection == null || _carbonsRequestId != null || _carbonsEnabled) {
       return;
     }
     final id = AbstractStanza.getRandomId();
