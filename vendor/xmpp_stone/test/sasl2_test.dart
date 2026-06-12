@@ -414,13 +414,16 @@ void main() {
         ..sasl2SendUserAgent = false
         ..useBind2 = true;
       final connection = Connection(account);
-      // Server advertises carbons as a child of the Bind 2 inline feature.
+      // Server advertises carbons nested inside <inline> within <bind>:
+      // <bind xmlns='urn:xmpp:bind:0'><inline><feature var='urn:xmpp:carbons:2'/></inline></bind>
       final bind2Feature = XmppElement()
         ..name = 'bind'
         ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0'));
-      bind2Feature.addChild(XmppElement()
+      final inlineEl = XmppElement()..name = 'inline';
+      inlineEl.addChild(XmppElement()
         ..name = 'feature'
         ..addAttribute(XmppAttribute('var', 'urn:xmpp:carbons:2')));
+      bind2Feature.addChild(inlineEl);
       connection.setSasl2InlineFeatures({'urn:xmpp:bind:0': bind2Feature});
       final socket = _RecordingSocket();
       connection.socket = socket;

@@ -154,8 +154,11 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
         ..textValue = resource);
     }
     // Request carbons inline if the server advertises it as a Bind 2 feature.
+    // The server advertises inline features nested inside a <inline> child of
+    // <bind>: <bind><inline><feature var='...'/></inline></bind>.
     final bind2Features = _connection.sasl2InlineFeatures[bind2Namespace];
-    final bind2FeatureChildren = bind2Features?.children.where((c) => c.name == 'feature') ?? [];
+    final bind2Inline = bind2Features?.getChild('inline');
+    final bind2FeatureChildren = bind2Inline?.children.where((c) => c.name == 'feature') ?? [];
     final serverOffersCarbonsInline = bind2FeatureChildren.any(
       (c) => c.getAttribute('var')?.value == carbons2Namespace,
     );
