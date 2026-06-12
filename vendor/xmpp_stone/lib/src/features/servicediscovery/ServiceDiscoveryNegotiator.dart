@@ -122,7 +122,12 @@ class ServiceDiscoveryNegotiator extends Negotiator {
       _supportedFeatures.add(f);
     }
     _connection.connectionNegotatiorManager.addFeatures(_supportedFeatures);
-    state = NegotiatorState.DONE;
+    // Defer the DONE state change so that the ConnectionNegotiatorManager's
+    // stateListener is attached before the event fires. When the cache path
+    // is taken, negotiate() is called synchronously inside negotiateNextFeature()
+    // before the featureStateStream.listen() call, so a synchronous state
+    // change would be missed by the broadcast stream.
+    Future.microtask(() => state = NegotiatorState.DONE);
   }
 
   void _sendServiceDiscoveryRequest() {

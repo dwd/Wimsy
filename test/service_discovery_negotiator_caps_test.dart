@@ -92,7 +92,7 @@ void main() {
   group('ServiceDiscoveryNegotiator caps-hash elision', () {
     test(
       'R: skips disco#info IQ when server caps hash is already cached',
-      () {
+      () async {
         const node = 'https://openfire.example.com/';
         const ver = 'TcsHJlFLfsfV63Fv7HoLvcmXAVw=';
         const capsKey = '$node#$ver';
@@ -117,6 +117,10 @@ void main() {
           isEmpty,
           reason: 'No disco#info IQ should be sent when caps are cached',
         );
+        // The DONE state is set via Future.microtask so the
+        // ConnectionNegotiatorManager's stateListener is attached first.
+        // Await the microtask queue before asserting state.
+        await Future.microtask(() {});
         expect(
           negotiator.state,
           NegotiatorState.DONE,
