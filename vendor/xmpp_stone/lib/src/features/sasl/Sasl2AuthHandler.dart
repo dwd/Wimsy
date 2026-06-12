@@ -155,9 +155,9 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
     }
     // Request carbons inline if the server advertises it as a Bind 2 feature.
     final bind2Features = _connection.sasl2InlineFeatures[bind2Namespace];
-    final bind2FeatureChildren = bind2Features?.children ?? [];
+    final bind2FeatureChildren = bind2Features?.children.where((c) => c.name == 'feature') ?? [];
     final serverOffersCarbonsInline = bind2FeatureChildren.any(
-      (c) => c.getNameSpace() == carbons2Namespace,
+      (c) => c.getAttribute('var')?.value == carbons2Namespace,
     );
     if (serverOffersCarbonsInline) {
       bind.addChild(XmppElement()

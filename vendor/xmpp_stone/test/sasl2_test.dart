@@ -419,8 +419,8 @@ void main() {
         ..name = 'bind'
         ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0'));
       bind2Feature.addChild(XmppElement()
-        ..name = 'enable'
-        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:carbons:2')));
+        ..name = 'feature'
+        ..addAttribute(XmppAttribute('var', 'urn:xmpp:carbons:2')));
       connection.setSasl2InlineFeatures({'urn:xmpp:bind:0': bind2Feature});
       final socket = _RecordingSocket();
       connection.socket = socket;
