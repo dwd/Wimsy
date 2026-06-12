@@ -103,7 +103,8 @@ class Connection {
   bool _sasl2PipelinedRetryIssued = false;
   xml.XmlElement? _deferredFeatureElement;
 
-  static const String _bind2Namespace = 'urn:xmpp:bind:2';
+  static const String _bind2Namespace = 'urn:xmpp:bind:0';
+  static const String _carbons2Namespace = 'urn:xmpp:carbons:2';
 
   bool authenticated = false;
 
@@ -112,6 +113,11 @@ class Connection {
   /// should skip itself.
   bool get bind2Completed => _bind2Completed;
   bool _bind2Completed = false;
+
+  /// Whether message carbons (XEP-0280) were enabled inline during Bind 2.
+  /// When true, the CarbonsNegotiator should skip its IQ round-trip.
+  bool get carbons2EnabledInline => _carbons2EnabledInline;
+  bool _carbons2EnabledInline = false;
 
   final StreamController<AbstractStanza?> _inStanzaStreamController =
       StreamController.broadcast();
@@ -192,9 +198,11 @@ class Connection {
 
   /// Checks the SASL2 success elements for a Bind 2 <bound> response
   /// (XEP-0386) and, if present, extracts the bound JID so that the old
-  /// <bind> IQ negotiator can be skipped.
+  /// <bind> IQ negotiator can be skipped. Also detects whether carbons
+  /// (XEP-0280) were enabled inline so CarbonsNegotiator can skip its IQ.
   void _processBind2SuccessElements(List<XmppElement> elements) {
     _bind2Completed = false;
+    _carbons2EnabledInline = false;
     for (final element in elements) {
       if (element.getNameSpace() == _bind2Namespace) {
         _bind2Completed = true;
@@ -203,6 +211,11 @@ class Connection {
         final jidText = element.getChild('jid')?.textValue?.trim();
         if (jidText != null && jidText.isNotEmpty) {
           fullJidRetrieved(Jid.fromFullJid(jidText));
+        }
+        // Check if carbons were enabled inline within the <bound> element.
+        final enabledEl = element.getChild('enabled');
+        if (enabledEl?.getNameSpace() == _carbons2Namespace) {
+          _carbons2EnabledInline = true;
         }
         break;
       }
@@ -503,6 +516,7 @@ class Connection {
     _sasl2PipelinedRetryIssued = false;
     _deferredFeatureElement = null;
     _bind2Completed = false;
+    _carbons2EnabledInline = false;
     final iapScheme = account.iapConfigVersionScheme?.trim();
     final iapValue = account.iapConfigVersionValue?.trim();
     if (iapScheme != null &&

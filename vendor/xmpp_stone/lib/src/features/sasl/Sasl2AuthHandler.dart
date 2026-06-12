@@ -19,7 +19,8 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   static const String TAG = 'Sasl2AuthHandler';
   static const String sasl2Namespace = 'urn:xmpp:sasl:2';
   static const String iapNamespace = 'urn:xmpp:iap:0';
-  static const String bind2Namespace = 'urn:xmpp:bind:2';
+  static const String bind2Namespace = 'urn:xmpp:bind:0';
+  static const String carbons2Namespace = 'urn:xmpp:carbons:2';
   static const int clientNonceLength = 48;
 
   final Connection _connection;
@@ -139,6 +140,9 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   /// Builds the Bind 2 inline element for inclusion in the SASL2
   /// <authenticate> stanza (XEP-0386). The <tag> child carries the
   /// requested resource name so the server can use it when assigning the JID.
+  /// If the server also advertises carbons as a Bind 2 inline feature, an
+  /// <enable xmlns='urn:xmpp:carbons:2'/> child is included so that carbons
+  /// are activated atomically with binding, saving a round-trip.
   XmppElement _buildBind2Element() {
     final bind = XmppElement()
       ..name = 'bind'
@@ -148,6 +152,17 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
       bind.addChild(XmppElement()
         ..name = 'tag'
         ..textValue = resource);
+    }
+    // Request carbons inline if the server advertises it as a Bind 2 feature.
+    final bind2Features = _connection.sasl2InlineFeatures[bind2Namespace];
+    final bind2FeatureChildren = bind2Features?.children ?? [];
+    final serverOffersCarbonsInline = bind2FeatureChildren.any(
+      (c) => c.getNameSpace() == carbons2Namespace,
+    );
+    if (serverOffersCarbonsInline) {
+      bind.addChild(XmppElement()
+        ..name = 'enable'
+        ..addAttribute(XmppAttribute('xmlns', carbons2Namespace)));
     }
     return bind;
   }

@@ -47,6 +47,13 @@ class CarbonsNegotiator extends Negotiator {
   @override
   void negotiate(List<Nonza> nonzas) {
     if (match(nonzas).isNotEmpty) {
+      // If carbons were already enabled inline during Bind 2 (XEP-0280 +
+      // XEP-0386), skip the IQ round-trip entirely.
+      if (_connection.carbons2EnabledInline) {
+        enabled = true;
+        state = NegotiatorState.DONE;
+        return;
+      }
       state = NegotiatorState.NEGOTIATING;
       sendRequest();
       _subscription = _connection.inStanzasStream.listen(checkStanzas);

@@ -220,9 +220,9 @@ void main() {
       final connection = Connection(account);
       // Simulate server advertising Bind 2 as an inline feature.
       connection.setSasl2InlineFeatures({
-        'urn:xmpp:bind:2': XmppElement()
+        'urn:xmpp:bind:0': XmppElement()
           ..name = 'bind'
-          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
       });
       final socket = _RecordingSocket();
       connection.socket = socket;
@@ -236,7 +236,7 @@ void main() {
       final auth = Nonza.parse(authXml);
       final bind = auth.getChild('bind');
       expect(bind, isNotNull);
-      expect(bind?.getNameSpace(), equals('urn:xmpp:bind:2'));
+      expect(bind?.getNameSpace(), equals('urn:xmpp:bind:0'));
       expect(bind?.getChild('tag')?.textValue, equals('wimsy'));
 
       connection.handleResponse(
@@ -257,9 +257,9 @@ void main() {
         ..useBind2 = false;
       final connection = Connection(account);
       connection.setSasl2InlineFeatures({
-        'urn:xmpp:bind:2': XmppElement()
+        'urn:xmpp:bind:0': XmppElement()
           ..name = 'bind'
-          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
       });
       final socket = _RecordingSocket();
       connection.socket = socket;
@@ -321,9 +321,9 @@ void main() {
         ..useBind2 = true;
       final connection = Connection(account);
       connection.setSasl2InlineFeatures({
-        'urn:xmpp:bind:2': XmppElement()
+        'urn:xmpp:bind:0': XmppElement()
           ..name = 'bind'
-          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
       });
       final socket = _RecordingSocket();
       connection.socket = socket;
@@ -337,7 +337,7 @@ void main() {
       connection.handleResponse(
         "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
         '<authorization-identifier>alice@example.com</authorization-identifier>'
-        "<bound xmlns='urn:xmpp:bind:2'>"
+        "<bound xmlns='urn:xmpp:bind:0'>"
         '<jid>alice@example.com/wimsy-server-assigned</jid>'
         '</bound>'
         "</success></xmpp_stone>",
@@ -379,9 +379,9 @@ void main() {
         ..useBind2 = true;
       final connection = Connection(account);
       connection.setSasl2InlineFeatures({
-        'urn:xmpp:bind:2': XmppElement()
+        'urn:xmpp:bind:0': XmppElement()
           ..name = 'bind'
-          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
       });
       final socket = _RecordingSocket();
       connection.socket = socket;
@@ -403,6 +403,152 @@ void main() {
         "</success></xmpp_stone>",
       );
       await resultFuture;
+    });
+
+    test('includes carbons enable in bind element when server offers it inline',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      // Server advertises carbons as a child of the Bind 2 inline feature.
+      final bind2Feature = XmppElement()
+        ..name = 'bind'
+        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0'));
+      bind2Feature.addChild(XmppElement()
+        ..name = 'enable'
+        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:carbons:2')));
+      connection.setSasl2InlineFeatures({'urn:xmpp:bind:0': bind2Feature});
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      final bind = auth.getChild('bind');
+      expect(bind, isNotNull);
+      final enable = bind?.getChild('enable');
+      expect(enable, isNotNull);
+      expect(enable?.getNameSpace(), equals('urn:xmpp:carbons:2'));
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+    });
+
+    test('does not include carbons enable when server does not offer it inline',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      // Bind 2 advertised but no carbons child.
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:0': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      final bind = auth.getChild('bind');
+      expect(bind, isNotNull);
+      expect(bind?.getChild('enable'), isNull);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+    });
+
+    test('carbons2EnabledInline is true when bound element contains enabled',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:0': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "<bound xmlns='urn:xmpp:bind:0'>"
+        "<enabled xmlns='urn:xmpp:carbons:2'/>"
+        '</bound>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+      expect(connection.bind2Completed, isTrue);
+      expect(connection.carbons2EnabledInline, isTrue);
+    });
+
+    test('carbons2EnabledInline is false when bound element has no enabled',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:0': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "<bound xmlns='urn:xmpp:bind:0'/>"
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+      expect(connection.bind2Completed, isTrue);
+      expect(connection.carbons2EnabledInline, isFalse);
     });
   });
 
