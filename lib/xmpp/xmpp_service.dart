@@ -1080,6 +1080,19 @@ class XmppService extends ChangeNotifier {
             )
           : Connection.getInstance(account);
       _connection = connection;
+      // Seed the ServiceDiscoveryNegotiator caps cache from persistent
+      // storage so that if the server advertises a caps hash we already
+      // verified in a previous session, we can skip the disco#info IQ
+      // entirely on connect.
+      final storage = _storage;
+      if (storage != null) {
+        ServiceDiscoveryNegotiator.seedCapsCache(storage.loadEntityCaps());
+      }
+      // Persist newly discovered server caps so future connects can elide
+      // the disco#info IQ for the same server version.
+      ServiceDiscoveryNegotiator.onCapsResult = (capsKey, features) {
+        _storage?.storeEntityCaps(capsKey, features);
+      };
       connection.setReconnectPolicy(
         const ReconnectionPolicy(
           baseDelay: Duration(seconds: 5),

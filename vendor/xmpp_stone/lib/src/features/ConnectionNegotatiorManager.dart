@@ -49,10 +49,37 @@ class ConnectionNegotiatorManager {
       }
     });
     if (_connection.authenticated) {
-      waitingNegotiators.add(NegotiatorWithSupportedNonzas(
-          ServiceDiscoveryNegotiator.getInstance(_connection), []));
+      // Extract the server's caps hash from stream features (XEP-0115) so
+      // the ServiceDiscoveryNegotiator can elide the disco#info IQ when
+      // the node#ver is already in the cache.
+      final capsKey = _extractServerCapsKey(element);
+      final discoNegotiator =
+          ServiceDiscoveryNegotiator.getInstance(_connection);
+      discoNegotiator.serverCapsKey = capsKey;
+      waitingNegotiators.add(
+          NegotiatorWithSupportedNonzas(discoNegotiator, []));
     }
     negotiateNextFeature();
+  }
+
+  /// Extracts the `node#ver` caps key from a `<stream:features>` element,
+  /// or returns null if no valid caps element is present.
+  static String? _extractServerCapsKey(xml.XmlElement features) {
+    for (final child in features.childElements) {
+      if (child.localName == 'c' &&
+          child.getAttribute('xmlns') ==
+              'http://jabber.org/protocol/caps') {
+        final node = child.getAttribute('node');
+        final ver = child.getAttribute('ver');
+        if (node != null &&
+            node.isNotEmpty &&
+            ver != null &&
+            ver.isNotEmpty) {
+          return '$node#$ver';
+        }
+      }
+    }
+    return null;
   }
 
   void cleanNegotiators() {

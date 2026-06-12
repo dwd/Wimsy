@@ -16,8 +16,35 @@ import 'package:xmpp_stone/src/features/servicediscovery/ServiceDiscoverySupport
 class ServiceDiscoveryNegotiator extends Negotiator {
   static const String NAMESPACE_DISCO_INFO =
       'http://jabber.org/protocol/disco#info';
+  static const String _NAMESPACE_CAPS =
+      'http://jabber.org/protocol/caps';
 
   static final Map<Connection, ServiceDiscoveryNegotiator> _instances = {};
+
+  /// Caps cache shared across all connections: maps `node#ver` to the
+  /// verified disco#info feature set. Seeded from persistent storage
+  /// before connecting so we can skip the disco#info IQ when the server
+  /// advertises a caps hash we already know.
+  static final Map<String, Set<String>> _capsCache = {};
+
+  /// Seed the caps cache from persistent storage. Call this before
+  /// connecting so that the negotiator can elide the disco#info IQ when
+  /// the server's caps hash is already known.
+  static void seedCapsCache(Map<String, Set<String>> cached) {
+    for (final entry in cached.entries) {
+      _capsCache.putIfAbsent(entry.key, () => Set<String>.from(entry.value));
+    }
+  }
+
+  /// Clear the entire caps cache. Intended for testing and account-reset
+  /// flows only.
+  static void clearCapsCache() {
+    _capsCache.clear();
+  }
+
+  /// Callback invoked after a successful disco#info response so the app
+  /// layer can persist the result. Set by the app before connecting.
+  static void Function(String capsKey, Set<String> features)? onCapsResult;
 
   static ServiceDiscoveryNegotiator getInstance(Connection connection) {
     var instance = _instances[connection];
@@ -34,6 +61,11 @@ class ServiceDiscoveryNegotiator extends Negotiator {
   }
 
   IqStanza? fullRequestStanza;
+
+  /// The `node#ver` caps key advertised by the server in stream features,
+  /// if any. Set by [ConnectionNegotiatorManager] before [negotiate] is
+  /// called.
+  String? serverCapsKey;
 
   final Connection _connection;
   late final IqRouter _router;
@@ -66,8 +98,31 @@ class ServiceDiscoveryNegotiator extends Negotiator {
   void negotiate(List<Nonza> nonza) {
     if (state == NegotiatorState.IDLE) {
       state = NegotiatorState.NEGOTIATING;
+      // If the server advertised a caps hash in stream features and we
+      // already have the verified feature set cached, skip the disco#info
+      // IQ entirely and populate features from the cache.
+      final capsKey = serverCapsKey;
+      if (capsKey != null) {
+        final cached = _capsCache[capsKey];
+        if (cached != null) {
+          _populateFeaturesFromCache(cached);
+          return;
+        }
+      }
       _sendServiceDiscoveryRequest();
     } else if (state == NegotiatorState.DONE) {}
+  }
+
+  void _populateFeaturesFromCache(Set<String> featureVars) {
+    _supportedFeatures.clear();
+    _supportedIdentities.clear();
+    for (final featureVar in featureVars) {
+      final f = Feature();
+      f.addAttribute(XmppAttribute('var', featureVar));
+      _supportedFeatures.add(f);
+    }
+    _connection.connectionNegotatiorManager.addFeatures(_supportedFeatures);
+    state = NegotiatorState.DONE;
   }
 
   void _sendServiceDiscoveryRequest() {
@@ -103,6 +158,15 @@ class ServiceDiscoveryNegotiator extends Negotiator {
             _supportedFeatures.add(element);
           }
         });
+      }
+      // Cache the result keyed by the server's caps hash so future
+      // connections can skip the disco#info IQ.
+      final capsKey = serverCapsKey;
+      if (capsKey != null && _supportedFeatures.isNotEmpty) {
+        final featureVars =
+            _supportedFeatures.map((f) => f.xmppVar ?? '').where((v) => v.isNotEmpty).toSet();
+        _capsCache.putIfAbsent(capsKey, () => featureVars);
+        onCapsResult?.call(capsKey, featureVars);
       }
     } else if (stanza.type == IqStanzaType.ERROR) {
       var errorStanza = stanza.getChild('error');
