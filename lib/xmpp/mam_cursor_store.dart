@@ -22,6 +22,24 @@ class MamCursorStore {
   final Set<String> _catchUpPending = {};
   final Map<String, int> _prependOffset = {};
   final Map<String, MamScheduledTask> _prependReset = {};
+  // JIDs for which MAM returned complete=true on a backwards page request,
+  // meaning there are no older messages in the archive.
+  final Set<String> _archiveExhausted = {};
+
+  /// Returns true if a previous backwards MAM page for [key] returned
+  /// complete=true, meaning there are no older messages to fetch.
+  bool isArchiveExhausted(String key) => _archiveExhausted.contains(key);
+
+  /// Records that the MAM archive for [key] is exhausted (complete=true).
+  void markArchiveExhausted(String key) {
+    _archiveExhausted.add(key);
+  }
+
+  /// Clears the archive-exhausted flag for [key], e.g. when new messages
+  /// arrive that extend the archive or when the cache is cleared.
+  void clearArchiveExhausted(String key) {
+    _archiveExhausted.remove(key);
+  }
 
   bool shouldThrottleBackfill(
     String key, {
@@ -114,6 +132,7 @@ class MamCursorStore {
       task.cancel();
     }
     _prependReset.clear();
+    _archiveExhausted.clear();
   }
 }
 

@@ -89,6 +89,27 @@ void main() {
     },
   );
 
+  test('archive exhausted flag is set, checked, cleared, and reset by clear()', () {
+    final store = MamCursorStore();
+
+    expect(store.isArchiveExhausted('alice@example.com'), isFalse);
+    store.markArchiveExhausted('alice@example.com');
+    expect(store.isArchiveExhausted('alice@example.com'), isTrue);
+
+    // Other JIDs are unaffected.
+    expect(store.isArchiveExhausted('bob@example.com'), isFalse);
+
+    store.clearArchiveExhausted('alice@example.com');
+    expect(store.isArchiveExhausted('alice@example.com'), isFalse);
+
+    // clear() resets all exhausted flags.
+    store.markArchiveExhausted('alice@example.com');
+    store.markArchiveExhausted('bob@example.com');
+    store.clear();
+    expect(store.isArchiveExhausted('alice@example.com'), isFalse);
+    expect(store.isArchiveExhausted('bob@example.com'), isFalse);
+  });
+
   test('catch-up pending markers transition completion state', () {
     final store = MamCursorStore();
     expect(store.isCatchUpComplete('scope'), isTrue);

@@ -40,7 +40,7 @@ class MessageArchiveManager {
 
   MessageArchiveManager(this._connection);
 
-  void queryAll({int? max, String? before, String? after, Jid? toJid}) {
+  String queryAll({int? max, String? before, String? after, Jid? toJid}) {
     var iqStanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
     if (toJid != null) {
       iqStanza.toJid = toJid;
@@ -51,6 +51,7 @@ class MessageArchiveManager {
     _addRsm(query, max: max, before: before, after: after);
     iqStanza.addChild(query);
     _connection.writeStanza(iqStanza);
+    return iqStanza.id!;
   }
 
   void queryByTime({
@@ -97,7 +98,7 @@ class MessageArchiveManager {
     }
   }
 
-  void queryById({
+  String queryById({
     String? beforeId,
     String? afterId,
     Jid? jid,
@@ -107,7 +108,7 @@ class MessageArchiveManager {
     Jid? toJid,
   }) {
     if (beforeId == null && afterId == null && jid == null) {
-      queryAll(max: max, before: before, after: after, toJid: toJid);
+      return queryAll(max: max, before: before, after: after, toJid: toJid);
     } else {
       var iqStanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
       if (toJid != null) {
@@ -134,6 +135,7 @@ class MessageArchiveManager {
       }
       _addRsm(query, max: max, before: before, after: after);
       _connection.writeStanza(iqStanza);
+      return iqStanza.id!;
     }
   }
 

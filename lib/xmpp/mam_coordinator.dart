@@ -44,6 +44,9 @@ class MamCoordinator {
     required String? oldestMamId,
     required void Function() onDmInitialFallback,
   }) {
+    if (_cursorStore.isArchiveExhausted(bareJid)) {
+      return;
+    }
     if (_cursorStore.shouldThrottlePageRequest(bareJid)) {
       return;
     }
@@ -67,6 +70,19 @@ class MamCoordinator {
     } else {
       _adapter.queryDm(bareJid, plan);
     }
+  }
+
+  /// Called when a backwards MAM page for [bareJid] returns complete=true,
+  /// meaning there are no older messages in the archive. Subsequent
+  /// [requestOlder] calls for this JID will be skipped until the flag is
+  /// cleared (e.g. on cache clear or new messages arriving).
+  void markArchiveExhausted(String bareJid) {
+    _cursorStore.markArchiveExhausted(bareJid);
+  }
+
+  /// Returns true if the MAM archive for [bareJid] is known to be exhausted.
+  bool isArchiveExhausted(String bareJid) {
+    return _cursorStore.isArchiveExhausted(bareJid);
   }
 
   void requestDmInitial({required String bareJid, required bool hasMessages}) {

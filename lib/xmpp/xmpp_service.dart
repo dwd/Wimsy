@@ -7252,7 +7252,7 @@ class XmppService extends ChangeNotifier {
             plan.afterId!.isNotEmpty
         ? plan.afterId
         : plan.after;
-    mam.queryById(
+    final iqId = mam.queryById(
       jid: (!isRoom && plan.useWithJid) ? Jid.fromFullJid(jid) : null,
       toJid: isRoom ? Jid.fromFullJid(jid) : null,
       max: plan.max,
@@ -7261,6 +7261,40 @@ class XmppService extends ChangeNotifier {
       beforeId: beforeId,
       afterId: afterId,
     );
+
+    // For backwards page requests (before != null or beforeId != null), listen
+    // for the fin result and mark the archive exhausted when complete=true.
+    // This prevents the scroll handler from issuing further requests once the
+    // server confirms there are no older messages.
+    final isBackwardsPage =
+        (before != null && before.isNotEmpty) ||
+        (beforeId != null && beforeId.isNotEmpty) ||
+        (plan.before != null && plan.before!.isEmpty); // initial page (before='')
+    if (isBackwardsPage) {
+      final router = IqRouter.getInstance(connection);
+      router.registerResponseHandler(iqId, (response) {
+        if (response.type != IqStanzaType.RESULT) {
+          return;
+        }
+        final fin = response.children.firstWhere(
+          (child) =>
+              child.name == 'fin' &&
+              child.getAttribute('xmlns')?.value == 'urn:xmpp:mam:2',
+          orElse: () => XmppElement(),
+        );
+        if (fin.name != 'fin') {
+          return;
+        }
+        final completeAttr = fin.getAttribute('complete')?.value;
+        if (completeAttr == 'true' || completeAttr == '1') {
+          _mamCoordinator.markArchiveExhausted(jid);
+          Log.d(
+            'XmppService',
+            'MAM archive exhausted (complete=true) for $jid',
+          );
+        }
+      });
+    }
   }
 
   bool _supportsMamExtendedQuery(

@@ -114,6 +114,66 @@ void main() {
     expect(adapter.queries, isEmpty);
   });
 
+  test('requestOlder is skipped when archive is exhausted', () {
+    final store = MamCursorStore(
+      now: () => DateTime.utc(2026, 1, 1),
+      schedule: _FakeScheduler().schedule,
+    );
+    final adapter = _FakeAdapter();
+    final coordinator = MamCoordinator(cursorStore: store, adapter: adapter);
+
+    // Mark the archive exhausted before requesting older messages.
+    coordinator.markArchiveExhausted('alice@example.com');
+
+    coordinator.requestOlder(
+      bareJid: 'alice@example.com',
+      isRoom: false,
+      seeded: true,
+      oldestMamId: 'm-1',
+      onDmInitialFallback: () {},
+    );
+
+    // No query should have been issued.
+    expect(adapter.queries, isEmpty);
+  });
+
+  test('requestOlder proceeds after clearArchiveExhausted', () {
+    final scheduler = _FakeScheduler();
+    final store = MamCursorStore(
+      now: () => DateTime.utc(2026, 1, 1),
+      schedule: scheduler.schedule,
+    );
+    final adapter = _FakeAdapter();
+    final coordinator = MamCoordinator(cursorStore: store, adapter: adapter);
+
+    coordinator.markArchiveExhausted('alice@example.com');
+    store.clearArchiveExhausted('alice@example.com');
+
+    coordinator.requestOlder(
+      bareJid: 'alice@example.com',
+      isRoom: false,
+      seeded: true,
+      oldestMamId: 'm-1',
+      onDmInitialFallback: () {},
+    );
+
+    expect(adapter.queries, hasLength(1));
+    expect(adapter.queries.single.plan.beforeId, 'm-1');
+  });
+
+  test('isArchiveExhausted reflects markArchiveExhausted', () {
+    final store = MamCursorStore(
+      now: () => DateTime.utc(2026, 1, 1),
+      schedule: _FakeScheduler().schedule,
+    );
+    final adapter = _FakeAdapter();
+    final coordinator = MamCoordinator(cursorStore: store, adapter: adapter);
+
+    expect(coordinator.isArchiveExhausted('room@example.com'), isFalse);
+    coordinator.markArchiveExhausted('room@example.com');
+    expect(coordinator.isArchiveExhausted('room@example.com'), isTrue);
+  });
+
   test('catch-up emits query and returns requested anchor', () {
     final store = MamCursorStore(
       now: () => DateTime.utc(2026, 1, 1),
