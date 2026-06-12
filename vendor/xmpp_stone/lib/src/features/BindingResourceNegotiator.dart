@@ -30,6 +30,12 @@ class BindingResourceConnectionNegotiator extends Negotiator {
   @override
   void negotiate(List<Nonza> nonzas) {
     if (match(nonzas).isNotEmpty) {
+      // If Bind 2 (XEP-0386) already completed the resource binding inline
+      // during SASL2, skip the old IQ-based bind negotiation entirely.
+      if (_connection.bind2Completed) {
+        state = NegotiatorState.DONE;
+        return;
+      }
       state = NegotiatorState.NEGOTIATING;
       subscription = _connection.inStanzasStream.listen(parseStanza);
       sendBindRequestStanza(_connection.account.resource);

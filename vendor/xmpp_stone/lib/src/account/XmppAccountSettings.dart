@@ -44,6 +44,7 @@ class XmppAccountSettings {
   List<XmppTcpEndpoint>? tcpEndpoints;
   List<XmppQuicEndpoint>? quicEndpoints;
   bool preferSasl2 = true;
+  bool useBind2 = true;
   bool sasl2SendUserAgent = true;
   String? sasl2UserAgentId;
   String? sasl2Software;

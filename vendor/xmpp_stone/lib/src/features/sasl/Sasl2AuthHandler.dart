@@ -19,6 +19,7 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   static const String TAG = 'Sasl2AuthHandler';
   static const String sasl2Namespace = 'urn:xmpp:sasl:2';
   static const String iapNamespace = 'urn:xmpp:iap:0';
+  static const String bind2Namespace = 'urn:xmpp:bind:2';
   static const int clientNonceLength = 48;
 
   final Connection _connection;
@@ -91,6 +92,13 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
     if (_connection.account.sasl2SendUserAgent) {
       authenticate.addChild(_buildUserAgentElement());
     }
+    // Include Bind 2 inline element if the server advertises it and the
+    // account has Bind 2 enabled (XEP-0386).
+    if (_connection.account.useBind2 &&
+        _connection.sasl2InlineFeatures.containsKey(bind2Namespace)) {
+      authenticate.addChild(_buildBind2Element());
+    }
+
     if (_connection.account.iapEnabled &&
         _connection.account.iapIncludeConfigVersion &&
         (_connection.iapAdvertisedInCurrentStream ||
@@ -126,6 +134,22 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
         ..textValue = device);
     }
     return element;
+  }
+
+  /// Builds the Bind 2 inline element for inclusion in the SASL2
+  /// <authenticate> stanza (XEP-0386). The <tag> child carries the
+  /// requested resource name so the server can use it when assigning the JID.
+  XmppElement _buildBind2Element() {
+    final bind = XmppElement()
+      ..name = 'bind'
+      ..addAttribute(XmppAttribute('xmlns', bind2Namespace));
+    final resource = (_connection.account.resource ?? '').trim();
+    if (resource.isNotEmpty) {
+      bind.addChild(XmppElement()
+        ..name = 'tag'
+        ..textValue = resource);
+    }
+    return bind;
   }
 
   String? _buildInitialResponse() {

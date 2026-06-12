@@ -234,6 +234,13 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0386.html"/>
+        <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">Bind 2 inline resource binding via SASL2. Sends bind element with tag in authenticate, parses bound JID from success, skips legacy IQ bind when Bind 2 completes.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0388.html"/>
         <xmpp:status>complete</xmpp:status>
         <xmpp:note xml:lang="en">Includes SCRAM authentication, user-agent binding, stream resumption inline, and IAP config-version pipelining.</xmpp:note>

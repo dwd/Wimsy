@@ -103,7 +103,15 @@ class Connection {
   bool _sasl2PipelinedRetryIssued = false;
   xml.XmlElement? _deferredFeatureElement;
 
+  static const String _bind2Namespace = 'urn:xmpp:bind:2';
+
   bool authenticated = false;
+
+  /// Whether resource binding was completed inline via Bind 2 (XEP-0386)
+  /// during SASL2 authentication. When true, the old <bind> negotiator
+  /// should skip itself.
+  bool get bind2Completed => _bind2Completed;
+  bool _bind2Completed = false;
 
   final StreamController<AbstractStanza?> _inStanzaStreamController =
       StreamController.broadcast();
@@ -179,6 +187,26 @@ class Connection {
 
   void setSasl2SuccessElements(List<XmppElement> elements) {
     _sasl2SuccessElements = List<XmppElement>.from(elements);
+    _processBind2SuccessElements(elements);
+  }
+
+  /// Checks the SASL2 success elements for a Bind 2 <bound> response
+  /// (XEP-0386) and, if present, extracts the bound JID so that the old
+  /// <bind> IQ negotiator can be skipped.
+  void _processBind2SuccessElements(List<XmppElement> elements) {
+    _bind2Completed = false;
+    for (final element in elements) {
+      if (element.getNameSpace() == _bind2Namespace) {
+        _bind2Completed = true;
+        // The <bound> element may carry a <jid> child with the full JID
+        // assigned by the server.
+        final jidText = element.getChild('jid')?.textValue?.trim();
+        if (jidText != null && jidText.isNotEmpty) {
+          fullJidRetrieved(Jid.fromFullJid(jidText));
+        }
+        break;
+      }
+    }
   }
 
   XmppElement? get iapConfigVersion => _iapConfigVersion;
@@ -474,6 +502,7 @@ class Connection {
     _sasl2PipelinedAuthInFlight = false;
     _sasl2PipelinedRetryIssued = false;
     _deferredFeatureElement = null;
+    _bind2Completed = false;
     final iapScheme = account.iapConfigVersionScheme?.trim();
     final iapValue = account.iapConfigVersionValue?.trim();
     if (iapScheme != null &&

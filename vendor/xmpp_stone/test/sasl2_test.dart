@@ -208,6 +208,204 @@ void main() {
     });
   });
 
+  group('Bind 2 (XEP-0386)', () {
+    test('includes bind element in authenticate when server advertises Bind 2',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      // Simulate server advertising Bind 2 as an inline feature.
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:2': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      final bind = auth.getChild('bind');
+      expect(bind, isNotNull);
+      expect(bind?.getNameSpace(), equals('urn:xmpp:bind:2'));
+      expect(bind?.getChild('tag')?.textValue, equals('wimsy'));
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      final result = await resultFuture;
+      expect(result.successful, isTrue);
+    });
+
+    test('does not include bind element when useBind2 is false', () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = false;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:2': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      expect(auth.getChild('bind'), isNull);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+    });
+
+    test('does not include bind element when server does not advertise Bind 2',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      // No Bind 2 in inline features.
+      connection.setSasl2InlineFeatures({});
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      expect(auth.getChild('bind'), isNull);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+    });
+
+    test('parses bound JID from Bind 2 success element', () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:2': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      // Server responds with a <bound> element containing the assigned JID.
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "<bound xmlns='urn:xmpp:bind:2'>"
+        '<jid>alice@example.com/wimsy-server-assigned</jid>'
+        '</bound>'
+        "</success></xmpp_stone>",
+      );
+      final result = await resultFuture;
+      expect(result.successful, isTrue);
+      expect(connection.bind2Completed, isTrue);
+      expect(connection.fullJid.resource, equals('wimsy-server-assigned'));
+    });
+
+    test('bind2Completed is false when no Bind 2 element in success', () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account.sasl2SendUserAgent = false;
+      final connection = Connection(account);
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+      expect(connection.bind2Completed, isFalse);
+    });
+
+    test('bind element has no tag child when resource is empty', () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = ''
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:2': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:2')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      final bind = auth.getChild('bind');
+      expect(bind, isNotNull);
+      expect(bind?.getChild('tag'), isNull);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+    });
+  });
+
   group('SASL2 state', () {
     test('authenticated SASL2 state does not require stream restart', () {
       final account =
