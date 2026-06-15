@@ -69,16 +69,19 @@ void main() {
     });
   });
 
-  group('parseWsEndpoint rejects https:// (WebTransport URIs bypass it)', () {
-    test('parseWsEndpoint returns null for https:// URI', () {
+  group('parseWsEndpoint handles both WebSocket and WebTransport URIs', () {
+    test('parseWsEndpoint returns WebTransport config for https:// URI', () {
       final result = parseWsEndpoint('https://xmpp.example.com/webtransport');
-      expect(result, isNull);
+      expect(result, isNotNull);
+      expect(result!.scheme, 'https');
+      expect(result.isWebTransport, isTrue);
     });
 
     test('parseWsEndpoint accepts wss:// URI', () {
       final result = parseWsEndpoint('wss://xmpp.example.com/ws');
       expect(result, isNotNull);
       expect(result!.scheme, 'wss');
+      expect(result.isWebTransport, isFalse);
     });
   });
 
