@@ -837,11 +837,6 @@ class XmppService extends ChangeNotifier {
         if (result == MigrationResult.success) {
           debugPrint('QUIC migration: success — keeping XMPP session');
           _connection?.probeKeepalive(shortTimeout: true);
-          // The XMPP session survived migration but messages may have arrived
-          // while the network path was down.  Reset the debounce guard so
-          // _primeMamSync() issues a fresh catch-up query immediately.
-          _lastGlobalMamSyncAt = null;
-          _primeMamSync();
         } else {
           debugPrint('QUIC migration: failed — falling back to full reconnect');
           _connection?.requestReconnect(
