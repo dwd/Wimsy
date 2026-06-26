@@ -937,10 +937,13 @@ class XmppService extends ChangeNotifier {
         'xmpp.srv_lookup',
         description: domain,
       );
-      if (quicTransportAvailable && useQuic) {
-        quicSrvCandidates = await resolveXmppQuicSrvCandidates(domain);
-      }
-      tcpSrvCandidates = await resolveXmppSrvCandidates(domain);
+      // Fetch QUIC, Direct-TLS TCP, and StartTLS TCP SRV records in parallel.
+      final srvResults = await resolveAllSrvCandidates(
+        domain,
+        includeQuic: quicTransportAvailable && useQuic,
+      );
+      quicSrvCandidates = srvResults.quic;
+      tcpSrvCandidates = srvResults.tcp;
       // Filter SRV candidates by the user's transport allow-flags.
       // - When Direct TLS is off, drop _xmpps-client._tcp records.
       // - When Plain TCP is off, drop _xmpp-client._tcp records.

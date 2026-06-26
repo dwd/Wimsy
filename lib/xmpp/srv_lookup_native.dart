@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'srv_cache.dart';
 import 'srv_ordering.dart';
 import 'srv_target.dart';
 
@@ -17,35 +18,85 @@ Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
   return candidates.first;
 }
 
+/// Resolves all TCP SRV candidates for [domain] (both Direct-TLS and
+/// StartTLS), running the two DNS queries concurrently.
+///
+/// Results are cached by DNS TTL. On timeout or failure the cache is
+/// consulted for stale records before returning an empty list.
 Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
   debugPrint('SRV lookup: domain=$domain');
-  final records = <XmppSrvTarget>[];
-  records.addAll(
-    await _lookupSrv('_xmpps-client._tcp.$domain', directTls: true),
-  );
-  records.addAll(
-    await _lookupSrv('_xmpp-client._tcp.$domain', directTls: false),
-  );
+
+  // Run _xmpps-client._tcp (Direct TLS) and _xmpp-client._tcp concurrently.
+  final results = await Future.wait([
+    _lookupSrv('_xmpps-client._tcp.$domain', directTls: true),
+    _lookupSrv('_xmpp-client._tcp.$domain', directTls: false),
+  ]);
+
+  final records = [...results[0], ...results[1]];
   if (records.isEmpty) {
     debugPrint('SRV lookup: no records found');
     return const [];
   }
   final ordered = orderXmppSrvTargets(records);
   final selected = ordered.first;
-  if (ordered.isNotEmpty) {
-    final orderSummary = ordered
-        .map(
-          (record) =>
-              '${record.host}:${record.port}/p${record.priority}/w${record.weight}/tls=${record.directTls}',
-        )
-        .join(', ');
-    debugPrint('SRV lookup: ordered candidates=[$orderSummary]');
-    debugPrint(
-      'SRV lookup: selected host=${selected.host} port=${selected.port} '
-      'priority=${selected.priority} weight=${selected.weight} directTls=${selected.directTls}',
+  final orderSummary = ordered
+      .map(
+        (r) =>
+            '${r.host}:${r.port}/p${r.priority}/w${r.weight}/tls=${r.directTls}',
+      )
+      .join(', ');
+  debugPrint('SRV lookup: ordered candidates=[$orderSummary]');
+  debugPrint(
+    'SRV lookup: selected host=${selected.host} port=${selected.port} '
+    'priority=${selected.priority} weight=${selected.weight} '
+    'directTls=${selected.directTls}',
+  );
+  return ordered;
+}
+
+/// Resolves all three SRV record sets (QUIC, Direct-TLS TCP, StartTLS TCP)
+/// for [domain] concurrently and returns them as a named record.
+///
+/// This is the preferred entry point when the caller needs all three sets at
+/// once, because it issues all DNS queries in parallel.
+Future<({List<XmppSrvTarget> quic, List<XmppSrvTarget> tcp})>
+    resolveAllSrvCandidates(
+  String domain, {
+  required bool includeQuic,
+}) async {
+  debugPrint('SRV parallel lookup: domain=$domain includeQuic=$includeQuic');
+
+  if (includeQuic) {
+    // All three queries in parallel.
+    final results = await Future.wait([
+      _lookupSrv('_xmpp-client._quic.$domain', directTls: false),
+      _lookupSrv('_xmpps-client._tcp.$domain', directTls: true),
+      _lookupSrv('_xmpp-client._tcp.$domain', directTls: false),
+    ]);
+    final quicRecords = results[0];
+    final tcpRecords = [...results[1], ...results[2]];
+    return (
+      quic: quicRecords.isEmpty
+          ? const <XmppSrvTarget>[]
+          : orderXmppSrvTargets(quicRecords),
+      tcp: tcpRecords.isEmpty
+          ? const <XmppSrvTarget>[]
+          : orderXmppSrvTargets(tcpRecords),
+    );
+  } else {
+    // Only TCP queries in parallel.
+    final results = await Future.wait([
+      _lookupSrv('_xmpps-client._tcp.$domain', directTls: true),
+      _lookupSrv('_xmpp-client._tcp.$domain', directTls: false),
+    ]);
+    final tcpRecords = [...results[0], ...results[1]];
+    return (
+      quic: const <XmppSrvTarget>[],
+      tcp: tcpRecords.isEmpty
+          ? const <XmppSrvTarget>[]
+          : orderXmppSrvTargets(tcpRecords),
     );
   }
-  return ordered;
 }
 
 Future<List<XmppSrvTarget>> resolveXmppQuicSrvCandidates(String domain) async {
@@ -69,25 +120,65 @@ Future<List<XmppSrvTarget>> resolveXmppQuicSrvCandidates(String domain) async {
   return ordered;
 }
 
+/// Looks up SRV records for [name], using the cache when possible.
+///
+/// On a successful live lookup the results are stored in [srvCache] with the
+/// TTL returned by DNS. If the live lookup fails or times out, stale cached
+/// records are returned as a fallback.
 Future<List<XmppSrvTarget>> _lookupSrv(
   String name, {
   required bool directTls,
 }) async {
-  final native = await _lookupSrvNative(name);
-  if (native.isNotEmpty) {
-    return native
-        .map(
-          (entry) => XmppSrvTarget(
-            host: entry.host,
-            port: entry.port,
-            priority: entry.priority,
-            weight: entry.weight,
-            directTls: directTls,
-          ),
-        )
-        .toList();
+  // Return fresh cached records immediately.
+  final fresh = srvCache.getFresh(name);
+  if (fresh != null) {
+    debugPrint('SRV cache: fresh hit for $name (${fresh.length} records)');
+    return fresh;
   }
-  return _lookupSrvUdp(name, directTls: directTls);
+
+  List<XmppSrvTarget> results;
+  bool timedOut = false;
+  try {
+    final native = await _lookupSrvNative(name);
+    if (native.isNotEmpty) {
+      results = native
+          .map(
+            (entry) => XmppSrvTarget(
+              host: entry.host,
+              port: entry.port,
+              priority: entry.priority,
+              weight: entry.weight,
+              directTls: directTls,
+            ),
+          )
+          .toList();
+      // Native resolver doesn't expose TTL; use a conservative default.
+      srvCache.store(name, results, const Duration(minutes: 5));
+      return results;
+    }
+    results = await _lookupSrvUdp(name, directTls: directTls);
+  } on TimeoutException {
+    timedOut = true;
+    results = const [];
+  } catch (_) {
+    results = const [];
+  }
+
+  if (results.isNotEmpty) {
+    return results;
+  }
+
+  // Live lookup failed or timed out — try stale cache as fallback.
+  final stale = srvCache.getStale(name);
+  if (stale != null && stale.isNotEmpty) {
+    debugPrint(
+      'SRV cache: ${timedOut ? 'timeout' : 'failure'}, '
+      'using stale records for $name (${stale.length} records)',
+    );
+    return stale;
+  }
+
+  return const [];
 }
 
 class _NativeSrvRecord {
@@ -168,6 +259,7 @@ Future<List<XmppSrvTarget>> _lookupSrvUdp(
     return const [];
   }
   final records = <XmppSrvTarget>[];
+  int? minTtl;
   for (final resolver in resolvers) {
     debugPrint('SRV udp: resolver=$resolver');
     final response = await _querySrv(name, resolver);
@@ -184,12 +276,19 @@ Future<List<XmppSrvTarget>> _lookupSrvUdp(
           directTls: directTls,
         ),
       );
+      if (minTtl == null || record.ttl < minTtl) {
+        minTtl = record.ttl;
+      }
     }
     if (records.isNotEmpty) {
       break;
     }
   }
-  debugPrint('SRV udp: records=${records.length}');
+  debugPrint('SRV udp: records=${records.length} minTtl=$minTtl');
+  if (records.isNotEmpty) {
+    final ttl = Duration(seconds: minTtl ?? 300);
+    srvCache.store(name, records, ttl);
+  }
   return records;
 }
 
@@ -228,12 +327,16 @@ class _SrvRecord {
     required this.weight,
     required this.port,
     required this.target,
+    required this.ttl,
   });
 
   final int priority;
   final int weight;
   final int port;
   final String target;
+
+  /// Time-to-live in seconds as returned by the DNS response.
+  final int ttl;
 }
 
 Future<List<_SrvRecord>> _querySrv(String name, InternetAddress server) async {
@@ -331,9 +434,14 @@ List<_SrvRecord> _parseSrvResponse(Uint8List data) {
       return records;
     }
     final type = (data[offset] << 8) | data[offset + 1];
-    offset += 2;
-    offset += 2;
-    offset += 4;
+    offset += 2; // type
+    offset += 2; // class
+    // Extract the 32-bit TTL field (seconds).
+    final ttl = (data[offset] << 24) |
+        (data[offset + 1] << 16) |
+        (data[offset + 2] << 8) |
+        data[offset + 3];
+    offset += 4; // ttl
     final rdLength = (data[offset] << 8) | data[offset + 1];
     offset += 2;
     if (offset + rdLength > data.length) {
@@ -354,6 +462,7 @@ List<_SrvRecord> _parseSrvResponse(Uint8List data) {
             weight: weight,
             port: port,
             target: target,
+            ttl: ttl,
           ),
         );
       }

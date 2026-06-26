@@ -15,3 +15,11 @@ Future<List<XmppSrvTarget>> resolveXmppSrvCandidates(String domain) async {
 Future<List<XmppSrvTarget>> resolveXmppQuicSrvCandidates(String domain) async {
   return const [];
 }
+
+Future<({List<XmppSrvTarget> quic, List<XmppSrvTarget> tcp})>
+    resolveAllSrvCandidates(
+  String domain, {
+  required bool includeQuic,
+}) async {
+  return (quic: const <XmppSrvTarget>[], tcp: const <XmppSrvTarget>[]);
+}
