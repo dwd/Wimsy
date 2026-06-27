@@ -242,6 +242,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Enable Developer Mode (required for symlink extraction by flutter_webrtc CMake)
+        shell: powershell
+        run: |
+          # flutter_webrtc's CMake downloads libwebrtc.zip and extracts it
+          # through a path that contains a Flutter plugin symlink/junction.
+          # Without Developer Mode the Windows kernel blocks symlink creation
+          # and CMake's archive_write_header fails.  Enabling Developer Mode
+          # grants SeCreateSymbolicLinkPrivilege to the current process.
+          $regPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
+          if (-not (Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+          }
+          Set-ItemProperty -Path $regPath -Name AllowDevelopmentWithoutDevLicense -Value 1
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
