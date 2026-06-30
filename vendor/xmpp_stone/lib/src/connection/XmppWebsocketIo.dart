@@ -69,7 +69,7 @@ class XmppWebSocketIo extends XmppWebSocket {
             path: wsPath,
           );
       Log.i(TAG, 'WebSocket URI: $uri');
-      _webSocket = _webSocketConnect(uri);
+      _webSocket = _webSocketConnect(uri, protocols: ['xmpp']);
     } else {
       final connector = HappyEyeballsConnector(
         hostLookup: _hostLookup,

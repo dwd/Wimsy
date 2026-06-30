@@ -63,7 +63,7 @@ class XmppWebSocketHtml extends XmppWebSocket {
           port: port,
           path: wsPath,
         );
-    _socket = WebSocketChannel.connect(uri);
+    _socket = WebSocketChannel.connect(uri, protocols: ['xmpp']);
 
     if (map != null) {
       _map = map;

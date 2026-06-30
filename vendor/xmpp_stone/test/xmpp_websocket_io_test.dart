@@ -42,6 +42,26 @@ void main() {
       expect(tcpCalled, isFalse);
     });
 
+    test('Passes xmpp subprotocol when connecting via WebSocket', () async {
+      Iterable<String>? capturedProtocols;
+      final channel = MockWebSocketChannel();
+      final socket = XmppWebSocketIo(
+        webSocketConnect: (uri, {protocols}) {
+          capturedProtocols = protocols;
+          return channel;
+        },
+      );
+
+      await socket.connect(
+        'example.com',
+        443,
+        useWebSocket: true,
+        wsUri: Uri.parse('wss://example.com/ws'),
+      );
+
+      expect(capturedProtocols, contains('xmpp'));
+    });
+
     test('Direct TLS uses tcp + secure factories', () async {
       var tcpCalled = false;
       var secureCalled = false;
