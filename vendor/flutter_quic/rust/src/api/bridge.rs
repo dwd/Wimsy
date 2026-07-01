@@ -157,7 +157,12 @@ pub async fn endpoint_connect(
 /// rebind is in progress.
 ///
 /// This exposes the QuicEndpoint.rebind_to_current_address() method to flutter_rust_bridge.
-pub fn endpoint_rebind_to_current_address(
+///
+/// This must be `async` so that flutter_rust_bridge dispatches it on the Tokio
+/// executor thread pool.  Quinn's `Endpoint::rebind` internally touches the
+/// Tokio I/O driver, which panics with "there is no reactor running" when
+/// called from a plain OS thread outside a Tokio runtime context.
+pub async fn endpoint_rebind_to_current_address(
     endpoint: &QuicEndpoint,
 ) -> Result<(), QuicError> {
     endpoint.rebind_to_current_address()

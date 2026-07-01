@@ -1273,7 +1273,7 @@ fn wire__crate__api__bridge__endpoint_rebind_to_current_address_impl(
     rust_vec_len_: i32,
     data_len_: i32,
 ) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "endpoint_rebind_to_current_address",
             port: Some(port_),
@@ -1293,32 +1293,37 @@ fn wire__crate__api__bridge__endpoint_rebind_to_current_address_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicEndpoint>,
             >>::sse_decode(&mut deserializer);
             deserializer.end();
-            move |context| {
-                transform_result_sse::<_, crate::errors::QuicError>((move || {
-                    let mut api_endpoint_guard = None;
-                    let decode_indices_ =
-                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
-                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                &api_endpoint,
-                                0,
-                                false,
-                            ),
-                        ]);
-                    for i in decode_indices_ {
-                        match i {
-                            0 => {
-                                api_endpoint_guard =
-                                    Some(api_endpoint.lockable_decode_sync_ref())
+            move |context| async move {
+                transform_result_sse::<_, crate::errors::QuicError>(
+                    (move || async move {
+                        let mut api_endpoint_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_endpoint,
+                                    0,
+                                    false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_endpoint_guard =
+                                        Some(api_endpoint.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
                             }
-                            _ => unreachable!(),
                         }
-                    }
-                    let api_endpoint_guard = api_endpoint_guard.unwrap();
-                    let output_ok = crate::api::bridge::endpoint_rebind_to_current_address(
-                        &*api_endpoint_guard,
-                    )?;
-                    Ok(output_ok)
-                })())
+                        let api_endpoint_guard = api_endpoint_guard.unwrap();
+                        let output_ok =
+                            crate::api::bridge::endpoint_rebind_to_current_address(
+                                &*api_endpoint_guard,
+                            )
+                            .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
             }
         },
     )

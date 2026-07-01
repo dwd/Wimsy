@@ -84,6 +84,32 @@ void main() {
     expect(terminal.message, contains('Authentication failed'));
   });
 
+  test(
+      'networkChanged force-closes a live connection and schedules immediate reconnect',
+      () async {
+    // Simulate a connected state (not ForcefullyClosed) — e.g. after wake-from-sleep
+    // where the QUIC migration failed but the connection object is still "open".
+    connection.setState(XmppConnectionState.Ready);
+
+    final phases = <ReconnectionPhase>[];
+    final sub = connection.reconnectStateStream.listen((s) => phases.add(s.phase));
+
+    // This is what xmpp_service.dart calls when QUIC migration fails.
+    connection.requestReconnect(
+      reason: ReconnectionReason.networkChanged,
+      immediate: true,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+
+    // The connection must have been force-closed and a reconnect scheduled/fired.
+    expect(
+      phases,
+      containsAll([ReconnectionPhase.scheduled]),
+      reason: 'networkChanged should force-close and schedule a reconnect',
+    );
+    await sub.cancel();
+  });
+
   test('jittered delay stays within configured bounds', () async {
     connection.setReconnectPolicy(
       const ReconnectionPolicy(

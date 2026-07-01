@@ -156,7 +156,11 @@ class ReconnectionManager {
   bool _shouldForceClose(ReconnectionReason reason) {
     return reason == ReconnectionReason.keepaliveTimeout ||
         reason == ReconnectionReason.streamError ||
-        reason == ReconnectionReason.manualRequest;
+        reason == ReconnectionReason.manualRequest ||
+        // A network-change event (e.g. wake-from-sleep, interface switch)
+        // means the existing transport is stale and must be torn down before
+        // a new connection can be established.
+        reason == ReconnectionReason.networkChanged;
   }
 
   void connectionStateHandler(XmppConnectionState state) {
