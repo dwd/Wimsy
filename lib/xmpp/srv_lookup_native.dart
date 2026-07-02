@@ -8,6 +8,12 @@ import 'srv_cache.dart';
 import 'srv_ordering.dart';
 import 'srv_target.dart';
 
+/// How many times to retry a failed SRV lookup before falling back to cache.
+const _srvRetryCount = 3;
+
+/// Delay between SRV lookup retry attempts.
+const _srvRetryDelay = Duration(seconds: 2);
+
 const MethodChannel _channel = MethodChannel('wimsy/dns');
 
 Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
@@ -123,8 +129,10 @@ Future<List<XmppSrvTarget>> resolveXmppQuicSrvCandidates(String domain) async {
 /// Looks up SRV records for [name], using the cache when possible.
 ///
 /// On a successful live lookup the results are stored in [srvCache] with the
-/// TTL returned by DNS. If the live lookup fails or times out, stale cached
-/// records are returned as a fallback.
+/// TTL returned by DNS. If the live lookup fails or times out, the lookup is
+/// retried up to [_srvRetryCount] times with a short delay between attempts
+/// (to handle transient DNS unavailability after the machine wakes from sleep).
+/// If all retries fail, stale cached records are returned as a last resort.
 Future<List<XmppSrvTarget>> _lookupSrv(
   String name, {
   required bool directTls,
@@ -136,39 +144,51 @@ Future<List<XmppSrvTarget>> _lookupSrv(
     return fresh;
   }
 
-  List<XmppSrvTarget> results;
+  List<XmppSrvTarget> results = const [];
   bool timedOut = false;
-  try {
-    final native = await _lookupSrvNative(name);
-    if (native.isNotEmpty) {
-      results = native
-          .map(
-            (entry) => XmppSrvTarget(
-              host: entry.host,
-              port: entry.port,
-              priority: entry.priority,
-              weight: entry.weight,
-              directTls: directTls,
-            ),
-          )
-          .toList();
-      // Native resolver doesn't expose TTL; use a conservative default.
-      srvCache.store(name, results, const Duration(minutes: 5));
+
+  for (var attempt = 1; attempt <= _srvRetryCount; attempt++) {
+    timedOut = false;
+    try {
+      final native = await _lookupSrvNative(name);
+      if (native.isNotEmpty) {
+        results = native
+            .map(
+              (entry) => XmppSrvTarget(
+                host: entry.host,
+                port: entry.port,
+                priority: entry.priority,
+                weight: entry.weight,
+                directTls: directTls,
+              ),
+            )
+            .toList();
+        // Native resolver doesn't expose TTL; use a conservative default.
+        srvCache.store(name, results, const Duration(minutes: 5));
+        return results;
+      }
+      results = await _lookupSrvUdp(name, directTls: directTls);
+    } on TimeoutException {
+      timedOut = true;
+      results = const [];
+    } catch (_) {
+      results = const [];
+    }
+
+    if (results.isNotEmpty) {
       return results;
     }
-    results = await _lookupSrvUdp(name, directTls: directTls);
-  } on TimeoutException {
-    timedOut = true;
-    results = const [];
-  } catch (_) {
-    results = const [];
+
+    debugPrint(
+      'SRV lookup: attempt $attempt/$_srvRetryCount failed for $name'
+      '${timedOut ? ' (timeout)' : ''}',
+    );
+    if (attempt < _srvRetryCount) {
+      await Future<void>.delayed(_srvRetryDelay);
+    }
   }
 
-  if (results.isNotEmpty) {
-    return results;
-  }
-
-  // Live lookup failed or timed out — try stale cache as fallback.
+  // All live attempts failed — try stale cache as fallback.
   final stale = srvCache.getStale(name);
   if (stale != null && stale.isNotEmpty) {
     debugPrint(

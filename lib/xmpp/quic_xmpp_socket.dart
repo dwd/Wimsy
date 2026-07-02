@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_quic/flutter_quic.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
+import 'dns_cache.dart';
 
 /// Result of a QUIC connection migration attempt.
 enum MigrationResult { success, failed }
@@ -46,7 +47,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// real FFI calls.  When null the real FFI function is used.
   @visibleForTesting
   Future<void> Function(QuicEndpoint endpoint)? rebindOverride;
-  final XmppWebSocketIo _fallbackSocket = XmppWebSocketIo();
+  final XmppWebSocketIo _fallbackSocket = XmppWebSocketIo(
+    hostLookup: resolveHostCached,
+  );
   final StreamController<String> _quicStreamController =
       StreamController<String>.broadcast();
 
@@ -395,7 +398,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   Future<void> _connectQuic(String host, int port, String serverName) async {
-    final addresses = await InternetAddress.lookup(host);
+    final addresses = await resolveHostCached(host);
     if (addresses.isEmpty) {
       throw SocketException('No addresses found for QUIC host $host');
     }
