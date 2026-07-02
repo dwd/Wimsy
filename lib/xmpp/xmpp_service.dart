@@ -63,6 +63,34 @@ enum XmppStatus { disconnected, connecting, connected, error }
 
 enum CsiOverrideMode { auto, active, inactive }
 
+/// Captures all parameters passed to [XmppService.connect] so that a failed
+/// connection attempt can be automatically retried with identical settings.
+class _ConnectArgs {
+  const _ConnectArgs({
+    required this.jid,
+    required this.password,
+    required this.resource,
+    this.host,
+    required this.port,
+    required this.useWebSocket,
+    required this.directTls,
+    this.connectionUrl,
+    required this.useQuic,
+    required this.useTcp,
+  });
+
+  final String jid;
+  final String password;
+  final String resource;
+  final String? host;
+  final int port;
+  final bool useWebSocket;
+  final bool directTls;
+  final String? connectionUrl;
+  final bool useQuic;
+  final bool useTcp;
+}
+
 class XmppService extends ChangeNotifier {
   final MessageStanzaParser _messageStanzaParser = const MessageStanzaParser();
 
@@ -292,6 +320,12 @@ class XmppService extends ChangeNotifier {
   StreamSubscription<IbbOpen>? _ibbOpenSubscription;
   StreamSubscription<IbbData>? _ibbDataSubscription;
   StreamSubscription<IbbClose>? _ibbCloseSubscription;
+
+  // Retry timer: when an initial connection attempt fails entirely, we wait
+  // [_connectRetryDelay] before automatically retrying with the same args.
+  Timer? _connectRetryTimer;
+  _ConnectArgs? _lastConnectArgs;
+  static const Duration _connectRetryDelay = Duration(minutes: 1);
 
   static const int _ibbDefaultBlockSize = 4096;
   static const Duration _outgoingCallTimeout = Duration(seconds: 45);
@@ -887,6 +921,22 @@ class XmppService extends ChangeNotifier {
     bool useQuic = true,
     bool useTcp = true,
   }) async {
+    // Cancel any pending retry so we don't double-connect.
+    _connectRetryTimer?.cancel();
+    _connectRetryTimer = null;
+    // Persist args so the retry timer can call connect() with the same params.
+    _lastConnectArgs = _ConnectArgs(
+      jid: jid,
+      password: password,
+      resource: resource,
+      host: host,
+      port: port,
+      useWebSocket: useWebSocket,
+      directTls: directTls,
+      connectionUrl: connectionUrl,
+      useQuic: useQuic,
+      useTcp: useTcp,
+    );
     final quicTransportAvailable =
         !kIsWeb &&
         (Platform.isAndroid ||
@@ -1229,6 +1279,7 @@ class XmppService extends ChangeNotifier {
           _connectTransaction = null;
           _setError(message);
           connection.setReconnectTerminal(message);
+          _scheduleConnectRetry();
         } else if (_status == XmppStatus.connecting) {
           notifyListeners();
         }
@@ -1258,16 +1309,44 @@ class XmppService extends ChangeNotifier {
       _connectTransaction = null;
       if (_status != XmppStatus.error) {
         _setError('Connection failed: $error');
-        _connection?.requestReconnect(
-          reason: ReconnectionReason.manualRequest,
-          immediate: true,
-          shortTimeout: true,
-        );
       }
+      _scheduleConnectRetry();
     }
   }
 
+  /// Schedules an automatic reconnect attempt after [_connectRetryDelay] if
+  /// we have stored connect args and no retry is already pending.
+  void _scheduleConnectRetry() {
+    final args = _lastConnectArgs;
+    if (args == null) return;
+    _connectRetryTimer?.cancel();
+    debugPrint(
+      'XMPP connect: scheduling retry in $_connectRetryDelay',
+    );
+    _connectRetryTimer = Timer(_connectRetryDelay, () {
+      _connectRetryTimer = null;
+      debugPrint('XMPP connect: retrying after failure');
+      connect(
+        jid: args.jid,
+        password: args.password,
+        resource: args.resource,
+        host: args.host,
+        port: args.port,
+        useWebSocket: args.useWebSocket,
+        directTls: args.directTls,
+        connectionUrl: args.connectionUrl,
+        useQuic: args.useQuic,
+        useTcp: args.useTcp,
+      );
+    });
+  }
+
   Future<void> disconnect() async {
+    // Cancel any pending automatic retry so the user's explicit disconnect
+    // is honoured and we don't reconnect behind their back.
+    _connectRetryTimer?.cancel();
+    _connectRetryTimer = null;
+    _lastConnectArgs = null;
     _connection?.setReconnectContext(allowAutoReconnect: false);
     await _safeClose(preserveCache: true);
     _finishSpan(_connectAwaitSpan, status: const SpanStatus.cancelled());
@@ -7430,6 +7509,9 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> _safeClose({required bool preserveCache}) async {
+    // Cancel any pending retry timer so it doesn't fire during teardown.
+    _connectRetryTimer?.cancel();
+    _connectRetryTimer = null;
     _quicStatsTimer?.cancel();
     _quicStatsTimer = null;
     _quicRttHistory.clear();
