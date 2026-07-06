@@ -58,6 +58,7 @@ dependencies:
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1
   msix: ^3.16.8
+  fake_async: ^1.3.2
   flutter_test:
     sdk: flutter
 
