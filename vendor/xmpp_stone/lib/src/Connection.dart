@@ -119,6 +119,11 @@ class Connection {
   bool get carbons2EnabledInline => _carbons2EnabledInline;
   bool _carbons2EnabledInline = false;
 
+  /// The idle timeout in seconds advertised by the server in the
+  /// `<limits xmlns="urn:xmpp:stream-limits:0"><idle-seconds>` stream feature
+  /// (XEP-0478). Null if the server did not advertise a limit.
+  int? xmppIdleSeconds;
+
   final StreamController<AbstractStanza?> _inStanzaStreamController =
       StreamController.broadcast();
 

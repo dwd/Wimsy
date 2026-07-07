@@ -718,6 +718,62 @@ fn wire__crate__api__bridge__connection_peer_transport_params_impl(
         },
     )
 }
+fn wire__crate__api__bridge__connection_send_ping_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "connection_send_ping",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_connection = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicConnection>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let mut api_connection_guard = None;
+                    let decode_indices_ =
+                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                &api_connection,
+                                0,
+                                false,
+                            ),
+                        ]);
+                    for i in decode_indices_ {
+                        match i {
+                            0 => {
+                                api_connection_guard =
+                                    Some(api_connection.lockable_decode_sync_ref())
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let api_connection_guard = api_connection_guard.unwrap();
+                    let output_ok = Result::<_, ()>::Ok(
+                        crate::api::bridge::connection_send_ping(&*api_connection_guard),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__bridge__connection_read_datagram_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2484,10 +2540,12 @@ impl SseDecode for crate::core::connection::QuicPeerTransportParams {
         let mut var_initialMaxStreamsBidi = <u64>::sse_decode(deserializer);
         let mut var_initialMaxStreamsUni = <u64>::sse_decode(deserializer);
         let mut var_initialMaxData = <u64>::sse_decode(deserializer);
+        let mut var_negotiatedIdleTimeoutMs = <Option<u64>>::sse_decode(deserializer);
         return crate::core::connection::QuicPeerTransportParams {
             initial_max_streams_bidi: var_initialMaxStreamsBidi,
             initial_max_streams_uni: var_initialMaxStreamsUni,
             initial_max_data: var_initialMaxData,
+            negotiated_idle_timeout_ms: var_negotiatedIdleTimeoutMs,
         };
     }
 }
@@ -2888,6 +2946,12 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
+        46 => wire__crate__api__bridge__connection_send_ping_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
         _ => unreachable!(),
     }
 }
@@ -3219,6 +3283,7 @@ impl flutter_rust_bridge::IntoDart for crate::core::connection::QuicPeerTranspor
             self.initial_max_streams_bidi.into_into_dart().into_dart(),
             self.initial_max_streams_uni.into_into_dart().into_dart(),
             self.initial_max_data.into_into_dart().into_dart(),
+            self.negotiated_idle_timeout_ms.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3711,6 +3776,7 @@ impl SseEncode for crate::core::connection::QuicPeerTransportParams {
         <u64>::sse_encode(self.initial_max_streams_bidi, serializer);
         <u64>::sse_encode(self.initial_max_streams_uni, serializer);
         <u64>::sse_encode(self.initial_max_data, serializer);
+        <Option<u64>>::sse_encode(self.negotiated_idle_timeout_ms, serializer);
     }
 }
 

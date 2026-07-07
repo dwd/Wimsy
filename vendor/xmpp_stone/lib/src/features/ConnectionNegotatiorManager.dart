@@ -40,6 +40,10 @@ class ConnectionNegotiatorManager {
 
   void negotiateFeatureList(xml.XmlElement element) {
     Log.d(TAG, 'Negotiating features');
+    // Parse the XMPP stream limits (XEP-0478) to extract the server's
+    // advertised idle timeout. This is used by the transport layer to schedule
+    // periodic keepalive PING frames before the server closes the stream.
+    _extractXmppIdleSeconds(element);
     var nonzas = parseFeatureNonzas(element);
     supportedNegotiatorList.forEach((negotiator) {
       var matchingNonzas = negotiator.match(nonzas);
@@ -60,6 +64,28 @@ class ConnectionNegotiatorManager {
           NegotiatorWithSupportedNonzas(discoNegotiator, []));
     }
     negotiateNextFeature();
+  }
+
+  /// Extracts the `<idle-seconds>` value from a
+  /// `<limits xmlns="urn:xmpp:stream-limits:0">` child of the stream features
+  /// element (XEP-0478) and stores it on the connection.
+  void _extractXmppIdleSeconds(xml.XmlElement features) {
+    for (final child in features.childElements) {
+      if (child.localName == 'limits' &&
+          child.getAttribute('xmlns') == 'urn:xmpp:stream-limits:0') {
+        for (final limit in child.childElements) {
+          if (limit.localName == 'idle-seconds') {
+            final value = int.tryParse(limit.innerText.trim());
+            if (value != null && value > 0) {
+              _connection.xmppIdleSeconds = value;
+              Log.i(TAG, 'XMPP stream idle timeout: ${value}s (XEP-0478)');
+            }
+            return;
+          }
+        }
+        return;
+      }
+    }
   }
 
   /// Extracts the `node#ver` caps key from a `<stream:features>` element,

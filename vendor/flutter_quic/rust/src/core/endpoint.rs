@@ -5,7 +5,6 @@ use crate::core::connection::QuicConnection;
 use crate::errors::QuicError;
 use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::Duration;
 
 #[frb(opaque)]
 pub struct QuicEndpoint {
@@ -77,19 +76,14 @@ impl QuicEndpoint {
         
         // Configure transport parameters for better performance
         let mut transport = quinn::TransportConfig::default();
-        // Per XEP-0467, the QUIC connection migration timeout SHOULD be set to
-        // the maximum 600 seconds, so we advertise that as our max_idle_timeout.
-        // The negotiated value will be the minimum of ours and the peer's.
-        let idle_timeout = quinn::IdleTimeout::try_from(Duration::from_secs(600))
-            .map_err(|e| QuicError::Config(format!("Invalid idle timeout: {:?}", e)))?;
-        transport.max_idle_timeout(Some(idle_timeout));
-        // Send a QUIC PING every 240 seconds to keep the connection alive.
-        // The negotiated idle timeout is min(ours=600s, server's=300s) = 300s,
-        // so 240s gives a comfortable margin without being chatty.  In practice
-        // the XMPP-level pings (30s foreground / 5min background) will fire
-        // more often, but this ensures the QUIC transport layer itself never
-        // idles out even when the XMPP layer is quiet.
-        transport.keep_alive_interval(Some(Duration::from_secs(240)));
+        // Do not advertise a max_idle_timeout — we leave it as None (infinite) so the
+        // server's preference wins during negotiation.  If the server also advertises no
+        // timeout the connection can remain idle indefinitely; if it does advertise one,
+        // that value becomes the negotiated timeout.  Application-level PING frames
+        // (sent by the Dart layer based on the negotiated QUIC and/or XMPP idle timeout)
+        // keep the connection alive without imposing an arbitrary local limit.
+        // Similarly, we do not set keep_alive_interval here; the Dart layer drives
+        // periodic QUIC PING frames via connection_send_ping() instead.
         transport.max_concurrent_bidi_streams(25u32.into());
         transport.max_concurrent_uni_streams(25u32.into());
         // Reduce buffer sizes to prevent bufferbloat on low-bandwidth / high-latency

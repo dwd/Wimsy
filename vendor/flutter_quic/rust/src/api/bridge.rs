@@ -312,6 +312,17 @@ pub fn connection_peer_transport_params(
     connection.peer_transport_params()
 }
 
+/// Send a QUIC PING frame to the peer, eliciting an ACK and resetting the idle timer.
+///
+/// This is a best-effort keepalive: it causes Quinn to emit a PING frame on the next
+/// poll, which the peer must acknowledge. This resets both sides' idle timers, preventing
+/// the connection from being closed due to inactivity.
+///
+/// Takes a shared reference — see `connection_open_bi` for rationale.
+pub fn connection_send_ping(connection: &QuicConnection) {
+    connection.send_ping();
+}
+
 // Configuration builder functions
 
 /// Create a new server config with single certificate

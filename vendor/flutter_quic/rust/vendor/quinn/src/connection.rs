@@ -564,6 +564,28 @@ impl Connection {
             .peer_params_initial_max_data()
     }
 
+    /// The negotiated idle timeout in milliseconds, or `None` if no timeout was negotiated.
+    ///
+    /// See [`proto::Connection::negotiated_idle_timeout_ms`].
+    pub fn negotiated_idle_timeout_ms(&self) -> Option<u64> {
+        self.0
+            .state
+            .lock("negotiated_idle_timeout_ms")
+            .inner
+            .negotiated_idle_timeout_ms()
+    }
+
+    /// Send a QUIC PING frame to the peer, eliciting an ACK and resetting the idle timer.
+    ///
+    /// This is a best-effort operation: if the connection is already closed the call is a no-op.
+    pub fn send_ping(&self) {
+        self.0
+            .state
+            .lock("send_ping")
+            .inner
+            .ping()
+    }
+
     /// Current state of the congestion control algorithm, for debugging purposes
     pub fn congestion_state(&self) -> Box<dyn Controller> {
         self.0

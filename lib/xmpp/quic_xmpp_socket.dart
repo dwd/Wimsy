@@ -69,6 +69,18 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   // detect when the server sends a new MAX_STREAMS(bidi) frame.
   BigInt _lastMaxStreamsBidiFrameCount = BigInt.zero;
   Timer? _maxStreamsWatchTimer;
+  // Periodic timer that sends QUIC PING frames to keep the connection alive.
+  // The interval is set to half the effective idle timeout (min of QUIC and
+  // XMPP advertised timeouts, or 5 minutes if neither is advertised).
+  Timer? _pingTimer;
+  // The negotiated QUIC idle timeout in milliseconds, or null if infinite.
+  // Populated after connect by _logPeerTransportParams.
+  int? _quicNegotiatedIdleTimeoutMs;
+
+  /// The negotiated QUIC idle timeout in milliseconds, or null if no timeout
+  /// was negotiated (i.e. the connection may remain idle indefinitely).
+  /// Populated after a successful QUIC connect.
+  int? get quicNegotiatedIdleTimeoutMs => _quicNegotiatedIdleTimeoutMs;
   String? _accountBareJid;
   String _controlBuffer = '';
   late String Function(String event) _map;
@@ -315,6 +327,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _lastMaxStreamsBidiFrameCount = BigInt.zero;
     _maxStreamsWatchTimer?.cancel();
     _maxStreamsWatchTimer = null;
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _quicNegotiatedIdleTimeoutMs = null;
     _accountBareJid = null;
     _controlBuffer = '';
     _auxStreamsBySlot.clear();
@@ -1096,11 +1111,18 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       final bidi = params.initialMaxStreamsBidi;
       final uni = params.initialMaxStreamsUni;
       final data = params.initialMaxData;
+      final idleMs = params.negotiatedIdleTimeoutMs;
+      // Store the negotiated QUIC idle timeout for use by the PING timer.
+      _quicNegotiatedIdleTimeoutMs = idleMs?.toInt();
+      final idleDesc = idleMs != null
+          ? '${(idleMs.toInt() / 1000).toStringAsFixed(1)}s'
+          : 'infinite';
       debugPrint(
         'QUIC peer transport params [$context]: '
         'initial_max_streams_bidi=$bidi '
         'initial_max_streams_uni=$uni '
-        'initial_max_data=$data',
+        'initial_max_data=$data '
+        'negotiated_idle_timeout=$idleDesc',
       );
       // The control stream consumes client-initiated bidi stream id 0, so we
       // need the peer to have advertised at least 2 to open aux slot 0.
@@ -1117,6 +1139,43 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     } catch (error) {
       debugPrint('QUIC peer transport params error [$context]: $error');
     }
+  }
+
+  /// Starts a periodic QUIC PING timer that sends a PING frame at [interval].
+  ///
+  /// The PING elicits an ACK from the peer, resetting both sides' idle timers
+  /// and preventing the QUIC connection from being closed due to inactivity.
+  /// Any previously running PING timer is cancelled first.
+  void startPingTimer(Duration interval) {
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    final connection = _connection;
+    if (connection == null || _closed) {
+      return;
+    }
+    debugPrint(
+      'QUIC PING timer started: interval=${interval.inSeconds}s '
+      '(quic_idle_timeout=${_quicNegotiatedIdleTimeoutMs != null ? '${(_quicNegotiatedIdleTimeoutMs! / 1000).toStringAsFixed(1)}s' : 'infinite'})',
+    );
+    _pingTimer = Timer.periodic(interval, (_) async {
+      final conn = _connection;
+      if (conn == null || _closed) {
+        _pingTimer?.cancel();
+        _pingTimer = null;
+        return;
+      }
+      try {
+        await connectionSendPing(connection: conn);
+      } catch (e) {
+        debugPrint('QUIC PING error: $e');
+      }
+    });
+  }
+
+  /// Stops the periodic QUIC PING timer.
+  void stopPingTimer() {
+    _pingTimer?.cancel();
+    _pingTimer = null;
   }
 
   /// Starts a periodic watcher that detects when the server sends a new

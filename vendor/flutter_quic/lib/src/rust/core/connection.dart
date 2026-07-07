@@ -207,17 +207,23 @@ class QuicPeerTransportParams {
   /// Peer's `initial_max_data` (connection-level flow-control window, bytes).
   final BigInt initialMaxData;
 
+  /// The negotiated idle timeout in milliseconds, or `null` if no timeout was
+  /// negotiated (i.e. the connection may remain idle indefinitely).
+  final BigInt? negotiatedIdleTimeoutMs;
+
   const QuicPeerTransportParams({
     required this.initialMaxStreamsBidi,
     required this.initialMaxStreamsUni,
     required this.initialMaxData,
+    this.negotiatedIdleTimeoutMs,
   });
 
   @override
   int get hashCode =>
       initialMaxStreamsBidi.hashCode ^
       initialMaxStreamsUni.hashCode ^
-      initialMaxData.hashCode;
+      initialMaxData.hashCode ^
+      negotiatedIdleTimeoutMs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -226,7 +232,8 @@ class QuicPeerTransportParams {
           runtimeType == other.runtimeType &&
           initialMaxStreamsBidi == other.initialMaxStreamsBidi &&
           initialMaxStreamsUni == other.initialMaxStreamsUni &&
-          initialMaxData == other.initialMaxData;
+          initialMaxData == other.initialMaxData &&
+          negotiatedIdleTimeoutMs == other.negotiatedIdleTimeoutMs;
 }
 
 /// UDP-level statistics

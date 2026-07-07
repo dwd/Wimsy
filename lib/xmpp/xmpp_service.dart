@@ -6078,6 +6078,50 @@ class XmppService extends ChangeNotifier {
     final socket = _connection?.socket;
     if (socket == null || !socket.isQuic) return;
 
+    // Start the QUIC PING timer. The interval is half the effective idle
+    // timeout so we always send a PING well before the connection would be
+    // dropped. The effective timeout is the minimum of:
+    //   • the negotiated QUIC idle timeout (from the peer's transport params)
+    //   • the XMPP stream idle timeout (XEP-0478 <idle-seconds>)
+    // If neither is advertised we default to 5 minutes.
+    if (socket is QuicCapableXmppSocket) {
+      const defaultPingInterval = Duration(minutes: 5);
+      Duration pingInterval = defaultPingInterval;
+
+      final quicIdleMs = socket.quicNegotiatedIdleTimeoutMs;
+      final xmppIdleSec = _connection?.xmppIdleSeconds;
+
+      // Convert both timeouts to milliseconds for comparison, taking the
+      // minimum so we respect whichever limit is tighter.
+      int? effectiveMs;
+      if (quicIdleMs != null) {
+        effectiveMs = quicIdleMs;
+      }
+      if (xmppIdleSec != null) {
+        final xmppMs = xmppIdleSec * 1000;
+        effectiveMs =
+            effectiveMs != null ? effectiveMs.clamp(0, xmppMs) : xmppMs;
+      }
+
+      if (effectiveMs != null && effectiveMs > 0) {
+        // Use half the effective timeout as the ping interval, clamped to a
+        // minimum of 10 seconds to avoid excessive traffic.
+        final halfMs = (effectiveMs ~/ 2).clamp(10000, effectiveMs);
+        pingInterval = Duration(milliseconds: halfMs);
+      }
+
+      final quicDesc = quicIdleMs != null
+          ? '${(quicIdleMs / 1000).toStringAsFixed(1)}s'
+          : 'infinite';
+      final xmppDesc = xmppIdleSec != null ? '${xmppIdleSec}s' : 'none';
+      Log.i(
+        'XmppService',
+        'QUIC PING timer: interval=${pingInterval.inSeconds}s '
+        '(quic_idle=$quicDesc xmpp_idle=$xmppDesc)',
+      );
+      socket.startPingTimer(pingInterval);
+    }
+
     _quicStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       final stats = await socket.getQuicStats();
       if (stats == null) return;

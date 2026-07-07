@@ -1442,6 +1442,14 @@ impl Connection {
         self.peer_params.initial_max_data.into_inner()
     }
 
+    /// The negotiated idle timeout in milliseconds, or `None` if no timeout was negotiated.
+    ///
+    /// This is the result of `negotiate_max_idle_timeout(local, peer)` computed during the
+    /// handshake. A value of `None` means the connection will never time out due to inactivity.
+    pub fn negotiated_idle_timeout_ms(&self) -> Option<u64> {
+        self.idle_timeout.map(|d| d.as_millis() as u64)
+    }
+
     /// See [`TransportConfig::send_window()`]
     pub fn set_send_window(&mut self, send_window: u64) {
         self.streams.set_send_window(send_window);

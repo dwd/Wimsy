@@ -141,7 +141,15 @@ impl QuicConnection {
             initial_max_streams_bidi: self.inner.peer_params_initial_max_streams_bidi(),
             initial_max_streams_uni: self.inner.peer_params_initial_max_streams_uni(),
             initial_max_data: self.inner.peer_params_initial_max_data(),
+            negotiated_idle_timeout_ms: self.inner.negotiated_idle_timeout_ms(),
         }
+    }
+
+    /// Send a QUIC PING frame to the peer, eliciting an ACK and resetting the idle timer.
+    ///
+    /// This is a best-effort operation: if the connection is already closed the call is a no-op.
+    pub fn send_ping(&self) {
+        self.inner.send_ping();
     }
     
     /// Get a reference to the inner Quinn connection
@@ -214,6 +222,9 @@ pub struct QuicPeerTransportParams {
     pub initial_max_streams_uni: u64,
     /// Peer's `initial_max_data` (connection-level flow-control window, bytes).
     pub initial_max_data: u64,
+    /// The negotiated idle timeout in milliseconds, or `None` if no timeout was negotiated
+    /// (i.e. the connection may remain idle indefinitely without being closed).
+    pub negotiated_idle_timeout_ms: Option<u64>,
 }
 
 /// UDP-level statistics
