@@ -166,6 +166,12 @@ class ReconnectionManager {
   void connectionStateHandler(XmppConnectionState state) {
     if (state == XmppConnectionState.ForcefullyClosed) {
       Log.d(TAG, 'Connection forcefully closed');
+      // Reset phase so the dedupe check in requestReconnect does not block
+      // the next attempt. This handles the case where a connection attempt
+      // fails (e.g. network offline) while _phase is still 'reconnecting'.
+      if (_phase == ReconnectionPhase.reconnecting) {
+        _phase = ReconnectionPhase.idle;
+      }
       requestReconnect(reason: ReconnectionReason.forcefulClose);
       return;
     }

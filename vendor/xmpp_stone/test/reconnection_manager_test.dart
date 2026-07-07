@@ -110,6 +110,39 @@ void main() {
     await sub.cancel();
   });
 
+  test(
+      'reconnect continues after a failed attempt (no-network scenario)',
+      () async {
+    // Regression test: when a reconnect attempt fails (all transports time
+    // out), the connection goes ForcefullyClosed again while _phase is still
+    // 'reconnecting'. The dedupe guard must not block the next attempt.
+    connection.setReconnectPolicy(
+      const ReconnectionPolicy(
+        baseDelay: Duration(milliseconds: 50),
+        maxDelay: Duration(milliseconds: 200),
+        jitterRatio: 0,
+        unboundedRetries: true,
+      ),
+    );
+
+    // Start from ForcefullyClosed — first reconnect fires.
+    connection.setState(XmppConnectionState.ForcefullyClosed);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(connection.reconnectCalls, 1);
+
+    // Simulate the attempt failing: connection goes back to ForcefullyClosed
+    // while _phase is still 'reconnecting'.
+    connection.setState(XmppConnectionState.ForcefullyClosed);
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+
+    // A second reconnect attempt must have been scheduled and fired.
+    expect(
+      connection.reconnectCalls,
+      greaterThan(1),
+      reason: 'reconnect should continue after a failed attempt',
+    );
+  });
+
   test('jittered delay stays within configured bounds', () async {
     connection.setReconnectPolicy(
       const ReconnectionPolicy(

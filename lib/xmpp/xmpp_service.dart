@@ -1341,6 +1341,17 @@ class XmppService extends ChangeNotifier {
     });
   }
 
+  /// Triggers an immediate reconnect attempt, even if one is already in
+  /// progress. This is intended for the user to manually kick a stuck or
+  /// slow reconnect loop. It force-closes the current connection (if any)
+  /// and schedules a new attempt with no delay.
+  void triggerImmediateReconnect() {
+    _connection?.requestReconnect(
+      reason: ReconnectionReason.manualRequest,
+      immediate: true,
+    );
+  }
+
   Future<void> disconnect() async {
     // Cancel any pending automatic retry so the user's explicit disconnect
     // is honoured and we don't reconnect behind their back.

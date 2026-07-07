@@ -567,11 +567,11 @@ class _LoginScreenState extends State<LoginScreen> {
                             Expanded(
                               child: FilledButton(
                                 onPressed: service.isConnecting
-                                    ? null
+                                    ? service.triggerImmediateReconnect
                                     : _handleConnect,
                                 child: Text(
                                   service.isConnecting
-                                      ? 'Connecting...'
+                                      ? 'Connecting... (tap to retry now)'
                                       : 'Connect',
                                 ),
                               ),
