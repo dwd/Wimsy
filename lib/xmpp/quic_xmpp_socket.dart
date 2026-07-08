@@ -1166,6 +1166,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       }
       try {
         await connectionSendPing(connection: conn);
+        debugPrint('QUIC PING sent (keeping connection alive)');
       } catch (e) {
         debugPrint('QUIC PING error: $e');
       }

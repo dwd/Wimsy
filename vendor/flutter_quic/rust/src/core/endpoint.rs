@@ -76,14 +76,21 @@ impl QuicEndpoint {
         
         // Configure transport parameters for better performance
         let mut transport = quinn::TransportConfig::default();
-        // Do not advertise a max_idle_timeout — we leave it as None (infinite) so the
-        // server's preference wins during negotiation.  If the server also advertises no
-        // timeout the connection can remain idle indefinitely; if it does advertise one,
-        // that value becomes the negotiated timeout.  Application-level PING frames
-        // (sent by the Dart layer based on the negotiated QUIC and/or XMPP idle timeout)
-        // keep the connection alive without imposing an arbitrary local limit.
+        // Advertise a large max_idle_timeout (2 hours) so the server knows we are
+        // willing to keep the connection alive for a long time.  Per RFC 9000 §10.1
+        // the negotiated idle timeout is min(ours, theirs), so if the server
+        // advertises a shorter value (e.g. 30 s) that shorter value wins — but at
+        // least we are expressing our preference for a long-lived connection rather
+        // than silently accepting whatever the server proposes.  Application-level
+        // PING frames (sent by the Dart layer based on the negotiated QUIC and/or
+        // XMPP idle timeout) keep the connection alive within that window.
         // Similarly, we do not set keep_alive_interval here; the Dart layer drives
         // periodic QUIC PING frames via connection_send_ping() instead.
+        let two_hours_ms = 2 * 60 * 60 * 1000; // 7_200_000 ms
+        transport.max_idle_timeout(Some(
+            quinn::IdleTimeout::try_from(std::time::Duration::from_millis(two_hours_ms))
+                .expect("2-hour idle timeout is within Quinn's VarInt range"),
+        ));
         transport.max_concurrent_bidi_streams(25u32.into());
         transport.max_concurrent_uni_streams(25u32.into());
         // Reduce buffer sizes to prevent bufferbloat on low-bandwidth / high-latency
