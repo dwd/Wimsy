@@ -2782,6 +2782,19 @@ class XmppService extends ChangeNotifier {
         replyToJid: message.replyToJid,
         replyFallback: message.replyFallback,
       );
+      // When the room reflects our own message back to us, it proves the
+      // message was received by the server. Mark it with a double tick
+      // (receiptReceived) so the UI shows delivery confirmation.
+      if (isSelfReflection) {
+        final reflectedId = message.messageId ?? message.stanzaId;
+        if (reflectedId != null && reflectedId.isNotEmpty) {
+          _updateOutgoingRoomStatus(
+            message.roomJid,
+            reflectedId,
+            receiptReceived: true,
+          );
+        }
+      }
     });
     _roomSubscriptions['presence']?.cancel();
     _roomSubscriptions['presence'] = _mucManager!.roomPresenceStream.listen((
@@ -6723,6 +6736,8 @@ class XmppService extends ChangeNotifier {
           to: normalized,
           body: body,
           outgoing: outgoing,
+          // Outgoing messages in the MAM archive were received by the server.
+          receiptReceived: outgoing && (stanzaId != null && stanzaId.isNotEmpty),
           timestamp: timestamp,
           messageId: messageId,
           mamId: mamId,
@@ -6763,6 +6778,8 @@ class XmppService extends ChangeNotifier {
       to: normalized,
       body: body,
       outgoing: outgoing,
+      // Outgoing messages in the MAM archive were received by the server.
+      receiptReceived: outgoing && (stanzaId != null && stanzaId.isNotEmpty),
       timestamp: timestamp,
       messageId: messageId,
       mamId: mamId,
