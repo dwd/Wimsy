@@ -8207,14 +8207,12 @@ class XmppService extends ChangeNotifier {
         _requestRoomMam(roomJid, max: 25, before: '');
         continue;
       }
-      // R2.2: same short-circuit for MUCs.
-      if (!shouldFetchMamCatchUpForChat(
-        displayedStanzaId: _displayedStanzaIdByChat[roomJid],
-        latestLocalMamId: _latestRoomMamIdFor(roomJid),
-        stanzaIdAtLatestMamId: _stanzaIdAtLatestMamId(roomJid, isRoom: true),
-      )) {
-        continue;
-      }
+      // Always issue room catch-up on reconnect.
+      //
+      // The displayed marker is per-account (our own marker), not a reliable
+      // indicator that there are no newer messages in the MUC archive.
+      // Skipping MUC catch-up when marker == latest local stanza-id can miss
+      // messages sent while this client was offline.
       _startMamCatchUp(roomJid, isRoom: true);
     }
     _finishMamSyncIfIdle();
