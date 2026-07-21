@@ -1545,6 +1545,26 @@ class XmppService extends ChangeNotifier {
     if (pepBytes != null) {
       return pepBytes;
     }
+    // For MUC occupant JIDs (full JIDs with a resource/nick), check the full
+    // JID first in the vCard cache — anonymous rooms cache avatars under the
+    // full occupant JID because no real JID is available.
+    final inputHasResource = bareJid != normalized;
+    if (inputHasResource) {
+      final occupantBytes = _vcardAvatarBytes[bareJid];
+      if (occupantBytes != null) {
+        return occupantBytes;
+      }
+      final occupantState = _vcardAvatarState[bareJid];
+      if (occupantState == _vcardNoAvatar) {
+        return null;
+      }
+      // Don't fall through to the bare-JID path — for MUC occupants the
+      // bare JID is the room JID, not the occupant's identity.
+      if (!_vcardRequests.contains(bareJid)) {
+        _requestVcardAvatar(bareJid);
+      }
+      return null;
+    }
     final vcardBytes = _vcardAvatarBytes[normalized];
     if (vcardBytes != null) {
       return vcardBytes;
@@ -8667,10 +8687,18 @@ class XmppService extends ChangeNotifier {
     }
     if (mucUser != null) {
       final realJid = mucUser.getChild('item')?.getAttribute('jid')?.value;
-      if (realJid == null || realJid.isEmpty) {
+      if (realJid != null && realJid.isNotEmpty) {
+        // Non-anonymous MUC: use the real bare JID.
+        return Jid.fromFullJid(realJid).userAtDomain;
+      }
+      // Anonymous/semi-anonymous MUC: the real JID is hidden. Use the full
+      // occupant JID (room@conference/nick) so we can still fetch and cache
+      // the vCard under a stable per-occupant key.
+      final resource = from.resource;
+      if (resource == null || resource.isEmpty) {
         return null;
       }
-      return Jid.fromFullJid(realJid).userAtDomain;
+      return from.fullJid;
     }
     return from.userAtDomain;
   }

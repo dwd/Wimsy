@@ -212,5 +212,74 @@ void main() {
         reason: 'should fetch when advertised hash differs from cached hash',
       );
     });
+
+    // MUC anonymous occupant JIDs (room@conference/nick) are used as cache
+    // keys when the real JID is not exposed by the MUC.
+    test(
+      'anonymous MUC occupant: full occupant JID used as cache key → fetch',
+      () {
+        const occupantJid = 'room@conference.example.com/nick';
+        expect(
+          shouldFetchVcardForCache(
+            bareJid: occupantJid,
+            preferName: false,
+            cachedAvatarBytes: const <String, Object?>{},
+            cachedAvatarState: const <String, String>{},
+          ),
+          isTrue,
+          reason:
+              'no cache entry for occupant JID → should fetch from full JID',
+        );
+      },
+    );
+
+    test(
+      'anonymous MUC occupant: cached bytes under occupant JID → skip',
+      () {
+        const occupantJid = 'room@conference.example.com/nick';
+        const occupantHash = 'c82325df5fc62e538948e6da153fb44ea2e71f85';
+        expect(
+          shouldFetchVcardForCache(
+            bareJid: occupantJid,
+            preferName: false,
+            cachedAvatarBytes: <String, Object?>{
+              occupantJid: Uint8List.fromList([1, 2, 3]),
+            },
+            cachedAvatarState: const <String, String>{
+              occupantJid: occupantHash,
+            },
+            advertisedHash: occupantHash,
+          ),
+          isFalse,
+          reason: 'matching bytes+hash under occupant JID → should skip fetch',
+        );
+      },
+    );
+
+    test(
+      'anonymous MUC occupant: cache under bare room JID does not satisfy '
+      'fetch guard for occupant JID',
+      () {
+        const occupantJid = 'room@conference.example.com/nick';
+        const roomJid = 'room@conference.example.com';
+        const occupantHash = 'c82325df5fc62e538948e6da153fb44ea2e71f85';
+        // Only the bare room JID is in cache — not the occupant JID.
+        expect(
+          shouldFetchVcardForCache(
+            bareJid: occupantJid,
+            preferName: false,
+            cachedAvatarBytes: <String, Object?>{
+              roomJid: Uint8List.fromList([1, 2, 3]),
+            },
+            cachedAvatarState: const <String, String>{roomJid: occupantHash},
+            advertisedHash: occupantHash,
+          ),
+          isTrue,
+          reason:
+              'cache key is the occupant JID, not the room JID; '
+              'room-JID cache should not satisfy the occupant fetch',
+        );
+      },
+    );
   });
 }
