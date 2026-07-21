@@ -840,9 +840,17 @@ class _WimsyHomeState extends State<WimsyHome> {
                           }
                         }
                         final isUnread = unreadCount > 0;
-                        final bookmarkStatusText = contact.bookmarkAutoJoin
-                            ? 'Auto-join room'
-                            : 'Room bookmark';
+                        final roomJoinError = isBookmark
+                            ? service.roomFor(jid)?.joinError == true
+                            : false;
+                        final roomJoinErrorCondition = isBookmark
+                            ? service.roomFor(jid)?.joinErrorCondition
+                            : null;
+                        final bookmarkStatusText = roomJoinError
+                            ? _mucJoinErrorLabel(roomJoinErrorCondition)
+                            : (contact.bookmarkAutoJoin
+                                  ? 'Auto-join room'
+                                  : 'Room bookmark');
                         return InkWell(
                           onTap: () => service.selectChat(jid),
                           child: Container(
@@ -854,11 +862,14 @@ class _WimsyHomeState extends State<WimsyHome> {
                               color: theme.colorScheme.surface,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: isBookmark
-                                    ? theme.colorScheme.primary.withValues(
-                                        alpha: 0.35,
+                                color: roomJoinError
+                                    ? theme.colorScheme.error.withValues(
+                                        alpha: 0.5,
                                       )
-                                    : theme.colorScheme.outlineVariant,
+                                    : (isBookmark
+                                          ? theme.colorScheme.primary
+                                                .withValues(alpha: 0.35)
+                                          : theme.colorScheme.outlineVariant),
                               ),
                             ),
                             child: Opacity(
@@ -982,9 +993,10 @@ class _WimsyHomeState extends State<WimsyHome> {
                                           overflow: TextOverflow.ellipsis,
                                           style: theme.textTheme.bodySmall
                                               ?.copyWith(
-                                                color: theme
-                                                    .colorScheme
-                                                    .onSurfaceVariant,
+                                                color: roomJoinError
+                                                    ? theme.colorScheme.error
+                                                    : theme.colorScheme
+                                                          .onSurfaceVariant,
                                               ),
                                         ),
                                         if (latest != null) ...[
@@ -3326,6 +3338,29 @@ class _WimsyHomeState extends State<WimsyHome> {
       setState(() => _clearingCache = false);
     }
     return true;
+  }
+}
+
+/// Returns a human-readable label for a MUC join error to show in the
+/// contact list. [errorCondition] is the XMPP error condition element name
+/// (e.g. "registration-required", "forbidden").
+String _mucJoinErrorLabel(String? errorCondition) {
+  switch (errorCondition) {
+    case 'registration-required':
+      return 'Join failed: members only';
+    case 'forbidden':
+      return 'Join failed: banned';
+    case 'not-allowed':
+      return 'Join failed: not allowed';
+    case 'conflict':
+      return 'Join failed: nickname conflict';
+    case 'service-unavailable':
+      return 'Join failed: room full';
+    case 'not-authorized':
+    case 'password-required':
+      return 'Join failed: password required';
+    default:
+      return 'Join failed';
   }
 }
 

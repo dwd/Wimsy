@@ -9,6 +9,17 @@ import 'package:xmpp_stone/src/elements/stanzas/AbstractStanza.dart';
 import 'package:xmpp_stone/src/elements/stanzas/MessageStanza.dart';
 import 'package:xmpp_stone/src/elements/stanzas/PresenceStanza.dart';
 
+/// Emitted when a MUC join attempt is rejected by the server with a
+/// presence stanza of type="error". The [roomJid] is the bare JID of the
+/// room and [errorCondition] is the XMPP error condition element name
+/// (e.g. "registration-required", "forbidden", "not-allowed").
+class MucJoinError {
+  MucJoinError({required this.roomJid, required this.errorCondition});
+
+  final String roomJid;
+  final String errorCondition;
+}
+
 class MucManager {
   static const _mucNs = 'http://jabber.org/protocol/muc';
   static const _mucUserNs = 'http://jabber.org/protocol/muc#user';
@@ -32,11 +43,15 @@ class MucManager {
       StreamController.broadcast();
   final StreamController<MucSubjectUpdate> _subjectController =
       StreamController.broadcast();
+  final StreamController<MucJoinError> _joinErrorController =
+      StreamController.broadcast();
 
   Stream<MucMessage> get roomMessageStream => _messageController.stream;
   Stream<MucPresenceUpdate> get roomPresenceStream =>
       _presenceController.stream;
   Stream<MucSubjectUpdate> get roomSubjectStream => _subjectController.stream;
+  /// Emits an event when the server rejects a room join with an error presence.
+  Stream<MucJoinError> get roomJoinErrorStream => _joinErrorController.stream;
 
   MucManager(this._connection) {
     _connection.inStanzasStream.listen(_handleStanza);
@@ -114,7 +129,23 @@ class MucManager {
 
   void _handlePresence(PresenceStanza stanza) {
     final from = stanza.fromJid;
-    if (from == null || from.resource == null || from.resource!.isEmpty) {
+    if (from == null) {
+      return;
+    }
+    // A join-rejected error presence has type="error" and the from JID has no
+    // resource (just the room bare JID). Detect it early and emit on the error
+    // stream so callers can disable autojoin and surface the error to the user.
+    if (stanza.type == PresenceType.ERROR) {
+      final roomJid = from.userAtDomain;
+      if (roomJid.isNotEmpty) {
+        final condition = _extractErrorCondition(stanza);
+        _joinErrorController.add(
+          MucJoinError(roomJid: roomJid, errorCondition: condition),
+        );
+      }
+      return;
+    }
+    if (from.resource == null || from.resource!.isEmpty) {
       return;
     }
     final x = stanza.children.firstWhereOrNull(
@@ -144,6 +175,23 @@ class MucManager {
       statusCodes: statusCodes,
     );
     _presenceController.add(presence);
+  }
+
+  /// Extracts the XMPP error condition element name from a presence error
+  /// stanza (e.g. "registration-required", "forbidden", "not-allowed").
+  String _extractErrorCondition(PresenceStanza stanza) {
+    const xmppStanzasNs = 'urn:ietf:params:xml:ns:xmpp-stanzas';
+    final error = stanza.getChild('error');
+    if (error == null) {
+      return '';
+    }
+    for (final child in error.children) {
+      final xmlns = child.getAttribute('xmlns')?.value;
+      if (xmlns == xmppStanzasNs && child.name != 'text') {
+        return child.name ?? '';
+      }
+    }
+    return '';
   }
 }
 

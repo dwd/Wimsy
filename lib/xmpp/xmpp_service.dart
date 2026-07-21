@@ -1830,7 +1830,12 @@ class XmppService extends ChangeNotifier {
       suppressHistory: true,
     );
     final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
-    _rooms[normalized] = existing.copyWith(joined: true, nick: resolvedNick);
+    // Clear any prior join error when a new join attempt starts.
+    _rooms[normalized] = existing.copyWith(
+      joined: true,
+      nick: resolvedNick,
+      clearJoinError: true,
+    );
     notifyListeners();
     final latestRoomTs = _latestRoomTimestamp(normalized);
     _roomHistoryCutoffAt[normalized] = latestRoomTs ?? DateTime.now();
@@ -2846,6 +2851,11 @@ class XmppService extends ChangeNotifier {
       final existing = _rooms[roomJid] ?? RoomEntry(roomJid: roomJid);
       _rooms[roomJid] = existing.copyWith(subject: subject.subject);
       notifyListeners();
+    });
+    _roomSubscriptions['joinError']?.cancel();
+    _roomSubscriptions['joinError'] =
+        _mucManager!.roomJoinErrorStream.listen((event) {
+      _handleMucJoinError(event);
     });
     _startMucSelfPingTimer();
   }
@@ -4873,6 +4883,39 @@ class XmppService extends ChangeNotifier {
       return;
     }
     joinRoom(entry.roomJid, nick: entry.nick);
+  }
+
+  /// Handles a MUC join error emitted by [MucManager.roomJoinErrorStream].
+  ///
+  /// When the server rejects a join with an error presence (e.g.
+  /// "registration-required" or "forbidden"), we:
+  ///   1. Mark the room as not joined and record the error condition.
+  ///   2. Disable autojoin for the corresponding bookmark so we don't keep
+  ///      hammering a room we can't enter, and persist the change to the server.
+  void _handleMucJoinError(MucJoinError event) {
+    final normalized = _bareJid(event.roomJid);
+    Log.w(
+      'XmppService',
+      'MUC join error for $normalized: ${event.errorCondition}',
+    );
+    final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
+    _rooms[normalized] = existing.copyWith(
+      joined: false,
+      joinError: true,
+      joinErrorCondition: event.errorCondition.isNotEmpty
+          ? event.errorCondition
+          : null,
+    );
+    // Disable autojoin in the bookmark so we stop retrying this room
+    // automatically, then persist the updated bookmark to the server.
+    final bookmarkIndex = _bookmarks.indexWhere((b) => b.jid == normalized);
+    if (bookmarkIndex >= 0 && _bookmarks[bookmarkIndex].bookmarkAutoJoin) {
+      final updated = _bookmarks[bookmarkIndex].copyWith(bookmarkAutoJoin: false);
+      _bookmarks[bookmarkIndex] = updated;
+      _bookmarkPersistor?.call(List.unmodifiable(_bookmarks));
+      unawaited(upsertBookmark(updated));
+    }
+    notifyListeners();
   }
 
   String _reactionChatTarget(String fromBare, String toBare) {
