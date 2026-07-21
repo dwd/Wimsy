@@ -4058,13 +4058,7 @@ class _MessageBubble extends StatelessWidget {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () async {
-                  final uri = Uri.tryParse(url);
-                  if (uri == null) {
-                    return;
-                  }
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                },
+                onTap: () => _showExpandedImage(context, url),
                 child: Image.network(
                   url,
                   fit: BoxFit.contain,
@@ -4072,6 +4066,51 @@ class _MessageBubble extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Shows a fullscreen overlay displaying [url] so the user can view the
+  /// image at full size. Tapping the background or the close button dismisses
+  /// the overlay.
+  void _showExpandedImage(BuildContext context, String url) {
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return Dialog.fullscreen(
+          backgroundColor: Colors.black87,
+          child: Stack(
+            children: [
+              // Tapping outside the image also dismisses the dialog.
+              GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(color: Colors.transparent),
+              ),
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 8.0,
+                  child: Image.network(
+                    url,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: SafeArea(
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
