@@ -21,6 +21,7 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
   static const String iapNamespace = 'urn:xmpp:iap:0';
   static const String bind2Namespace = 'urn:xmpp:bind:0';
   static const String carbons2Namespace = 'urn:xmpp:carbons:2';
+  static const String fastNamespace = 'urn:xmpp:fast:0';
   static const int clientNonceLength = 48;
 
   final Connection _connection;
@@ -106,6 +107,22 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
             _allowCachedIapConfigVersion) &&
         _connection.iapConfigVersion != null) {
       authenticate.addChild(_connection.iapConfigVersion!);
+    }
+
+    // Request a FAST token (XEP-0484) if the server advertises support inline.
+    // We prefer HT2-SHA-256-NONE; fall back to HT-SHA-256-NONE if HT2 is not
+    // offered. The preference will be stored in fastMechanism for use on the
+    // next reconnection.
+    if (_connection.account.fastEnabled &&
+        _connection.sasl2InlineFeatures.containsKey(fastNamespace)) {
+      final fastElement = _connection.sasl2InlineFeatures[fastNamespace];
+      final preferredMechanism =
+          pickFastMechanism(fastElement) ?? 'HT2-SHA-256-NONE';
+      _connection.account.fastMechanism = preferredMechanism;
+      authenticate.addChild(XmppElement()
+        ..name = 'request-token'
+        ..addAttribute(XmppAttribute('xmlns', fastNamespace))
+        ..addAttribute(XmppAttribute('mechanism', preferredMechanism)));
     }
 
     _state = _Sasl2State.authSent;
@@ -262,8 +279,58 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
         .toList();
     _connection.setSasl2SuccessElements(extensionElements);
 
+    // Extract any FAST token the server issued (XEP-0484).
+    _extractAndStoreFastToken(extensionElements);
+
     _subscription.cancel();
     _completer.complete(AuthenticationResult(true, ''));
+  }
+
+  /// Extracts a `<token xmlns='urn:xmpp:fast:0'>` element from [elements] and
+  /// persists the token value into the account so it can be used on the next
+  /// reconnection.
+  void _extractAndStoreFastToken(List<XmppElement> elements) {
+    for (final el in elements) {
+      if (el.getNameSpace() == fastNamespace && el.name == 'token') {
+        final token = el.getAttribute('token')?.value;
+        final expiry = el.getAttribute('expiry')?.value;
+        if (token != null && token.isNotEmpty) {
+          _connection.account.fastToken = token;
+          _connection.account.fastTokenExpiry = expiry;
+          Log.d(TAG, 'Stored FAST token (expiry=$expiry)');
+        }
+        return;
+      }
+    }
+  }
+
+  /// Picks the best FAST mechanism from the `<fast>` inline feature element.
+  /// Prefers HT2 over HT, and SHA-256 over SHA-512 for performance.
+  /// Returns `null` if no supported mechanism is found.
+  static String? pickFastMechanism(XmppElement? fastElement) {
+    if (fastElement == null) {
+      return null;
+    }
+    final mechanisms = fastElement.children
+        .where((c) => c.name == 'mechanism')
+        .map((c) => (c.textValue ?? '').trim())
+        .where((m) => m.isNotEmpty)
+        .toList();
+
+    // Preference order: HT2-SHA-256-NONE, HT2-SHA-512-NONE, HT-SHA-256-NONE,
+    // HT-SHA-512-NONE.
+    const preferred = [
+      'HT2-SHA-256-NONE',
+      'HT2-SHA-512-NONE',
+      'HT-SHA-256-NONE',
+      'HT-SHA-512-NONE',
+    ];
+    for (final m in preferred) {
+      if (mechanisms.contains(m)) {
+        return m;
+      }
+    }
+    return null;
   }
 
   String? _scramChallengeFirst(String content) {

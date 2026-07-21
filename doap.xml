@@ -302,6 +302,13 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0484.html"/>
+        <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">FAST token requested on initial SASL2 auth and stored. On reconnection, HT2-* (preferred) or HT-* mechanisms are used instead of SCRAM. Both SHA-256 and SHA-512 variants are supported with NONE channel-binding. Token expiry is checked before use.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0509.html"/>
         <xmpp:status>partial</xmpp:status>
       </xmpp:SupportedXep>

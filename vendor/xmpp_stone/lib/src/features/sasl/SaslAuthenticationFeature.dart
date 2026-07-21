@@ -5,6 +5,7 @@ import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/Negotiator.dart';
 import 'package:xmpp_stone/src/features/sasl/AbstractSaslHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/AnonymousHandler.dart';
+import 'package:xmpp_stone/src/features/sasl/FastAuthHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/PlainSaslHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/Sasl2AuthHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/SaslMechanism.dart';
@@ -14,6 +15,7 @@ class SaslAuthenticationFeature extends Negotiator {
   static const String sasl1Namespace = 'urn:ietf:params:xml:ns:xmpp-sasl';
   static const String sasl2Namespace = 'urn:xmpp:sasl:2';
   static const String iapNamespace = 'urn:xmpp:iap:0';
+  static const String fastNamespace = 'urn:xmpp:fast:0';
 
   final Connection _connection;
   final String _password;
@@ -94,6 +96,27 @@ class SaslAuthenticationFeature extends Negotiator {
   }
 
   void _process() {
+    // Attempt FAST authentication (XEP-0484) if we have a stored token and the
+    // server offers the matching mechanism inside the SASL2 <fast> feature.
+    final fastHandler = _tryCreateFastHandler();
+    if (fastHandler != null) {
+      state = NegotiatorState.NEGOTIATING;
+      fastHandler.start().then((result) {
+        if (result.successful) {
+          _connection
+              .setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
+        } else {
+          // FAST failed (expired / invalid token). The handler already cleared
+          // the stored token. Fall back to a fresh SASL2/SCRAM connection.
+          _connection.setState(XmppConnectionState.AuthenticationFailure);
+          _connection.errorMessage = result.message;
+          _connection.close();
+        }
+        state = NegotiatorState.DONE;
+      });
+      return;
+    }
+
     var useSasl2 = _shouldUseSasl2();
     var offered = useSasl2 ? _offeredSasl2Mechanisms : _offeredSasl1Mechanisms;
     var mechanism = _pickSupportedMechanism(offered);
@@ -137,6 +160,64 @@ class SaslAuthenticationFeature extends Negotiator {
       }
       state = NegotiatorState.DONE;
     });
+  }
+
+  /// Returns a [FastAuthHandler] ready to use if all conditions are met:
+  ///   - FAST is enabled in the account,
+  ///   - A valid non-expired token is stored,
+  ///   - The server is advertising SASL2 with a `<fast>` inline feature,
+  ///   - The stored mechanism name is offered by the server.
+  FastAuthHandler? _tryCreateFastHandler() {
+    final account = _connection.account;
+    if (!account.fastEnabled) return null;
+
+    final token = account.fastToken;
+    if (token == null || token.isEmpty) return null;
+
+    // Check token expiry if present.
+    final expiryStr = account.fastTokenExpiry;
+    if (expiryStr != null && expiryStr.isNotEmpty) {
+      try {
+        final expiry = DateTime.parse(expiryStr);
+        if (DateTime.now().isAfter(expiry)) {
+          // Token has expired; clear it and fall back to SCRAM.
+          account.fastToken = null;
+          account.fastTokenExpiry = null;
+          account.fastMechanism = null;
+          return null;
+        }
+      } catch (_) {
+        // Unparseable expiry; ignore and continue.
+      }
+    }
+
+    // Need SASL2 and the server to offer a <fast> inline feature.
+    if (_offeredSasl2Mechanisms.isEmpty) return null;
+    final fastFeature = _sasl2InlineFeatures[fastNamespace];
+    if (fastFeature == null) return null;
+
+    // Find a mechanism that both we support and the server lists in <fast>.
+    final fastMechanismName = account.fastMechanism;
+    if (fastMechanismName == null || fastMechanismName.isEmpty) return null;
+
+    // Verify the server still offers this specific mechanism.
+    final offeredMechanisms = fastFeature.children
+        .where((c) => c.name == 'mechanism')
+        .map((c) => (c.textValue ?? '').trim())
+        .where((m) => m.isNotEmpty)
+        .toSet();
+    if (!offeredMechanisms.contains(fastMechanismName)) {
+      // The server no longer offers the stored mechanism; clear and fall back.
+      account.fastMechanism = null;
+      return null;
+    }
+
+    print('XMPP FAST: attempting $fastMechanismName');
+    return FastAuthHandler.fromMechanismName(
+      _connection,
+      fastMechanismName,
+      token,
+    );
   }
 
   bool _shouldUseSasl2() {

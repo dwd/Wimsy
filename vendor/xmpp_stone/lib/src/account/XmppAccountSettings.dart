@@ -62,6 +62,18 @@ class XmppAccountSettings {
   bool ackEnabled = true;
   bool smResumable = true;
 
+  // FAST (XEP-0484) token fields. When [fastEnabled] is true and a token
+  // has been issued by the server, the client will attempt to use HT2-* (or
+  // HT-*) authentication on the next connection instead of SCRAM.
+  bool fastEnabled = true;
+  /// The FAST token last issued by the server, base64-encoded.
+  String? fastToken;
+  /// ISO-8601 expiry timestamp for [fastToken].
+  String? fastTokenExpiry;
+  /// Wire-name of the preferred FAST mechanism agreed with the server
+  /// (e.g. "HT2-SHA-256-NONE").
+  String? fastMechanism;
+
   XmppAccountSettings(
     this.name,
     this.username,
