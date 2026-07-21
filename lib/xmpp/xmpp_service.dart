@@ -7757,7 +7757,6 @@ class XmppService extends ChangeNotifier {
     }
     _presenceByBareJid.clear();
     _presenceByFullJid.clear();
-    _roomMessages.clear();
     _rooms.clear();
     _roomOccupants.clear();
     _lastSeenAt.clear();
