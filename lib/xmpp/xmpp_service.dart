@@ -7100,6 +7100,20 @@ class XmppService extends ChangeNotifier {
     return null;
   }
 
+  String? _iqPubsubErrorCondition(IqStanza stanza) {
+    final error = stanza.getChild('error');
+    if (error == null) {
+      return null;
+    }
+    for (final child in error.children) {
+      if (child.getAttribute('xmlns')?.value ==
+          'http://jabber.org/protocol/pubsub#errors') {
+        return child.name;
+      }
+    }
+    return null;
+  }
+
   bool _isJingleUnsupportedError(String? condition) {
     switch (condition) {
       case 'feature-not-implemented':
@@ -7273,10 +7287,11 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final condition = _iqErrorCondition(result);
-    if (condition != 'precondition-not-met') {
+    final pubsubError = _iqPubsubErrorCondition(result);
+    if (pubsubError != 'precondition-not-met') {
       Log.w(
         'XmppService',
-        'MDS publish to urn:xmpp:mds:displayed:0 failed: $condition',
+        'MDS publish to urn:xmpp:mds:displayed:0 failed: $condition / $pubsubError',
       );
       return;
     }
