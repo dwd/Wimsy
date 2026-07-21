@@ -35,6 +35,7 @@ import 'muc_self_ping.dart';
 import 'muc_config.dart';
 import 'jid_discovery.dart';
 import 'chat_message_mutations.dart';
+import 'mds_publish.dart';
 import 'message_intent_builder.dart';
 import 'message_stanza_parser.dart';
 import 'startup_fetch_helpers.dart';
@@ -7241,9 +7242,61 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  /// Sends a pubsub node-configuration IQ to fix the MDS node settings to
+  /// match what our publish-options require.  Called when the server responds
+  /// to a publish with `<precondition-not-met/>` (XEP-0060 §7.1.3.3).
+  Future<void> _configureMdsNode(String selfBareJid) async {
+    await _sendIqAndAwait(
+      buildMdsNodeConfigureIq(selfBareJid: selfBareJid),
+    );
+  }
+
+  /// Publishes an MDS displayed marker for [chatJid], handling the case where
+  /// the pubsub node is misconfigured.  If the server responds with
+  /// `<precondition-not-met/>` (XEP-0060 §7.1.3.3) — indicating that the
+  /// node's current configuration does not match our publish-options — we
+  /// reconfigure the node to the correct settings and retry the publish once.
+  Future<void> _doPublishMdsDisplayed({
+    required String chatJid,
+    required String stanzaId,
+    required String byValue,
+    required String selfBareJid,
+  }) async {
+    final publishIq = buildMdsPublishIq(
+      chatJid: chatJid,
+      stanzaId: stanzaId,
+      byValue: byValue,
+      selfBareJid: selfBareJid,
+    );
+    final result = await _sendIqAndAwait(publishIq);
+    if (result == null || result.type != IqStanzaType.ERROR) {
+      return;
+    }
+    final condition = _iqErrorCondition(result);
+    if (condition != 'precondition-not-met') {
+      Log.w(
+        'XmppService',
+        'MDS publish to urn:xmpp:mds:displayed:0 failed: $condition',
+      );
+      return;
+    }
+    // The node exists but its configuration does not match our publish-options.
+    // Reconfigure the node to the required settings, then retry once.
+    Log.w(
+      'XmppService',
+      'MDS node misconfigured (precondition-not-met); reconfiguring and retrying',
+    );
+    await _configureMdsNode(selfBareJid);
+    await _sendIqAndAwait(buildMdsPublishIq(
+      chatJid: chatJid,
+      stanzaId: stanzaId,
+      byValue: byValue,
+      selfBareJid: selfBareJid,
+    ));
+  }
+
   void _publishDisplayedState(String bareJid) {
-    final connection = _connection;
-    if (connection == null || _currentUserBareJid == null) {
+    if (_currentUserBareJid == null) {
       return;
     }
     final normalized = _bareJid(bareJid);
@@ -7277,58 +7330,15 @@ class XmppService extends ChangeNotifier {
     _storage?.storeDisplayedSyncTimestamps(
       Map<String, DateTime>.from(_displayedAtByChat),
     );
-    final id = AbstractStanza.getRandomId();
-    final iqStanza = IqStanza(id, IqStanzaType.SET);
-    iqStanza.toJid = Jid.fromFullJid(_currentUserBareJid!);
-    final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(
-      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
-    );
-    final publish = XmppElement()..name = 'publish';
-    publish.addAttribute(XmppAttribute('node', 'urn:xmpp:mds:displayed:0'));
-    final item = XmppElement()..name = 'item';
-    item.addAttribute(XmppAttribute('id', normalized));
-    final displayed = XmppElement()..name = 'displayed';
-    displayed.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:mds:displayed:0'));
-    final stanzaIdElement = XmppElement()..name = 'stanza-id';
-    stanzaIdElement.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sid:0'));
-    stanzaIdElement.addAttribute(XmppAttribute('id', stanzaId));
     final byValue = isBookmark(normalized)
         ? normalized
         : (_currentUserBareJid ?? '');
-    if (byValue.isNotEmpty) {
-      stanzaIdElement.addAttribute(XmppAttribute('by', byValue));
-    }
-    displayed.addChild(stanzaIdElement);
-    item.addChild(displayed);
-    publish.addChild(item);
-    pubsub.addChild(publish);
-    // publish-options: set max_items=max so the server retains one item per
-    // chat JID rather than overwriting a single global item (XEP-0490 §4).
-    final publishOptions = XmppElement()..name = 'publish-options';
-    final optForm = XmppElement()..name = 'x';
-    optForm.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
-    optForm.addAttribute(XmppAttribute('type', 'submit'));
-    XmppElement buildField(String varName, String value, {String? type}) {
-      final f = XmppElement()..name = 'field';
-      f.addAttribute(XmppAttribute('var', varName));
-      if (type != null) f.addAttribute(XmppAttribute('type', type));
-      final v = XmppElement()..name = 'value';
-      v.textValue = value;
-      f.addChild(v);
-      return f;
-    }
-    optForm.addChild(buildField('FORM_TYPE',
-        'http://jabber.org/protocol/pubsub#publish-options',
-        type: 'hidden'));
-    optForm.addChild(buildField('pubsub#persist_items', 'true'));
-    optForm.addChild(buildField('pubsub#access_model', 'whitelist'));
-    optForm.addChild(buildField('pubsub#send_last_published_item', 'never'));
-    optForm.addChild(buildField('pubsub#max_items', 'max'));
-    publishOptions.addChild(optForm);
-    pubsub.addChild(publishOptions);
-    iqStanza.addChild(pubsub);
-    connection.writeStanza(iqStanza);
+    unawaited(_doPublishMdsDisplayed(
+      chatJid: normalized,
+      stanzaId: stanzaId,
+      byValue: byValue,
+      selfBareJid: _currentUserBareJid!,
+    ));
     notifyListeners();
   }
 
