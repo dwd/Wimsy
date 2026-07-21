@@ -34,6 +34,22 @@ void main() {
     expect(mucSelfPingOutcomeFromResponse(stanza), MucSelfPingOutcome.notJoined);
   });
 
+  // Openfire returns not-acceptable with type="modify" (rather than type="cancel"
+  // as Prosody does). The error type attribute is not used in outcome detection —
+  // only the condition element name matters — so this should still map to notJoined.
+  test('mucSelfPingOutcomeFromResponse handles not-acceptable with type=modify (Openfire style)', () {
+    final stanza = IqStanza('id-openfire', IqStanzaType.ERROR);
+    final error = XmppElement()..name = 'error';
+    error.addAttribute(XmppAttribute('type', 'modify'));
+    final condition = XmppElement()..name = 'not-acceptable';
+    condition.addAttribute(
+      XmppAttribute('xmlns', 'urn:ietf:params:xml:ns:xmpp-stanzas'),
+    );
+    error.addChild(condition);
+    stanza.addChild(error);
+    expect(mucSelfPingOutcomeFromResponse(stanza), MucSelfPingOutcome.notJoined);
+  });
+
   test('mucSelfPingOutcomeFromResponse treats item-not-found as joined', () {
     final stanza = IqStanza('id3', IqStanzaType.ERROR);
     final error = XmppElement()..name = 'error';

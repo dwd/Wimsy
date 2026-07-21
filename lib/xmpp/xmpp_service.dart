@@ -4856,7 +4856,14 @@ class XmppService extends ChangeNotifier {
     if (roomJid == null) {
       return;
     }
+    // A ping timeout is treated as "not joined": if the room doesn't respond
+    // within _mucSelfPingTimeout we assume we've lost room membership and
+    // attempt a rejoin. This handles servers (e.g. Openfire) that deliver
+    // error responses very slowly (several minutes), long after the 30-second
+    // window — without this, the late response is silently discarded and no
+    // rejoin is ever triggered.
     _roomLastPingAt[roomJid] = DateTime.now();
+    _rejoinRoom(roomJid);
   }
 
   void _handleMucSelfPingResponse(String roomJid, IqStanza stanza) {
