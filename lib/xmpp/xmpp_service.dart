@@ -7739,9 +7739,18 @@ class XmppService extends ChangeNotifier {
     _chatStates.clear();
     _roomHistoryCutoffAt.clear();
     _lastDisplayedMarkerIdByChat.clear();
-    _displayedStanzaIdByChat.clear();
-    _displayedSyncPending.clear();
-    _displayedAtByChat.clear();
+    // Re-seed displayed-sync state from storage so that the read cutoff
+    // survives reconnects. Without this, the maps would be empty after every
+    // reconnect and all groupchat messages would appear unread again.
+    _displayedStanzaIdByChat
+      ..clear()
+      ..addAll(_storage?.loadDisplayedSync() ?? {});
+    _displayedSyncPending
+      ..clear()
+      ..addAll(_storage?.loadDisplayedSyncPending() ?? {});
+    _displayedAtByChat
+      ..clear()
+      ..addAll(_storage?.loadDisplayedSyncTimestamps() ?? {});
     if (!preserveCache) {
       _recentReactionEmojis.clear();
     }
