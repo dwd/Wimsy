@@ -35,7 +35,7 @@ import 'muc_self_ping.dart';
 import 'muc_config.dart';
 import 'jid_discovery.dart';
 import 'chat_message_mutations.dart';
-import 'mds_publish.dart';
+import 'pep_publish.dart';
 import 'message_intent_builder.dart';
 import 'message_stanza_parser.dart';
 import 'startup_fetch_helpers.dart';
@@ -5582,55 +5582,35 @@ class XmppService extends ChangeNotifier {
   }
 
   void _publishRecentReactionEmojis() {
-    final connection = _connection;
     final selfBareJid = _currentUserBareJid;
-    if (connection == null || selfBareJid == null || selfBareJid.isEmpty) {
+    if (_connection == null || selfBareJid == null || selfBareJid.isEmpty) {
       return;
     }
-    final id = AbstractStanza.getRandomId();
-    final iqStanza = IqStanza(id, IqStanzaType.SET);
-    iqStanza.toJid = Jid.fromFullJid(selfBareJid);
-    final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(
-      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
-    );
-    final publish = XmppElement()..name = 'publish';
-    publish.addAttribute(XmppAttribute('node', _recentReactionsNode));
-    final item = XmppElement()..name = 'item';
-    item.addAttribute(XmppAttribute('id', 'recent'));
-    final recent = XmppElement()..name = 'recent';
-    recent.addAttribute(XmppAttribute('xmlns', _recentReactionsNode));
-    for (final emoji in _recentReactionEmojis) {
-      final element = XmppElement()..name = 'emoji';
-      element.textValue = emoji;
-      recent.addChild(element);
-    }
-    item.addChild(recent);
-    publish.addChild(item);
-    pubsub.addChild(publish);
+    // Capture the current emoji list before going async so we publish a
+    // consistent snapshot even if the list is mutated before the retry.
+    final emojis = List<String>.unmodifiable(_recentReactionEmojis);
 
-    final options = XmppElement()..name = 'publish-options';
-    final form = XmppElement()..name = 'x';
-    form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
-    form.addAttribute(XmppAttribute('type', 'submit'));
-    final formType = XmppElement()..name = 'field';
-    formType.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
-    formType.addAttribute(XmppAttribute('type', 'hidden'));
-    final formTypeValue = XmppElement()..name = 'value';
-    formTypeValue.textValue =
-        'http://jabber.org/protocol/pubsub#publish-options';
-    formType.addChild(formTypeValue);
-    final accessModel = XmppElement()..name = 'field';
-    accessModel.addAttribute(XmppAttribute('var', 'pubsub#access_model'));
-    final accessValue = XmppElement()..name = 'value';
-    accessValue.textValue = 'whitelist';
-    accessModel.addChild(accessValue);
-    form.addChild(formType);
-    form.addChild(accessModel);
-    options.addChild(form);
-    pubsub.addChild(options);
-    iqStanza.addChild(pubsub);
-    connection.writeStanza(iqStanza);
+    IqStanza buildPublishIq() {
+      final recent = XmppElement()..name = 'recent';
+      recent.addAttribute(XmppAttribute('xmlns', _recentReactionsNode));
+      for (final emoji in emojis) {
+        final element = XmppElement()..name = 'emoji';
+        element.textValue = emoji;
+        recent.addChild(element);
+      }
+      return buildPrivatePepPublishIq(
+        node: _recentReactionsNode,
+        itemId: 'recent',
+        payload: recent,
+        selfBareJid: selfBareJid,
+      );
+    }
+
+    unawaited(_doPrivatePepPublish(
+      publishIqBuilder: buildPublishIq,
+      node: _recentReactionsNode,
+      selfBareJid: selfBareJid,
+    ));
   }
 
   void _handleRecentReactionsStanza(AbstractStanza stanza) {
@@ -7256,33 +7236,23 @@ class XmppService extends ChangeNotifier {
     }
   }
 
-  /// Sends a pubsub node-configuration IQ to fix the MDS node settings to
-  /// match what our publish-options require.  Called when the server responds
-  /// to a publish with `<precondition-not-met/>` (XEP-0060 §7.1.3.3).
-  Future<void> _configureMdsNode(String selfBareJid) async {
-    await _sendIqAndAwait(
-      buildMdsNodeConfigureIq(selfBareJid: selfBareJid),
-    );
-  }
-
-  /// Publishes an MDS displayed marker for [chatJid], handling the case where
-  /// the pubsub node is misconfigured.  If the server responds with
-  /// `<precondition-not-met/>` (XEP-0060 §7.1.3.3) — indicating that the
-  /// node's current configuration does not match our publish-options — we
-  /// reconfigure the node to the correct settings and retry the publish once.
-  Future<void> _doPublishMdsDisplayed({
-    required String chatJid,
-    required String stanzaId,
-    required String byValue,
+  /// Generic helper that publishes to a private PEP node and automatically
+  /// recovers from a `<precondition-not-met/>` error (XEP-0060 §7.1.3.3).
+  ///
+  /// When the server responds with `<precondition-not-met/>` it means the
+  /// node's configuration doesn't match the `<publish-options>` we sent.
+  /// We fix this by sending a `pubsub#owner configure` IQ (built by
+  /// [buildPrivatePepConfigureIq]) to align the node configuration, then
+  /// retrying [publishIqBuilder] once.
+  ///
+  /// [publishIqBuilder] is called twice (initial attempt + retry) so it must
+  /// produce a fresh IQ each time (with a new stanza id).
+  Future<void> _doPrivatePepPublish({
+    required IqStanza Function() publishIqBuilder,
+    required String node,
     required String selfBareJid,
   }) async {
-    final publishIq = buildMdsPublishIq(
-      chatJid: chatJid,
-      stanzaId: stanzaId,
-      byValue: byValue,
-      selfBareJid: selfBareJid,
-    );
-    final result = await _sendIqAndAwait(publishIq);
+    final result = await _sendIqAndAwait(publishIqBuilder());
     if (result == null || result.type != IqStanzaType.ERROR) {
       return;
     }
@@ -7291,7 +7261,7 @@ class XmppService extends ChangeNotifier {
     if (pubsubError != 'precondition-not-met') {
       Log.w(
         'XmppService',
-        'MDS publish to urn:xmpp:mds:displayed:0 failed: $condition / $pubsubError',
+        'PEP publish to $node failed: $condition / $pubsubError',
       );
       return;
     }
@@ -7299,15 +7269,31 @@ class XmppService extends ChangeNotifier {
     // Reconfigure the node to the required settings, then retry once.
     Log.w(
       'XmppService',
-      'MDS node misconfigured (precondition-not-met); reconfiguring and retrying',
+      'PEP node $node misconfigured (precondition-not-met); reconfiguring and retrying',
     );
-    await _configureMdsNode(selfBareJid);
-    await _sendIqAndAwait(buildMdsPublishIq(
-      chatJid: chatJid,
-      stanzaId: stanzaId,
-      byValue: byValue,
+    await _sendIqAndAwait(
+      buildPrivatePepConfigureIq(node: node, selfBareJid: selfBareJid),
+    );
+    await _sendIqAndAwait(publishIqBuilder());
+  }
+
+  /// Publishes an MDS displayed marker for [chatJid] via [_doPrivatePepPublish].
+  Future<void> _doPublishMdsDisplayed({
+    required String chatJid,
+    required String stanzaId,
+    required String byValue,
+    required String selfBareJid,
+  }) async {
+    await _doPrivatePepPublish(
+      publishIqBuilder: () => buildMdsPublishIq(
+        chatJid: chatJid,
+        stanzaId: stanzaId,
+        byValue: byValue,
+        selfBareJid: selfBareJid,
+      ),
+      node: mdsNodeName,
       selfBareJid: selfBareJid,
-    ));
+    );
   }
 
   void _publishDisplayedState(String bareJid) {

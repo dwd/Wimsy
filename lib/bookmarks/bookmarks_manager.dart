@@ -1,6 +1,7 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../models/contact_entry.dart';
+import '../xmpp/pep_publish.dart';
 
 typedef BookmarkUpdateCallback = void Function(List<ContactEntry> bookmarks);
 
@@ -308,7 +309,7 @@ class BookmarksManager {
     item.addChild(_buildConference(bookmark));
     publish.addChild(item);
     pubsub.addChild(publish);
-    pubsub.addChild(_buildPublishOptions());
+    pubsub.addChild(buildPrivatePepPublishOptions());
     iqStanza.addChild(pubsub);
     connection.writeStanza(iqStanza);
   }
@@ -383,34 +384,6 @@ class BookmarksManager {
     }
     final cloned = _cloneElement(extensions);
     _bookmarkExtensionsByJid[jid] = cloned;
-  }
-
-  XmppElement _buildPublishOptions() {
-    final publishOptions = XmppElement()..name = 'publish-options';
-    final x = XmppElement()..name = 'x';
-    x.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
-    x.addAttribute(XmppAttribute('type', 'submit'));
-    x.addChild(_buildDataField('FORM_TYPE',
-        'http://jabber.org/protocol/pubsub#publish-options',
-        type: 'hidden'));
-    x.addChild(_buildDataField('pubsub#persist_items', 'true'));
-    x.addChild(_buildDataField('pubsub#access_model', 'whitelist'));
-    x.addChild(_buildDataField('pubsub#send_last_published_item', 'never'));
-    x.addChild(_buildDataField('pubsub#max_items', 'max'));
-    publishOptions.addChild(x);
-    return publishOptions;
-  }
-
-  XmppElement _buildDataField(String varName, String value, {String? type}) {
-    final field = XmppElement()..name = 'field';
-    field.addAttribute(XmppAttribute('var', varName));
-    if (type != null && type.isNotEmpty) {
-      field.addAttribute(XmppAttribute('type', type));
-    }
-    final valueElement = XmppElement()..name = 'value';
-    valueElement.textValue = value;
-    field.addChild(valueElement);
-    return field;
   }
 
   XmppElement _cloneElement(XmppElement element) {
