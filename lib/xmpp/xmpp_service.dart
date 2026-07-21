@@ -6273,7 +6273,13 @@ class XmppService extends ChangeNotifier {
       notifyListeners();
     });
     connection.setKeepaliveBackgroundMode(_backgroundMode);
-    connection.probeKeepalive(shortTimeout: false);
+    // Only probe on non-QUIC connections. On QUIC the transport-level PING
+    // timer handles keepalive; an XMPP-level probe here would use the 10 s
+    // floor timeout (no prior latency baseline) and disconnect under
+    // high-latency paths before the ping reply can arrive.
+    if (!connection.isQuic) {
+      connection.probeKeepalive(shortTimeout: false);
+    }
     _requestCarbons();
   }
 
