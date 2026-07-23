@@ -31,12 +31,10 @@ abstract class AbstractStanza extends XmppElement {
     addAttribute(XmppAttribute('id', _id));
   }
 
-  static String getRandomId() {
-    const ASCII_START = 65;
-    const ASCII_END = 90;
-    var codeUnits = List.generate(9, (index) {
-      return Random.secure().nextInt(ASCII_END - ASCII_START) + ASCII_START;
-    });
-    return String.fromCharCodes(codeUnits);
+  static String getRandomId({int entropyBits = 96}) {
+    final byteCount = (entropyBits / 8).ceil();
+    final random = Random.secure();
+    final bytes = List<int>.generate(byteCount, (_) => random.nextInt(256));
+    return base64UrlEncode(bytes);
   }
 }
