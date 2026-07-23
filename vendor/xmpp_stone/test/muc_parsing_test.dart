@@ -69,6 +69,23 @@ void main() {
       expect(parsed.message!.stanzaId, 'stanza-55');
     });
 
+    test('stanzaId is null when no XEP-0359 stanza-id element is present', () {
+      // Rooms that do not support XEP-0359 send messages without a <stanza-id>
+      // element. The stanzaId field must be null in that case; the stanza's own
+      // id attribute must NOT be used as a substitute.
+      final stanza = MessageStanza('own-id', MessageStanzaType.GROUPCHAT);
+      stanza.fromJid = Jid.fromFullJid('room@example.com/alice');
+      stanza.body = 'no stanza-id here';
+
+      final parsed = parseMucGroupMessage(stanza);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.message, isNotNull);
+      expect(parsed.message!.stanzaId, isNull,
+          reason: 'stanzaId must only reflect a room-applied XEP-0359 id, '
+              'not the stanza own id attribute');
+    });
+
     test('Reaction-only message parses target and reactions', () {
       final stanza = MessageStanza('root', MessageStanzaType.GROUPCHAT);
       stanza.fromJid = Jid.fromFullJid('room@example.com/alice');

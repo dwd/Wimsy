@@ -256,6 +256,11 @@ _ReactionInfo? _extractReactions(XmppElement? message) {
   return null;
 }
 
+/// Extracts the XEP-0359 stanza-id applied by the MUC room with JID
+/// [roomJid] from the given [message] element. Returns null if no
+/// room-applied stanza-id element is present. Does NOT fall back to the
+/// stanza's own id attribute — callers that need such a fallback must
+/// handle it explicitly.
 String? _extractStanzaId(XmppElement? message, String roomJid) {
   if (message == null) {
     return null;
@@ -282,10 +287,6 @@ String? _extractStanzaId(XmppElement? message, String roomJid) {
       ?.value;
   if (byMatch != null && byMatch.isNotEmpty) {
     return byMatch;
-  }
-  final fallback = message.getAttribute('id')?.value;
-  if (fallback != null && fallback.isNotEmpty) {
-    return fallback;
   }
   return null;
 }
@@ -404,7 +405,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
           (fallbackBody == null || fallbackBody.isEmpty) ? null : fallbackBody,
       mamResultId: mamResultId,
       messageId: messageIdAttr,
-      stanzaId: forwardedStanzaId ?? directStanzaId ?? stanza.id,
+      stanzaId: forwardedStanzaId ?? directStanzaId,
       timestamp: timestamp,
     ),
   );
