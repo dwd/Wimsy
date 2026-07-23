@@ -85,7 +85,7 @@ void main() {
   group('buildReplyReference 1:1 chat', () {
     final service = XmppService();
 
-    test('uses stanzaId when available for 1:1 chat reply', () {
+    test('ignores stanzaId when available for 1:1 chat reply', () {
       final message = _chatMessage(
         from: 'alice@example.com',
         messageId: 'msg-id',
@@ -99,7 +99,7 @@ void main() {
       );
 
       expect(ref, isNotNull);
-      expect(ref!.id, 'server-stanza-id');
+      expect(ref!.id, 'msg-id');
     });
 
     test('falls back to messageId for 1:1 chat reply when stanzaId is absent',

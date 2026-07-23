@@ -285,6 +285,19 @@ class StreamManagementModule extends Negotiator {
     if (!_connection.isOpened()) {
       return;
     }
+    // H2: log the fact that probeKeepalive is being called on a QUIC connection.
+    // The _handleConnectionState QUIC guard prevents this from being called
+    // from within StreamManagementModule itself, but external callers (e.g.
+    // XmppService._setupKeepalive) can bypass that guard.  Logging here lets
+    // us see if a QUIC probe is being started when it should be skipped.
+    if (_connection.isQuic) {
+      Log.w(
+        TAG,
+        'probeKeepalive called on QUIC connection — '
+        'ping reply routing via inStanzasStream may not work on QUIC; '
+        'smEnabled=${_isSmEnabled()} shortTimeout=$shortTimeout',
+      );
+    }
     if (_isSmEnabled()) {
       sendAckRequest(force: true, shortTimeout: shortTimeout);
       return;
@@ -507,8 +520,20 @@ class StreamManagementModule extends Negotiator {
     stanza.addChild(ping);
     _pendingPingId = id;
     _pendingPingAt = DateTime.now();
+    final timeout = _keepaliveTimeout(shortTimeout: shortTimeout);
+    // H1: log the ping ID and timeout so we can correlate which ping times out.
+    // H2: log whether we are on a QUIC connection; the IQ router may not route
+    //     ping replies from aux QUIC streams back to inStanzasStream, in which
+    //     case the reply can never be seen and the timeout will always fire.
+    Log.d(
+      TAG,
+      'Keepalive ping sent id=$id timeout=${timeout.inMilliseconds}ms '
+      'lastLatency=${_lastKeepaliveLatency?.inMilliseconds}ms '
+      'shortTimeout=$shortTimeout '
+      'isQuic=${_connection.isQuic}',
+    );
     _pendingPingTimer = Timer(
-      _keepaliveTimeout(shortTimeout: shortTimeout),
+      timeout,
       () => _handlePingTimeout(shortTimeout: shortTimeout),
     );
     _connection.writeStanza(stanza);
@@ -520,6 +545,16 @@ class StreamManagementModule extends Negotiator {
       return;
     }
     final pendingId = _pendingPingId;
+    // H2: log every IQ that arrives while a ping is pending so we can see
+    //     whether the ping reply arrives but with the wrong ID, or never arrives
+    //     at all (indicating the reply is swallowed before reaching this stream).
+    if (pendingId != null) {
+      Log.d(
+        TAG,
+        'Keepalive IQ check: incoming id=${stanza.id} type=${stanza.type} '
+        'pendingId=$pendingId match=${stanza.id == pendingId}',
+      );
+    }
     if (pendingId == null || stanza.id != pendingId) {
       return;
     }
@@ -539,6 +574,18 @@ class StreamManagementModule extends Negotiator {
     if (_pendingPingAt == null) {
       return;
     }
+    // H1 + H2: log timeout details — this tells us the actual elapsed time
+    //          and whether we are on QUIC (where replies may never arrive).
+    final elapsed = _pendingPingAt != null
+        ? DateTime.now().difference(_pendingPingAt!)
+        : null;
+    Log.w(
+      TAG,
+      'Keepalive ping timed out id=$_pendingPingId '
+      'elapsed=${elapsed?.inMilliseconds}ms '
+      'shortTimeout=$shortTimeout '
+      'isQuic=${_connection.isQuic}',
+    );
     _clearPendingPing();
     _handleKeepaliveFailure(
       KeepaliveFailureReason.pingTimeout,
@@ -581,7 +628,17 @@ class StreamManagementModule extends Negotiator {
     final scaled = base * multiplier;
     final floor = Duration(seconds: shortTimeout ? 5 : 10);
     final candidate = scaled > floor ? scaled : floor;
-    return candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
+    final result = candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
+    // H1: log the computed timeout and the latency it was based on, so we can
+    //     confirm that a zero/missing latency baseline is causing the 10 s floor
+    //     to be used on the very first probe after connection.
+    Log.d(
+      TAG,
+      'Keepalive timeout computed: result=${result.inMilliseconds}ms '
+      'base=${base.inMilliseconds}ms multiplier=$multiplier '
+      'floor=${floor.inMilliseconds}ms shortTimeout=$shortTimeout',
+    );
+    return result;
   }
 
   void _clearPendingSmAck() {

@@ -206,7 +206,7 @@ class XmppService extends ChangeNotifier {
   static const String _capsNode = 'https://wimsy.im/caps';
   static const String _capsHash = 'sha-1';
   static const String _replyNamespace = 'urn:xmpp:reply:0';
-  static const String _featureFallbackNamespace = 'urn:xmpp:feature-fallback:0';
+  static const String _fallbackNamespace = 'urn:xmpp:fallback:0';
   static const String _jingleNamespace = 'urn:xmpp:jingle:1';
   static const String _jingleRtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
   static const String _jingleGroupingNamespace =
@@ -2529,10 +2529,10 @@ class XmppService extends ChangeNotifier {
     // For MUC rooms, XEP-0461 requires the stanza-id applied by the chatroom
     // (XEP-0359), not the stanza's own id attribute. If the room has not
     // applied a stanza-id we cannot build a valid reply reference.
-    // For 1:1 chats the stanza-id is preferred but the message id is a valid
+    // For 1:1 chats the stanza-id is ignored but the message id is a valid
     // fallback.
     final targetId =
-        isRoom ? message.stanzaId : (message.stanzaId ?? message.messageId);
+        isRoom ? message.stanzaId : message.messageId;
     if (targetId == null || targetId.isEmpty) {
       return null;
     }
@@ -5316,7 +5316,7 @@ class XmppService extends ChangeNotifier {
     String? forNamespace,
   }) {
     final fallback = XmppElement()..name = 'fallback';
-    fallback.addAttribute(XmppAttribute('xmlns', _featureFallbackNamespace));
+    fallback.addAttribute(XmppAttribute('xmlns', _fallbackNamespace));
     if (forNamespace != null && forNamespace.isNotEmpty) {
       fallback.addAttribute(XmppAttribute('for', forNamespace));
     }

@@ -6,8 +6,7 @@ class MessageStanzaParser {
   const MessageStanzaParser();
 
   static const _replyNs = 'urn:xmpp:reply:0';
-  static const _featureFallbackNs = 'urn:xmpp:feature-fallback:0';
-  static const _legacyFallbackNs = 'urn:xmpp:fallback:0';
+  static const _fallbackNs = 'urn:xmpp:fallback:0';
 
   bool hasReceiptRequest(MessageStanza stanza) {
     return _hasChildWithXmlns(stanza, 'request', 'urn:xmpp:receipts');
@@ -181,7 +180,7 @@ class MessageStanzaParser {
         continue;
       }
       final xmlns = child.getAttribute('xmlns')?.value;
-      if (xmlns != _featureFallbackNs && xmlns != _legacyFallbackNs) {
+      if (xmlns != _fallbackNs) {
         continue;
       }
       final forNamespace = child.getAttribute('for')?.value?.trim();
