@@ -190,18 +190,16 @@ class FastAuthHandler implements AbstractSaslHandler {
       return null;
     }
 
-    final List<int> payload;
-    if (_variant == FastMechanismVariant.ht) {
-      // HT-*:  authcid || NUL || token_bytes
-      // authcid is the bare JID (local@domain) per XEP-0484 §4.
-      final authcid = '${_connection.account.username}@${_connection.account.domain}';
-      payload = utf8.encode(authcid) + [0x00] + tokenBytes;
-    } else {
-      // HT2-*: HMAC-<hash>(token_bytes, "Initiator" || cb_data)
-      // cb_data is empty for NONE channel-binding.
-      final message = utf8.encode('Initiator');
-      payload = crypto.Hmac(_hash, tokenBytes).convert(message).bytes;
+    // HT-*:  authcid || NUL || [ extra || NUL ] || initiator_hashed_token  // optional bit is HT2-*
+    // authcid is the bare JID (local@domain) per XEP-0484 §4.
+    final authcid = '${_connection.account.username}@${_connection.account.domain}';
+    final List<int> payload = utf8.encode(authcid) + [0x00];
+    // Message is "Initiator" || cbdata [ || extra ]
+    final message = utf8.encode('Initiator');
+    if (_variant == FastMechanismVariant.ht2) {
+      payload.add(0x00); // Empty extra
     }
+    payload.addAll(crypto.Hmac(_hash, tokenBytes).convert(message).bytes);
     return CryptoUtils.bytesToBase64(payload, false, false);
   }
 
