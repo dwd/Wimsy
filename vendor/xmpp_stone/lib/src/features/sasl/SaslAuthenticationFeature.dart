@@ -105,18 +105,28 @@ class SaslAuthenticationFeature extends Negotiator {
         if (result.successful) {
           _connection
               .setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
-        } else {
-          // FAST failed (expired / invalid token). The handler already cleared
-          // the stored token. Fall back to a fresh SASL2/SCRAM connection.
-          _connection.setState(XmppConnectionState.AuthenticationFailure);
-          _connection.errorMessage = result.message;
-          _connection.close();
+          state = NegotiatorState.DONE;
+          return;
         }
-        state = NegotiatorState.DONE;
+        // FAST failed (expired / invalid / revoked token). The handler has
+        // already cleared the stored token, so rather than dropping the
+        // connection we simply retry authentication on the same stream with
+        // the regular password-based mechanism (SCRAM). XEP-0388 allows a
+        // client to send another <authenticate/> after a <failure/>.
+        print('XMPP FAST: authentication failed (${result.message}); '
+            'falling back to password authentication');
+        _processPasswordSasl();
       });
       return;
     }
 
+    _processPasswordSasl();
+  }
+
+  /// Runs the regular password-based SASL flow (SASL2 when available and
+  /// preferred, otherwise SASL1), picking the best mechanism offered by the
+  /// server. This is also the fallback path when FAST authentication fails.
+  void _processPasswordSasl() {
     var useSasl2 = _shouldUseSasl2();
     var offered = useSasl2 ? _offeredSasl2Mechanisms : _offeredSasl1Mechanisms;
     var mechanism = _pickSupportedMechanism(offered);
@@ -181,9 +191,7 @@ class SaslAuthenticationFeature extends Negotiator {
         final expiry = DateTime.parse(expiryStr);
         if (DateTime.now().isAfter(expiry)) {
           // Token has expired; clear it and fall back to SCRAM.
-          account.fastToken = null;
-          account.fastTokenExpiry = null;
-          account.fastMechanism = null;
+          account.clearFastToken();
           return null;
         }
       } catch (_) {
@@ -207,8 +215,9 @@ class SaslAuthenticationFeature extends Negotiator {
         .where((m) => m.isNotEmpty)
         .toSet();
     if (!offeredMechanisms.contains(fastMechanismName)) {
-      // The server no longer offers the stored mechanism; clear and fall back.
-      account.fastMechanism = null;
+      // The server no longer offers the stored mechanism; clear the whole
+      // credential set (including any persisted copy) and fall back.
+      account.clearFastToken();
       return null;
     }
 

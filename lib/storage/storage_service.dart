@@ -8,12 +8,16 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../models/avatar_metadata.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
+import 'fast_token_record.dart';
 import 'secure_store.dart';
 
 class StorageService {
   static const _secureBoxName = 'wimsy_secure';
   static const _saltKey = 'wimsy_salt';
   static const _accountKey = 'account';
+  // XEP-0484 FAST tokens, keyed by bare JID, so that a token issued for one
+  // account is never presented for another.
+  static const _fastTokensKey = 'fast_tokens';
   static const _rosterKey = 'roster';
   static const _rosterVersionKey = 'roster_version';
   static const _messagesKey = 'messages';
@@ -96,6 +100,75 @@ class StorageService {
       return;
     }
     await box.put(_accountKey, account);
+  }
+
+  /// Loads the persisted FAST (XEP-0484) credentials for [bareJid], or null
+  /// when no usable token is stored. Expired tokens are treated as absent and
+  /// removed from disk so we do not present them to the server.
+  FastTokenRecord? loadFastToken(String bareJid) {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return null;
+    }
+    final data = box.get(_fastTokensKey);
+    if (data is! Map) {
+      return null;
+    }
+    final entry = data[bareJid];
+    if (entry is! Map) {
+      return null;
+    }
+    final record = FastTokenRecord.fromMap(Map<String, dynamic>.from(entry));
+    if (record == null) {
+      return null;
+    }
+    if (record.isExpired) {
+      unawaited(clearFastToken(bareJid));
+      return null;
+    }
+    return record;
+  }
+
+  /// Persists the FAST credentials issued for [bareJid], replacing any
+  /// previously stored token for that account.
+  Future<void> storeFastToken(String bareJid, FastTokenRecord record) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    final existing = box.get(_fastTokensKey);
+    final next = <String, dynamic>{};
+    if (existing is Map) {
+      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+    }
+    next[bareJid] = record.toMap();
+    await box.put(_fastTokensKey, next);
+  }
+
+  /// Drops the stored FAST credentials for [bareJid], e.g. after the server
+  /// rejected the token, so the next connection authenticates with SCRAM.
+  Future<void> clearFastToken(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    final existing = box.get(_fastTokensKey);
+    if (existing is! Map || !existing.containsKey(bareJid)) {
+      return;
+    }
+    final next = <String, dynamic>{};
+    next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+    next.remove(bareJid);
+    await box.put(_fastTokensKey, next);
+  }
+
+  /// Drops every stored FAST token (forget-account flows).
+  Future<void> clearFastTokens() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_fastTokensKey, const <String, dynamic>{});
   }
 
   List<ContactEntry> loadRoster() {

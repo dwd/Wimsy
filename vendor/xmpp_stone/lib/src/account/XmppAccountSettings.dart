@@ -74,6 +74,14 @@ class XmppAccountSettings {
   /// (e.g. "HT2-SHA-256-NONE").
   String? fastMechanism;
 
+  /// Invoked whenever the FAST credentials ([fastToken], [fastTokenExpiry]
+  /// and [fastMechanism]) change, so that the embedding application can
+  /// persist them and reuse the token on the next (first) connection.
+  ///
+  /// The callback is also invoked with a cleared token when FAST
+  /// authentication fails, so that stale tokens are dropped from storage.
+  void Function(XmppAccountSettings account)? onFastCredentialsChanged;
+
   XmppAccountSettings(
     this.name,
     this.username,
@@ -93,6 +101,34 @@ class XmppAccountSettings {
   });
 
   Jid get fullJid => Jid(username, domain, resource);
+
+  /// Stores a freshly issued FAST token together with its (optional) expiry
+  /// and notifies [onFastCredentialsChanged].
+  void storeFastToken(String token, String? expiry) {
+    fastToken = token;
+    fastTokenExpiry = expiry;
+    _notifyFastCredentialsChanged();
+  }
+
+  /// Clears the stored FAST credentials, e.g. after an expired or rejected
+  /// token, so the next connection falls back to SCRAM. Notifies
+  /// [onFastCredentialsChanged] when something was actually cleared.
+  void clearFastToken() {
+    if (fastToken == null && fastTokenExpiry == null && fastMechanism == null) {
+      return;
+    }
+    fastToken = null;
+    fastTokenExpiry = null;
+    fastMechanism = null;
+    _notifyFastCredentialsChanged();
+  }
+
+  void _notifyFastCredentialsChanged() {
+    final callback = onFastCredentialsChanged;
+    if (callback != null) {
+      callback(this);
+    }
+  }
 
   /// for `port` setting by default used default XMPP port 5222, for the Web platform set it manually via [XmppAccountSettings.port]
   static XmppAccountSettings fromJid(String jid, String password) {

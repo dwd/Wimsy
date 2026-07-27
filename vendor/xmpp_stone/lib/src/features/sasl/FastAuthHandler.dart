@@ -250,8 +250,7 @@ class FastAuthHandler implements AbstractSaslHandler {
         final token = el.getAttribute('token')?.value;
         final expiry = el.getAttribute('expiry')?.value;
         if (token != null && token.isNotEmpty) {
-          _connection.account.fastToken = token;
-          _connection.account.fastTokenExpiry = expiry;
+          _connection.account.storeFastToken(token, expiry);
           Log.d(TAG, 'Stored new FAST token (expiry=$expiry)');
         }
         return;
@@ -271,9 +270,7 @@ class FastAuthHandler implements AbstractSaslHandler {
     Log.e(TAG, message);
     // If FAST fails, clear the stored token so the next reconnect falls back
     // to SCRAM rather than retrying with an invalid/expired token.
-    _connection.account.fastToken = null;
-    _connection.account.fastTokenExpiry = null;
-    _connection.account.fastMechanism = null;
+    _connection.account.clearFastToken();
 
     if (!_completer.isCompleted) {
       _subscription.cancel();

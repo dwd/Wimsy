@@ -295,8 +295,7 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
         final token = el.getAttribute('token')?.value;
         final expiry = el.getAttribute('expiry')?.value;
         if (token != null && token.isNotEmpty) {
-          _connection.account.fastToken = token;
-          _connection.account.fastTokenExpiry = expiry;
+          _connection.account.storeFastToken(token, expiry);
           Log.d(TAG, 'Stored FAST token (expiry=$expiry)');
         }
         return;

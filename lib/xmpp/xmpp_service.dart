@@ -13,6 +13,7 @@ import '../models/room_entry.dart';
 import '../bookmarks/bookmarks_manager.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
+import '../storage/fast_token_record.dart';
 import '../storage/storage_service.dart';
 import '../av/call_session.dart';
 import '../av/call_quality.dart';
@@ -1104,6 +1105,10 @@ class XmppService extends ChangeNotifier {
       account.directTls = resolvedDirectTls;
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
+      // XEP-0484: seed any FAST token persisted from a previous session so we
+      // can authenticate without the password on this first connect, and keep
+      // the stored copy in sync with the tokens the server issues/revokes.
+      _seedFastToken(account, bareJid);
       if (!shouldUseWebSocket) {
         account.quicEndpoints = (quicTransportAvailable && useQuic)
             ? buildQuicEndpointPlan(
@@ -1368,6 +1373,46 @@ class XmppService extends ChangeNotifier {
     _status = XmppStatus.disconnected;
     _errorMessage = null;
     notifyListeners();
+  }
+
+  /// XEP-0484: primes [account] with the FAST credentials persisted for
+  /// [bareJid] (if any) and installs the callback that keeps the persisted
+  /// copy up to date.
+  ///
+  /// Seeding lets the very first connection of a session authenticate with the
+  /// token instead of the password. If the server rejects the token the SASL
+  /// layer clears it and falls back to SCRAM, and the callback removes the
+  /// stale token from storage as well.
+  void _seedFastToken(XmppAccountSettings account, String bareJid) {
+    final storage = _storage;
+    if (storage == null) {
+      return;
+    }
+    final stored = storage.loadFastToken(bareJid);
+    if (stored != null && stored.mechanism != null) {
+      account.fastToken = stored.token;
+      account.fastTokenExpiry = stored.expiry;
+      account.fastMechanism = stored.mechanism;
+      debugPrint('XMPP FAST: using stored token for $bareJid '
+          '(mechanism=${stored.mechanism} expiry=${stored.expiry})');
+    }
+    account.onFastCredentialsChanged = (updated) {
+      final token = updated.fastToken;
+      if (token == null || token.isEmpty) {
+        unawaited(storage.clearFastToken(bareJid));
+        return;
+      }
+      unawaited(
+        storage.storeFastToken(
+          bareJid,
+          FastTokenRecord(
+            token: token,
+            expiry: updated.fastTokenExpiry,
+            mechanism: updated.fastMechanism,
+          ),
+        ),
+      );
+    };
   }
 
   void clearCache() {
