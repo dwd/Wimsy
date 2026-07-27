@@ -160,4 +160,57 @@ void main() {
     expect(payload.fallbackBody, '> quoted line');
     expect(payload.cleanedBody, 'hello');
   });
+
+  test('extractReplyPayload strips the current urn:xmpp:fallback:0 range', () {
+    // XEP-0428 renamed the namespace; both spellings must be understood.
+    final stanza = _chatStanza(
+      id: 'm6',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: '> quoted line\n\nhello',
+    );
+    final reply = XmppElement()..name = 'reply';
+    reply.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:reply:0'));
+    reply.addAttribute(XmppAttribute('id', 'orig-2'));
+    stanza.addChild(reply);
+    final fallback = XmppElement()..name = 'fallback';
+    fallback.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fallback:0'));
+    fallback.addAttribute(XmppAttribute('for', 'urn:xmpp:reply:0'));
+    final body = XmppElement()..name = 'body';
+    body.addAttribute(XmppAttribute('start', '0'));
+    body.addAttribute(XmppAttribute('end', '15'));
+    fallback.addChild(body);
+    stanza.addChild(fallback);
+
+    final payload = parser.extractReplyPayload(stanza, body: stanza.body);
+    expect(payload, isNotNull);
+    expect(payload!.fallbackBody, '> quoted line');
+    expect(payload.cleanedBody, 'hello');
+  });
+
+  test('extractReplyPayload ignores a fallback for another feature', () {
+    final stanza = _chatStanza(
+      id: 'm7',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'unrelated fallback text',
+    );
+    final reply = XmppElement()..name = 'reply';
+    reply.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:reply:0'));
+    reply.addAttribute(XmppAttribute('id', 'orig-3'));
+    stanza.addChild(reply);
+    final fallback = XmppElement()..name = 'fallback';
+    fallback.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fallback:0'));
+    fallback.addAttribute(XmppAttribute('for', 'urn:xmpp:sce:0'));
+    final body = XmppElement()..name = 'body';
+    body.addAttribute(XmppAttribute('start', '0'));
+    body.addAttribute(XmppAttribute('end', '9'));
+    fallback.addChild(body);
+    stanza.addChild(fallback);
+
+    final payload = parser.extractReplyPayload(stanza, body: stanza.body);
+    expect(payload, isNotNull);
+    expect(payload!.fallbackBody, isNull);
+    expect(payload.cleanedBody, 'unrelated fallback text');
+  });
 }

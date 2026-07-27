@@ -39,6 +39,8 @@ dependencies:
     path: vendor/xmpp_stone
   hive: ^2.2.3
   hive_flutter: ^1.1.0
+  # Used to locate the Hive box file so its size can be monitored.
+  path_provider: ^2.1.4
   flutter_secure_storage: ^10.0.0
   cryptography: ^2.7.0
   intl: ^0.20.2

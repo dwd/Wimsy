@@ -6,7 +6,15 @@ class MessageStanzaParser {
   const MessageStanzaParser();
 
   static const _replyNs = 'urn:xmpp:reply:0';
-  static const _fallbackNs = 'urn:xmpp:fallback:0';
+  // XEP-0428 renamed its namespace from `urn:xmpp:feature-fallback:0` to
+  // `urn:xmpp:fallback:0`. We send the current one but must keep accepting
+  // the legacy one, which is still emitted by deployed clients and servers
+  // (and by our own MUC handling) — otherwise the quoted fallback text is
+  // not stripped and the quote is shown twice.
+  static const _fallbackNamespaces = <String>{
+    'urn:xmpp:fallback:0',
+    'urn:xmpp:feature-fallback:0',
+  };
 
   bool hasReceiptRequest(MessageStanza stanza) {
     return _hasChildWithXmlns(stanza, 'request', 'urn:xmpp:receipts');
@@ -180,7 +188,7 @@ class MessageStanzaParser {
         continue;
       }
       final xmlns = child.getAttribute('xmlns')?.value;
-      if (xmlns != _fallbackNs) {
+      if (!_fallbackNamespaces.contains(xmlns)) {
         continue;
       }
       final forNamespace = child.getAttribute('for')?.value?.trim();
