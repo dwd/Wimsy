@@ -1546,6 +1546,11 @@ class _WimsyHomeState extends State<WimsyHome> {
                         activeChat != null &&
                         (!isBookmark || (roomEntry?.joined ?? false));
                     return Row(
+                      // Align the action buttons to the bottom so that as
+                      // the message field grows taller (wrapping longer
+                      // messages), the buttons stay anchored near the
+                      // text baseline instead of floating in the middle.
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Expanded(
                           child: TextField(
@@ -1553,6 +1558,13 @@ class _WimsyHomeState extends State<WimsyHome> {
                             focusNode: _messageFocusNode,
                             autofocus: canSend,
                             enabled: canSend,
+                            // Allow the field to grow (up to a limit) and
+                            // wrap the text instead of scrolling
+                            // horizontally, so a long message stays fully
+                            // visible while composing it.
+                            minLines: 1,
+                            maxLines: 6,
+                            textInputAction: TextInputAction.send,
                             decoration: const InputDecoration(
                               labelText: 'Message',
                             ),
