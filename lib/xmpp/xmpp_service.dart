@@ -1245,6 +1245,18 @@ class XmppService extends ChangeNotifier {
           _setupRoster();
           _setupChatManager();
           _setupMuc();
+          // The `Ready` state only fires for a freshly-bound session (a
+          // resumed stream instead reports `Resumed`, handled above), which
+          // means the server has forgotten any MUC occupancy we previously
+          // held. Our in-memory `_rooms` map, however, still marks those
+          // rooms as `joined` from before the disconnect. Left uncorrected,
+          // `_sendInitialPresence()` below would send plain directed
+          // presence updates to those rooms instead of a real join request;
+          // servers reject that as invalid, and the rejection is
+          // misinterpreted as a failed join, which disables autojoin even
+          // though the room can still be joined normally. Explicitly
+          // re-send a full join for every room we believe we were in.
+          _rejoinRoomsAfterReconnect();
           _setupMessageSignals();
           _setupJingle();
           _setupIbb();
@@ -4962,6 +4974,28 @@ class XmppService extends ChangeNotifier {
       return;
     }
     joinRoom(entry.roomJid, nick: entry.nick);
+  }
+
+  /// Re-sends a proper MUC join for every room [_rooms] still marks as
+  /// `joined` after a fresh session bind (see the `Ready` handler above for
+  /// why this is necessary). [joinRoom] both sends the correct join presence
+  /// (with the `http://jabber.org/protocol/muc` `x` element) and re-marks the
+  /// room as joined, so this simply re-establishes real occupancy instead of
+  /// leaving stale state that would otherwise cause a plain presence update
+  /// to be sent to a room we're no longer actually in.
+  void _rejoinRoomsAfterReconnect() {
+    if (_mucManager == null) {
+      return;
+    }
+    final previouslyJoined = _rooms.values
+        .where(
+          (entry) =>
+              entry.joined && entry.nick != null && entry.nick!.isNotEmpty,
+        )
+        .toList(growable: false);
+    for (final entry in previouslyJoined) {
+      joinRoom(entry.roomJid, nick: entry.nick);
+    }
   }
 
   /// Handles a MUC join error emitted by [MucManager.roomJoinErrorStream].
