@@ -26,7 +26,6 @@ import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/xmpp_service.dart';
 import 'xmpp/jid_discovery.dart';
-import 'xmpp/unread_message_finder.dart';
 import 'background/foreground_task_handler.dart';
 import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -1144,16 +1143,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     _handleAutoScroll(messages.length);
     final isNewlyOpenedChat =
         activeChat != null && activeChat != _lastFocusedChat;
-    // Capture the first unread message before marking the chat as read
-    // below (which flips every message's readByMe flag to true), so we can
-    // scroll it into view once the chat opens instead of always jumping
-    // straight to the bottom of the history.
-    final firstUnread = isNewlyOpenedChat
-        ? _findFirstUnreadMessage(service, activeChat, messages)
-        : null;
-    final firstUnreadId = firstUnread == null
-        ? null
-        : _messageIds(firstUnread).firstOrNull;
     if (activeChat != null) {
       _markChatRead(activeChat, messages);
     }
@@ -1177,14 +1166,17 @@ class _WimsyHomeState extends State<WimsyHome> {
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          if (!isBookmark) {
+          // Only focus the message input on non-mobile platforms: popping
+          // up the on-screen keyboard automatically on phones/tablets when
+          // a chat is opened (e.g. from a notification tap) is unwanted.
+          final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+          if (!isBookmark && !isMobile) {
             _messageFocusNode.requestFocus();
           }
-          if (firstUnreadId != null) {
-            unawaited(_scrollToMessageById(activeChat, firstUnreadId));
-          } else {
-            _scrollToBottom();
-          }
+          // Always jump straight to the latest message when a chat is
+          // opened (e.g. by tapping it in the list or tapping a
+          // notification), rather than scrolling to the first unread one.
+          _scrollToBottom();
         }
       });
     }
@@ -3289,22 +3281,6 @@ class _WimsyHomeState extends State<WimsyHome> {
     // readByMe flag is persisted and survives reconnects.
     widget.service.markMessagesRead(bareJid);
     unawaited(widget.notifications.cancelMessagesForTag(bareJid));
-  }
-
-  /// Returns the earliest incoming message in [messages] that hasn't been
-  /// read by the local user yet, or `null` if every message is already
-  /// read. Must be called with a [messages] snapshot taken *before*
-  /// [_markChatRead] runs, since that marks everything as read.
-  ChatMessage? _findFirstUnreadMessage(
-    XmppService service,
-    String bareJid,
-    List<ChatMessage> messages,
-  ) {
-    return UnreadMessageFinder.firstUnread(
-      messages,
-      displayedAt: service.displayedAtFor(bareJid),
-      localReadAt: _lastReadAtByChat[bareJid],
-    );
   }
 
   void _noteActiveChatRead(XmppService service, String? activeChat) {
