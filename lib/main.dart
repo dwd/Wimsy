@@ -1535,66 +1535,113 @@ class _WimsyHomeState extends State<WimsyHome> {
                     ),
                   ),
                 ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _messageController,
-                        focusNode: _messageFocusNode,
-                        autofocus:
-                            activeChat != null &&
-                            (!isBookmark || (roomEntry?.joined ?? false)),
-                        enabled:
-                            activeChat != null &&
-                            (!isBookmark || (roomEntry?.joined ?? false)),
-                        decoration: const InputDecoration(labelText: 'Message'),
-                        onChanged: (value) {
-                          if (activeChat == null || isBookmark) {
-                            return;
-                          }
-                          _handleTypingState(service, activeChat, value);
-                        },
-                        onSubmitted: (_) => _sendMessage(activeChat),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    IconButton(
-                      onPressed:
-                          activeChat == null ||
-                              (isBookmark && !(roomEntry?.joined ?? false))
-                          ? null
-                          : () => _sendAttachment(
-                              activeChat,
-                              isBookmark: isBookmark,
-                              roomEntry: roomEntry,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // On narrow screens (e.g. phones or split panes), the
+                    // attachment and camera actions are combined into a
+                    // single menu button so the message field stays as
+                    // wide as possible.
+                    final isCompact = constraints.maxWidth < 420;
+                    final canSend =
+                        activeChat != null &&
+                        (!isBookmark || (roomEntry?.joined ?? false));
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _messageController,
+                            focusNode: _messageFocusNode,
+                            autofocus: canSend,
+                            enabled: canSend,
+                            decoration: const InputDecoration(
+                              labelText: 'Message',
                             ),
-                      icon: const Icon(Icons.attach_file),
-                      tooltip: 'Send file',
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      onPressed:
-                          activeChat == null ||
-                              (isBookmark && !(roomEntry?.joined ?? false))
-                          ? null
-                          : () => _sendPhotoMessage(
-                              activeChat,
-                              isBookmark: isBookmark,
-                              roomEntry: roomEntry,
-                            ),
-                      icon: const Icon(Icons.photo_camera),
-                      tooltip: 'Send photo',
-                    ),
-                    const SizedBox(width: 4),
-                    FilledButton(
-                      onPressed:
-                          activeChat == null ||
-                              (isBookmark && !(roomEntry?.joined ?? false))
-                          ? null
-                          : () => _sendMessage(activeChat),
-                      child: const Text('Send'),
-                    ),
-                  ],
+                            onChanged: (value) {
+                              if (activeChat == null || isBookmark) {
+                                return;
+                              }
+                              _handleTypingState(service, activeChat, value);
+                            },
+                            onSubmitted: (_) => _sendMessage(activeChat),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (isCompact)
+                          PopupMenuButton<_ComposerAttachmentAction>(
+                            enabled: canSend,
+                            icon: const Icon(Icons.attach_file),
+                            tooltip: 'Attach',
+                            onSelected: (action) {
+                              switch (action) {
+                                case _ComposerAttachmentAction.file:
+                                  _sendAttachment(
+                                    activeChat,
+                                    isBookmark: isBookmark,
+                                    roomEntry: roomEntry,
+                                  );
+                                  break;
+                                case _ComposerAttachmentAction.photo:
+                                  _sendPhotoMessage(
+                                    activeChat,
+                                    isBookmark: isBookmark,
+                                    roomEntry: roomEntry,
+                                  );
+                                  break;
+                              }
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: _ComposerAttachmentAction.file,
+                                child: ListTile(
+                                  leading: Icon(Icons.attach_file),
+                                  title: Text('Send file'),
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: _ComposerAttachmentAction.photo,
+                                child: ListTile(
+                                  leading: Icon(Icons.photo_camera),
+                                  title: Text('Send photo'),
+                                ),
+                              ),
+                            ],
+                          )
+                        else ...[
+                          IconButton(
+                            onPressed: canSend
+                                ? () => _sendAttachment(
+                                    activeChat,
+                                    isBookmark: isBookmark,
+                                    roomEntry: roomEntry,
+                                  )
+                                : null,
+                            icon: const Icon(Icons.attach_file),
+                            tooltip: 'Send file',
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            onPressed: canSend
+                                ? () => _sendPhotoMessage(
+                                    activeChat,
+                                    isBookmark: isBookmark,
+                                    roomEntry: roomEntry,
+                                  )
+                                : null,
+                            icon: const Icon(Icons.photo_camera),
+                            tooltip: 'Send photo',
+                          ),
+                        ],
+                        const SizedBox(width: 4),
+                        IconButton(
+                          onPressed: canSend
+                              ? () => _sendMessage(activeChat)
+                              : null,
+                          icon: const Icon(Icons.send),
+                          tooltip: 'Send',
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
@@ -3429,6 +3476,10 @@ String _roomPreviewSenderLabel(ChatMessage message) {
   final sender = message.from.trim();
   return sender.isEmpty ? 'unknown' : sender;
 }
+
+/// Actions available in the combined attachment menu shown on narrow
+/// screens, where the file and photo actions are merged into one button.
+enum _ComposerAttachmentAction { file, photo }
 
 class _PhotoSelection {
   const _PhotoSelection({
