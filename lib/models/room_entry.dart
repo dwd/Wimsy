@@ -7,6 +7,7 @@ class RoomEntry {
     this.occupantCount = 0,
     this.joinError = false,
     this.joinErrorCondition,
+    this.lastOwnMessageAt,
   });
 
   final String roomJid;
@@ -19,6 +20,9 @@ class RoomEntry {
   /// The XMPP error condition returned when [joinError] is true, e.g.
   /// "registration-required" or "forbidden".
   final String? joinErrorCondition;
+  /// The timestamp at which the user last sent a message to this room, used
+  /// to drive the "notify after I post" MUC notification settings.
+  final DateTime? lastOwnMessageAt;
 
   RoomEntry copyWith({
     String? nick,
@@ -28,6 +32,7 @@ class RoomEntry {
     bool? joinError,
     String? joinErrorCondition,
     bool clearJoinError = false,
+    DateTime? lastOwnMessageAt,
   }) {
     return RoomEntry(
       roomJid: roomJid,
@@ -39,6 +44,7 @@ class RoomEntry {
       joinErrorCondition: clearJoinError
           ? null
           : (joinErrorCondition ?? this.joinErrorCondition),
+      lastOwnMessageAt: lastOwnMessageAt ?? this.lastOwnMessageAt,
     );
   }
 }

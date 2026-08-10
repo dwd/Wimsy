@@ -1,6 +1,7 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../models/contact_entry.dart';
+import '../models/muc_notify_settings.dart';
 import '../xmpp/pep_publish.dart';
 
 typedef BookmarkUpdateCallback = void Function(List<ContactEntry> bookmarks);
@@ -86,6 +87,7 @@ class BookmarksManager {
   Future<void> upsertBookmark(ContactEntry bookmark) async {
     final entry = bookmark.copyWith(isBookmark: true);
     _bookmarksByJid[entry.jid] = entry;
+    _setNotifyExtension(entry.jid, entry.effectiveMucNotifySettings);
     _onUpdate(bookmarks);
     await _publishBookmark(entry);
     await _storeLegacyBookmarks();
@@ -98,6 +100,44 @@ class BookmarksManager {
     _bookmarkExtensionsByJid.remove(roomJid);
     await _retractBookmark(roomJid);
     await _storeLegacyBookmarks();
+  }
+
+  /// Updates the MUC notification settings for [roomJid] and republishes the
+  /// bookmark (preserving any other vendor extensions already present).
+  Future<void> setMucNotifySettings(
+    String roomJid,
+    MucNotifySettings settings,
+  ) async {
+    final existing = _bookmarksByJid[roomJid];
+    if (existing == null) {
+      return;
+    }
+    final updated = existing.copyWith(mucNotifySettings: settings);
+    _bookmarksByJid[roomJid] = updated;
+    _setNotifyExtension(roomJid, settings);
+    _onUpdate(bookmarks);
+    await _publishBookmark(updated);
+    await _storeLegacyBookmarks();
+  }
+
+  void _setNotifyExtension(String roomJid, MucNotifySettings settings) {
+    final existing = _bookmarkExtensionsByJid[roomJid];
+    final extensions = existing != null
+        ? _cloneElement(existing)
+        : (XmppElement()..name = 'extensions');
+    extensions.children.removeWhere(
+      (child) =>
+          child.name == MucNotifySettings.elementName &&
+          child.getAttribute('xmlns')?.value == MucNotifySettings.namespace,
+    );
+    if (settings != MucNotifySettings.defaultSettings) {
+      extensions.addChild(settings.toXml());
+    }
+    if (extensions.children.isEmpty) {
+      _bookmarkExtensionsByJid.remove(roomJid);
+    } else {
+      _bookmarkExtensionsByJid[roomJid] = extensions;
+    }
   }
 
   void _handleEventMessage(MessageStanza stanza) {
@@ -256,6 +296,9 @@ class BookmarksManager {
     final autoJoin = autoJoinAttr == 'true' || autoJoinAttr == '1';
     final nick = conference.getChild('nick')?.textValue?.trim();
     final password = conference.getChild('password')?.textValue?.trim();
+    final mucNotifySettings = MucNotifySettings.fromExtensions(
+      conference.getChild('extensions'),
+    );
     return ContactEntry(
       jid: jid,
       name: name?.isNotEmpty == true ? name : null,
@@ -264,6 +307,7 @@ class BookmarksManager {
       bookmarkNick: nick?.isNotEmpty == true ? nick : null,
       bookmarkPassword: password?.isNotEmpty == true ? password : null,
       bookmarkAutoJoin: autoJoin,
+      mucNotifySettings: mucNotifySettings,
     );
   }
 

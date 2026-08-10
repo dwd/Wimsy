@@ -9,6 +9,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
+import '../models/muc_notify_settings.dart';
 import '../models/room_entry.dart';
 import '../bookmarks/bookmarks_manager.dart';
 import '../pep/pep_manager.dart';
@@ -1844,6 +1845,21 @@ class XmppService extends ChangeNotifier {
     return true;
   }
 
+  /// Updates the MUC notification settings for [roomJid]'s bookmark and
+  /// republishes it via PEP so it is synchronized to the user's other
+  /// clients.
+  Future<bool> setMucNotifySettings(
+    String roomJid,
+    MucNotifySettings settings,
+  ) async {
+    final manager = _bookmarksManager;
+    if (manager == null) {
+      return false;
+    }
+    await manager.setMucNotifySettings(_bareJid(roomJid), settings);
+    return true;
+  }
+
   Future<bool> blockContact(String bareJid) async {
     final normalized = _bareJid(bareJid);
     if (normalized.isEmpty) {
@@ -1981,13 +1997,16 @@ class XmppService extends ChangeNotifier {
     _connection?.writeStanza(stanza);
     final rawXml = _serializeStanza(stanza);
     final nick = _roomNickFor(normalized);
+    final now = DateTime.now();
+    final existingRoom = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
+    _rooms[normalized] = existingRoom.copyWith(lastOwnMessageAt: now);
     _addRoomMessage(
       roomJid: normalized,
       from: nick,
       body: trimmed,
       rawXml: rawXml,
       outgoing: true,
-      timestamp: DateTime.now(),
+      timestamp: now,
       messageId: messageId,
       replyToId: reply?.id,
       replyToJid: reply?.toJid,
@@ -4692,6 +4711,16 @@ class XmppService extends ChangeNotifier {
     return _messageIntentBuilder.build(stanza);
   }
 
+  /// Test-only seam to seed a room's "last own message sent" timestamp,
+  /// used by [shouldNotifyForRoomContent] to drive the "notify after I post"
+  /// MUC notification settings without requiring a live connection.
+  @visibleForTesting
+  void seedRoomLastOwnMessageAtForTesting(String roomJid, DateTime timestamp) {
+    final normalized = _bareJid(roomJid);
+    final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
+    _rooms[normalized] = existing.copyWith(lastOwnMessageAt: timestamp);
+  }
+
   @visibleForTesting
   List<MessageIntent> buildMessageIntentsForTesting(MessageStanza stanza) {
     return _buildMessageIntents(stanza);
@@ -6965,6 +6994,41 @@ class XmppService extends ChangeNotifier {
         'catchUpComplete=$catchUpCompleteRoom shouldNotify=$shouldNotifyRoom',
       );
     }
+  }
+
+  /// Decides whether an incoming groupchat [message] for [roomJid] should
+  /// trigger a notification, based on that room's [MucNotifySettings]: all
+  /// messages, only ones mentioning the user's in-room nickname, or any
+  /// message received during/after a window following the user's own last
+  /// message to the room.
+  bool shouldNotifyForRoomContent(String roomJid, ChatMessage message) {
+    final normalized = _bareJid(roomJid);
+    final bookmark = _bookmarks.firstWhere(
+      (entry) => entry.jid == normalized,
+      orElse: () => ContactEntry(jid: ''),
+    );
+    final settings = bookmark.jid.isNotEmpty
+        ? bookmark.effectiveMucNotifySettings
+        : MucNotifySettings.defaultSettings;
+
+    final lastOwnMessageAt = _rooms[normalized]?.lastOwnMessageAt;
+    if (lastOwnMessageAt != null &&
+        !message.timestamp.isBefore(lastOwnMessageAt)) {
+      if (settings.alwaysAfterOwnMessage) {
+        return true;
+      }
+      final period = settings.afterOwnMessagePeriod;
+      if (period != null &&
+          message.timestamp.difference(lastOwnMessageAt) <= period) {
+        return true;
+      }
+    }
+
+    if (settings.mode == MucNotifyMode.all) {
+      return true;
+    }
+    final nick = _roomNickFor(normalized);
+    return MucNotifySettings.bodyMentionsNick(message.body, nick);
   }
 
   bool _shouldNotifyRoomMessage(String roomJid, DateTime timestamp) {

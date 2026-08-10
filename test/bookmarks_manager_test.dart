@@ -3,6 +3,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/bookmarks/bookmarks_manager.dart';
 import 'package:wimsy/models/contact_entry.dart';
+import 'package:wimsy/models/muc_notify_settings.dart';
 
 class TestConnection extends Connection {
   TestConnection(super.account);
@@ -170,6 +171,78 @@ void main() {
     final extensions = payload?.getChild('extensions');
     expect(extensions, isNotNull);
     expect(extensions?.getChild('note')?.textValue, 'Pinned');
+  });
+
+  test('Parses MUC notify settings received from a PEP event', () {
+    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final connection = TestConnection(account);
+    List<ContactEntry> updates = [];
+    final manager = BookmarksManager(
+      connection: connection,
+      selfBareJid: 'user@example.com',
+      onUpdate: (bookmarks) => updates = bookmarks,
+    );
+
+    final message = MessageStanza('m1', MessageStanzaType.CHAT);
+    final event = XmppElement()..name = 'event';
+    event.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub#event'));
+    final items = XmppElement()..name = 'items';
+    items.addAttribute(XmppAttribute('node', 'urn:xmpp:bookmarks:1'));
+    final item = XmppElement()..name = 'item';
+    final conference = _conferencePayload(jid: 'team@conference.example', name: 'Team', nick: 'dave');
+    final extensions = XmppElement()..name = 'extensions';
+    const settings = MucNotifySettings(
+      mode: MucNotifyMode.all,
+      afterOwnMessagePeriod: Duration(minutes: 10),
+    );
+    extensions.addChild(settings.toXml());
+    conference.addChild(extensions);
+    item.addChild(conference);
+    items.addChild(item);
+    event.addChild(items);
+    message.addChild(event);
+
+    manager.handleStanza(message);
+
+    expect(updates, hasLength(1));
+    expect(updates.first.mucNotifySettings, settings);
+
+    // The setting should also be preserved verbatim when the bookmark is
+    // subsequently republished (e.g. after an unrelated edit made locally).
+  });
+
+  test('setMucNotifySettings republishes bookmark with updated settings', () async {
+    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final connection = TestConnection(account);
+    final manager = BookmarksManager(
+      connection: connection,
+      selfBareJid: 'user@example.com',
+      onUpdate: (_) {},
+    );
+
+    await manager.upsertBookmark(ContactEntry(jid: 'team@conference.example', name: 'Team'));
+    connection.written.clear();
+
+    const settings = MucNotifySettings(
+      mode: MucNotifyMode.mentions,
+      alwaysAfterOwnMessage: true,
+    );
+    await manager.setMucNotifySettings('team@conference.example', settings);
+
+    expect(manager.bookmarks.single.mucNotifySettings, settings);
+
+    final publishIq = connection.written.whereType<IqStanza>().firstWhere((iq) {
+      final pubsub = iq.getChild('pubsub');
+      return pubsub?.getChild('publish') != null;
+    });
+    final conference = publishIq
+        .getChild('pubsub')
+        ?.getChild('publish')
+        ?.getChild('item')
+        ?.getChild('conference');
+    final notifyElement = conference?.getChild('extensions')?.getChild('notify');
+    expect(notifyElement?.getAttribute('mode')?.value, 'mentions');
+    expect(notifyElement?.getAttribute('after-own')?.value, 'always');
   });
 
   test('Retract includes notify=true', () async {

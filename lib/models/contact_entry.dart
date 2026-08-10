@@ -1,3 +1,5 @@
+import 'muc_notify_settings.dart';
+
 class ContactEntry {
   ContactEntry({
     required this.jid,
@@ -8,6 +10,7 @@ class ContactEntry {
     this.bookmarkNick,
     this.bookmarkPassword,
     this.bookmarkAutoJoin = false,
+    this.mucNotifySettings,
   }) : groups = List.unmodifiable(groups ?? const []);
 
   final String jid;
@@ -19,7 +22,16 @@ class ContactEntry {
   final String? bookmarkPassword;
   final bool bookmarkAutoJoin;
 
+  /// Configuration controlling when groupchat notifications should be shown
+  /// for this room. Null means the [MucNotifySettings.defaultSettings]
+  /// apply.
+  final MucNotifySettings? mucNotifySettings;
+
   String get displayName => name?.isNotEmpty == true ? name! : jid;
+
+  /// The effective notify settings, falling back to the default when unset.
+  MucNotifySettings get effectiveMucNotifySettings =>
+      mucNotifySettings ?? MucNotifySettings.defaultSettings;
 
   ContactEntry copyWith({
     String? name,
@@ -29,6 +41,8 @@ class ContactEntry {
     String? bookmarkNick,
     String? bookmarkPassword,
     bool? bookmarkAutoJoin,
+    MucNotifySettings? mucNotifySettings,
+    bool clearMucNotifySettings = false,
   }) {
     return ContactEntry(
       jid: jid,
@@ -39,6 +53,9 @@ class ContactEntry {
       bookmarkNick: bookmarkNick ?? this.bookmarkNick,
       bookmarkPassword: bookmarkPassword ?? this.bookmarkPassword,
       bookmarkAutoJoin: bookmarkAutoJoin ?? this.bookmarkAutoJoin,
+      mucNotifySettings: clearMucNotifySettings
+          ? null
+          : (mucNotifySettings ?? this.mucNotifySettings),
     );
   }
 
@@ -52,6 +69,7 @@ class ContactEntry {
       'bookmarkNick': bookmarkNick,
       'bookmarkPassword': bookmarkPassword,
       'bookmarkAutoJoin': bookmarkAutoJoin,
+      'mucNotifySettings': mucNotifySettings?.toMap(),
     };
   }
 
@@ -71,6 +89,11 @@ class ContactEntry {
     final bookmarkNick = map['bookmarkNick']?.toString();
     final bookmarkPassword = map['bookmarkPassword']?.toString();
     final bookmarkAutoJoin = map['bookmarkAutoJoin'] == true;
+    final mucNotifySettings = MucNotifySettings.fromMap(
+      map['mucNotifySettings'] is Map<String, dynamic>
+          ? map['mucNotifySettings'] as Map<String, dynamic>
+          : null,
+    );
     if (groupsRaw is List) {
       for (final entry in groupsRaw) {
         final value = entry.toString().trim();
@@ -88,6 +111,7 @@ class ContactEntry {
       bookmarkNick: bookmarkNick,
       bookmarkPassword: bookmarkPassword,
       bookmarkAutoJoin: bookmarkAutoJoin,
+      mucNotifySettings: mucNotifySettings,
     );
   }
 }

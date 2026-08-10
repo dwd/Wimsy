@@ -20,6 +20,7 @@ import 'av/call_session.dart';
 import 'login_screen.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
+import 'models/muc_notify_settings.dart';
 import 'models/room_entry.dart';
 import 'notifications/notification_service.dart';
 import 'storage/preferences_service.dart';
@@ -218,6 +219,18 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     if (!shouldNotify) {
       debugPrint(
         'NewMsg[MUC] _handleIncomingRoomMessage: suppressed by _shouldNotifyFor '
+        'chat=$roomJid',
+      );
+      return;
+    }
+    final shouldNotifyForContent = _service.shouldNotifyForRoomContent(
+      roomJid,
+      message,
+    );
+    if (!shouldNotifyForContent) {
+      debugPrint(
+        'NewMsg[MUC] _handleIncomingRoomMessage: suppressed by '
+        'shouldNotifyForRoomContent (mode/mention/after-own settings) '
         'chat=$roomJid',
       );
       return;
@@ -3096,6 +3109,8 @@ class _WimsyHomeState extends State<WimsyHome> {
       text: bookmark.bookmarkPassword ?? '',
     );
     var autoJoin = bookmark.bookmarkAutoJoin;
+    var notifyMode = bookmark.effectiveMucNotifySettings.mode;
+    var afterOwnChoice = _afterOwnChoiceFor(bookmark.effectiveMucNotifySettings);
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -3134,6 +3149,48 @@ class _WimsyHomeState extends State<WimsyHome> {
                       onChanged: (value) => setState(() => autoJoin = value),
                       title: const Text('Auto-join'),
                     ),
+                    const Divider(height: 24),
+                    DropdownButtonFormField<MucNotifyMode>(
+                      initialValue: notifyMode,
+                      decoration: const InputDecoration(
+                        labelText: 'Notify me about',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: MucNotifyMode.all,
+                          child: Text('All messages'),
+                        ),
+                        DropdownMenuItem(
+                          value: MucNotifyMode.mentions,
+                          child: Text('Only mentions of my nickname'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => notifyMode = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<_AfterOwnMessageChoice>(
+                      initialValue: afterOwnChoice,
+                      decoration: const InputDecoration(
+                        labelText: 'After I send a message',
+                      ),
+                      items: _AfterOwnMessageChoice.values
+                          .map(
+                            (choice) => DropdownMenuItem(
+                              value: choice,
+                              child: Text(choice.label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => afterOwnChoice = value);
+                        }
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -3169,11 +3226,30 @@ class _WimsyHomeState extends State<WimsyHome> {
           ? passwordController.text.trim()
           : null,
       bookmarkAutoJoin: autoJoin,
+      mucNotifySettings: MucNotifySettings(
+        mode: notifyMode,
+        afterOwnMessagePeriod: afterOwnChoice.period,
+        alwaysAfterOwnMessage: afterOwnChoice.always,
+      ),
     );
     final ok = await widget.service.upsertBookmark(updated);
     if (!ok) {
       _showSnack('Failed to save bookmark.');
     }
+  }
+
+  _AfterOwnMessageChoice _afterOwnChoiceFor(MucNotifySettings settings) {
+    if (settings.alwaysAfterOwnMessage) {
+      return _AfterOwnMessageChoice.alwaysNotify;
+    }
+    final period = settings.afterOwnMessagePeriod;
+    if (period == null) {
+      return _AfterOwnMessageChoice.off;
+    }
+    return _AfterOwnMessageChoice.values.firstWhere(
+      (choice) => choice.period == period,
+      orElse: () => _AfterOwnMessageChoice.off,
+    );
   }
 
   Future<void> _confirmRemoveContact(ContactEntry contact) async {
@@ -3463,6 +3539,22 @@ String _roomPreviewSenderLabel(ChatMessage message) {
   }
   final sender = message.from.trim();
   return sender.isEmpty ? 'unknown' : sender;
+}
+
+/// Preset choices for the "notify me for a while after I post" MUC
+/// notification option, shown in the bookmark editor.
+enum _AfterOwnMessageChoice {
+  off('Off', null, false),
+  fiveMinutes('For 5 minutes', Duration(minutes: 5), false),
+  fifteenMinutes('For 15 minutes', Duration(minutes: 15), false),
+  oneHour('For 1 hour', Duration(hours: 1), false),
+  alwaysNotify('Always', null, true);
+
+  const _AfterOwnMessageChoice(this.label, this.period, this.always);
+
+  final String label;
+  final Duration? period;
+  final bool always;
 }
 
 /// Actions available in the combined attachment menu shown on narrow
