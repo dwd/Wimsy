@@ -752,6 +752,18 @@ class Connection {
     return (name == 'stream:features' || name == 'features');
   }
 
+  /// Matches a SASL (1 or 2) `<success/>` element. Used to flip
+  /// [authenticated] synchronously as soon as a success response is parsed,
+  /// see the comment in [handleResponse] for why this matters.
+  bool saslSuccessMatcher(xml.XmlElement element) {
+    if (element.name.local != 'success') {
+      return false;
+    }
+    final xmlns = element.getAttribute('xmlns');
+    return xmlns == 'urn:xmpp:sasl:2' ||
+        xmlns == 'urn:ietf:params:xml:ns:xmpp-sasl';
+  }
+
   void handleResponse(String response) {
     _inboundProcessingDepth++;
     // prepareStreamResponse (the map function) already buffers incomplete
@@ -775,6 +787,20 @@ class Connection {
             .where((element) => stanzaMatcher(element))
             .map((xmlElement) => StanzaParser.parseStanza(xmlElement))
             .forEach((stanza) => _inStanzaStreamController.add(stanza));
+
+        // SASL2's <success/> can carry a sibling <stream:features/> in the
+        // very same response. The SASL handlers only flip `authenticated`
+        // once their handshake Future resolves, which happens asynchronously
+        // (via the stanza stream above), i.e. *after* this method returns.
+        // Detecting <success/> here and setting `authenticated` immediately
+        // ensures the feature negotiation below (which gates disco-based
+        // negotiators, e.g. Service Discovery -> MAM, on `authenticated`)
+        // sees the correct value instead of racing the async handshake.
+        if (xmlResponse.descendants
+            .whereType<xml.XmlElement>()
+            .any(saslSuccessMatcher)) {
+          authenticated = true;
+        }
 
         xmlResponse.descendants
             .whereType<xml.XmlElement>()

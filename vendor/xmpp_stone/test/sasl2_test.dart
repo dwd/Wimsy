@@ -208,6 +208,45 @@ void main() {
     });
   });
 
+  group('SASL2 feature negotiation timing', () {
+    test(
+        'authenticated is set synchronously when success arrives bundled '
+        'with stream features', () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      final connection = Connection(account);
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      // A SASL2 <success/> can arrive bundled with a sibling
+      // <stream:features/> in the very same server response. Feature
+      // negotiation (which gates disco-based negotiators, e.g. Service
+      // Discovery -> MAM, on `authenticated`) runs synchronously inside
+      // handleResponse, while the SASL handler only flips `authenticated`
+      // once its own Future resolves asynchronously. Without the fix,
+      // `authenticated` would still be false at this point, causing MAM
+      // (and any other disco-gated feature) to never be negotiated.
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success><stream:features xmlns:stream='http://etherx.jabber.org/streams'/>"
+        '</xmpp_stone>',
+      );
+
+      // Must already be true here, synchronously, before awaiting the
+      // handler's Future.
+      expect(connection.authenticated, isTrue);
+
+      final result = await resultFuture;
+      expect(result.successful, isTrue);
+    });
+  });
+
   group('Bind 2 (XEP-0386)', () {
     test('includes bind element in authenticate when server advertises Bind 2',
         () async {
