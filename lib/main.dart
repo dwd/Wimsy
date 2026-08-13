@@ -17,6 +17,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'av/call_session.dart';
+import 'keepalive_settings_screen.dart';
 import 'login_screen.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
@@ -593,6 +594,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     _seedMessages();
     _seedRoomMessages();
     _loadMediaPreferences();
+    widget.service.applyKeepaliveTuning(widget.preferences.keepaliveTuning);
   }
 
   Future<void> _seedRoster() async {
@@ -5389,6 +5391,16 @@ class _PresenceMenu extends StatelessWidget {
               case _PresenceAction.simulateDisconnect:
                 service.simulateServerDisconnect();
                 break;
+              case _PresenceAction.keepaliveSettings:
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) => KeepaliveSettingsScreen(
+                      service: service,
+                      preferences: preferences,
+                    ),
+                  ),
+                );
+                break;
               case _PresenceAction.csiAuto:
                 service.setCsiOverrideMode(CsiOverrideMode.auto);
                 break;
@@ -5484,6 +5496,10 @@ class _PresenceMenu extends StatelessWidget {
             const PopupMenuItem(
               value: _PresenceAction.simulateDisconnect,
               child: Text('Simulate disconnect'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.keepaliveSettings,
+              child: Text('Keepalive settings...'),
             ),
             const PopupMenuDivider(),
             PopupMenuItem(
@@ -5828,6 +5844,7 @@ enum _PresenceAction {
   csiForceInactive,
   toggleSentry,
   simulateDisconnect,
+  keepaliveSettings,
   clearCacheExit,
   exit,
 }

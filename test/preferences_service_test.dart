@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wimsy/models/keepalive_tuning.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 
 void main() {
@@ -78,6 +79,59 @@ void main() {
       final prefs = await load();
       await prefs.setVideoInputId('cam-device-2');
       expect(prefs.videoInputId, 'cam-device-2');
+    });
+  });
+
+  group('keepaliveTuning', () {
+    test('defaults to KeepaliveTuning.defaults when nothing is stored',
+        () async {
+      final prefs = await load();
+      expect(prefs.keepaliveTuning, KeepaliveTuning.defaults);
+    });
+
+    test('round-trips a fully customized tuning', () async {
+      final prefs = await load();
+      const custom = KeepaliveTuning(
+        smAckIntervalForeground: Duration(seconds: 20),
+        smAckIntervalBackground: Duration(minutes: 3),
+        pingIntervalForeground: Duration(seconds: 15),
+        pingIntervalBackground: Duration(minutes: 2),
+        pendingAckRequestDelay: Duration(seconds: 5),
+        keepaliveMaxTimeout: Duration(seconds: 45),
+        mucSelfPingIdle: Duration(minutes: 5),
+        mucSelfPingCheckInterval: Duration(seconds: 30),
+        mucSelfPingTimeout: Duration(seconds: 20),
+        csiIdleDelay: Duration(seconds: 90),
+        connectRetryDelay: Duration(seconds: 30),
+        reconnectBaseDelay: Duration(seconds: 2),
+        reconnectMaxDelay: Duration(minutes: 5),
+        reconnectJitterRatio: 0.5,
+        quicPingIntervalDefault: Duration(minutes: 2),
+        quicPingIntervalMinFloor: Duration(seconds: 5),
+        outgoingCallTimeout: Duration(seconds: 30),
+        incomingCallTimeout: Duration(seconds: 40),
+        callStatsInterval: Duration(seconds: 2),
+      );
+
+      await prefs.setKeepaliveTuning(custom);
+
+      expect(prefs.keepaliveTuning, custom);
+    });
+
+    test('only overrides values that were explicitly saved', () async {
+      final prefs = await load();
+      final partiallyCustom = KeepaliveTuning.defaults.copyWith(
+        pingIntervalForeground: const Duration(seconds: 7),
+      );
+
+      await prefs.setKeepaliveTuning(partiallyCustom);
+      final reloaded = prefs.keepaliveTuning;
+
+      expect(reloaded.pingIntervalForeground, const Duration(seconds: 7));
+      expect(
+        reloaded.pingIntervalBackground,
+        KeepaliveTuning.defaults.pingIntervalBackground,
+      );
     });
   });
 }

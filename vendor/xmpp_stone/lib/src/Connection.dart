@@ -995,6 +995,26 @@ class Connection {
     streamManagementModule?.probeKeepalive(shortTimeout: shortTimeout);
   }
 
+  /// Overrides Stream Management/ping keepalive cadence at runtime. See
+  /// [StreamManagementModule.configure] for parameter semantics.
+  void configureKeepalive({
+    Duration? smAckIntervalForeground,
+    Duration? smAckIntervalBackground,
+    Duration? pingIntervalForeground,
+    Duration? pingIntervalBackground,
+    Duration? pendingAckRequestDelay,
+    Duration? keepaliveMaxTimeout,
+  }) {
+    streamManagementModule?.configure(
+      smAckIntervalForeground: smAckIntervalForeground,
+      smAckIntervalBackground: smAckIntervalBackground,
+      pingIntervalForeground: pingIntervalForeground,
+      pingIntervalBackground: pingIntervalBackground,
+      pendingAckRequestDelay: pendingAckRequestDelay,
+      keepaliveMaxTimeout: keepaliveMaxTimeout,
+    );
+  }
+
   Stream<ReconnectionState> get reconnectStateStream {
     return reconnectionManager?.stateStream ?? const Stream.empty();
   }

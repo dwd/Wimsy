@@ -9,6 +9,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
+import '../models/keepalive_tuning.dart';
 import '../models/muc_notify_settings.dart';
 import '../models/room_entry.dart';
 import '../bookmarks/bookmarks_manager.dart';
@@ -148,9 +149,11 @@ class XmppService extends ChangeNotifier {
   // reference this field name.
   final Map<String, DateTime> _pendingPings = {};
   String? _carbonsRequestId;
-  static const Duration _mucSelfPingIdle = Duration(minutes: 10);
-  static const Duration _mucSelfPingCheckInterval = Duration(minutes: 1);
-  static const Duration _mucSelfPingTimeout = Duration(seconds: 30);
+  // All adjustable keepalive/ping/reconnect/call timers live in a single
+  // [KeepaliveTuning] instance so a settings control panel can read and
+  // update every one of them consistently. See [keepaliveTuning] and
+  // [applyKeepaliveTuning].
+  KeepaliveTuning _keepaliveTuning = KeepaliveTuning.defaults;
   final Map<String, StreamSubscription<Message>> _chatMessageSubscriptions = {};
   final Map<String, StreamSubscription<ChatState?>> _chatStateSubscriptions =
       {};
@@ -217,7 +220,6 @@ class XmppService extends ChangeNotifier {
   String? _capsVer;
   bool _csiInactive = false;
   CsiOverrideMode _csiOverrideMode = CsiOverrideMode.auto;
-  static const Duration _csiIdleDelay = Duration(minutes: 1);
   final MamCursorStore _mamCursorStore = MamCursorStore();
   final Map<String, Timer> _mamCatchUpTimers = {};
   DateTime? _lastGlobalMamSyncAt;
@@ -325,15 +327,12 @@ class XmppService extends ChangeNotifier {
   StreamSubscription<IbbClose>? _ibbCloseSubscription;
 
   // Retry timer: when an initial connection attempt fails entirely, we wait
-  // [_connectRetryDelay] before automatically retrying with the same args.
+  // [KeepaliveTuning.connectRetryDelay] before automatically retrying with
+  // the same args.
   Timer? _connectRetryTimer;
   _ConnectArgs? _lastConnectArgs;
-  static const Duration _connectRetryDelay = Duration(minutes: 1);
 
   static const int _ibbDefaultBlockSize = 4096;
-  static const Duration _outgoingCallTimeout = Duration(seconds: 45);
-  static const Duration _incomingCallTimeout = Duration(seconds: 60);
-  static const Duration _callStatsInterval = Duration(seconds: 5);
   static const String _fileTransferStateOffered = 'offered';
   static const String _fileTransferStateAccepted = 'accepted';
   static const String _fileTransferStateInProgress = 'in_progress';
@@ -1333,16 +1332,18 @@ class XmppService extends ChangeNotifier {
     }
   }
 
-  /// Schedules an automatic reconnect attempt after [_connectRetryDelay] if
-  /// we have stored connect args and no retry is already pending.
+  /// Schedules an automatic reconnect attempt after
+  /// [KeepaliveTuning.connectRetryDelay] if we have stored connect args and
+  /// no retry is already pending.
   void _scheduleConnectRetry() {
     final args = _lastConnectArgs;
     if (args == null) return;
     _connectRetryTimer?.cancel();
+    final retryDelay = _keepaliveTuning.connectRetryDelay;
     debugPrint(
-      'XMPP connect: scheduling retry in $_connectRetryDelay',
+      'XMPP connect: scheduling retry in $retryDelay',
     );
-    _connectRetryTimer = Timer(_connectRetryDelay, () {
+    _connectRetryTimer = Timer(retryDelay, () {
       _connectRetryTimer = null;
       debugPrint('XMPP connect: retrying after failure');
       connect(
@@ -3174,7 +3175,7 @@ class XmppService extends ChangeNotifier {
     _incomingCallHandler?.call(session);
     _startCallTimeout(
       sid: event.sid,
-      duration: _incomingCallTimeout,
+      duration: _keepaliveTuning.incomingCallTimeout,
       incoming: true,
     );
     notifyListeners();
@@ -3339,7 +3340,7 @@ class XmppService extends ChangeNotifier {
     _callVideoEnabledBySid[sid] = video;
     _startCallTimeout(
       sid: sid,
-      duration: _outgoingCallTimeout,
+      duration: _keepaliveTuning.outgoingCallTimeout,
       incoming: false,
     );
     notifyListeners();
@@ -3565,9 +3566,12 @@ class XmppService extends ChangeNotifier {
 
   void _startCallStatsTimer(String sid) {
     _callStatsTimers.remove(sid)?.cancel();
-    _callStatsTimers[sid] = Timer.periodic(_callStatsInterval, (_) {
-      unawaited(_collectCallStats(sid));
-    });
+    _callStatsTimers[sid] = Timer.periodic(
+      _keepaliveTuning.callStatsInterval,
+      (_) {
+        unawaited(_collectCallStats(sid));
+      },
+    );
   }
 
   Future<void> _collectCallStats(String sid) async {
@@ -4895,9 +4899,12 @@ class XmppService extends ChangeNotifier {
 
   void _startMucSelfPingTimer() {
     _mucSelfPingTimer?.cancel();
-    _mucSelfPingTimer = Timer.periodic(_mucSelfPingCheckInterval, (_) {
-      _tickMucSelfPing();
-    });
+    _mucSelfPingTimer = Timer.periodic(
+      _keepaliveTuning.mucSelfPingCheckInterval,
+      (_) {
+        _tickMucSelfPing();
+      },
+    );
   }
 
   void _tickMucSelfPing() {
@@ -4919,7 +4926,7 @@ class XmppService extends ChangeNotifier {
         _roomLastTrafficAt[roomJid] = now;
         continue;
       }
-      if (now.difference(lastTraffic) < _mucSelfPingIdle) {
+      if (now.difference(lastTraffic) < _keepaliveTuning.mucSelfPingIdle) {
         continue;
       }
       final lastPing = _roomLastPingAt[roomJid];
@@ -4958,7 +4965,7 @@ class XmppService extends ChangeNotifier {
     _pendingMucSelfPings[id] = _bareJid(roomJid);
     _mucSelfPingTimeouts[id]?.cancel();
     _mucSelfPingTimeouts[id] = Timer(
-      _mucSelfPingTimeout,
+      _keepaliveTuning.mucSelfPingTimeout,
       () => _handleMucSelfPingTimeout(id),
     );
   }
@@ -4970,7 +4977,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     // A ping timeout is treated as "not joined": if the room doesn't respond
-    // within _mucSelfPingTimeout we assume we've lost room membership and
+    // within KeepaliveTuning.mucSelfPingTimeout we assume we've lost room membership and
     // attempt a rejoin. This handles servers (e.g. Openfire) that deliver
     // error responses very slowly (several minutes), long after the 30-second
     // window — without this, the late response is silently discarded and no
@@ -6274,7 +6281,8 @@ class XmppService extends ChangeNotifier {
     //   • the XMPP stream idle timeout (XEP-0478 <idle-seconds>)
     // If neither is advertised we default to 5 minutes.
     if (socket is QuicCapableXmppSocket) {
-      const defaultPingInterval = Duration(minutes: 5);
+      final defaultPingInterval = _keepaliveTuning.quicPingIntervalDefault;
+      final minFloorMs = _keepaliveTuning.quicPingIntervalMinFloor.inMilliseconds;
       Duration pingInterval = defaultPingInterval;
 
       final quicIdleMs = socket.quicNegotiatedIdleTimeoutMs;
@@ -6293,9 +6301,10 @@ class XmppService extends ChangeNotifier {
       }
 
       if (effectiveMs != null && effectiveMs > 0) {
-        // Use half the effective timeout as the ping interval, clamped to a
-        // minimum of 10 seconds to avoid excessive traffic.
-        final halfMs = (effectiveMs ~/ 2).clamp(10000, effectiveMs);
+        // Use half the effective timeout as the ping interval, clamped to
+        // [KeepaliveTuning.quicPingIntervalMinFloor] to avoid excessive
+        // traffic.
+        final halfMs = (effectiveMs ~/ 2).clamp(minFloorMs, effectiveMs);
         pingInterval = Duration(milliseconds: halfMs);
       }
 
@@ -6387,6 +6396,7 @@ class XmppService extends ChangeNotifier {
       notifyListeners();
     });
     connection.setKeepaliveBackgroundMode(_backgroundMode);
+    _applyKeepaliveTuningToConnection(connection);
     // Only probe on non-QUIC connections. On QUIC the transport-level PING
     // timer handles keepalive; an XMPP-level probe here would use the 10 s
     // floor timeout (no prior latency baseline) and disconnect under
@@ -6395,6 +6405,47 @@ class XmppService extends ChangeNotifier {
       connection.probeKeepalive(shortTimeout: false);
     }
     _requestCarbons();
+  }
+
+  /// The keepalive/ping/reconnect/call timer tuning currently in effect.
+  ///
+  /// Defaults to [KeepaliveTuning.defaults] until [applyKeepaliveTuning] is
+  /// called (typically once at startup with the persisted value from a
+  /// control panel).
+  KeepaliveTuning get keepaliveTuning => _keepaliveTuning;
+
+  /// Updates every keepalive/ping/reconnect/call timer at once.
+  ///
+  /// This is the single entry point a settings control panel should call.
+  /// It updates the local copies used by [XmppService] itself (MUC
+  /// self-ping, CSI idle, connect retry, call timeouts) and, if a
+  /// connection is currently active, pushes the Stream Management/ping and
+  /// reconnection values down into it immediately.
+  void applyKeepaliveTuning(KeepaliveTuning tuning) {
+    _keepaliveTuning = tuning;
+    final connection = _connection;
+    if (connection != null) {
+      _applyKeepaliveTuningToConnection(connection);
+    }
+    notifyListeners();
+  }
+
+  void _applyKeepaliveTuningToConnection(Connection connection) {
+    connection.configureKeepalive(
+      smAckIntervalForeground: _keepaliveTuning.smAckIntervalForeground,
+      smAckIntervalBackground: _keepaliveTuning.smAckIntervalBackground,
+      pingIntervalForeground: _keepaliveTuning.pingIntervalForeground,
+      pingIntervalBackground: _keepaliveTuning.pingIntervalBackground,
+      pendingAckRequestDelay: _keepaliveTuning.pendingAckRequestDelay,
+      keepaliveMaxTimeout: _keepaliveTuning.keepaliveMaxTimeout,
+    );
+    connection.setReconnectPolicy(
+      ReconnectionPolicy(
+        baseDelay: _keepaliveTuning.reconnectBaseDelay,
+        maxDelay: _keepaliveTuning.reconnectMaxDelay,
+        jitterRatio: _keepaliveTuning.reconnectJitterRatio,
+      ),
+    );
   }
 
   Future<void> _handleStreamError(Nonza nonza) async {
@@ -8256,7 +8307,7 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _csiIdleTimer?.cancel();
-    _csiIdleTimer = Timer(_csiIdleDelay, () {
+    _csiIdleTimer = Timer(_keepaliveTuning.csiIdleDelay, () {
       _sendClientState(active: false);
     });
   }

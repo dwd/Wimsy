@@ -20,12 +20,25 @@ import '../Negotiator.dart';
 
 class StreamManagementModule extends Negotiator {
   static const TAG = 'StreamManagementModule';
-  static const Duration _smAckIntervalForeground = Duration(minutes: 1);
-  static const Duration _smAckIntervalBackground = Duration(minutes: 5);
-  static const Duration _pingIntervalForeground = Duration(seconds: 30);
-  static const Duration _pingIntervalBackground = Duration(minutes: 5);
-  static const Duration _pendingAckRequestDelay = Duration(seconds: 15);
-  static const Duration _keepaliveMaxTimeout = Duration(seconds: 30);
+
+  // Defaults are exposed as `static const` so callers (e.g. a settings
+  // control panel) can offer a "reset to defaults" action without having to
+  // hard-code the values themselves.
+  static const Duration defaultSmAckIntervalForeground = Duration(minutes: 1);
+  static const Duration defaultSmAckIntervalBackground = Duration(minutes: 5);
+  static const Duration defaultPingIntervalForeground = Duration(seconds: 30);
+  static const Duration defaultPingIntervalBackground = Duration(minutes: 5);
+  static const Duration defaultPendingAckRequestDelay = Duration(seconds: 15);
+  static const Duration defaultKeepaliveMaxTimeout = Duration(seconds: 30);
+
+  // Mutable copies of the above, adjustable at runtime via [configure] so a
+  // control panel can tune keepalive cadence without restarting the app.
+  Duration _smAckIntervalForeground = defaultSmAckIntervalForeground;
+  Duration _smAckIntervalBackground = defaultSmAckIntervalBackground;
+  Duration _pingIntervalForeground = defaultPingIntervalForeground;
+  Duration _pingIntervalBackground = defaultPingIntervalBackground;
+  Duration _pendingAckRequestDelay = defaultPendingAckRequestDelay;
+  Duration _keepaliveMaxTimeout = defaultKeepaliveMaxTimeout;
 
   static Map<Connection, StreamManagementModule> instances = {};
 
@@ -90,6 +103,57 @@ class StreamManagementModule extends Negotiator {
   }
 
   Duration? get lastKeepaliveLatency => _lastKeepaliveLatency;
+
+  /// Current keepalive/ping tuning, exposed so a control panel can display
+  /// the effective values (including any overrides applied via [configure]).
+  Duration get smAckIntervalForeground => _smAckIntervalForeground;
+  Duration get smAckIntervalBackground => _smAckIntervalBackground;
+  Duration get pingIntervalForeground => _pingIntervalForeground;
+  Duration get pingIntervalBackground => _pingIntervalBackground;
+  Duration get pendingAckRequestDelay => _pendingAckRequestDelay;
+  Duration get keepaliveMaxTimeout => _keepaliveMaxTimeout;
+
+  /// Overrides keepalive/ping cadence at runtime. Any parameter left `null`
+  /// keeps its current value. Passing no arguments is a no-op. The active
+  /// keepalive timer is restarted so a new foreground/background interval
+  /// takes effect immediately instead of waiting for the next tick.
+  void configure({
+    Duration? smAckIntervalForeground,
+    Duration? smAckIntervalBackground,
+    Duration? pingIntervalForeground,
+    Duration? pingIntervalBackground,
+    Duration? pendingAckRequestDelay,
+    Duration? keepaliveMaxTimeout,
+  }) {
+    if (smAckIntervalForeground != null) {
+      _smAckIntervalForeground = smAckIntervalForeground;
+    }
+    if (smAckIntervalBackground != null) {
+      _smAckIntervalBackground = smAckIntervalBackground;
+    }
+    if (pingIntervalForeground != null) {
+      _pingIntervalForeground = pingIntervalForeground;
+    }
+    if (pingIntervalBackground != null) {
+      _pingIntervalBackground = pingIntervalBackground;
+    }
+    if (pendingAckRequestDelay != null) {
+      _pendingAckRequestDelay = pendingAckRequestDelay;
+    }
+    if (keepaliveMaxTimeout != null) {
+      _keepaliveMaxTimeout = keepaliveMaxTimeout;
+    }
+    Log.i(
+      TAG,
+      'Keepalive tuning updated: smAckFg=${_smAckIntervalForeground.inSeconds}s '
+      'smAckBg=${_smAckIntervalBackground.inSeconds}s '
+      'pingFg=${_pingIntervalForeground.inSeconds}s '
+      'pingBg=${_pingIntervalBackground.inSeconds}s '
+      'pendingAckDelay=${_pendingAckRequestDelay.inSeconds}s '
+      'maxTimeout=${_keepaliveMaxTimeout.inSeconds}s',
+    );
+    _restartKeepaliveTimer();
+  }
 
   StreamManagementModule(this._connection) {
     _connection.streamManagementModule = this;

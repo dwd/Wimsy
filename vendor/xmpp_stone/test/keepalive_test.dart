@@ -133,4 +133,83 @@ void main() {
     expect(failure.reason, KeepaliveFailureReason.pingTimeout);
     expect(failure.shortTimeout, isTrue);
   });
+
+  test('StreamManagementModule.configure overrides start out at defaults',
+      () {
+    final setup = _newConnection();
+    final module = StreamManagementModule.getInstance(setup.connection);
+
+    expect(
+      module.smAckIntervalForeground,
+      StreamManagementModule.defaultSmAckIntervalForeground,
+    );
+    expect(
+      module.pingIntervalBackground,
+      StreamManagementModule.defaultPingIntervalBackground,
+    );
+    expect(
+      module.keepaliveMaxTimeout,
+      StreamManagementModule.defaultKeepaliveMaxTimeout,
+    );
+  });
+
+  test('StreamManagementModule.configure applies only the given overrides',
+      () {
+    final setup = _newConnection();
+    final module = StreamManagementModule.getInstance(setup.connection);
+
+    module.configure(
+      smAckIntervalForeground: const Duration(seconds: 10),
+      pingIntervalBackground: const Duration(minutes: 2),
+    );
+
+    expect(module.smAckIntervalForeground, const Duration(seconds: 10));
+    expect(module.pingIntervalBackground, const Duration(minutes: 2));
+    // Untouched values keep their defaults.
+    expect(
+      module.smAckIntervalBackground,
+      StreamManagementModule.defaultSmAckIntervalBackground,
+    );
+    expect(
+      module.pingIntervalForeground,
+      StreamManagementModule.defaultPingIntervalForeground,
+    );
+    expect(
+      module.pendingAckRequestDelay,
+      StreamManagementModule.defaultPendingAckRequestDelay,
+    );
+    expect(
+      module.keepaliveMaxTimeout,
+      StreamManagementModule.defaultKeepaliveMaxTimeout,
+    );
+  });
+
+  test('Connection.configureKeepalive forwards to the stream management module',
+      () {
+    final setup = _newConnection();
+    final connection = setup.connection;
+
+    connection.configureKeepalive(
+      pendingAckRequestDelay: const Duration(seconds: 3),
+      keepaliveMaxTimeout: const Duration(seconds: 90),
+    );
+
+    final module = StreamManagementModule.getInstance(connection);
+    expect(module.pendingAckRequestDelay, const Duration(seconds: 3));
+    expect(module.keepaliveMaxTimeout, const Duration(seconds: 90));
+  });
+
+  test('Connection.configureKeepalive is a no-op without a stream management module',
+      () {
+    final account = XmppAccountSettings.fromJid('bob@example.com', 'secret')
+      ..bufferedWritesEnabled = false;
+    final connection = Connection.getInstance(account);
+    // Deliberately do not call StreamManagementModule.getInstance.
+    expect(
+      () => connection.configureKeepalive(
+        pendingAckRequestDelay: const Duration(seconds: 1),
+      ),
+      returnsNormally,
+    );
+  });
 }
