@@ -557,6 +557,7 @@ class _WimsyHomeState extends State<WimsyHome> {
   int _lastMessageCount = 0;
   final Map<String, bool> _roomSubjectExpanded = {};
   bool _wasAtBottom = true;
+  bool _showScrollToBottomButton = false;
   String? _editingMessageId;
   String? _editingChatBareJid;
   bool _editingIsRoom = false;
@@ -684,7 +685,6 @@ class _WimsyHomeState extends State<WimsyHome> {
       },
     );
   }
-
 
   Widget _buildClient(BuildContext context, XmppService service) {
     return LayoutBuilder(
@@ -1010,7 +1010,8 @@ class _WimsyHomeState extends State<WimsyHome> {
                                               ?.copyWith(
                                                 color: roomJoinError
                                                     ? theme.colorScheme.error
-                                                    : theme.colorScheme
+                                                    : theme
+                                                          .colorScheme
                                                           .onSurfaceVariant,
                                               ),
                                         ),
@@ -1314,131 +1315,151 @@ class _WimsyHomeState extends State<WimsyHome> {
                       ),
                     ),
                   )
-                : ListView.builder(
-                    controller: _messageScrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final message = messages[index];
-                      final messageKey = _keyForMessage(activeChat, message);
-                      final senderName = isBookmark
-                          ? (message.outgoing ? 'You' : message.from)
-                          : message.outgoing
-                          ? 'You'
-                          : service.displayNameFor(message.from);
-                      final replyTarget = _resolveReplyTarget(
-                        message: message,
-                        messageById: messageById,
-                      );
-                      final replySenderName = replyTarget == null
-                          ? null
-                          : (isBookmark
-                                ? (replyTarget.outgoing
-                                      ? 'you'
-                                      : replyTarget.from)
-                                : (replyTarget.outgoing
-                                      ? 'you'
-                                      : service.displayNameFor(
-                                          replyTarget.from,
-                                        )));
-                      final replyBody = replyTarget?.body;
-                      final timestamp = _formatTimestamp(message.timestamp);
-                      final avatarBytes = isBookmark
-                          ? null
-                          : service.avatarBytesFor(message.from);
-                      final inviteRoomJid = message.inviteRoomJid;
-                      final inviteRoomName =
-                          inviteRoomJid == null || inviteRoomJid.isEmpty
-                          ? null
-                          : service.displayNameFor(inviteRoomJid);
-                      final inviteAvatarBytes =
-                          inviteRoomJid == null || inviteRoomJid.isEmpty
-                          ? null
-                          : service.avatarBytesFor(inviteRoomJid);
-                      final joinRoom =
-                          (inviteRoomJid != null &&
-                              inviteRoomJid.isNotEmpty &&
-                              !message.outgoing)
-                          ? () => service.joinRoom(
-                              inviteRoomJid,
-                              password: message.invitePassword,
-                            )
-                          : null;
-                      return _MessageBubble(
-                        key: messageKey,
-                        message: message,
-                        senderName: senderName,
-                        timestamp: timestamp,
-                        avatarBytes: avatarBytes,
-                        replySenderName: replySenderName,
-                        replyBody: replyBody,
-                        onReplyTargetTap: (message.replyToId ?? '').isEmpty
-                            ? null
-                            : () => _scrollToMessageById(
-                                activeChat,
-                                message.replyToId!,
-                              ),
-                        inviteRoomJid: inviteRoomJid,
-                        inviteRoomName: inviteRoomName,
-                        inviteAvatarBytes: inviteAvatarBytes,
-                        inviteReason: message.inviteReason,
-                        onJoinInvite: joinRoom,
-                        selfReactionSenderId: service.reactionSenderForChat(
-                          activeChat,
-                          isRoom: isBookmark,
-                        ),
-                        recentReactionOptions: service.recentReactionEmojis,
-                        onReact: (emoji) {
-                          service.sendReaction(
-                            bareJid: activeChat,
+                : Stack(
+                    children: [
+                      ListView.builder(
+                        controller: _messageScrollController,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final message = messages[index];
+                          final messageKey = _keyForMessage(
+                            activeChat,
+                            message,
+                          );
+                          final senderName = isBookmark
+                              ? (message.outgoing ? 'You' : message.from)
+                              : message.outgoing
+                              ? 'You'
+                              : service.displayNameFor(message.from);
+                          final replyTarget = _resolveReplyTarget(
                             message: message,
-                            emoji: emoji,
-                            isRoom: isBookmark,
+                            messageById: messageById,
+                          );
+                          final replySenderName = replyTarget == null
+                              ? null
+                              : (isBookmark
+                                    ? (replyTarget.outgoing
+                                          ? 'you'
+                                          : replyTarget.from)
+                                    : (replyTarget.outgoing
+                                          ? 'you'
+                                          : service.displayNameFor(
+                                              replyTarget.from,
+                                            )));
+                          final replyBody = replyTarget?.body;
+                          final timestamp = _formatTimestamp(message.timestamp);
+                          final avatarBytes = isBookmark
+                              ? null
+                              : service.avatarBytesFor(message.from);
+                          final inviteRoomJid = message.inviteRoomJid;
+                          final inviteRoomName =
+                              inviteRoomJid == null || inviteRoomJid.isEmpty
+                              ? null
+                              : service.displayNameFor(inviteRoomJid);
+                          final inviteAvatarBytes =
+                              inviteRoomJid == null || inviteRoomJid.isEmpty
+                              ? null
+                              : service.avatarBytesFor(inviteRoomJid);
+                          final joinRoom =
+                              (inviteRoomJid != null &&
+                                  inviteRoomJid.isNotEmpty &&
+                                  !message.outgoing)
+                              ? () => service.joinRoom(
+                                  inviteRoomJid,
+                                  password: message.invitePassword,
+                                )
+                              : null;
+                          return _MessageBubble(
+                            key: messageKey,
+                            message: message,
+                            senderName: senderName,
+                            timestamp: timestamp,
+                            avatarBytes: avatarBytes,
+                            replySenderName: replySenderName,
+                            replyBody: replyBody,
+                            onReplyTargetTap: (message.replyToId ?? '').isEmpty
+                                ? null
+                                : () => _scrollToMessageById(
+                                    activeChat,
+                                    message.replyToId!,
+                                  ),
+                            inviteRoomJid: inviteRoomJid,
+                            inviteRoomName: inviteRoomName,
+                            inviteAvatarBytes: inviteAvatarBytes,
+                            inviteReason: message.inviteReason,
+                            onJoinInvite: joinRoom,
+                            selfReactionSenderId: service.reactionSenderForChat(
+                              activeChat,
+                              isRoom: isBookmark,
+                            ),
+                            recentReactionOptions: service.recentReactionEmojis,
+                            onReact: (emoji) {
+                              service.sendReaction(
+                                bareJid: activeChat,
+                                message: message,
+                                emoji: emoji,
+                                isRoom: isBookmark,
+                              );
+                            },
+                            onEdit:
+                                (message.outgoing &&
+                                    (message.messageId ?? '').isNotEmpty)
+                                ? () => _startEditingMessage(
+                                    activeChat: activeChat,
+                                    message: message,
+                                    isRoom: isBookmark,
+                                  )
+                                : null,
+                            onReply:
+                                ((message.stanzaId ?? message.messageId) ?? '')
+                                    .isNotEmpty
+                                ? () => _startReplyingToMessage(
+                                    activeChat: activeChat,
+                                    message: message,
+                                    isRoom: isBookmark,
+                                  )
+                                : null,
+                            onAcceptFile:
+                                (!isBookmark &&
+                                    !message.outgoing &&
+                                    (message.fileTransferId ?? '').isNotEmpty &&
+                                    message.fileState == 'offered')
+                                ? () => _promptAcceptFileTransfer(
+                                    activeChat,
+                                    message,
+                                  )
+                                : null,
+                            onDeclineFile:
+                                (!isBookmark &&
+                                    !message.outgoing &&
+                                    (message.fileTransferId ?? '').isNotEmpty &&
+                                    message.fileState == 'offered')
+                                ? () => _declineFileTransfer(message)
+                                : null,
+                            onFallbackUpload:
+                                (!isBookmark &&
+                                    message.outgoing &&
+                                    (message.fileTransferId ?? '').isNotEmpty &&
+                                    (message.fileState == 'failed' ||
+                                        message.fileState == 'declined'))
+                                ? () => _fallbackFileTransfer(message)
+                                : null,
                           );
                         },
-                        onEdit:
-                            (message.outgoing &&
-                                (message.messageId ?? '').isNotEmpty)
-                            ? () => _startEditingMessage(
-                                activeChat: activeChat,
-                                message: message,
-                                isRoom: isBookmark,
-                              )
-                            : null,
-                        onReply:
-                            ((message.stanzaId ?? message.messageId) ?? '')
-                                .isNotEmpty
-                            ? () => _startReplyingToMessage(
-                                activeChat: activeChat,
-                                message: message,
-                                isRoom: isBookmark,
-                              )
-                            : null,
-                        onAcceptFile:
-                            (!isBookmark &&
-                                !message.outgoing &&
-                                (message.fileTransferId ?? '').isNotEmpty &&
-                                message.fileState == 'offered')
-                            ? () =>
-                                  _promptAcceptFileTransfer(activeChat, message)
-                            : null,
-                        onDeclineFile:
-                            (!isBookmark &&
-                                !message.outgoing &&
-                                (message.fileTransferId ?? '').isNotEmpty &&
-                                message.fileState == 'offered')
-                            ? () => _declineFileTransfer(message)
-                            : null,
-                        onFallbackUpload:
-                            (!isBookmark &&
-                                message.outgoing &&
-                                (message.fileTransferId ?? '').isNotEmpty &&
-                                (message.fileState == 'failed' ||
-                                    message.fileState == 'declined'))
-                            ? () => _fallbackFileTransfer(message)
-                            : null,
-                      );
-                    },
+                      ),
+                      if (_showScrollToBottomButton)
+                        Positioned(
+                          right: 16,
+                          bottom: 16,
+                          child: FloatingActionButton.small(
+                            heroTag: 'scrollToBottomFab',
+                            tooltip: 'Scroll to latest message',
+                            onPressed: _scrollToBottom,
+                            child: const Icon(Icons.arrow_downward),
+                          ),
+                        ),
+                    ],
                   ),
           ),
           Container(
@@ -3112,7 +3133,9 @@ class _WimsyHomeState extends State<WimsyHome> {
     );
     var autoJoin = bookmark.bookmarkAutoJoin;
     var notifyMode = bookmark.effectiveMucNotifySettings.mode;
-    var afterOwnChoice = _afterOwnChoiceFor(bookmark.effectiveMucNotifySettings);
+    var afterOwnChoice = _afterOwnChoiceFor(
+      bookmark.effectiveMucNotifySettings,
+    );
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -3424,16 +3447,32 @@ class _WimsyHomeState extends State<WimsyHome> {
   void _handleScrollPosition() {
     if (!_messageScrollController.hasClients) {
       _wasAtBottom = true;
+      _updateScrollToBottomButton(false);
       return;
     }
     final position = _messageScrollController.position;
     _wasAtBottom = position.pixels >= (position.maxScrollExtent - 48);
+    _updateScrollToBottomButton(
+      shouldShowScrollToBottomButton(
+        pixels: position.pixels,
+        maxScrollExtent: position.maxScrollExtent,
+      ),
+    );
     if (position.pixels <= 24) {
       final activeChat = widget.service.activeChatBareJid;
       if (activeChat != null) {
         widget.service.requestOlderMessages(activeChat);
       }
     }
+  }
+
+  void _updateScrollToBottomButton(bool visible) {
+    if (_showScrollToBottomButton == visible) {
+      return;
+    }
+    setState(() {
+      _showScrollToBottomButton = visible;
+    });
   }
 
   void _scrollToBottom() {
@@ -3484,6 +3523,20 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
     return true;
   }
+}
+
+/// Decides whether the floating "scroll to latest message" button should be
+/// visible for the message list, given the current scroll [pixels] offset
+/// and the list's [maxScrollExtent].
+///
+/// The button is only shown once the user has scrolled a meaningful
+/// distance away from the bottom, so it doesn't flicker in and out for tiny
+/// scroll adjustments near the latest message.
+bool shouldShowScrollToBottomButton({
+  required double pixels,
+  required double maxScrollExtent,
+}) {
+  return maxScrollExtent - pixels > 200;
 }
 
 /// Returns a human-readable label for a MUC join error to show in the
@@ -5171,11 +5224,10 @@ class _PresenceMenu extends StatelessWidget {
                           onPressed: saving
                               ? null
                               : () async {
-                                  final result = await FilePicker
-                                      .pickFiles(
-                                        type: FileType.image,
-                                        withData: true,
-                                      );
+                                  final result = await FilePicker.pickFiles(
+                                    type: FileType.image,
+                                    withData: true,
+                                  );
                                   if (result == null || result.files.isEmpty) {
                                     return;
                                   }
@@ -5912,10 +5964,7 @@ class _CropMaskPainter extends CustomPainter {
 }
 
 class _PinSetupScreen extends StatefulWidget {
-  const _PinSetupScreen({
-    required this.onPinSet,
-    required this.preferences,
-  });
+  const _PinSetupScreen({required this.onPinSet, required this.preferences});
 
   final Future<void> Function(String pin, {required bool ignored}) onPinSet;
   final PreferencesService preferences;
@@ -6398,7 +6447,10 @@ class _QuicStatsGraph extends StatelessWidget {
             width: 36,
             height: 12,
             decoration: BoxDecoration(
-              border: Border.all(color: theme.colorScheme.outlineVariant, width: 0.5),
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant,
+                width: 0.5,
+              ),
               borderRadius: BorderRadius.circular(2),
             ),
             child: CustomPaint(
