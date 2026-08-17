@@ -3479,11 +3479,30 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (!_messageScrollController.hasClients) {
       return;
     }
-    _messageScrollController.animateTo(
-      _messageScrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
-    );
+    _messageScrollController
+        .animateTo(
+          _messageScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        )
+        .then((_) => _settleScrollToBottom());
+  }
+
+  /// After the scroll animation completes, the message list's content
+  /// height may have changed slightly (e.g. an image or avatar finishing
+  /// layout, or a new message arriving mid-animation), leaving the view
+  /// short of the true bottom because [maxScrollExtent] was captured before
+  /// the animation started. Jump straight to the up-to-date
+  /// [maxScrollExtent] so the view always lands exactly at the latest
+  /// message.
+  void _settleScrollToBottom() {
+    if (!mounted || !_messageScrollController.hasClients) {
+      return;
+    }
+    final position = _messageScrollController.position;
+    if (position.pixels < position.maxScrollExtent) {
+      _messageScrollController.jumpTo(position.maxScrollExtent);
+    }
   }
 
   Future<bool> _confirmClearCache() async {
