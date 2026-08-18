@@ -26,8 +26,9 @@ import 'models/room_entry.dart';
 import 'notifications/notification_service.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
-import 'xmpp/xmpp_service.dart';
 import 'xmpp/jid_discovery.dart';
+import 'xmpp/vcard_utils.dart';
+import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
 import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -1349,8 +1350,19 @@ class _WimsyHomeState extends State<WimsyHome> {
                                             )));
                           final replyBody = replyTarget?.body;
                           final timestamp = _formatTimestamp(message.timestamp);
+                          final occupantAvatarJid = isBookmark
+                              ? roomOccupantAvatarJid(
+                                  roomJid: activeChat,
+                                  nick: message.from,
+                                  outgoing: message.outgoing,
+                                )
+                              : null;
                           final avatarBytes = isBookmark
-                              ? null
+                              ? (occupantAvatarJid == null
+                                    ? null
+                                    : service.avatarBytesFor(
+                                        occupantAvatarJid,
+                                      ))
                               : service.avatarBytesFor(message.from);
                           final inviteRoomJid = message.inviteRoomJid;
                           final inviteRoomName =

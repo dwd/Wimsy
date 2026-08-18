@@ -282,4 +282,29 @@ void main() {
       },
     );
   });
+
+  group('roomOccupantAvatarJid', () {
+    const roomJid = 'room@conference.example.com';
+
+    test('builds the full occupant JID for an incoming room message', () {
+      expect(
+        roomOccupantAvatarJid(roomJid: roomJid, nick: 'nick', outgoing: false),
+        'room@conference.example.com/nick',
+      );
+    });
+
+    test('returns null for our own outgoing room message', () {
+      expect(
+        roomOccupantAvatarJid(roomJid: roomJid, nick: 'nick', outgoing: true),
+        isNull,
+      );
+    });
+
+    test('returns null when the nick is empty', () {
+      expect(
+        roomOccupantAvatarJid(roomJid: roomJid, nick: '', outgoing: false),
+        isNull,
+      );
+    });
+  });
 }

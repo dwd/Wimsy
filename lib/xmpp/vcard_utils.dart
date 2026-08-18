@@ -119,6 +119,30 @@ bool shouldFetchVcardForCache({
   return false;
 }
 
+/// Computes the JID to use for fetching/displaying a room occupant's avatar
+/// via vCard, given the occupant's [nick] (as reported by
+/// `ChatMessage.from` for messages received in a MUC room).
+///
+/// Room messages store only the occupant's nick, not a full JID. To fetch
+/// the occupant's vCard avatar we need the occupant's *full* JID
+/// (`room@conference/nick`), since anonymous/semi-anonymous MUCs hide the
+/// occupant's real bare JID and vCard avatar lookups for occupants only work
+/// against the full occupant JID (see `shouldFetchVcardForCache` above and
+/// `XmppService.avatarBytesFor`'s full-JID handling).
+///
+/// Returns `null` for outgoing messages (no need to fetch our own avatar via
+/// the occupant JID) or when [nick] is empty.
+String? roomOccupantAvatarJid({
+  required String roomJid,
+  required String nick,
+  required bool outgoing,
+}) {
+  if (outgoing || nick.isEmpty) {
+    return null;
+  }
+  return '$roomJid/$nick';
+}
+
 String normalizeVcardPhotoHash(String hash) {
   var normalized = hash.trim();
   while (normalized.length.isEven && normalized.isNotEmpty) {
