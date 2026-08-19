@@ -2604,12 +2604,17 @@ class XmppService extends ChangeNotifier {
     required bool isRoom,
   }) {
     // For MUC rooms, XEP-0461 requires the stanza-id applied by the chatroom
-    // (XEP-0359), not the stanza's own id attribute. If the room has not
-    // applied a stanza-id we cannot build a valid reply reference.
+    // (XEP-0359), not the stanza's own id attribute. Live groupchat messages
+    // carry an explicit <stanza-id/> child, but messages delivered via MAM
+    // catch-up (XEP-0313) often omit it because the MAM <result id="..."/>
+    // *is* defined by XEP-0313 to equal the room's XEP-0359 stanza-id for a
+    // MUC archive, so fall back to that id when the dedicated element is
+    // missing. If neither is available we cannot build a valid reference.
     // For 1:1 chats the stanza-id is ignored but the message id is a valid
     // fallback.
-    final targetId =
-        isRoom ? message.stanzaId : message.messageId;
+    final targetId = isRoom
+        ? (message.stanzaId ?? message.mamId)
+        : message.messageId;
     if (targetId == null || targetId.isEmpty) {
       return null;
     }

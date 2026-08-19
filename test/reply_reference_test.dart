@@ -7,6 +7,7 @@ ChatMessage _mucMessage({
   required String from,
   required String messageId,
   String? stanzaId,
+  String? mamId,
 }) {
   return ChatMessage(
     from: from,
@@ -16,6 +17,7 @@ ChatMessage _mucMessage({
     outgoing: false,
     messageId: messageId,
     stanzaId: stanzaId,
+    mamId: mamId,
     rawXml: '<message/>',
   );
 }
@@ -60,14 +62,41 @@ void main() {
           reason: 'MUC reply must use the room-applied stanza-id per XEP-0461');
     });
 
-    test('returns null for MUC reply when no room stanza-id is available', () {
-      // When the room has not assigned a stanza-id the client cannot build
-      // a valid XEP-0461 reply reference; returning null is the correct
-      // behaviour (no <reply> element will be included in the outgoing stanza).
+    test(
+        'falls back to the MAM archive id (XEP-0313) for MUC reply when no '
+        'dedicated stanza-id element is present', () {
+      // Messages delivered via MAM catch-up sometimes omit the dedicated
+      // <stanza-id/> element. Per XEP-0313, the MAM <result id="..."/> for a
+      // MUC archive equals the room's XEP-0359 stanza-id, so it is a valid
+      // substitute and must still produce a usable reply reference.
       final message = _mucMessage(
         from: 'alice',
         messageId: 'stanza-own-id',
         stanzaId: null,
+        mamId: 'mam-archive-id',
+      );
+
+      final ref = service.buildReplyReference(
+        chatJid: 'room@conference.example',
+        message: message,
+        isRoom: true,
+      );
+
+      expect(ref, isNotNull,
+          reason: 'should fall back to the MAM archive id per XEP-0313');
+      expect(ref!.id, 'mam-archive-id');
+    });
+
+    test('returns null for MUC reply when no room stanza-id or mamId is available', () {
+      // When the room has not assigned a stanza-id, and no MAM archive id is
+      // known either, the client cannot build a valid XEP-0461 reply
+      // reference; returning null is the correct behaviour (no <reply>
+      // element will be included in the outgoing stanza).
+      final message = _mucMessage(
+        from: 'alice',
+        messageId: 'stanza-own-id',
+        stanzaId: null,
+        mamId: null,
       );
 
       final ref = service.buildReplyReference(
