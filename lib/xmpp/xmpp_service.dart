@@ -1481,8 +1481,11 @@ class XmppService extends ChangeNotifier {
       _publishDisplayedState(bareJid);
     }
     if (bareJid != null && isBookmark(bareJid)) {
+      // MAM catch-up for rooms is handled when we join the room (see
+      // joinRoom), since a joined room already receives every message sent
+      // since it joined. Re-requesting MAM here (i.e. on every UI switch to
+      // an already-joined room) would be redundant and wasteful.
       _ensureRoom(_bareJid(bareJid));
-      _requestRoomMamOnOpen(bareJid);
       _publishDisplayedState(bareJid);
     }
     notifyListeners();
@@ -8356,16 +8359,6 @@ class XmppService extends ChangeNotifier {
       return;
     }
     _startMamCatchUp(normalized, isRoom: false);
-  }
-
-  void _requestRoomMamOnOpen(String roomJid) {
-    final normalized = _bareJid(roomJid);
-    final existingMessages = _roomMessages[normalized];
-    if (existingMessages == null || existingMessages.isEmpty) {
-      _requestRoomMam(normalized, max: 25, before: '');
-      return;
-    }
-    _startMamCatchUp(normalized, isRoom: true);
   }
 
   void _requestMamInitial(String bareJid) {
