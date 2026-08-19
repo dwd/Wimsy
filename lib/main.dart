@@ -550,6 +550,15 @@ class _WimsyHomeState extends State<WimsyHome> {
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _messageScrollController = ScrollController();
   final Map<String, DateTime> _lastReadAtByChat = {};
+  // Busy chats can have tens of thousands of cached messages. Rendering and
+  // re-indexing all of them on every rebuild made opening such a chat
+  // visibly slow (the window stayed blank while it caught up). Instead we
+  // only keep a bounded "window" of the most recent messages on screen and
+  // grow it from the already-loaded local cache as the user scrolls up,
+  // falling back to a network fetch only once the local cache is exhausted.
+  static const int _initialMessageWindowSize = 60;
+  static const int _messageWindowIncrement = 60;
+  final Map<String, int> _messageWindowByChat = {};
   bool _clearingCache = false;
   Timer? _typingDebounce;
   Timer? _idleTimer;
@@ -602,6 +611,47 @@ class _WimsyHomeState extends State<WimsyHome> {
   Future<void> _seedRoster() async {
     final roster = widget.storage.loadRoster();
     widget.service.seedRoster(roster);
+  }
+
+  /// The number of most-recent messages to keep rendered for [bareJid].
+  /// Grows in [_messageWindowIncrement] steps as the user scrolls toward
+  /// the top of a chat with more cached history than is currently shown.
+  int _messageWindowFor(String bareJid) {
+    return _messageWindowByChat[bareJid] ?? _initialMessageWindowSize;
+  }
+
+  /// Reveals another page of already-cached messages for [bareJid] without
+  /// hitting the network, preserving the user's scroll position so the
+  /// message they were looking at doesn't jump around as older messages
+  /// are inserted above it.
+  void _growMessageWindow(String bareJid) {
+    final hasClients = _messageScrollController.hasClients;
+    final previousPixels = hasClients
+        ? _messageScrollController.position.pixels
+        : null;
+    final previousExtent = hasClients
+        ? _messageScrollController.position.maxScrollExtent
+        : null;
+    setState(() {
+      _messageWindowByChat[bareJid] =
+          _messageWindowFor(bareJid) + _messageWindowIncrement;
+    });
+    if (previousPixels == null || previousExtent == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_messageScrollController.hasClients) {
+        return;
+      }
+      final newExtent = _messageScrollController.position.maxScrollExtent;
+      _messageScrollController.jumpTo(
+        scrollOffsetAfterPrepend(
+          previousPixels: previousPixels,
+          previousMaxScrollExtent: previousExtent,
+          newMaxScrollExtent: newExtent,
+        ),
+      );
+    });
   }
 
   Future<void> _seedMessages() async {
@@ -1146,22 +1196,36 @@ class _WimsyHomeState extends State<WimsyHome> {
   }) {
     final theme = Theme.of(context);
     final isBookmark = activeChat != null && service.isBookmark(activeChat);
-    final messages = activeChat == null
+    final isNewlyOpenedChat =
+        activeChat != null && activeChat != _lastFocusedChat;
+    if (isNewlyOpenedChat) {
+      // Start each newly opened chat with just the initial screenful or
+      // two, rather than carrying over a window grown from a previous
+      // visit or previous chat.
+      _messageWindowByChat[activeChat] = _initialMessageWindowSize;
+    }
+    final allMessages = activeChat == null
         ? const <ChatMessage>[]
         : isBookmark
         ? service.roomMessagesFor(activeChat)
         : service.messagesFor(activeChat);
+    // Only render/index the most recent "window" of messages: for a busy
+    // chat with a huge cached history, building and indexing every single
+    // message on each rebuild is what made opening the chat feel slow.
+    // Older messages are revealed on demand as the user scrolls up (see
+    // `_growMessageWindow`).
+    final messages = activeChat == null
+        ? allMessages
+        : messageWindow(allMessages, _messageWindowFor(activeChat));
     final messageById = _indexMessagesById(messages);
     _indexMessagePositions(activeChat, messages);
     final roomEntry = activeChat == null ? null : service.roomFor(activeChat);
     _activeChatForKeyHandler = activeChat;
     _activeChatIsBookmark = isBookmark;
     _activeChatRoomJoined = roomEntry?.joined ?? false;
-    _handleAutoScroll(messages.length);
-    final isNewlyOpenedChat =
-        activeChat != null && activeChat != _lastFocusedChat;
+    _handleAutoScroll(allMessages.length);
     if (activeChat != null) {
-      _markChatRead(activeChat, messages);
+      _markChatRead(activeChat, allMessages);
     }
     if (activeChat == null) {
       _lastFocusedChat = null;
@@ -1174,7 +1238,7 @@ class _WimsyHomeState extends State<WimsyHome> {
       }
     } else if (isNewlyOpenedChat) {
       _lastFocusedChat = activeChat;
-      _lastMessageCount = messages.length;
+      _lastMessageCount = allMessages.length;
       if (_editingChatBareJid != null && _editingChatBareJid != activeChat) {
         _cancelEditing();
       }
@@ -3473,7 +3537,17 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (position.pixels <= 24) {
       final activeChat = widget.service.activeChatBareJid;
       if (activeChat != null) {
-        widget.service.requestOlderMessages(activeChat);
+        final isRoom = widget.service.isBookmark(activeChat);
+        final cachedCount = isRoom
+            ? widget.service.roomMessagesFor(activeChat).length
+            : widget.service.messagesFor(activeChat).length;
+        if (cachedCount > _messageWindowFor(activeChat)) {
+          // More history is already sitting in the local cache: reveal it
+          // immediately rather than waiting on a round-trip to the server.
+          _growMessageWindow(activeChat);
+        } else {
+          widget.service.requestOlderMessages(activeChat);
+        }
       }
     }
   }
@@ -3568,6 +3642,47 @@ bool shouldShowScrollToBottomButton({
   required double maxScrollExtent,
 }) {
   return maxScrollExtent - pixels > 200;
+}
+
+/// Returns the slice of [messages] that should actually be rendered: the
+/// most recent [windowSize] messages, or all of them if there are fewer
+/// than [windowSize] to begin with.
+///
+/// Busy chats/groupchats can have a local cache of many thousands of
+/// messages. Rendering (and re-indexing, for reply lookups and jump-to-id)
+/// every single one on every rebuild is what made opening such a chat feel
+/// slow, with the window staying blank for a while before finally showing
+/// up scrolled to the bottom. Keeping only a bounded window in view fixes
+/// that; older messages are paged in on demand as the user scrolls up.
+List<ChatMessage> messageWindow(List<ChatMessage> messages, int windowSize) {
+  if (windowSize <= 0 || messages.isEmpty) {
+    return messages;
+  }
+  if (messages.length <= windowSize) {
+    return messages;
+  }
+  return messages.sublist(messages.length - windowSize);
+}
+
+/// Computes the scroll offset that keeps the same content on screen after
+/// older messages have been prepended to the message list.
+///
+/// Prepending items above the current viewport pushes everything else
+/// down by the amount of newly-added content; without compensating for
+/// that, the user's view would visibly jump. This returns the new
+/// [previousPixels] offset shifted by however much the scrollable content
+/// grew (`newMaxScrollExtent - previousMaxScrollExtent`), so the message
+/// the user was looking at stays in the same place.
+double scrollOffsetAfterPrepend({
+  required double previousPixels,
+  required double previousMaxScrollExtent,
+  required double newMaxScrollExtent,
+}) {
+  final delta = newMaxScrollExtent - previousMaxScrollExtent;
+  if (delta <= 0) {
+    return previousPixels;
+  }
+  return previousPixels + delta;
 }
 
 /// Returns a human-readable label for a MUC join error to show in the
