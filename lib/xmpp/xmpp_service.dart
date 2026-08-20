@@ -1485,7 +1485,14 @@ class XmppService extends ChangeNotifier {
       // joinRoom), since a joined room already receives every message sent
       // since it joined. Re-requesting MAM here (i.e. on every UI switch to
       // an already-joined room) would be redundant and wasteful.
-      _ensureRoom(_bareJid(bareJid));
+      final normalizedRoom = _bareJid(bareJid);
+      _ensureRoom(normalizedRoom);
+      // If we open a room chat that we haven't joined yet, try to join it
+      // immediately. On success this also re-enables autojoin for the
+      // bookmark (see the self-presence handling in _listenToMucEvents).
+      if (_rooms[normalizedRoom]?.joined != true) {
+        joinRoom(bareJid);
+      }
       _publishDisplayedState(bareJid);
     }
     notifyListeners();
@@ -2934,6 +2941,18 @@ class XmppService extends ChangeNotifier {
       if (presence.isSelf && !presence.unavailable) {
         final joinSpan = _mucJoinTransactions.remove(roomJid);
         _finishSpan(joinSpan);
+        // We successfully joined the room; enable autojoin in the bookmark
+        // (if not already enabled) so we automatically rejoin it on the
+        // next connection, then persist the change to the server.
+        final bookmarkIndex = _bookmarks.indexWhere((b) => b.jid == roomJid);
+        if (bookmarkIndex >= 0 && !_bookmarks[bookmarkIndex].bookmarkAutoJoin) {
+          final updated = _bookmarks[bookmarkIndex].copyWith(
+            bookmarkAutoJoin: true,
+          );
+          _bookmarks[bookmarkIndex] = updated;
+          _bookmarkPersistor?.call(List.unmodifiable(_bookmarks));
+          unawaited(upsertBookmark(updated));
+        }
       }
       final mujiSession = _mujiSessions[roomJid];
       if (mujiSession != null && presence.nick.isNotEmpty) {
