@@ -7527,7 +7527,16 @@ class XmppService extends ChangeNotifier {
     await _sendIqAndAwait(
       buildPrivatePepConfigureIq(node: node, selfBareJid: selfBareJid),
     );
-    await _sendIqAndAwait(publishIqBuilder());
+    final retryResult = await _sendIqAndAwait(publishIqBuilder());
+    if (retryResult != null && retryResult.type == IqStanzaType.ERROR) {
+      final retryCondition = _iqErrorCondition(retryResult);
+      final retryPubsubError = _iqPubsubErrorCondition(retryResult);
+      Log.w(
+        'XmppService',
+        'PEP publish to $node still failed after reconfiguring: '
+        '$retryCondition / $retryPubsubError',
+      );
+    }
   }
 
   /// Publishes an MDS displayed marker for [chatJid] via [_doPrivatePepPublish].

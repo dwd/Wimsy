@@ -18,7 +18,7 @@ const pubsubXmlns = 'http://jabber.org/protocol/pubsub';
 const pubsubOwnerXmlns = 'http://jabber.org/protocol/pubsub#owner';
 const pubsubPublishOptionsFormType =
     'http://jabber.org/protocol/pubsub#publish-options';
-const pubsubMetaDataFormType = 'http://jabber.org/protocol/pubsub#meta-data';
+const pubsubNodeConfigFormType = 'http://jabber.org/protocol/pubsub#node_config';
 
 /// Builds a data-form `<field>` element with [varName] and [value].
 /// Optionally sets a [type] attribute (e.g. `'hidden'`).
@@ -80,7 +80,7 @@ IqStanza buildPrivatePepConfigureIq({
   configForm.addAttribute(XmppAttribute('type', 'submit'));
   configForm.addChild(buildFormField(
     'FORM_TYPE',
-    pubsubMetaDataFormType,
+    pubsubNodeConfigFormType,
     type: 'hidden',
   ));
   configForm.addChild(buildFormField('pubsub#persist_items', 'true'));

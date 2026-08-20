@@ -68,7 +68,7 @@ void main() {
       expect(configure?.getAttribute('node')?.value, 'urn:example:mynode');
     });
 
-    test('configure form has FORM_TYPE set to pubsub meta-data', () {
+    test('configure form has FORM_TYPE set to pubsub node_config', () {
       final iq = buildPrivatePepConfigureIq(
         node: 'urn:example:node',
         selfBareJid: 'user@example.com',
@@ -81,7 +81,7 @@ void main() {
       final formType = fields
           .firstWhere((f) => f.getAttribute('var')?.value == 'FORM_TYPE');
       expect(formType.getChild('value')?.textValue,
-          'http://jabber.org/protocol/pubsub#meta-data');
+          'http://jabber.org/protocol/pubsub#node_config');
     });
 
     test('configure form includes all required node config fields', () {

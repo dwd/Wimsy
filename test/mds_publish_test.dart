@@ -145,7 +145,7 @@ void main() {
       expect(configure?.getAttribute('node')?.value, 'urn:xmpp:mds:displayed:0');
     });
 
-    test('configure form has FORM_TYPE set to pubsub meta-data', () {
+    test('configure form has FORM_TYPE set to pubsub node_config', () {
       final iq = buildMdsNodeConfigureIq(selfBareJid: 'user@example.com');
       final configure = iq.getChild('pubsub')?.getChild('configure');
       final x = configure?.getChild('x');
@@ -155,7 +155,7 @@ void main() {
       final formType = fields.firstWhere(
           (f) => f.getAttribute('var')?.value == 'FORM_TYPE');
       expect(formType.getChild('value')?.textValue,
-          'http://jabber.org/protocol/pubsub#meta-data');
+          'http://jabber.org/protocol/pubsub#node_config');
     });
 
     test('configure form includes all required node config fields', () {
