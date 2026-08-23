@@ -292,6 +292,42 @@ void main() {
   });
 
   group('SASL2 feature negotiation timing', () {
+    test('pipelined success consumes bundled post-auth features', () async {
+      final account = XmppAccountSettings.fromJid(
+        'alice@example.com',
+        'secret',
+      )
+        ..sasl2CachedMechanisms = ['PLAIN']
+        ..sasl2LastMechanism = 'PLAIN'
+        ..iapConfigVersionValue = 'config-1'
+        ..sasl2SendUserAgent = false;
+      final socket = _RecordingSocket();
+      final connection = Connection(account, socketFactory: () => socket);
+
+      await connection.openSocket();
+      await Future<void>.delayed(Duration.zero);
+      expect(socket.writes.join(), contains('<authenticate'));
+
+      connection.handleResponse(
+        "<xmpp_stone><stream:features xmlns:stream='http://etherx.jabber.org/streams'>"
+        "<authentication xmlns='urn:xmpp:sasl:2'><mechanism>PLAIN</mechanism>"
+        "</authentication><config-version xmlns='urn:xmpp:iap:0' "
+        "value='config-1'/></stream:features></xmpp_stone>",
+      );
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com/wimsy</authorization-identifier>'
+        "</success><stream:features xmlns:stream='http://etherx.jabber.org/streams'>"
+        "<session xmlns='urn:ietf:params:xml:ns:xmpp-session'><optional/>"
+        '</session></stream:features></xmpp_stone>',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(connection.state,
+          isNot(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures));
+      expect(connection.state, XmppConnectionState.SessionInitialized);
+    });
+
     test(
         'authenticated is set synchronously when success arrives bundled '
         'with stream features', () async {

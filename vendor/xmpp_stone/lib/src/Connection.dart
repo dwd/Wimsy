@@ -102,6 +102,7 @@ class Connection {
   bool _sasl2PipelinedAuthInFlight = false;
   bool _sasl2PipelinedRetryIssued = false;
   xml.XmlElement? _deferredFeatureElement;
+  xml.XmlElement? _deferredPostAuthFeatureElement;
 
   static const String _bind2Namespace = 'urn:xmpp:bind:0';
   static const String _carbons2Namespace = 'urn:xmpp:carbons:2';
@@ -526,6 +527,7 @@ class Connection {
     _sasl2PipelinedAuthInFlight = false;
     _sasl2PipelinedRetryIssued = false;
     _deferredFeatureElement = null;
+    _deferredPostAuthFeatureElement = null;
     _bind2Completed = false;
     _carbons2EnabledInline = false;
     final iapScheme = account.iapConfigVersionScheme?.trim();
@@ -847,7 +849,11 @@ class Connection {
             .where((element) => featureMatcher(element))
             .forEach((feature) {
           if (_sasl2PipelinedAuthInFlight) {
-            _deferredFeatureElement = feature;
+            if (authenticated) {
+              _deferredPostAuthFeatureElement = feature;
+            } else {
+              _deferredFeatureElement = feature;
+            }
           } else {
             connectionNegotatiorManager.negotiateFeatureList(feature);
           }
@@ -980,6 +986,11 @@ class Connection {
       if (result.successful) {
         completeSasl2Authentication();
         _deferredFeatureElement = null;
+        final postAuthFeatures = _deferredPostAuthFeatureElement;
+        _deferredPostAuthFeatureElement = null;
+        if (postAuthFeatures != null) {
+          connectionNegotatiorManager.negotiateFeatureList(postAuthFeatures);
+        }
         return;
       }
 
