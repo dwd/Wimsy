@@ -56,6 +56,8 @@ class XmppAccountSettings {
   String? iapConfigVersionValue;
   List<String>? sasl2CachedMechanisms;
   String? sasl2LastMechanism;
+  List<String>? sasl2CachedBind2Features;
+  List<String>? sasl2CachedFastMechanisms;
   bool bufferedWritesEnabled = true;
   int totalReconnections = 3;
   int reconnectionTimeout = 1000;

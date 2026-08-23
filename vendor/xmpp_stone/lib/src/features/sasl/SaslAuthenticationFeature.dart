@@ -78,6 +78,7 @@ class SaslAuthenticationFeature extends Negotiator {
         _connection.account.sasl2CachedMechanisms = parseMechanismNames(nonza);
         _offeredSasl2Mechanisms.addAll(parseMechanisms(nonza));
         _sasl2InlineFeatures.addAll(parseInlineFeatures(nonza));
+        cacheInlineFeatureNames(_connection, _sasl2InlineFeatures);
       } else if (nonza.name == 'mechanisms' &&
           nonza.getNameSpace() == sasl1Namespace) {
         _offeredSasl1Mechanisms.addAll(parseMechanisms(nonza));
@@ -360,6 +361,31 @@ class SaslAuthenticationFeature extends Negotiator {
       parsed[key] = child;
     }
     return parsed;
+  }
+
+  static void cacheInlineFeatureNames(
+    Connection connection,
+    Map<String, XmppElement> features,
+  ) {
+    final bind = features['urn:xmpp:bind:0'];
+    connection.account.sasl2CachedBind2Features = bind == null
+        ? null
+        : bind
+                .getChild('inline')
+                ?.children
+                .where((child) => child.name == 'feature')
+                .map((child) => child.getAttribute('var')?.value ?? '')
+                .where((value) => value.isNotEmpty)
+                .toList() ??
+            <String>[];
+    final fast = features[fastNamespace];
+    connection.account.sasl2CachedFastMechanisms = fast == null
+        ? null
+        : fast.children
+            .where((child) => child.name == 'mechanism')
+            .map((child) => (child.textValue ?? '').trim())
+            .where((value) => value.isNotEmpty)
+            .toList();
   }
 
   static void applyIapConfigVersion(Connection connection, Nonza nonza) {

@@ -16,6 +16,7 @@ import '../bookmarks/bookmarks_manager.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/fast_token_record.dart';
+import '../storage/iap_cache_record.dart';
 import '../storage/storage_service.dart';
 import '../av/call_session.dart';
 import '../av/call_quality.dart';
@@ -868,7 +869,9 @@ class XmppService extends ChangeNotifier {
     // migration failure (or non-QUIC transport) do we tear down the session.
     final socket = _connection?.socket;
     if (socket is QuicCapableXmppSocket) {
-      debugPrint('QUIC migration: attempting migration after connectivity change');
+      debugPrint(
+        'QUIC migration: attempting migration after connectivity change',
+      );
       socket.attemptMigration().then((result) {
         if (result == MigrationResult.success) {
           debugPrint('QUIC migration: success — keeping XMPP session');
@@ -1075,7 +1078,9 @@ class XmppService extends ChangeNotifier {
         }
       }
       if (wsConfig == null) {
-        _setError('Enter a connection URL like wss://host/path or https://host/path.');
+        _setError(
+          'Enter a connection URL like wss://host/path or https://host/path.',
+        );
         return;
       }
     }
@@ -1109,6 +1114,7 @@ class XmppService extends ChangeNotifier {
       // can authenticate without the password on this first connect, and keep
       // the stored copy in sync with the tokens the server issues/revokes.
       _seedFastToken(account, bareJid);
+      _seedIapCache(account, bareJid);
       if (!shouldUseWebSocket) {
         account.quicEndpoints = (quicTransportAvailable && useQuic)
             ? buildQuicEndpointPlan(
@@ -1216,6 +1222,7 @@ class XmppService extends ChangeNotifier {
           return;
         }
         if (state == XmppConnectionState.Ready) {
+          _persistIapCache(account, bareJid);
           if (!completer.isCompleted) {
             completer.complete();
           }
@@ -1340,9 +1347,7 @@ class XmppService extends ChangeNotifier {
     if (args == null) return;
     _connectRetryTimer?.cancel();
     final retryDelay = _keepaliveTuning.connectRetryDelay;
-    debugPrint(
-      'XMPP connect: scheduling retry in $retryDelay',
-    );
+    debugPrint('XMPP connect: scheduling retry in $retryDelay');
     _connectRetryTimer = Timer(retryDelay, () {
       _connectRetryTimer = null;
       debugPrint('XMPP connect: retrying after failure');
@@ -1407,8 +1412,10 @@ class XmppService extends ChangeNotifier {
       account.fastToken = stored.token;
       account.fastTokenExpiry = stored.expiry;
       account.fastMechanism = stored.mechanism;
-      debugPrint('XMPP FAST: using stored token for $bareJid '
-          '(mechanism=${stored.mechanism} expiry=${stored.expiry})');
+      debugPrint(
+        'XMPP FAST: using stored token for $bareJid '
+        '(mechanism=${stored.mechanism} expiry=${stored.expiry})',
+      );
     }
     account.onFastCredentialsChanged = (updated) {
       final token = updated.fastToken;
@@ -1427,6 +1434,39 @@ class XmppService extends ChangeNotifier {
         ),
       );
     };
+  }
+
+  void _seedIapCache(XmppAccountSettings account, String bareJid) {
+    final cached = _storage?.loadIapCache(bareJid);
+    if (cached == null) return;
+    account
+      ..iapConfigVersionScheme = cached.configVersionScheme
+      ..iapConfigVersionValue = cached.configVersion
+      ..sasl2CachedMechanisms = cached.sasl2Mechanisms
+      ..sasl2LastMechanism = cached.lastMechanism
+      ..sasl2CachedBind2Features = cached.bind2Features
+      ..sasl2CachedFastMechanisms = cached.fastMechanisms;
+    debugPrint('XMPP IAP: restored cached config-version for $bareJid');
+  }
+
+  void _persistIapCache(XmppAccountSettings account, String bareJid) {
+    final value = account.iapConfigVersionValue;
+    final mechanisms = account.sasl2CachedMechanisms;
+    final lastMechanism = account.sasl2LastMechanism;
+    if (value == null || mechanisms == null || lastMechanism == null) return;
+    unawaited(
+      _storage?.storeIapCache(
+        bareJid,
+        IapCacheRecord(
+          configVersion: value,
+          configVersionScheme: account.iapConfigVersionScheme,
+          sasl2Mechanisms: mechanisms,
+          lastMechanism: lastMechanism,
+          bind2Features: account.sasl2CachedBind2Features ?? const [],
+          fastMechanisms: account.sasl2CachedFastMechanisms ?? const [],
+        ),
+      ),
+    );
   }
 
   void clearCache() {
@@ -2984,8 +3024,9 @@ class XmppService extends ChangeNotifier {
       notifyListeners();
     });
     _roomSubscriptions['joinError']?.cancel();
-    _roomSubscriptions['joinError'] =
-        _mucManager!.roomJoinErrorStream.listen((event) {
+    _roomSubscriptions['joinError'] = _mucManager!.roomJoinErrorStream.listen((
+      event,
+    ) {
       _handleMucJoinError(event);
     });
     _startMucSelfPingTimer();
@@ -3593,12 +3634,11 @@ class XmppService extends ChangeNotifier {
 
   void _startCallStatsTimer(String sid) {
     _callStatsTimers.remove(sid)?.cancel();
-    _callStatsTimers[sid] = Timer.periodic(
-      _keepaliveTuning.callStatsInterval,
-      (_) {
-        unawaited(_collectCallStats(sid));
-      },
-    );
+    _callStatsTimers[sid] = Timer.periodic(_keepaliveTuning.callStatsInterval, (
+      _,
+    ) {
+      unawaited(_collectCallStats(sid));
+    });
   }
 
   Future<void> _collectCallStats(String sid) async {
@@ -5086,7 +5126,9 @@ class XmppService extends ChangeNotifier {
     // automatically, then persist the updated bookmark to the server.
     final bookmarkIndex = _bookmarks.indexWhere((b) => b.jid == normalized);
     if (bookmarkIndex >= 0 && _bookmarks[bookmarkIndex].bookmarkAutoJoin) {
-      final updated = _bookmarks[bookmarkIndex].copyWith(bookmarkAutoJoin: false);
+      final updated = _bookmarks[bookmarkIndex].copyWith(
+        bookmarkAutoJoin: false,
+      );
       _bookmarks[bookmarkIndex] = updated;
       _bookmarkPersistor?.call(List.unmodifiable(_bookmarks));
       unawaited(upsertBookmark(updated));
@@ -5774,11 +5816,13 @@ class XmppService extends ChangeNotifier {
       );
     }
 
-    unawaited(_doPrivatePepPublish(
-      publishIqBuilder: buildPublishIq,
-      node: _recentReactionsNode,
-      selfBareJid: selfBareJid,
-    ));
+    unawaited(
+      _doPrivatePepPublish(
+        publishIqBuilder: buildPublishIq,
+        node: _recentReactionsNode,
+        selfBareJid: selfBareJid,
+      ),
+    );
   }
 
   void _handleRecentReactionsStanza(AbstractStanza stanza) {
@@ -5913,9 +5957,11 @@ class XmppService extends ChangeNotifier {
     // stamp is the time the marker was originally published, which is a useful
     // fallback cutoff when the referenced stanzaId has been evicted from cache.
     final delay = stanza.children
-        .where((c) =>
-            c.name == 'delay' &&
-            c.getAttribute('xmlns')?.value == 'urn:xmpp:delay')
+        .where(
+          (c) =>
+              c.name == 'delay' &&
+              c.getAttribute('xmlns')?.value == 'urn:xmpp:delay',
+        )
         .firstOrNull;
     final delayStamp = delay?.getAttribute('stamp')?.value;
     debugPrint(
@@ -6309,7 +6355,8 @@ class XmppService extends ChangeNotifier {
     // If neither is advertised we default to 5 minutes.
     if (socket is QuicCapableXmppSocket) {
       final defaultPingInterval = _keepaliveTuning.quicPingIntervalDefault;
-      final minFloorMs = _keepaliveTuning.quicPingIntervalMinFloor.inMilliseconds;
+      final minFloorMs =
+          _keepaliveTuning.quicPingIntervalMinFloor.inMilliseconds;
       Duration pingInterval = defaultPingInterval;
 
       final quicIdleMs = socket.quicNegotiatedIdleTimeoutMs;
@@ -6323,8 +6370,9 @@ class XmppService extends ChangeNotifier {
       }
       if (xmppIdleSec != null) {
         final xmppMs = xmppIdleSec * 1000;
-        effectiveMs =
-            effectiveMs != null ? effectiveMs.clamp(0, xmppMs) : xmppMs;
+        effectiveMs = effectiveMs != null
+            ? effectiveMs.clamp(0, xmppMs)
+            : xmppMs;
       }
 
       if (effectiveMs != null && effectiveMs > 0) {
@@ -6342,7 +6390,7 @@ class XmppService extends ChangeNotifier {
       Log.i(
         'XmppService',
         'QUIC PING timer: interval=${pingInterval.inSeconds}s '
-        '(quic_idle=$quicDesc xmpp_idle=$xmppDesc)',
+            '(quic_idle=$quicDesc xmpp_idle=$xmppDesc)',
       );
       socket.startPingTimer(pingInterval);
     }
@@ -6986,7 +7034,8 @@ class XmppService extends ChangeNotifier {
           body: body,
           outgoing: outgoing,
           // Outgoing messages in the MAM archive were received by the server.
-          receiptReceived: outgoing && (stanzaId != null && stanzaId.isNotEmpty),
+          receiptReceived:
+              outgoing && (stanzaId != null && stanzaId.isNotEmpty),
           timestamp: timestamp,
           messageId: messageId,
           mamId: mamId,
@@ -7225,10 +7274,7 @@ class XmppService extends ChangeNotifier {
       }
       final nextState = state ?? existing.fileState;
       final nextBytes = fileBytes ?? existing.fileBytes;
-      list[i] = existing.copyWith(
-        fileBytes: nextBytes,
-        fileState: nextState,
-      );
+      list[i] = existing.copyWith(fileBytes: nextBytes, fileState: nextState);
       notifyListeners();
       _messagePersistor?.call(normalized, List.unmodifiable(list));
       return;
@@ -7534,7 +7580,7 @@ class XmppService extends ChangeNotifier {
       Log.w(
         'XmppService',
         'PEP publish to $node still failed after reconfiguring: '
-        '$retryCondition / $retryPubsubError',
+            '$retryCondition / $retryPubsubError',
       );
     }
   }
@@ -7596,12 +7642,14 @@ class XmppService extends ChangeNotifier {
     final byValue = isBookmark(normalized)
         ? normalized
         : (_currentUserBareJid ?? '');
-    unawaited(_doPublishMdsDisplayed(
-      chatJid: normalized,
-      stanzaId: stanzaId,
-      byValue: byValue,
-      selfBareJid: _currentUserBareJid!,
-    ));
+    unawaited(
+      _doPublishMdsDisplayed(
+        chatJid: normalized,
+        stanzaId: stanzaId,
+        byValue: byValue,
+        selfBareJid: _currentUserBareJid!,
+      ),
+    );
     notifyListeners();
   }
 
@@ -7765,7 +7813,8 @@ class XmppService extends ChangeNotifier {
     final isBackwardsPage =
         (before != null && before.isNotEmpty) ||
         (beforeId != null && beforeId.isNotEmpty) ||
-        (plan.before != null && plan.before!.isEmpty); // initial page (before='')
+        (plan.before != null &&
+            plan.before!.isEmpty); // initial page (before='')
     if (isBackwardsPage) {
       final router = IqRouter.getInstance(connection);
       router.registerResponseHandler(iqId, (response) {
@@ -8512,8 +8561,7 @@ class XmppService extends ChangeNotifier {
         if (!shouldFetchMamCatchUpForChat(
           displayedStanzaId: _displayedStanzaIdByChat[bareJid],
           latestLocalMamId: latestMamIdFor(bareJid),
-          stanzaIdAtLatestMamId:
-              _stanzaIdAtLatestMamId(bareJid, isRoom: false),
+          stanzaIdAtLatestMamId: _stanzaIdAtLatestMamId(bareJid, isRoom: false),
         )) {
           continue;
         }
@@ -8565,9 +8613,7 @@ class XmppService extends ChangeNotifier {
     query.addAttribute(XmppAttribute('queryid', AbstractStanza.getRandomId()));
 
     final x = XmppElement()..name = 'x';
-    x.addAttribute(
-      XmppAttribute('xmlns', 'jabber:x:data'),
-    );
+    x.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
     x.addAttribute(XmppAttribute('type', 'submit'));
 
     final formType = XmppElement()..name = 'field';
@@ -8591,9 +8637,7 @@ class XmppService extends ChangeNotifier {
 
     // RSM: request up to 50 messages per page.
     final set = XmppElement()..name = 'set';
-    set.addAttribute(
-      XmppAttribute('xmlns', 'http://jabber.org/protocol/rsm'),
-    );
+    set.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/rsm'));
     final max = XmppElement()
       ..name = 'max'
       ..textValue = '50';

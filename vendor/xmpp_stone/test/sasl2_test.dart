@@ -45,6 +45,34 @@ void main() {
       expect(inlineFeatures.containsKey('urn:xmpp:bind2:0'), isTrue);
     });
 
+    test('caches inline feature names for IAP pipelining', () {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      final connection = Connection(account);
+      final bind = XmppElement()
+        ..name = 'bind'
+        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0'));
+      final bindInline = XmppElement()..name = 'inline';
+      bindInline.addChild(XmppElement()
+        ..name = 'feature'
+        ..addAttribute(XmppAttribute('var', 'urn:xmpp:carbons:2')));
+      bind.addChild(bindInline);
+      final fast = XmppElement()
+        ..name = 'fast'
+        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fast:0'));
+      fast.addChild(XmppElement()
+        ..name = 'mechanism'
+        ..textValue = 'HT2-SHA-256-NONE');
+
+      SaslAuthenticationFeature.cacheInlineFeatureNames(connection, {
+        'urn:xmpp:bind:0': bind,
+        'urn:xmpp:fast:0': fast,
+      });
+
+      expect(account.sasl2CachedBind2Features, ['urn:xmpp:carbons:2']);
+      expect(account.sasl2CachedFastMechanisms, ['HT2-SHA-256-NONE']);
+    });
+
     test('applies IAP config-version offer to connection', () {
       final connection = Connection(
         XmppAccountSettings.fromJid('alice@example.com', 'secret'),

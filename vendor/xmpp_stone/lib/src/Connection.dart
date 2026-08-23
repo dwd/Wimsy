@@ -520,7 +520,7 @@ class Connection {
   }
 
   Future<void> openSocket() async {
-    _sasl2InlineFeatures = {};
+    _sasl2InlineFeatures = _buildCachedSasl2InlineFeatures();
     _sasl2SuccessElements = [];
     _iapAdvertisedInCurrentStream = false;
     _sasl2PipelinedAuthInFlight = false;
@@ -672,6 +672,37 @@ class Connection {
       print('XMPP socket error: $error');
       handleConnectionError(error.toString());
     }
+  }
+
+  Map<String, XmppElement> _buildCachedSasl2InlineFeatures() {
+    final features = <String, XmppElement>{};
+    final bindFeatures = account.sasl2CachedBind2Features;
+    if (bindFeatures != null) {
+      final bind = XmppElement()
+        ..name = 'bind'
+        ..addAttribute(XmppAttribute('xmlns', _bind2Namespace));
+      final inline = XmppElement()..name = 'inline';
+      for (final featureName in bindFeatures) {
+        inline.addChild(XmppElement()
+          ..name = 'feature'
+          ..addAttribute(XmppAttribute('var', featureName)));
+      }
+      bind.addChild(inline);
+      features[_bind2Namespace] = bind;
+    }
+    final fastMechanisms = account.sasl2CachedFastMechanisms;
+    if (fastMechanisms != null) {
+      final fast = XmppElement()
+        ..name = 'fast'
+        ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fast:0'));
+      for (final mechanism in fastMechanisms) {
+        fast.addChild(XmppElement()
+          ..name = 'mechanism'
+          ..textValue = mechanism);
+      }
+      features['urn:xmpp:fast:0'] = fast;
+    }
+    return features;
   }
 
   void _attachOpenedSocket(xmppSocket.XmppWebSocket socket) {

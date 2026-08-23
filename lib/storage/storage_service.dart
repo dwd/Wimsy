@@ -12,6 +12,7 @@ import '../models/avatar_metadata.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
 import 'fast_token_record.dart';
+import 'iap_cache_record.dart';
 import 'secure_store.dart';
 
 class StorageService {
@@ -21,6 +22,7 @@ class StorageService {
   // XEP-0484 FAST tokens, keyed by bare JID, so that a token issued for one
   // account is never presented for another.
   static const _fastTokensKey = 'fast_tokens';
+  static const _iapCachesKey = 'iap_caches';
   static const _rosterKey = 'roster';
   static const _rosterVersionKey = 'roster_version';
   static const _messagesKey = 'messages';
@@ -91,6 +93,7 @@ class StorageService {
   static const List<String> _essentialKeys = [
     _accountKey,
     _fastTokensKey,
+    _iapCachesKey,
     _rosterKey,
     _rosterVersionKey,
     _bookmarksKey,
@@ -105,7 +108,7 @@ class StorageService {
   /// [secureStore] is only injected by tests; production code uses the
   /// platform keystore implementation.
   StorageService({SecureStore? secureStore})
-      : _secureStorage = secureStore ?? createSecureStore();
+    : _secureStorage = secureStore ?? createSecureStore();
 
   final SecureStore _secureStorage;
   Box<dynamic>? _box;
@@ -222,7 +225,9 @@ class StorageService {
     final existing = box.get(_fastTokensKey);
     final next = <String, dynamic>{};
     if (existing is Map) {
-      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+      next.addAll(
+        existing.map((key, value) => MapEntry(key.toString(), value)),
+      );
     }
     next[bareJid] = record.toMap();
     await box.put(_fastTokensKey, next);
@@ -254,6 +259,28 @@ class StorageService {
     await box.put(_fastTokensKey, const <String, dynamic>{});
   }
 
+  IapCacheRecord? loadIapCache(String bareJid) {
+    final data = _box?.get(_iapCachesKey);
+    if (bareJid.isEmpty || data is! Map || data[bareJid] is! Map) return null;
+    return IapCacheRecord.fromMap(
+      Map<String, dynamic>.from(data[bareJid] as Map),
+    );
+  }
+
+  Future<void> storeIapCache(String bareJid, IapCacheRecord record) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) return;
+    final existing = box.get(_iapCachesKey);
+    final next = <String, dynamic>{};
+    if (existing is Map) {
+      next.addAll(
+        existing.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    next[bareJid] = record.toMap();
+    await box.put(_iapCachesKey, next);
+  }
+
   List<ContactEntry> loadRoster() {
     final box = _box;
     if (box == null) {
@@ -264,7 +291,9 @@ class StorageService {
       final contacts = <ContactEntry>[];
       for (final entry in data) {
         if (entry is Map) {
-          final contact = ContactEntry.fromMap(Map<String, dynamic>.from(entry));
+          final contact = ContactEntry.fromMap(
+            Map<String, dynamic>.from(entry),
+          );
           if (contact != null) {
             contacts.add(contact);
           }
@@ -320,7 +349,9 @@ class StorageService {
       final bookmarks = <ContactEntry>[];
       for (final entry in data) {
         if (entry is Map) {
-          final bookmark = ContactEntry.fromMap(Map<String, dynamic>.from(entry));
+          final bookmark = ContactEntry.fromMap(
+            Map<String, dynamic>.from(entry),
+          );
           if (bookmark != null) {
             bookmarks.add(bookmark);
           }
@@ -336,7 +367,10 @@ class StorageService {
     if (box == null) {
       return;
     }
-    await box.put(_bookmarksKey, bookmarks.map((entry) => entry.toMap()).toList());
+    await box.put(
+      _bookmarksKey,
+      bookmarks.map((entry) => entry.toMap()).toList(),
+    );
   }
 
   Map<String, List<ChatMessage>> loadMessages() {
@@ -353,11 +387,17 @@ class StorageService {
     return _copyMessageCache(_roomMessageCache);
   }
 
-  Future<void> storeMessagesForJid(String bareJid, List<ChatMessage> messages) async {
+  Future<void> storeMessagesForJid(
+    String bareJid,
+    List<ChatMessage> messages,
+  ) async {
     await _storeMessagesForJid(bareJid, messages, isRoom: false);
   }
 
-  Future<void> storeRoomMessagesForJid(String roomJid, List<ChatMessage> messages) async {
+  Future<void> storeRoomMessagesForJid(
+    String roomJid,
+    List<ChatMessage> messages,
+  ) async {
     await _storeMessagesForJid(roomJid, messages, isRoom: true);
   }
 
@@ -409,8 +449,9 @@ class StorageService {
         }
         continue;
       }
-      writes[boxKey] =
-          list.map((message) => message.toMap()).toList(growable: false);
+      writes[boxKey] = list
+          .map((message) => message.toMap())
+          .toList(growable: false);
     }
     if (deletes.isNotEmpty) {
       await box.deleteAll(deletes);
@@ -494,7 +535,8 @@ class StorageService {
   /// [_maxCachedMessageBytes]. Returns the chats whose records changed so the
   /// caller can persist exactly those.
   Set<_MessageCacheKey> _enforceMessageCacheLimit() {
-    var totalBytes = _totalMessageBytes(_messageCache) +
+    var totalBytes =
+        _totalMessageBytes(_messageCache) +
         _totalMessageBytes(_roomMessageCache);
     if (totalBytes <= _maxCachedMessageBytes) {
       return const {};
@@ -502,20 +544,24 @@ class StorageService {
     final all = <_CachedMessageRef>[];
     for (final entry in _messageCache.entries) {
       for (final message in entry.value) {
-        all.add(_CachedMessageRef(
-          entry.value,
-          message,
-          _MessageCacheKey(entry.key, false),
-        ));
+        all.add(
+          _CachedMessageRef(
+            entry.value,
+            message,
+            _MessageCacheKey(entry.key, false),
+          ),
+        );
       }
     }
     for (final entry in _roomMessageCache.entries) {
       for (final message in entry.value) {
-        all.add(_CachedMessageRef(
-          entry.value,
-          message,
-          _MessageCacheKey(entry.key, true),
-        ));
+        all.add(
+          _CachedMessageRef(
+            entry.value,
+            message,
+            _MessageCacheKey(entry.key, true),
+          ),
+        );
       }
     }
     all.sort((a, b) => a.message.timestamp.compareTo(b.message.timestamp));
@@ -598,12 +644,17 @@ class StorageService {
     if (box == null) {
       return const {};
     }
-    final data = box.get(_avatarMetadataKey, defaultValue: const <String, dynamic>{});
+    final data = box.get(
+      _avatarMetadataKey,
+      defaultValue: const <String, dynamic>{},
+    );
     if (data is Map) {
       final result = <String, AvatarMetadata>{};
       for (final entry in data.entries) {
         if (entry.value is Map) {
-          final meta = AvatarMetadata.fromMap(Map<String, dynamic>.from(entry.value as Map));
+          final meta = AvatarMetadata.fromMap(
+            Map<String, dynamic>.from(entry.value as Map),
+          );
           if (meta != null) {
             result[entry.key.toString()] = meta;
           }
@@ -619,7 +670,10 @@ class StorageService {
     if (box == null) {
       return const {};
     }
-    final data = box.get(_displayedSyncKey, defaultValue: const <String, dynamic>{});
+    final data = box.get(
+      _displayedSyncKey,
+      defaultValue: const <String, dynamic>{},
+    );
     if (data is Map) {
       final result = <String, String>{};
       for (final entry in data.entries) {
@@ -639,8 +693,10 @@ class StorageService {
     if (box == null) {
       return const {};
     }
-    final data = box.get(_displayedSyncTimestampsKey,
-        defaultValue: const <String, dynamic>{});
+    final data = box.get(
+      _displayedSyncTimestampsKey,
+      defaultValue: const <String, dynamic>{},
+    );
     if (data is! Map) {
       return const {};
     }
@@ -655,7 +711,8 @@ class StorageService {
   }
 
   Future<void> storeDisplayedSyncTimestamps(
-      Map<String, DateTime> timestamps) async {
+    Map<String, DateTime> timestamps,
+  ) async {
     final box = _box;
     if (box == null) {
       return;
@@ -707,10 +764,7 @@ class StorageService {
     if (box == null) {
       return;
     }
-    await box.put(
-      _displayedSyncPendingKey,
-      Map<String, String>.from(pending),
-    );
+    await box.put(_displayedSyncPendingKey, Map<String, String>.from(pending));
   }
 
   /// R5: load the persisted Entity Capabilities (XEP-0115) cache. The
@@ -811,15 +865,23 @@ class StorageService {
     await box.delete(_lastMamIdSeenKey);
   }
 
-  Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {
+  Future<void> storeAvatarMetadata(
+    String bareJid,
+    AvatarMetadata metadata,
+  ) async {
     final box = _box;
     if (box == null) {
       return;
     }
-    final existing = box.get(_avatarMetadataKey, defaultValue: <String, dynamic>{});
+    final existing = box.get(
+      _avatarMetadataKey,
+      defaultValue: <String, dynamic>{},
+    );
     final next = <String, dynamic>{};
     if (existing is Map) {
-      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+      next.addAll(
+        existing.map((key, value) => MapEntry(key.toString(), value)),
+      );
     }
     next[bareJid] = metadata.toMap();
     await box.put(_avatarMetadataKey, next);
@@ -850,9 +912,10 @@ class StorageService {
       for (final entry in blobs.entries)
         if (entry.key.isNotEmpty) '$_avatarBlobPrefix${entry.key}': entry.value,
     };
-    final stale = _keysWithPrefix(box, _avatarBlobPrefix)
-        .where((key) => !keep.containsKey(key))
-        .toList(growable: false);
+    final stale = _keysWithPrefix(
+      box,
+      _avatarBlobPrefix,
+    ).where((key) => !keep.containsKey(key)).toList(growable: false);
     if (stale.isNotEmpty) {
       await box.deleteAll(stale);
     }
@@ -901,7 +964,10 @@ class StorageService {
     if (box == null) {
       return const {};
     }
-    final data = box.get(_vcardAvatarStateKey, defaultValue: const <String, dynamic>{});
+    final data = box.get(
+      _vcardAvatarStateKey,
+      defaultValue: const <String, dynamic>{},
+    );
     if (data is Map) {
       final result = <String, String>{};
       for (final entry in data.entries) {
@@ -934,10 +1000,15 @@ class StorageService {
     if (box == null) {
       return;
     }
-    final existing = box.get(_vcardAvatarStateKey, defaultValue: <String, dynamic>{});
+    final existing = box.get(
+      _vcardAvatarStateKey,
+      defaultValue: <String, dynamic>{},
+    );
     final next = <String, dynamic>{};
     if (existing is Map) {
-      next.addAll(existing.map((key, value) => MapEntry(key.toString(), value)));
+      next.addAll(
+        existing.map((key, value) => MapEntry(key.toString(), value)),
+      );
     }
     next[bareJid] = state;
     await box.put(_vcardAvatarStateKey, next);
@@ -956,7 +1027,10 @@ class StorageService {
     final key = await _deriveKey(pin, salt);
     final cipher = HiveAesCipher(key);
     await _salvageBoxIfOversized(cipher);
-    _box = await Hive.openBox<dynamic>(_secureBoxName, encryptionCipher: cipher);
+    _box = await Hive.openBox<dynamic>(
+      _secureBoxName,
+      encryptionCipher: cipher,
+    );
     await _migrateAggregatedCaches();
     _seedMessageCaches();
     await _compactIfOversized();
@@ -1052,31 +1126,11 @@ class StorageService {
       return;
     }
     var migrated = false;
-    migrated |= await _migrateMapKey(
-      box,
-      _messagesKey,
-      _messagePrefix,
-    );
-    migrated |= await _migrateMapKey(
-      box,
-      _roomMessagesKey,
-      _roomMessagePrefix,
-    );
-    migrated |= await _migrateMapKey(
-      box,
-      _avatarBlobsKey,
-      _avatarBlobPrefix,
-    );
-    migrated |= await _migrateMapKey(
-      box,
-      _vcardAvatarsKey,
-      _vcardAvatarPrefix,
-    );
-    migrated |= await _migrateMapKey(
-      box,
-      _entityCapsKey,
-      _entityCapsPrefix,
-    );
+    migrated |= await _migrateMapKey(box, _messagesKey, _messagePrefix);
+    migrated |= await _migrateMapKey(box, _roomMessagesKey, _roomMessagePrefix);
+    migrated |= await _migrateMapKey(box, _avatarBlobsKey, _avatarBlobPrefix);
+    migrated |= await _migrateMapKey(box, _vcardAvatarsKey, _vcardAvatarPrefix);
+    migrated |= await _migrateMapKey(box, _entityCapsKey, _entityCapsPrefix);
     if (migrated) {
       // The legacy values are still in the append-only log; reclaim them now
       // rather than after another 60 writes.
