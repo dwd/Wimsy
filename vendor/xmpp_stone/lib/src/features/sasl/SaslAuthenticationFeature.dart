@@ -103,8 +103,7 @@ class SaslAuthenticationFeature extends Negotiator {
       state = NegotiatorState.NEGOTIATING;
       fastHandler.start().then((result) {
         if (result.successful) {
-          _connection
-              .setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
+          _connection.completeSasl2Authentication();
           state = NegotiatorState.DONE;
           return;
         }
@@ -158,8 +157,7 @@ class SaslAuthenticationFeature extends Negotiator {
     saslHandler.start().then((result) {
       if (result.successful) {
         if (useSasl2) {
-          _connection
-            ..setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
+          _connection.completeSasl2Authentication();
         } else {
           _connection.setState(XmppConnectionState.Authenticated);
         }

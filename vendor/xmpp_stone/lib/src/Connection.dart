@@ -796,9 +796,13 @@ class Connection {
         // ensures the feature negotiation below (which gates disco-based
         // negotiators, e.g. Service Discovery -> MAM, on `authenticated`)
         // sees the correct value instead of racing the async handshake.
-        if (xmlResponse.descendants
+        final successElements = xmlResponse.descendants
             .whereType<xml.XmlElement>()
-            .any(saslSuccessMatcher)) {
+            .where(saslSuccessMatcher);
+        if (successElements.any(
+            (element) => element.getAttribute('xmlns') == 'urn:xmpp:sasl:2')) {
+          completeSasl2Authentication();
+        } else if (successElements.isNotEmpty) {
           authenticated = true;
         }
 
@@ -938,7 +942,7 @@ class Connection {
     handler.start().then((result) {
       _sasl2PipelinedAuthInFlight = false;
       if (result.successful) {
-        setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
+        completeSasl2Authentication();
         _deferredFeatureElement = null;
         return;
       }
@@ -1063,6 +1067,19 @@ class Connection {
 
   XmppConnectionState get state {
     return _state;
+  }
+
+  /// Records successful SASL2 authentication without allowing a late handler
+  /// Future to move an already-initialized session back to the awaiting-
+  /// features state. SASL2 success and the next stream features may arrive in
+  /// one transport read, while the authentication Future completes later.
+  void completeSasl2Authentication() {
+    authenticated = true;
+    if (state == XmppConnectionState.SessionInitialized ||
+        state == XmppConnectionState.Ready) {
+      return;
+    }
+    setState(XmppConnectionState.AuthenticatedSasl2AwaitingFeatures);
   }
 
   void _processState(XmppConnectionState state) {

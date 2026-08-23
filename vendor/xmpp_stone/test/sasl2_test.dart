@@ -9,6 +9,7 @@ import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
 import 'package:xmpp_stone/src/elements/XmppAttribute.dart';
 import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
+import 'package:xmpp_stone/src/features/Negotiator.dart';
 import 'package:xmpp_stone/src/features/sasl/Sasl2AuthHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/SaslAuthenticationFeature.dart';
 import 'package:xmpp_stone/src/features/sasl/SaslMechanism.dart';
@@ -244,6 +245,42 @@ void main() {
 
       final result = await resultFuture;
       expect(result.successful, isTrue);
+    });
+
+    test('late handler completion preserves feature-negotiated state',
+        () async {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      final connection = Connection(account);
+      connection.socket = _RecordingSocket();
+      final feature = SaslAuthenticationFeature(connection, 'secret');
+      final authentication = Nonza()
+        ..name = 'authentication'
+        ..addAttribute(XmppAttribute(
+          'xmlns',
+          SaslAuthenticationFeature.sasl2Namespace,
+        ));
+      authentication.addChild(XmppElement()
+        ..name = 'mechanism'
+        ..textValue = 'PLAIN');
+
+      feature.negotiate([authentication]);
+      final done = feature.featureStateStream
+          .firstWhere((state) => state == NegotiatorState.DONE);
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        '</success></xmpp_stone>',
+      );
+
+      // Feature processing can initialize the session before the handler's
+      // Future continuation runs. That continuation must not regress state.
+      connection.setState(XmppConnectionState.SessionInitialized);
+      await done;
+
+      expect(connection.state, XmppConnectionState.SessionInitialized);
+      connection.doneParsingFeatures();
+      expect(connection.state, XmppConnectionState.Ready);
     });
   });
 
@@ -607,6 +644,21 @@ void main() {
         returnsNormally,
       );
       expect(connection.authenticated, isTrue);
+    });
+
+    test('late SASL2 completion does not regress an initialized session', () {
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      final connection = Connection(account);
+
+      connection.setState(XmppConnectionState.SessionInitialized);
+      connection.completeSasl2Authentication();
+
+      expect(connection.authenticated, isTrue);
+      expect(connection.state, XmppConnectionState.SessionInitialized);
+
+      connection.doneParsingFeatures();
+      expect(connection.state, XmppConnectionState.Ready);
     });
   });
 }
