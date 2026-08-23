@@ -543,23 +543,26 @@ class _LoginScreenState extends State<LoginScreen> {
                         _buildDiscoveryOptions(service),
                         _buildManualConnection(service),
                         const SizedBox(height: 12),
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: const Text(
-                            'Remember password on this device',
+                        Material(
+                          color: Colors.transparent,
+                          child: CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text(
+                              'Remember password on this device',
+                            ),
+                            value: _rememberPassword,
+                            onChanged: service.isConnecting
+                                ? null
+                                : (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _rememberPassword = value;
+                                    });
+                                  },
                           ),
-                          value: _rememberPassword,
-                          onChanged: service.isConnecting
-                              ? null
-                              : (value) {
-                                  if (value == null) {
-                                    return;
-                                  }
-                                  setState(() {
-                                    _rememberPassword = value;
-                                  });
-                                },
                         ),
                         const SizedBox(height: 20),
                         Row(
