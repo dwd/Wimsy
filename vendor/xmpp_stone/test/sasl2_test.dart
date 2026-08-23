@@ -71,6 +71,30 @@ void main() {
         equals('abc123'),
       );
     });
+
+    test('accepts IAP config-version offer without optional scheme', () {
+      final connection = Connection(
+        XmppAccountSettings.fromJid('alice@example.com', 'secret'),
+      );
+      final configVersion = Nonza()
+        ..name = 'config-version'
+        ..addAttribute(
+          XmppAttribute('xmlns', SaslAuthenticationFeature.iapNamespace),
+        )
+        ..addAttribute(XmppAttribute('value', 'openfire-config'));
+
+      SaslAuthenticationFeature.applyIapConfigVersion(
+        connection,
+        configVersion,
+      );
+
+      expect(connection.iapAdvertisedInCurrentStream, isTrue);
+      expect(
+        connection.iapConfigVersion?.getAttribute('value')?.value,
+        equals('openfire-config'),
+      );
+      expect(connection.iapConfigVersion?.getAttribute('scheme'), isNull);
+    });
   });
 
   group('SASL2 handler', () {
@@ -172,6 +196,36 @@ void main() {
       );
       final result = await resultFuture;
       expect(result.successful, isTrue);
+    });
+
+    test('includes value-only IAP config-version by default', () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..sasl2SendUserAgent = false;
+      final connection = Connection(account);
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+      connection.setIapConfigVersion(value: 'openfire-config');
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final auth = Nonza.parse(
+        xml.XmlDocument.parse(socket.writes.first).rootElement,
+      );
+      final configVersion = auth.getChild('config-version');
+      expect(configVersion, isNotNull);
+      expect(
+        configVersion?.getAttribute('value')?.value,
+        equals('openfire-config'),
+      );
+      expect(configVersion?.getAttribute('scheme'), isNull);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'/></xmpp_stone>",
+      );
+      expect((await resultFuture).successful, isTrue);
     });
 
     test('requests retry with fresh features on IAP mismatch failure',
@@ -676,7 +730,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
-      bool useWebTransport = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
@@ -693,6 +747,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   void close() {
     _controller.close();
   }
+
   @override
   Future<dynamic> getQuicStats() => Future.value(null);
   @override

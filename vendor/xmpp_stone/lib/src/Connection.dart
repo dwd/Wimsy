@@ -229,12 +229,14 @@ class Connection {
 
   XmppElement? get iapConfigVersion => _iapConfigVersion;
 
-  void setIapConfigVersion({required String scheme, required String value}) {
+  void setIapConfigVersion({String? scheme, required String value}) {
     final element = XmppElement()
       ..name = 'config-version'
       ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:iap:0'))
-      ..addAttribute(XmppAttribute('scheme', scheme))
       ..addAttribute(XmppAttribute('value', value));
+    if (scheme != null && scheme.isNotEmpty) {
+      element.addAttribute(XmppAttribute('scheme', scheme));
+    }
     _iapConfigVersion = element;
     _iapAdvertisedInCurrentStream = true;
     account.iapConfigVersionScheme = scheme;
@@ -334,9 +336,13 @@ class Connection {
       final ch = stripped[i];
 
       // Handle XML comments <!-- … -->
-      if (!inString && !inComment && i + 3 < len &&
-          ch == '<' && stripped[i + 1] == '!' &&
-          stripped[i + 2] == '-' && stripped[i + 3] == '-') {
+      if (!inString &&
+          !inComment &&
+          i + 3 < len &&
+          ch == '<' &&
+          stripped[i + 1] == '!' &&
+          stripped[i + 2] == '-' &&
+          stripped[i + 3] == '-') {
         final end = stripped.indexOf('-->', i + 4);
         if (end < 0) break; // incomplete comment — stop
         i = end + 3;
@@ -524,15 +530,14 @@ class Connection {
     _carbons2EnabledInline = false;
     final iapScheme = account.iapConfigVersionScheme?.trim();
     final iapValue = account.iapConfigVersionValue?.trim();
-    if (iapScheme != null &&
-        iapScheme.isNotEmpty &&
-        iapValue != null &&
-        iapValue.isNotEmpty) {
+    if (iapValue != null && iapValue.isNotEmpty) {
       final element = XmppElement()
         ..name = 'config-version'
         ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:iap:0'))
-        ..addAttribute(XmppAttribute('scheme', iapScheme))
         ..addAttribute(XmppAttribute('value', iapValue));
+      if (iapScheme != null && iapScheme.isNotEmpty) {
+        element.addAttribute(XmppAttribute('scheme', iapScheme));
+      }
       _iapConfigVersion = element;
     } else {
       _iapConfigVersion = null;

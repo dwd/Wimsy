@@ -366,11 +366,14 @@ class SaslAuthenticationFeature extends Negotiator {
     final scheme = nonza.getAttribute('scheme')?.value?.trim() ?? '';
     final value = nonza.getAttribute('value')?.value?.trim() ??
         (nonza.textValue ?? '').trim();
-    if (scheme.isEmpty || value.isEmpty) {
+    if (value.isEmpty) {
       connection.clearIapConfigVersion();
       return;
     }
-    connection.setIapConfigVersion(scheme: scheme, value: value);
+    connection.setIapConfigVersion(
+      scheme: scheme.isEmpty ? null : scheme,
+      value: value,
+    );
   }
 
   SaslMechanism _handleAuthNotSupported() {

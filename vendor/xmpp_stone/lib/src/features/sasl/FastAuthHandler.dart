@@ -103,8 +103,8 @@ class FastAuthHandler implements AbstractSaslHandler {
     if (lastDash < 0) {
       return null;
     }
-    final hashPart = rest.substring(0, lastDash);  // e.g. "SHA-256"
-    final cbPart = rest.substring(lastDash + 1);   // e.g. "NONE"
+    final hashPart = rest.substring(0, lastDash); // e.g. "SHA-256"
+    final cbPart = rest.substring(lastDash + 1); // e.g. "NONE"
 
     // Only NONE channel-binding is currently supported.
     if (cbPart != 'NONE') {
@@ -167,6 +167,13 @@ class FastAuthHandler implements AbstractSaslHandler {
       authenticate.addChild(_buildBind2Element());
     }
 
+    if (_connection.account.iapEnabled &&
+        _connection.account.iapIncludeConfigVersion &&
+        _connection.iapAdvertisedInCurrentStream &&
+        _connection.iapConfigVersion != null) {
+      authenticate.addChild(_connection.iapConfigVersion!);
+    }
+
     // Request a fresh FAST token so we stay authenticated on the next
     // reconnection. We ask for the same mechanism we are currently using.
     if (_connection.account.fastEnabled &&
@@ -192,7 +199,8 @@ class FastAuthHandler implements AbstractSaslHandler {
 
     // HT-*:  authcid || NUL || [ extra || NUL ] || initiator_hashed_token  // optional bit is HT2-*
     // authcid is the bare JID (local@domain) per XEP-0484 §4.
-    final authcid = '${_connection.account.username}@${_connection.account.domain}';
+    final authcid =
+        '${_connection.account.username}@${_connection.account.domain}';
     final List<int> payload = utf8.encode(authcid) + [0x00];
     // Message is "Initiator" || cbdata [ || extra ]
     final message = utf8.encode('Initiator');
@@ -335,8 +343,7 @@ class FastAuthHandler implements AbstractSaslHandler {
   /// Builds a `<request-token xmlns='urn:xmpp:fast:0' mechanism='HT2-…'/>`
   /// element to ask the server for a fresh FAST token.
   XmppElement _buildRequestTokenElement() {
-    final mechanism =
-        _connection.account.fastMechanism ?? _mechanismName;
+    final mechanism = _connection.account.fastMechanism ?? _mechanismName;
     return XmppElement()
       ..name = 'request-token'
       ..addAttribute(XmppAttribute('xmlns', fastNamespace))
@@ -350,8 +357,7 @@ String _generateUuidV4() {
       16, (_) => DateTime.now().microsecondsSinceEpoch & 0xff);
   random[6] = (random[6] & 0x0f) | 0x40;
   random[8] = (random[8] & 0x3f) | 0x80;
-  final hex =
-      random.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  final hex = random.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   return '${hex.substring(0, 8)}-'
       '${hex.substring(8, 12)}-'
       '${hex.substring(12, 16)}-'

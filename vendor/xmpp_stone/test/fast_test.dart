@@ -317,6 +317,34 @@ void main() {
       final expected = [...authcid, 0x00, ...expectedHmac];
       expect(payload, equals(expected));
     });
+
+    test('includes advertised IAP config-version', () async {
+      final tokenB64 = base64.encode(List<int>.filled(32, 7));
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..fastEnabled = true;
+      final connection = Connection(account);
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+      connection.setIapConfigVersion(value: 'openfire-config');
+
+      FastAuthHandler.fromMechanismName(
+        connection,
+        'HT2-SHA-256-NONE',
+        tokenB64,
+      )!
+          .start();
+      await Future<void>.delayed(Duration.zero);
+
+      final auth = Nonza.parse(
+        xml.XmlDocument.parse(socket.writes.first).rootElement,
+      );
+      final configVersion = auth.getChild('config-version');
+      expect(configVersion, isNotNull);
+      expect(
+        configVersion?.getAttribute('value')?.value,
+        equals('openfire-config'),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -357,8 +385,9 @@ void main() {
       final payload = base64.decode(initialResponseB64);
 
       // HT2-*: authcid || NUL || NUL (empty extra) || HMAC-SHA-256(token).
-      final expectedHmac =
-          crypto.Hmac(crypto.sha256, tokenBytes).convert(utf8.encode('Initiator')).bytes;
+      final expectedHmac = crypto.Hmac(crypto.sha256, tokenBytes)
+          .convert(utf8.encode('Initiator'))
+          .bytes;
       final expected = [
         ...utf8.encode('alice@example.com'),
         0x00,
@@ -398,8 +427,9 @@ void main() {
           auth.getChild('initial-response')?.textValue ?? '';
       final payload = base64.decode(initialResponseB64);
 
-      final expectedHmac =
-          crypto.Hmac(crypto.sha512, tokenBytes).convert(utf8.encode('Initiator')).bytes;
+      final expectedHmac = crypto.Hmac(crypto.sha512, tokenBytes)
+          .convert(utf8.encode('Initiator'))
+          .bytes;
       final expected = [
         ...utf8.encode('bob@example.com'),
         0x00,
@@ -493,7 +523,8 @@ void main() {
       connection.socket = socket;
 
       // Simulate server offering fast inline with HT2-SHA-256-NONE.
-      final fastFeatureEl = buildFastElement(['HT2-SHA-256-NONE', 'HT2-SHA-512-NONE']);
+      final fastFeatureEl =
+          buildFastElement(['HT2-SHA-256-NONE', 'HT2-SHA-512-NONE']);
       connection.setSasl2InlineFeatures({
         'urn:xmpp:fast:0': fastFeatureEl,
       });
@@ -545,7 +576,8 @@ void main() {
       );
     });
 
-    test('does NOT add <request-token> when server does not offer FAST', () async {
+    test('does NOT add <request-token> when server does not offer FAST',
+        () async {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..fastEnabled = true;
       final connection = Connection(account);
@@ -564,7 +596,8 @@ void main() {
       expect(auth.getChild('request-token'), isNull);
     });
 
-    test('token stored in account after successful initial auth with FAST token',
+    test(
+        'token stored in account after successful initial auth with FAST token',
         () async {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..fastEnabled = true;

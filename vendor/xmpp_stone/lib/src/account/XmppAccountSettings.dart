@@ -50,7 +50,7 @@ class XmppAccountSettings {
   String? sasl2Software;
   String? sasl2Device;
   bool iapEnabled = true;
-  bool iapIncludeConfigVersion = false;
+  bool iapIncludeConfigVersion = true;
   bool iapPipeliningEnabled = true;
   String? iapConfigVersionScheme;
   String? iapConfigVersionValue;
@@ -66,10 +66,13 @@ class XmppAccountSettings {
   // has been issued by the server, the client will attempt to use HT2-* (or
   // HT-*) authentication on the next connection instead of SCRAM.
   bool fastEnabled = true;
+
   /// The FAST token last issued by the server, base64-encoded.
   String? fastToken;
+
   /// ISO-8601 expiry timestamp for [fastToken].
   String? fastTokenExpiry;
+
   /// Wire-name of the preferred FAST mechanism agreed with the server
   /// (e.g. "HT2-SHA-256-NONE").
   String? fastMechanism;
