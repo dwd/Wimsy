@@ -10,6 +10,7 @@ import 'package:xmpp_stone/src/elements/XmppAttribute.dart';
 import 'package:xmpp_stone/src/elements/XmppElement.dart';
 import 'package:xmpp_stone/src/elements/nonzas/Nonza.dart';
 import 'package:xmpp_stone/src/features/ConnectionNegotatiorManager.dart';
+import 'package:xmpp_stone/src/features/sasl/FastAuthHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/Sasl2AuthHandler.dart';
 import 'package:xmpp_stone/src/features/sasl/SaslAuthenticationFeature.dart';
 import 'package:xmpp_stone/src/features/servicediscovery/CarbonsNegotiator.dart';
@@ -833,7 +834,13 @@ class Connection {
             .where((element) => startMatcher(element))
             .forEach((element) => processInitialStream(element));
 
-        xmlResponse.childElements
+        final topLevelElements = xmlResponse.childElements.expand(
+          (element) => startMatcher(element)
+              ? element.childElements
+              : <xml.XmlElement>[element],
+        );
+
+        topLevelElements
             .where((element) => stanzaMatcher(element))
             .map((xmlElement) => StanzaParser.parseStanza(xmlElement))
             .forEach((stanza) => _inStanzaStreamController.add(stanza));
@@ -872,7 +879,7 @@ class Connection {
         });
 
         //TODO: Probably will introduce bugs!!!
-        xmlResponse.childElements
+        topLevelElements
             .where((element) => nonzaMatcher(element))
             .map((xmlElement) => Nonza.parse(xmlElement))
             .forEach((nonza) => _inNonzaStreamController.add(nonza));
@@ -973,26 +980,50 @@ class Connection {
       return;
     }
 
+    final fastMechanism = account.fastMechanism;
+    final cachedFastMechanisms =
+        account.sasl2CachedFastMechanisms ?? const <String>[];
+    final canUseFast = account.fastEnabled &&
+        account.fastToken != null &&
+        account.fastToken!.isNotEmpty &&
+        fastMechanism != null &&
+        !fastMechanism.startsWith('HT2-') &&
+        cachedFastMechanisms.contains(fastMechanism) &&
+        !_fastTokenExpired();
     final mechanism = SaslAuthenticationFeature.mechanismFromWireName(
       account.sasl2LastMechanism,
     );
-    if (mechanism == null) {
+    if (!canUseFast && mechanism == null) {
       return;
     }
     final cachedMechanisms = account.sasl2CachedMechanisms ?? const <String>[];
     final mechanismName = account.sasl2LastMechanism;
-    if (mechanismName == null || !cachedMechanisms.contains(mechanismName)) {
+    if (!canUseFast &&
+        (mechanismName == null || !cachedMechanisms.contains(mechanismName))) {
       return;
     }
 
     _sasl2PipelinedAuthInFlight = true;
     authenticating();
-    final handler = Sasl2AuthHandler(
-      this,
-      account.password,
-      mechanism,
-      allowCachedIapConfigVersion: true,
-    );
+    final handler = canUseFast
+        ? FastAuthHandler.fromMechanismName(
+            this,
+            fastMechanism!,
+            account.fastToken!,
+            allowCachedIapConfigVersion: true,
+          )
+        : Sasl2AuthHandler(
+            this,
+            account.password,
+            mechanism!,
+            allowCachedIapConfigVersion: true,
+          );
+    if (handler == null) {
+      account.clearFastToken();
+      _sasl2PipelinedAuthInFlight = false;
+      _tryStartSasl2IapPipeline();
+      return;
+    }
     handler.start().then((result) {
       _sasl2PipelinedAuthInFlight = false;
       if (result.successful) {
@@ -1016,10 +1047,29 @@ class Connection {
         return;
       }
 
+      if (canUseFast && _deferredFeatureElement != null) {
+        final features = _deferredFeatureElement!;
+        _deferredFeatureElement = null;
+        connectionNegotatiorManager.negotiateFeatureList(features);
+        return;
+      }
+
       setState(XmppConnectionState.AuthenticationFailure);
       errorMessage = result.message;
       close();
     });
+  }
+
+  bool _fastTokenExpired() {
+    final expiry = account.fastTokenExpiry;
+    if (expiry == null || expiry.isEmpty) return false;
+    try {
+      if (!DateTime.now().isAfter(DateTime.parse(expiry))) return false;
+      account.clearFastToken();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void writeStanza(AbstractStanza stanza) {

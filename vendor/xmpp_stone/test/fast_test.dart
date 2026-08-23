@@ -706,6 +706,34 @@ void main() {
 
   // -------------------------------------------------------------------------
   group('Token expiry checks', () {
+    test('IAP pipeline prefers a cached FAST token over password SASL',
+        () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..fastEnabled = true
+        ..fastToken = base64.encode(List.filled(32, 1))
+        ..fastMechanism = 'HT-SHA-256-NONE'
+        ..fastTokenExpiry = '2099-01-01T00:00:00Z'
+        ..sasl2CachedFastMechanisms = ['HT-SHA-256-NONE']
+        ..sasl2CachedMechanisms = ['SCRAM-SHA-256']
+        ..sasl2LastMechanism = 'SCRAM-SHA-256'
+        ..iapConfigVersionValue = 'config-1'
+        ..sasl2SendUserAgent = false;
+      final socket = _RecordingSocket();
+      final connection = Connection(account, socketFactory: () => socket);
+
+      await connection.openSocket();
+      await Future<void>.delayed(Duration.zero);
+
+      final authenticateXml = socket.writes.firstWhere(
+        (write) => write.contains('<authenticate'),
+      );
+      expect(
+        authenticateXml,
+        contains('mechanism="HT-SHA-256-NONE"'),
+      );
+      expect(authenticateXml, contains('config-version'));
+    });
+
     test('tryCreateFastHandler rejects expired token', () {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..fastEnabled = true

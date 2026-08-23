@@ -65,6 +65,7 @@ class FastAuthHandler implements AbstractSaslHandler {
 
   /// The opaque Unicode token string issued by the FAST server.
   final String _token;
+  final bool _allowCachedIapConfigVersion;
 
   late StreamSubscription<Nonza> _subscription;
   final _completer = Completer<AuthenticationResult>();
@@ -74,16 +75,18 @@ class FastAuthHandler implements AbstractSaslHandler {
     this._mechanismName,
     this._variant,
     this._hash,
-    this._token,
-  );
+    this._token, {
+    bool allowCachedIapConfigVersion = false,
+  }) : _allowCachedIapConfigVersion = allowCachedIapConfigVersion;
 
   /// Creates a [FastAuthHandler] from a stored mechanism name such as
   /// "HT2-SHA-256-NONE". Returns `null` if the mechanism is not supported.
   static FastAuthHandler? fromMechanismName(
     Connection connection,
     String mechanismName,
-    String token,
-  ) {
+    String token, {
+    bool allowCachedIapConfigVersion = false,
+  }) {
     final upper = mechanismName.toUpperCase();
     FastMechanismVariant? variant;
     String rest;
@@ -131,6 +134,7 @@ class FastAuthHandler implements AbstractSaslHandler {
       variant,
       hash,
       token,
+      allowCachedIapConfigVersion: allowCachedIapConfigVersion,
     );
   }
 
@@ -174,7 +178,8 @@ class FastAuthHandler implements AbstractSaslHandler {
 
     if (_connection.account.iapEnabled &&
         _connection.account.iapIncludeConfigVersion &&
-        _connection.iapAdvertisedInCurrentStream &&
+        (_connection.iapAdvertisedInCurrentStream ||
+            _allowCachedIapConfigVersion) &&
         _connection.iapConfigVersion != null) {
       authenticate.addChild(_connection.iapConfigVersion!);
     }

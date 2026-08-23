@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:test/test.dart';
 import 'package:universal_io/io.dart';
@@ -292,6 +293,42 @@ void main() {
   });
 
   group('SASL2 feature negotiation timing', () {
+    test('dispatches a challenge nested under a coalesced stream opener',
+        () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..sasl2SendUserAgent = false;
+      final socket = _RecordingSocket();
+      final connection = Connection(account)..socket = socket;
+      final handler = Sasl2AuthHandler(
+        connection,
+        'secret',
+        SaslMechanism.SCRAM_SHA_256,
+      );
+
+      handler.start();
+      await Future<void>.delayed(Duration.zero);
+      final authenticate = Nonza.parse(
+        xml.XmlDocument.parse(socket.writes.single).rootElement,
+      );
+      final clientFirst = utf8.decode(
+        base64.decode(authenticate.getChild('initial-response')!.textValue!),
+      );
+      final nonce = clientFirst.split('r=').last;
+      final serverFirst =
+          'r=${nonce}server,s=${base64.encode(utf8.encode('salt'))},i=4096';
+      final challenge = base64.encode(utf8.encode(serverFirst));
+
+      connection.handleResponse(
+        "<xmpp_stone><stream:stream xmlns:stream='http://etherx.jabber.org/streams'>"
+        "<challenge xmlns='urn:xmpp:sasl:2'>$challenge</challenge>"
+        '</stream:stream></xmpp_stone>',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(socket.writes, hasLength(2));
+      expect(socket.writes.last, contains('<response'));
+    });
+
     test('pipelined success consumes bundled post-auth features', () async {
       final account = XmppAccountSettings.fromJid(
         'alice@example.com',
