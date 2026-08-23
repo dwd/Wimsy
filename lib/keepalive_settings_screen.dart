@@ -291,6 +291,7 @@ class _KeepaliveSettingsScreenState extends State<KeepaliveSettingsScreen> {
           ),
           const SizedBox(height: 24),
           FilledButton(
+            key: const ValueKey('saveAndApplyButton'),
             onPressed: _dirty ? _save : null,
             child: const Text('Save & apply'),
           ),
@@ -380,6 +381,7 @@ class _DurationFieldState extends State<_DurationField> {
           SizedBox(
             width: 96,
             child: TextField(
+              key: ValueKey('durationField_${widget.label}'),
               controller: _controller,
               keyboardType: TextInputType.number,
               textAlign: TextAlign.end,
@@ -387,6 +389,12 @@ class _DurationFieldState extends State<_DurationField> {
                 suffixText: 's',
                 isDense: true,
               ),
+              onChanged: (text) {
+                final parsed = int.tryParse(text.trim());
+                if (parsed != null) {
+                  widget.onChanged(parsed);
+                }
+              },
               onSubmitted: (text) {
                 final parsed = int.tryParse(text.trim());
                 if (parsed != null) {
