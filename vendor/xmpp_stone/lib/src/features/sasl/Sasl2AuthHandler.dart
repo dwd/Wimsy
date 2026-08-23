@@ -175,7 +175,8 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
     // <bind>: <bind><inline><feature var='...'/></inline></bind>.
     final bind2Features = _connection.sasl2InlineFeatures[bind2Namespace];
     final bind2Inline = bind2Features?.getChild('inline');
-    final bind2FeatureChildren = bind2Inline?.children.where((c) => c.name == 'feature') ?? [];
+    final bind2FeatureChildren =
+        bind2Inline?.children.where((c) => c.name == 'feature') ?? [];
     final serverOffersCarbonsInline = bind2FeatureChildren.any(
       (c) => c.getAttribute('var')?.value == carbons2Namespace,
     );
@@ -316,11 +317,9 @@ class Sasl2AuthHandler implements AbstractSaslHandler {
         .where((m) => m.isNotEmpty)
         .toList();
 
-    // Preference order: HT2-SHA-256-NONE, HT2-SHA-512-NONE, HT-SHA-256-NONE,
-    // HT-SHA-512-NONE.
+    // HT2 support is intentionally disabled until its later draft semantics
+    // and interoperability are covered by test vectors.
     const preferred = [
-      'HT2-SHA-256-NONE',
-      'HT2-SHA-512-NONE',
       'HT-SHA-256-NONE',
       'HT-SHA-512-NONE',
     ];

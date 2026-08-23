@@ -206,6 +206,12 @@ class SaslAuthenticationFeature extends Negotiator {
     // Find a mechanism that both we support and the server lists in <fast>.
     final fastMechanismName = account.fastMechanism;
     if (fastMechanismName == null || fastMechanismName.isEmpty) return null;
+    // HT2 is intentionally not negotiated yet. Existing cached HT2 tokens
+    // are discarded so the next password authentication requests HT instead.
+    if (fastMechanismName.startsWith('HT2-')) {
+      account.clearFastToken();
+      return null;
+    }
 
     // Verify the server still offers this specific mechanism.
     final offeredMechanisms = fastFeature.children

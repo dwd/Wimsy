@@ -286,6 +286,18 @@ class Connection {
 
   void _openStream() {
     var streamOpeningString = _socket?.getStreamOpeningElement(fullJid.domain);
+    if (streamOpeningString != null &&
+        !streamOpeningString.contains(" from=") &&
+        !streamOpeningString.contains(' from=')) {
+      final end = streamOpeningString.lastIndexOf('>');
+      if (end >= 0) {
+        streamOpeningString = streamOpeningString.replaceRange(
+          end,
+          end,
+          " from='${fullJid.userAtDomain}'",
+        );
+      }
+    }
     write(streamOpeningString);
     _tryStartSasl2IapPipeline();
   }

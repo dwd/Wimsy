@@ -212,7 +212,7 @@ void main() {
 
   // -------------------------------------------------------------------------
   group('Sasl2AuthHandler.pickFastMechanism', () {
-    test('picks HT2-SHA-256-NONE as first preference', () {
+    test('ignores HT2-SHA-512 and picks HT-SHA-256-NONE', () {
       final fast = buildFastElement([
         'HT-SHA-512-NONE',
         'HT2-SHA-512-NONE',
@@ -221,11 +221,11 @@ void main() {
       ]);
       expect(
         Sasl2AuthHandler.pickFastMechanism(fast),
-        equals('HT2-SHA-256-NONE'),
+        equals('HT-SHA-256-NONE'),
       );
     });
 
-    test('picks HT2-SHA-512-NONE when HT2-SHA-256-NONE is absent', () {
+    test('ignores HT2 and picks HT-SHA-256-NONE', () {
       final fast = buildFastElement([
         'HT2-SHA-512-NONE',
         'HT-SHA-256-NONE',
@@ -233,7 +233,7 @@ void main() {
       ]);
       expect(
         Sasl2AuthHandler.pickFastMechanism(fast),
-        equals('HT2-SHA-512-NONE'),
+        equals('HT-SHA-256-NONE'),
       );
     });
 
@@ -309,13 +309,14 @@ void main() {
       expect(initialResponseB64, isNotEmpty);
 
       final payload = decodePayload(initialResponseB64);
-      final authcid = utf8.encode('alice@example.com');
+      final authcid = utf8.encode('alice');
       // HT-*: authcid || NUL || HMAC-<hash>(token, "Initiator").
-      final expectedHmac = crypto.Hmac(crypto.sha256, tokenBytes)
+      final expectedHmac = crypto.Hmac(crypto.sha256, utf8.encode(tokenB64))
           .convert(utf8.encode('Initiator'))
           .bytes;
       final expected = [...authcid, 0x00, ...expectedHmac];
       expect(payload, equals(expected));
+      expect(auth.getChild('fast')?.getNameSpace(), 'urn:xmpp:fast:0');
     });
 
     test('includes advertised IAP config-version', () async {
@@ -385,11 +386,11 @@ void main() {
       final payload = base64.decode(initialResponseB64);
 
       // HT2-*: authcid || NUL || NUL (empty extra) || HMAC-SHA-256(token).
-      final expectedHmac = crypto.Hmac(crypto.sha256, tokenBytes)
+      final expectedHmac = crypto.Hmac(crypto.sha256, utf8.encode(tokenB64))
           .convert(utf8.encode('Initiator'))
           .bytes;
       final expected = [
-        ...utf8.encode('alice@example.com'),
+        ...utf8.encode('alice'),
         0x00,
         0x00,
         ...expectedHmac,
@@ -427,11 +428,11 @@ void main() {
           auth.getChild('initial-response')?.textValue ?? '';
       final payload = base64.decode(initialResponseB64);
 
-      final expectedHmac = crypto.Hmac(crypto.sha512, tokenBytes)
+      final expectedHmac = crypto.Hmac(crypto.sha512, utf8.encode(tokenB64))
           .convert(utf8.encode('Initiator'))
           .bytes;
       final expected = [
-        ...utf8.encode('bob@example.com'),
+        ...utf8.encode('bob'),
         0x00,
         0x00,
         ...expectedHmac,
@@ -465,10 +466,18 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       // Feed a success response with a new token.
+      final responder = base64.encode([
+        0,
+        ...crypto.Hmac(
+          crypto.sha256,
+          utf8.encode(base64.encode(List.filled(32, 1))),
+        ).convert(utf8.encode('Responder')).bytes,
+      ]);
       connection.handleResponse(
         "<xmpp_stone>"
         "<success xmlns='urn:xmpp:sasl:2'>"
         "<authorization-identifier>alice@example.com</authorization-identifier>"
+        "<additional-data>$responder</additional-data>"
         "<token xmlns='urn:xmpp:fast:0' token='$newToken' expiry='$expiry'/>"
         "</success>"
         "</xmpp_stone>",
@@ -644,7 +653,7 @@ void main() {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..fastEnabled = true
         ..fastToken = base64.encode(List.filled(32, 1))
-        ..fastMechanism = 'HT2-SHA-256-NONE'
+        ..fastMechanism = 'HT-SHA-256-NONE'
         ..fastTokenExpiry = '2099-01-01T00:00:00Z'
         ..onFastCredentialsChanged = ((updated) {
           cleared = updated.fastToken == null;
@@ -653,7 +662,7 @@ void main() {
       final socket = _RecordingSocket();
       connection.socket = socket;
 
-      final authElement = buildSasl2AuthElement(['HT2-SHA-256-NONE']);
+      final authElement = buildSasl2AuthElement(['HT-SHA-256-NONE']);
       final feature = SaslAuthenticationFeature(connection, 'secret');
       feature.negotiate([authElement]);
       await Future<void>.delayed(Duration.zero);
@@ -663,7 +672,7 @@ void main() {
           Nonza.parse(xml.XmlDocument.parse(socket.writes.first).rootElement);
       expect(
         firstAuth.getAttribute('mechanism')?.value,
-        equals('HT2-SHA-256-NONE'),
+        equals('HT-SHA-256-NONE'),
       );
 
       // The server rejects the stored token.
@@ -701,12 +710,12 @@ void main() {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..fastEnabled = true
         ..fastToken = base64.encode(List.filled(32, 1))
-        ..fastMechanism = 'HT2-SHA-256-NONE'
+        ..fastMechanism = 'HT-SHA-256-NONE'
         // Expiry in the past.
         ..fastTokenExpiry = '2000-01-01T00:00:00Z';
       final connection = Connection(account);
 
-      final authElement = buildSasl2AuthElement(['HT2-SHA-256-NONE']);
+      final authElement = buildSasl2AuthElement(['HT-SHA-256-NONE']);
       final inlineFeatures =
           SaslAuthenticationFeature.parseInlineFeatures(authElement);
       connection.setSasl2InlineFeatures(inlineFeatures);
@@ -730,14 +739,14 @@ void main() {
       final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
         ..fastEnabled = true
         ..fastToken = base64.encode(List.filled(32, 1))
-        ..fastMechanism = 'HT2-SHA-256-NONE'
+        ..fastMechanism = 'HT-SHA-256-NONE'
         // Expiry far in the future.
         ..fastTokenExpiry = '2099-01-01T00:00:00Z';
       final connection = Connection(account);
       final socket = _RecordingSocket();
       connection.socket = socket;
 
-      final authElement = buildSasl2AuthElement(['HT2-SHA-256-NONE']);
+      final authElement = buildSasl2AuthElement(['HT-SHA-256-NONE']);
 
       final feature = SaslAuthenticationFeature(connection, 'secret');
       feature.negotiate([authElement]);
@@ -749,7 +758,7 @@ void main() {
           reason: 'FAST authenticate should have been sent');
       final doc = xml.XmlDocument.parse(socket.writes.first).rootElement;
       final auth = Nonza.parse(doc);
-      expect(auth.getAttribute('mechanism')?.value, equals('HT2-SHA-256-NONE'));
+      expect(auth.getAttribute('mechanism')?.value, equals('HT-SHA-256-NONE'));
     });
 
     test('expired token notifies the persistence callback', () {

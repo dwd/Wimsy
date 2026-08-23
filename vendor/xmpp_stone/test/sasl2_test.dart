@@ -307,6 +307,7 @@ void main() {
       await connection.openSocket();
       await Future<void>.delayed(Duration.zero);
       expect(socket.writes.join(), contains('<authenticate'));
+      expect(socket.writes.join(), contains("from='alice@example.com'"));
 
       connection.handleResponse(
         "<xmpp_stone><stream:features xmlns:stream='http://etherx.jabber.org/streams'>"

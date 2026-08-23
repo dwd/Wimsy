@@ -63,8 +63,8 @@ class FastAuthHandler implements AbstractSaslHandler {
   final FastMechanismVariant _variant;
   final crypto.Hash _hash;
 
-  /// Base64-encoded token bytes as stored in the account.
-  final String _tokenBase64;
+  /// The opaque Unicode token string issued by the FAST server.
+  final String _token;
 
   late StreamSubscription<Nonza> _subscription;
   final _completer = Completer<AuthenticationResult>();
@@ -74,7 +74,7 @@ class FastAuthHandler implements AbstractSaslHandler {
     this._mechanismName,
     this._variant,
     this._hash,
-    this._tokenBase64,
+    this._token,
   );
 
   /// Creates a [FastAuthHandler] from a stored mechanism name such as
@@ -82,7 +82,7 @@ class FastAuthHandler implements AbstractSaslHandler {
   static FastAuthHandler? fromMechanismName(
     Connection connection,
     String mechanismName,
-    String tokenBase64,
+    String token,
   ) {
     final upper = mechanismName.toUpperCase();
     FastMechanismVariant? variant;
@@ -130,7 +130,7 @@ class FastAuthHandler implements AbstractSaslHandler {
       mechanismName,
       variant,
       hash,
-      tokenBase64,
+      token,
     );
   }
 
@@ -161,6 +161,11 @@ class FastAuthHandler implements AbstractSaslHandler {
       authenticate.addChild(_buildUserAgentElement());
     }
 
+    // XEP-0484 requires this marker when authenticating with a FAST token.
+    authenticate.addChild(XmppElement()
+      ..name = 'fast'
+      ..addAttribute(XmppAttribute('xmlns', fastNamespace)));
+
     // Include Bind 2 inline element if the server advertises it.
     if (_connection.account.useBind2 &&
         _connection.sasl2InlineFeatures.containsKey(bind2Namespace)) {
@@ -189,18 +194,11 @@ class FastAuthHandler implements AbstractSaslHandler {
   /// HT-*:  `authcid || '\x00' || token_bytes`
   /// HT2-*: `HMAC-<hash>(token_bytes, "Initiator")`  (NONE channel-binding)
   String? _buildInitialResponse() {
-    final List<int> tokenBytes;
-    try {
-      tokenBytes = base64.decode(_tokenBase64);
-    } catch (e) {
-      Log.e(TAG, 'Failed to decode FAST token: $e');
-      return null;
-    }
+    final tokenBytes = utf8.encode(_token);
 
     // HT-*:  authcid || NUL || [ extra || NUL ] || initiator_hashed_token  // optional bit is HT2-*
-    // authcid is the bare JID (local@domain) per XEP-0484 §4.
-    final authcid =
-        '${_connection.account.username}@${_connection.account.domain}';
+    // authcid is the authentication identity's localpart.
+    final authcid = _connection.account.username;
     final List<int> payload = utf8.encode(authcid) + [0x00];
     // Message is "Initiator" || cbdata [ || extra ]
     final message = utf8.encode('Initiator');
@@ -230,6 +228,9 @@ class FastAuthHandler implements AbstractSaslHandler {
   }
 
   void _handleSuccess(Nonza nonza) {
+    if (!_verifyResponder(nonza.getChild('additional-data')?.textValue)) {
+      return;
+    }
     final authorizationIdentifier =
         nonza.getChild('authorization-identifier')?.textValue?.trim();
     if (authorizationIdentifier != null && authorizationIdentifier.isNotEmpty) {
@@ -248,6 +249,42 @@ class FastAuthHandler implements AbstractSaslHandler {
 
     _subscription.cancel();
     _completer.complete(AuthenticationResult(true, ''));
+  }
+
+  bool _verifyResponder(String? additionalData) {
+    if (additionalData == null || additionalData.isEmpty) {
+      _fail('Missing HT responder authentication data');
+      return false;
+    }
+    List<int> response;
+    try {
+      response = base64.decode(additionalData);
+    } catch (_) {
+      _fail('Invalid HT responder authentication data');
+      return false;
+    }
+    final expected = crypto.Hmac(_hash, utf8.encode(_token))
+        .convert(utf8.encode('Responder'))
+        .bytes;
+    // Draft -10 prefixes the success response with NUL. Accept the unprefixed
+    // -09 form too because XEP-0484 normatively cites that revision.
+    if (response.length == expected.length + 1 && response.first == 0) {
+      response = response.sublist(1);
+    }
+    if (!_constantTimeEquals(response, expected)) {
+      _fail('HT responder authentication failed');
+      return false;
+    }
+    return true;
+  }
+
+  static bool _constantTimeEquals(List<int> left, List<int> right) {
+    var difference = left.length ^ right.length;
+    final length = left.length < right.length ? left.length : right.length;
+    for (var i = 0; i < length; i++) {
+      difference |= left[i] ^ right[i];
+    }
+    return difference == 0;
   }
 
   /// Looks for a `<token xmlns='urn:xmpp:fast:0'>` child in the SASL2
