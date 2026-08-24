@@ -90,6 +90,7 @@ void main() {
     manager.queryById(
       afterId: 'anchor-mam-id-99',
       max: 50,
+      after: 'previous-page-last-id',
     );
 
     final iq = await sent;
@@ -105,6 +106,7 @@ void main() {
 
     // Must carry RSM max.
     expect(xml, contains('<max>50</max>'));
+    expect(xml, contains('<after>previous-page-last-id</after>'));
 
     // Must use MAM:2 namespace.
     expect(xml, contains('urn:xmpp:mam:2'));
@@ -163,7 +165,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
-      bool useWebTransport = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,

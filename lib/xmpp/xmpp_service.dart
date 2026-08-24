@@ -34,6 +34,7 @@ import 'mam_coordinator.dart';
 import 'mam_cursor_store.dart';
 import 'mam_merge_engine.dart';
 import 'mam_query_planner.dart';
+import 'mam_fin_page.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
@@ -1200,6 +1201,9 @@ class XmppService extends ChangeNotifier {
           // Any in-flight carbons enable request is tied to the old stream.
           _carbonsRequestId = null;
           _carbonsEnabled = false;
+          // A new stream must always get a fresh MAM catch-up, even when the
+          // reconnect happens within the normal duplicate-sync guard window.
+          _lastGlobalMamSyncAt = null;
           _status = XmppStatus.connecting;
           _errorMessage = null;
           notifyListeners();
@@ -1218,6 +1222,10 @@ class XmppService extends ChangeNotifier {
           _setupDeliveryTracking();
           _setupJingle();
           _setupIbb();
+          // Stream management normally replays queued stanzas, but the
+          // account archive is the authoritative source for anything the
+          // server could not retain on the resumed stream.
+          _primeMamSync();
           _applyClientState();
           return;
         }
@@ -8589,13 +8597,14 @@ class XmppService extends ChangeNotifier {
 
   /// R2.1: Issue a single unified MAM catch-up query against the user's own
   /// server archive, starting after [anchor] (the globally newest MAM id we
-  /// have seen). On completion the RSM `<last>` id is used to advance
+  /// have seen). Additional RSM pages are requested until the server marks
+  /// the result complete. The RSM `<last>` id is used to advance
   /// [_lastMamIdSeen] so the next session's anchor is up to date.
   ///
   /// The query is built manually so we can capture the IQ id and register an
   /// [IqRouter] response handler — [MessageArchiveManager.queryById] writes
   /// the stanza internally and does not expose the id.
-  void _startUnifiedDmCatchUp(String anchor) {
+  void _startUnifiedDmCatchUp(String anchor, {String? after}) {
     final connection = _connection;
     if (connection == null) {
       return;
@@ -8642,6 +8651,12 @@ class XmppService extends ChangeNotifier {
       ..name = 'max'
       ..textValue = '50';
     set.addChild(max);
+    if (after != null && after.isNotEmpty) {
+      final afterElement = XmppElement()
+        ..name = 'after'
+        ..textValue = after;
+      set.addChild(afterElement);
+    }
     query.addChild(set);
 
     iq.addChild(query);
@@ -8650,36 +8665,16 @@ class XmppService extends ChangeNotifier {
     // server returns the <fin> result.
     final router = IqRouter.getInstance(connection);
     router.registerResponseHandler(id, (response) {
-      if (response.type != IqStanzaType.RESULT) {
+      final page = MamFinPage.fromIq(response);
+      if (page == null) {
         return;
       }
-      // Parse <fin xmlns="urn:xmpp:mam:2"><set …><last>…</last></set></fin>
-      final fin = response.children.firstWhere(
-        (child) =>
-            child.name == 'fin' &&
-            child.getAttribute('xmlns')?.value == 'urn:xmpp:mam:2',
-        orElse: () => XmppElement(),
-      );
-      if (fin.name != 'fin') {
-        return;
-      }
-      final rsmSet = fin.children.firstWhere(
-        (child) =>
-            child.name == 'set' &&
-            child.getAttribute('xmlns')?.value ==
-                'http://jabber.org/protocol/rsm',
-        orElse: () => XmppElement(),
-      );
-      if (rsmSet.name != 'set') {
-        return;
-      }
-      final lastEl = rsmSet.children.firstWhere(
-        (child) => child.name == 'last',
-        orElse: () => XmppElement(),
-      );
-      final lastId = lastEl.name == 'last' ? lastEl.textValue?.trim() : null;
+      final lastId = page.lastId;
       if (lastId != null && lastId.isNotEmpty) {
         _bumpLastMamIdSeen(lastId);
+      }
+      if (!page.complete && lastId != null && lastId != after) {
+        _startUnifiedDmCatchUp(anchor, after: lastId);
       }
     });
 
