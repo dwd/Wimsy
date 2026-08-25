@@ -12,6 +12,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/login_screen.dart';
 import 'package:wimsy/main.dart';
+import 'package:wimsy/models/chat_message.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
@@ -80,6 +81,55 @@ void main() {
     expect(composer.textCapitalization, TextCapitalization.sentences);
     expect(composer.autocorrect, isTrue);
     expect(composer.enableSuggestions, isTrue);
+  });
+
+  testWidgets('long pressing a message opens its complete action menu', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'bob@example.com',
+      to: 'alice@example.com',
+      body: 'A message with actions',
+      timestamp: DateTime.utc(2026),
+      outgoing: false,
+      messageId: 'long-press-menu-test',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'Bob',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'alice@example.com',
+            recentReactionOptions: const ['👍'],
+            onReact: (_) {},
+            onEdit: null,
+            onReply: () {},
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    await tester.longPress(find.text('A message with actions'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reply'), findsOneWidget);
+    expect(find.text('Add reaction'), findsOneWidget);
+    expect(find.text('View XML'), findsOneWidget);
   });
 
   testWidgets('Login screen displays and clears live connection logs', (

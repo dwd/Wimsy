@@ -1426,9 +1426,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                           final avatarBytes = isBookmark
                               ? (occupantAvatarJid == null
                                     ? null
-                                    : service.avatarBytesFor(
-                                        occupantAvatarJid,
-                                      ))
+                                    : service.avatarBytesFor(occupantAvatarJid))
                               : service.avatarBytesFor(message.from);
                           final inviteRoomJid = message.inviteRoomJid;
                           final inviteRoomName =
@@ -1448,7 +1446,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                                   password: message.invitePassword,
                                 )
                               : null;
-                          return _MessageBubble(
+                          return MessageBubble(
                             key: messageKey,
                             message: message,
                             senderName: senderName,
@@ -3920,8 +3918,8 @@ class MessageComposerTextField extends StatelessWidget {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({
+class MessageBubble extends StatelessWidget {
+  const MessageBubble({
     super.key,
     required this.message,
     required this.senderName,
@@ -3968,6 +3966,7 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final menuKey = GlobalKey<_MessageMenuButtonState>();
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface;
     final linkColor = theme.colorScheme.primary;
@@ -3982,21 +3981,16 @@ class _MessageBubble extends StatelessWidget {
     final reactions = message.reactions ?? const {};
     final ownReactions = _ownReactions(reactions);
 
-    return GestureDetector(
-      onLongPress: onReact == null
-          ? null
-          : () => _showReactionPickerSheet(
-              context: context,
-              onReact: onReact!,
-              recentReactionOptions: recentReactionOptions,
-              ownReactions: ownReactions,
-            ),
+    return _TouchLongPressRegion(
+      key: Key('message-bubble-${message.messageId}'),
+      onLongPress: (position) => menuKey.currentState?.showAt(position),
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _MessageMenuButton(
+              key: menuKey,
               message: message,
               recentReactionOptions: recentReactionOptions,
               ownReactions: ownReactions,
@@ -4696,6 +4690,85 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
+/// Detects touch long presses without competing with selectable message text.
+class _TouchLongPressRegion extends StatefulWidget {
+  const _TouchLongPressRegion({
+    super.key,
+    required this.onLongPress,
+    required this.child,
+  });
+
+  final ValueChanged<Offset> onLongPress;
+  final Widget child;
+
+  @override
+  State<_TouchLongPressRegion> createState() => _TouchLongPressRegionState();
+}
+
+class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
+  Timer? _timer;
+  int? _pointer;
+  Offset? _startPosition;
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.touch &&
+        event.kind != PointerDeviceKind.stylus &&
+        event.kind != PointerDeviceKind.invertedStylus) {
+      return;
+    }
+    _cancel();
+    _pointer = event.pointer;
+    _startPosition = event.position;
+    _timer = Timer(kLongPressTimeout, () {
+      final position = _startPosition;
+      _timer = null;
+      if (position != null) {
+        widget.onLongPress(position);
+      }
+    });
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (event.pointer != _pointer || _startPosition == null) {
+      return;
+    }
+    if ((event.position - _startPosition!).distance > kTouchSlop) {
+      _cancel();
+    }
+  }
+
+  void _handlePointerEnd(PointerEvent event) {
+    if (event.pointer == _pointer) {
+      _cancel();
+    }
+  }
+
+  void _cancel() {
+    _timer?.cancel();
+    _timer = null;
+    _pointer = null;
+    _startPosition = null;
+  }
+
+  @override
+  void dispose() {
+    _cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: _handlePointerMove,
+      onPointerUp: _handlePointerEnd,
+      onPointerCancel: _handlePointerEnd,
+      child: widget.child,
+    );
+  }
+}
+
 class _ContactActionsMenu extends StatelessWidget {
   const _ContactActionsMenu({
     required this.isBookmark,
@@ -5142,8 +5215,9 @@ class _AvatarPlaceholder extends StatelessWidget {
   }
 }
 
-class _MessageMenuButton extends StatelessWidget {
+class _MessageMenuButton extends StatefulWidget {
   const _MessageMenuButton({
+    super.key,
     required this.message,
     required this.recentReactionOptions,
     required this.ownReactions,
@@ -5162,69 +5236,87 @@ class _MessageMenuButton extends StatelessWidget {
   final Widget? child;
 
   @override
+  State<_MessageMenuButton> createState() => _MessageMenuButtonState();
+}
+
+class _MessageMenuButtonState extends State<_MessageMenuButton> {
+  Future<void> showAt(Offset globalPosition) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: _items(),
+    );
+    if (value != null && mounted) {
+      _handleSelected(value);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final reactions = message.reactions ?? const {};
     return PopupMenuButton<String>(
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-      icon: child == null ? const Icon(Icons.more_horiz, size: 16) : null,
-      child: child,
-      onSelected: (value) {
-        switch (value) {
-          case 'edit_message':
-            onEdit?.call();
-            break;
-          case 'reply_message':
-            onReply?.call();
-            break;
-          case 'add_reaction':
-            _showReactionSheet(context);
-            break;
-          case 'view_reactions':
-            _showReactions(context);
-            break;
-          case 'view_xml':
-            _showXml(context);
-            break;
-        }
-      },
-      itemBuilder: (context) => [
-        if (onEdit != null)
-          const PopupMenuItem(
-            value: 'edit_message',
-            child: Text('Edit message'),
-          ),
-        if (onReply != null)
-          const PopupMenuItem(value: 'reply_message', child: Text('Reply')),
-        if (onReact != null)
-          const PopupMenuItem(
-            value: 'add_reaction',
-            child: Text('Add reaction'),
-          ),
-        if (reactions.isNotEmpty)
-          const PopupMenuItem(
-            value: 'view_reactions',
-            child: Text('View reactions'),
-          ),
-        const PopupMenuItem(value: 'view_xml', child: Text('View XML')),
-      ],
+      icon: widget.child == null
+          ? const Icon(Icons.more_horiz, size: 16)
+          : null,
+      onSelected: _handleSelected,
+      itemBuilder: (context) => _items(),
+      child: widget.child,
     );
   }
 
+  List<PopupMenuEntry<String>> _items() {
+    final reactions = widget.message.reactions ?? const {};
+    return [
+      if (widget.onEdit != null)
+        const PopupMenuItem(value: 'edit_message', child: Text('Edit message')),
+      if (widget.onReply != null)
+        const PopupMenuItem(value: 'reply_message', child: Text('Reply')),
+      if (widget.onReact != null)
+        const PopupMenuItem(value: 'add_reaction', child: Text('Add reaction')),
+      if (reactions.isNotEmpty)
+        const PopupMenuItem(
+          value: 'view_reactions',
+          child: Text('View reactions'),
+        ),
+      const PopupMenuItem(value: 'view_xml', child: Text('View XML')),
+    ];
+  }
+
+  void _handleSelected(String value) {
+    switch (value) {
+      case 'edit_message':
+        widget.onEdit?.call();
+      case 'reply_message':
+        widget.onReply?.call();
+      case 'add_reaction':
+        _showReactionSheet(context);
+      case 'view_reactions':
+        _showReactions(context);
+      case 'view_xml':
+        _showXml(context);
+    }
+  }
+
   void _showReactionSheet(BuildContext context) {
-    if (onReact == null) {
+    if (widget.onReact == null) {
       return;
     }
     _showReactionPickerSheet(
       context: context,
-      onReact: onReact!,
-      recentReactionOptions: recentReactionOptions,
-      ownReactions: ownReactions,
+      onReact: widget.onReact!,
+      recentReactionOptions: widget.recentReactionOptions,
+      ownReactions: widget.ownReactions,
     );
   }
 
   void _showReactions(BuildContext context) {
-    final reactions = message.reactions ?? const {};
+    final reactions = widget.message.reactions ?? const {};
     showDialog<void>(
       context: context,
       builder: (context) {
@@ -5260,7 +5352,7 @@ class _MessageMenuButton extends StatelessWidget {
   }
 
   void _showXml(BuildContext context) {
-    final xml = message.rawXml?.trim();
+    final xml = widget.message.rawXml?.trim();
     showDialog<void>(
       context: context,
       builder: (context) {
