@@ -30,6 +30,7 @@ import 'xmpp/jid_discovery.dart';
 import 'xmpp/vcard_utils.dart';
 import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
+import 'utils/graph_statistics.dart';
 import 'utils/xep0392_color.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -761,6 +762,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                   data: service.quicLossHistory,
                   color: Colors.red,
                   unit: '',
+                  showAverage: true,
                 ),
                 const SizedBox(width: 16),
               ],
@@ -6601,25 +6603,30 @@ class _QuicStatsGraph extends StatelessWidget {
     required this.data,
     required this.color,
     required this.unit,
+    this.showAverage = false,
   });
 
   final String label;
   final List<int> data;
   final Color color;
   final String unit;
+  final bool showAverage;
 
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return const SizedBox.shrink();
-    final lastValue = data.last;
+    final value = showAverage
+        ? formatGraphAverage(graphAverage(data)!)
+        : data.last.toString();
+    final description = showAverage ? '$label average' : label;
     final theme = Theme.of(context);
     return Tooltip(
-      message: '$label: $lastValue$unit',
+      message: '$description: $value$unit',
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            '$lastValue$unit',
+            '$value$unit',
             style: theme.textTheme.labelSmall?.copyWith(
               fontSize: 8,
               fontWeight: FontWeight.bold,
