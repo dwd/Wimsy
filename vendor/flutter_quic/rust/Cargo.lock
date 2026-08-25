@@ -368,6 +368,7 @@ dependencies = [
  "chrono",
  "flutter_rust_bridge",
  "futures",
+ "log",
  "quinn",
  "quinn-proto",
  "rustls",

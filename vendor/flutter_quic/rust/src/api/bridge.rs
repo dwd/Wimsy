@@ -1,7 +1,11 @@
 #[flutter_rust_bridge::frb(init)]
 pub fn init_app() {
-    // Default utilities - feel free to customize
+    // flutter_rust_bridge installs an Android logger at TRACE by default.
+    // Quinn's packet and frame tracing is far too noisy for normal runs and
+    // can evict the actual close reason from logcat. Keep warnings, errors,
+    // and useful lifecycle information while suppressing per-packet output.
     flutter_rust_bridge::setup_default_user_utils();
+    log::set_max_level(log::LevelFilter::Info);
 }
 
 // Core API exposure functions to ensure flutter_rust_bridge discovers our types

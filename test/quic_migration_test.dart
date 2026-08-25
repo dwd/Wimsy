@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_quic/flutter_quic.dart'
     show
         QuicConnectionStats,
@@ -169,6 +171,30 @@ void main() {
       socket.rebindOverride = (_) async => throw Exception('rebind error');
       final result = await socket.attemptMigration();
       expect(result, MigrationResult.failed);
+    });
+
+    test('coalesces overlapping migration attempts into one rebind', () async {
+      final socket = makeQuicSocket(
+        statsSequence: [makeStats(0), makeStats(1)],
+        timeout: const Duration(milliseconds: 500),
+      );
+      final rebindStarted = Completer<void>();
+      final allowRebind = Completer<void>();
+      var rebindCount = 0;
+      socket.rebindOverride = (_) async {
+        rebindCount++;
+        rebindStarted.complete();
+        await allowRebind.future;
+      };
+
+      final first = socket.attemptMigration();
+      await rebindStarted.future;
+      final second = socket.attemptMigration();
+      allowRebind.complete();
+
+      expect(await first, MigrationResult.success);
+      expect(await second, MigrationResult.success);
+      expect(rebindCount, 1);
     });
   });
 

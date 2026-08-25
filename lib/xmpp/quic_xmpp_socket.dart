@@ -80,6 +80,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   DateTime? _lastQuicReceiveAt;
   DateTime? _lastQuicSendAt;
   DateTime? _lastQuicPingAt;
+  Future<MigrationResult>? _migrationFuture;
 
   /// The negotiated QUIC idle timeout in milliseconds, or null if no timeout
   /// was negotiated (i.e. the connection may remain idle indefinitely).
@@ -226,7 +227,22 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// Returns [MigrationResult.success] when the PATH_CHALLENGE is confirmed,
   /// or [MigrationResult.failed] on timeout, FFI error, or when QUIC is not
   /// active.
-  Future<MigrationResult> attemptMigration() async {
+  Future<MigrationResult> attemptMigration() {
+    final inFlight = _migrationFuture;
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final migration = _attemptMigration();
+    _migrationFuture = migration;
+    migration.whenComplete(() {
+      if (identical(_migrationFuture, migration)) {
+        _migrationFuture = null;
+      }
+    });
+    return migration;
+  }
+
+  Future<MigrationResult> _attemptMigration() async {
     final endpoint = _endpoint;
     if (!_useQuic || endpoint == null) {
       return MigrationResult.failed;

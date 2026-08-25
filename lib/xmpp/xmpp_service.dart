@@ -870,10 +870,18 @@ class XmppService extends ChangeNotifier {
     // migration failure (or non-QUIC transport) do we tear down the session.
     final socket = _connection?.socket;
     if (socket is QuicCapableXmppSocket) {
+      final connection = _connection;
       debugPrint(
         'QUIC migration: attempting migration after connectivity change',
       );
       socket.attemptMigration().then((result) {
+        // Connectivity notifications and reconnects are asynchronous. Ignore
+        // a result belonging to a socket that has since been replaced.
+        if (!identical(_connection, connection) ||
+            !identical(_connection?.socket, socket)) {
+          debugPrint('QUIC migration: ignoring stale migration result');
+          return;
+        }
         if (result == MigrationResult.success) {
           debugPrint('QUIC migration: success — keeping XMPP session');
           _connection?.probeKeepalive(shortTimeout: true);
