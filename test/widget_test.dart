@@ -86,6 +86,8 @@ void main() {
   testWidgets('long pressing a message opens its complete action menu', (
     WidgetTester tester,
   ) async {
+    var replied = false;
+    late StateSetter rebuild;
     final message = ChatMessage(
       from: 'bob@example.com',
       to: 'alice@example.com',
@@ -97,29 +99,34 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: MessageBubble(
-            message: message,
-            senderName: 'Bob',
-            timestamp: '12:00',
-            avatarBytes: null,
-            replySenderName: null,
-            replyBody: null,
-            onReplyTargetTap: null,
-            inviteRoomJid: null,
-            inviteRoomName: null,
-            inviteAvatarBytes: null,
-            inviteReason: null,
-            onJoinInvite: null,
-            selfReactionSenderId: 'alice@example.com',
-            recentReactionOptions: const ['👍'],
-            onReact: (_) {},
-            onEdit: null,
-            onReply: () {},
-            onAcceptFile: null,
-            onDeclineFile: null,
-            onFallbackUpload: null,
-          ),
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return Scaffold(
+              body: MessageBubble(
+                message: message,
+                senderName: 'Bob',
+                timestamp: '12:00',
+                avatarBytes: null,
+                replySenderName: null,
+                replyBody: null,
+                onReplyTargetTap: null,
+                inviteRoomJid: null,
+                inviteRoomName: null,
+                inviteAvatarBytes: null,
+                inviteReason: null,
+                onJoinInvite: null,
+                selfReactionSenderId: 'alice@example.com',
+                recentReactionOptions: const ['👍'],
+                onReact: (_) {},
+                onEdit: null,
+                onReply: () => replied = true,
+                onAcceptFile: null,
+                onDeclineFile: null,
+                onFallbackUpload: null,
+              ),
+            );
+          },
         ),
       ),
     );
@@ -130,6 +137,20 @@ void main() {
     expect(find.text('Reply'), findsOneWidget);
     expect(find.text('Add reaction'), findsOneWidget);
     expect(find.text('View XML'), findsOneWidget);
+
+    rebuild(() {});
+    await tester.pump();
+    await tester.tap(find.text('Reply'));
+    await tester.pumpAndSettle();
+    expect(replied, isTrue);
+
+    await tester.longPress(find.text('A message with actions'));
+    await tester.pumpAndSettle();
+    rebuild(() {});
+    await tester.pump();
+    await tester.tap(find.text('Add reaction'));
+    await tester.pumpAndSettle();
+    expect(find.text('👍'), findsOneWidget);
   });
 
   testWidgets('Login screen displays and clears live connection logs', (

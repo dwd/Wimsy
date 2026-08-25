@@ -3966,7 +3966,6 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final menuKey = GlobalKey<_MessageMenuButtonState>();
     final theme = Theme.of(context);
     final textColor = theme.colorScheme.onSurface;
     final linkColor = theme.colorScheme.primary;
@@ -3981,10 +3980,9 @@ class MessageBubble extends StatelessWidget {
     final reactions = message.reactions ?? const {};
     final ownReactions = _ownReactions(reactions);
 
-    return _TouchLongPressRegion(
-      key: Key('message-bubble-${message.messageId}'),
-      onLongPress: (position) => menuKey.currentState?.showAt(position),
-      child: Container(
+    return _MessageMenuRegion(
+      messageId: message.messageId,
+      builder: (menuKey) => Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4686,6 +4684,29 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _MessageMenuRegion extends StatefulWidget {
+  const _MessageMenuRegion({required this.messageId, required this.builder});
+
+  final String? messageId;
+  final Widget Function(GlobalKey<_MessageMenuButtonState> menuKey) builder;
+
+  @override
+  State<_MessageMenuRegion> createState() => _MessageMenuRegionState();
+}
+
+class _MessageMenuRegionState extends State<_MessageMenuRegion> {
+  final _menuKey = GlobalKey<_MessageMenuButtonState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return _TouchLongPressRegion(
+      key: Key('message-bubble-${widget.messageId}'),
+      onLongPress: (position) => _menuKey.currentState?.showAt(position),
+      child: widget.builder(_menuKey),
     );
   }
 }
