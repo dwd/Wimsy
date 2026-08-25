@@ -76,6 +76,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   // The negotiated QUIC idle timeout in milliseconds, or null if infinite.
   // Populated after connect by _logPeerTransportParams.
   int? _quicNegotiatedIdleTimeoutMs;
+  DateTime? _quicConnectedAt;
+  DateTime? _lastQuicReceiveAt;
+  DateTime? _lastQuicSendAt;
+  DateTime? _lastQuicPingAt;
 
   /// The negotiated QUIC idle timeout in milliseconds, or null if no timeout
   /// was negotiated (i.e. the connection may remain idle indefinitely).
@@ -169,7 +173,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _map = map ?? (element) => element;
     // If the caller supplied a map factory (Connection.makeStreamResponseMapper),
     // store it so aux recv loops can each get their own independent buffer.
-    _makeAuxMapper = null; // reset; Connection sets this via makeStreamResponseMapper
+    _makeAuxMapper =
+        null; // reset; Connection sets this via makeStreamResponseMapper
     _closed = false;
     if (!useQuic) {
       _useQuic = false;
@@ -284,6 +289,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           return;
         }
         Log.xmppp_sending(payload, channel: target.label);
+        _lastQuicSendAt = DateTime.now();
         final updated = await sendStreamWriteAll(
           stream: target.stream,
           data: utf8.encode(payload),
@@ -311,7 +317,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         .map((channel) => channel.sendStream)
         .toList(growable: false);
     if (auxSlots.isNotEmpty) {
-      debugPrint('QUIC closing ${auxSlots.length} aux stream(s): slots=$auxSlots');
+      debugPrint(
+        'QUIC closing ${auxSlots.length} aux stream(s): slots=$auxSlots',
+      );
     }
 
     _sendStream = null;
@@ -330,6 +338,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _pingTimer?.cancel();
     _pingTimer = null;
     _quicNegotiatedIdleTimeoutMs = null;
+    _quicConnectedAt = null;
+    _lastQuicReceiveAt = null;
+    _lastQuicSendAt = null;
+    _lastQuicPingAt = null;
     _accountBareJid = null;
     _controlBuffer = '';
     _auxStreamsBySlot.clear();
@@ -461,9 +473,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         return;
       } catch (error) {
         lastError = error;
-        debugPrint(
-          'QUIC connect round $attempt/$maxAttempts failed: $error',
-        );
+        debugPrint('QUIC connect round $attempt/$maxAttempts failed: $error');
       }
     }
     throw Exception(
@@ -523,39 +533,41 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       );
       unawaited(
         _connectQuicAddress(
-          address,
-          port,
-          serverName,
-          timeout: quicConnectTimeout,
-        ).then((result) {
-          if (completer.isCompleted) {
-            // We lost the race: discard this connection. Best-effort; we
-            // don't have a clean cancel path through the FFI, so just let
-            // the Rust side drop it when the arc goes out of scope.
-            debugPrint(
-              'QUIC connect discard (lost race): '
-              '${address.address}:$port type=${address.type}',
-            );
-            return;
-          }
-          completer.complete(
-            _QuicConnectResult(
-              address: address,
-              endpoint: result.endpoint,
-              connection: result.connection,
-              sendStream: result.sendStream,
-              recvStream: result.recvStream,
-            ),
-          );
-        }).catchError((Object error) {
-          debugPrint(
-            'QUIC connect failed: ${address.address}:$port '
-            'type=${address.type} error=$error',
-          );
-          if (!completer.isCompleted) {
-            recordFailure(address, error);
-          }
-        }),
+              address,
+              port,
+              serverName,
+              timeout: quicConnectTimeout,
+            )
+            .then((result) {
+              if (completer.isCompleted) {
+                // We lost the race: discard this connection. Best-effort; we
+                // don't have a clean cancel path through the FFI, so just let
+                // the Rust side drop it when the arc goes out of scope.
+                debugPrint(
+                  'QUIC connect discard (lost race): '
+                  '${address.address}:$port type=${address.type}',
+                );
+                return;
+              }
+              completer.complete(
+                _QuicConnectResult(
+                  address: address,
+                  endpoint: result.endpoint,
+                  connection: result.connection,
+                  sendStream: result.sendStream,
+                  recvStream: result.recvStream,
+                ),
+              );
+            })
+            .catchError((Object error) {
+              debugPrint(
+                'QUIC connect failed: ${address.address}:$port '
+                'type=${address.type} error=$error',
+              );
+              if (!completer.isCompleted) {
+                recordFailure(address, error);
+              }
+            }),
       );
     }
 
@@ -572,8 +584,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     //   t=750ms B[1]
     //   t=1000ms A[2]
     //   t=1250ms B[2]
-    final parallelAttempts =
-        quicConnectParallelAttempts < 1 ? 1 : quicConnectParallelAttempts;
+    final parallelAttempts = quicConnectParallelAttempts < 1
+        ? 1
+        : quicConnectParallelAttempts;
     final schedule = <InternetAddress>[];
     for (var rep = 0; rep < parallelAttempts; rep++) {
       for (final address in candidates) {
@@ -622,7 +635,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       qlogPath: qlogPath,
     );
     final connected = await connect.timeout(timeout);
-    final (sendStream, recvStream) = await connectionOpenBi(connection: connected.$2);
+    final (sendStream, recvStream) = await connectionOpenBi(
+      connection: connected.$2,
+    );
     return _QuicConnectResult(
       endpoint: connected.$1,
       connection: connected.$2,
@@ -736,6 +751,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             if (bytes.isEmpty) {
               continue;
             }
+            _lastQuicReceiveAt = DateTime.now();
             final chunk = utf8.decode(bytes, allowMalformed: true);
             if (isControl) {
               _captureBindResult(chunk);
@@ -767,7 +783,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               await _quicStreamController.close();
             }
           } else {
-            final endLabel = label ?? (slot != null ? 'quic-aux-$slot' : 'quic-aux-?');
+            final endLabel =
+                label ?? (slot != null ? 'quic-aux-$slot' : 'quic-aux-?');
             debugPrint('QUIC aux stream recv loop ended label=$endLabel');
           }
         }
@@ -813,8 +830,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     final accountDomain = _accountBareJid == null
         ? null
         : _accountBareJid!.contains('@')
-            ? _accountBareJid!.split('@').last
-            : _accountBareJid;
+        ? _accountBareJid!.split('@').last
+        : _accountBareJid;
     if (toBare == null ||
         (_accountBareJid != null && toBare == _accountBareJid) ||
         (accountDomain != null && toBare == accountDomain)) {
@@ -921,10 +938,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     // Coalesce concurrent opens for the same slot: if one is already in
     // flight, return the same future so callers share the result rather than
     // each trying to consume _connection via Auto_Owned FFI transfer.
-    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot, reason: reason ?? 'on-demand'));
+    return _auxStreamOpening.putIfAbsent(
+      slot,
+      () => _openAuxStream(slot, reason: reason ?? 'on-demand'),
+    );
   }
 
-  Future<_QuicStreamChannel> _openAuxStream(int slot, {String reason = 'pre-open'}) async {
+  Future<_QuicStreamChannel> _openAuxStream(
+    int slot, {
+    String reason = 'pre-open',
+  }) async {
     // Prefer a server-initiated stream from the pool over opening a new
     // client-initiated stream. This avoids a connectionOpenBi round-trip and
     // conserves bidi-stream credits.
@@ -946,7 +969,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       if (connection == null || _closed) {
         throw StateError('QUIC connection is not established');
       }
-      debugPrint('QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)');
+      debugPrint(
+        'QUIC aux stream opening slot=$slot reason=$reason (calling connectionOpenBi)',
+      );
       // connectionOpenBi now takes &QuicConnection (shared ref) so multiple
       // concurrent opens on different slots are safe — no serialisation lock
       // needed. Quinn's open_bi only needs &self internally.
@@ -968,17 +993,22 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         );
       });
       try {
-        final (sendStream, recvStream) = await connectionOpenBi(connection: connection)
-            .timeout(const Duration(seconds: 10), onTimeout: () {
-          // Mark that we are credit-starved and log stats so we can see
-          // the server's MAX_STREAMS frame count at the moment of timeout.
-          _auxStreamsBlocked = true;
-          _startMaxStreamsWatcher();
-          throw TimeoutException(
-            'connectionOpenBi timed out for aux slot $slot after 10s '
-            '(peer likely did not grant additional bidi stream credits)',
-          );
-        });
+        final (
+          sendStream,
+          recvStream,
+        ) = await connectionOpenBi(connection: connection).timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            // Mark that we are credit-starved and log stats so we can see
+            // the server's MAX_STREAMS frame count at the moment of timeout.
+            _auxStreamsBlocked = true;
+            _startMaxStreamsWatcher();
+            throw TimeoutException(
+              'connectionOpenBi timed out for aux slot $slot after 10s '
+              '(peer likely did not grant additional bidi stream credits)',
+            );
+          },
+        );
         // Re-check after the async gap: close() may have fired while we awaited.
         if (_closed) {
           // Discard the newly opened streams; the connection is being torn down.
@@ -1000,7 +1030,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         // prepareStreamResponse. Fall back to _map if no factory was set
         // (e.g. in tests that don't call setAuxMapperFactory).
         final auxMapper = _makeAuxMapper?.call() ?? _map;
-        _startRecvLoop(recvStream, isControl: false, slot: slot, mapper: auxMapper);
+        _startRecvLoop(
+          recvStream,
+          isControl: false,
+          slot: slot,
+          mapper: auxMapper,
+        );
         return channel;
       } catch (error, stack) {
         final elapsed = DateTime.now().difference(openStart);
@@ -1107,13 +1142,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return;
     }
     try {
-      final params = await connectionPeerTransportParams(connection: connection);
+      final params = await connectionPeerTransportParams(
+        connection: connection,
+      );
       final bidi = params.initialMaxStreamsBidi;
       final uni = params.initialMaxStreamsUni;
       final data = params.initialMaxData;
       final idleMs = params.negotiatedIdleTimeoutMs;
       // Store the negotiated QUIC idle timeout for use by the PING timer.
       _quicNegotiatedIdleTimeoutMs = idleMs?.toInt();
+      _quicConnectedAt ??= DateTime.now();
       final idleDesc = idleMs != null
           ? '${(idleMs.toInt() / 1000).toStringAsFixed(1)}s'
           : 'infinite';
@@ -1166,6 +1204,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       }
       try {
         await connectionSendPing(connection: conn);
+        _lastQuicPingAt = DateTime.now();
         debugPrint('QUIC PING sent (keeping connection alive)');
       } catch (e) {
         debugPrint('QUIC PING error: $e');
@@ -1196,24 +1235,26 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         return;
       }
       final prevCount = _lastMaxStreamsBidiFrameCount;
-      unawaited(_logConnectionStats('max-streams-watcher').then((_) {
-        final rxMaxBidi = _lastMaxStreamsBidiFrameCount;
-        debugPrint(
-          'QUIC aux stream watcher: '
-          'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
-          '(was $prevCount)',
-        );
-        if (rxMaxBidi > prevCount) {
-          _auxStreamsBlocked = false;
-          _maxStreamsWatchTimer?.cancel();
-          _maxStreamsWatchTimer = null;
+      unawaited(
+        _logConnectionStats('max-streams-watcher').then((_) {
+          final rxMaxBidi = _lastMaxStreamsBidiFrameCount;
           debugPrint(
-            'QUIC aux stream watcher: server granted more bidi stream credits '
-            '(MAX_STREAMS frame count increased to $rxMaxBidi); '
-            'lazy aux stream opens via _selectSendTarget will now succeed',
+            'QUIC aux stream watcher: '
+            'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
+            '(was $prevCount)',
           );
-        }
-      }));
+          if (rxMaxBidi > prevCount) {
+            _auxStreamsBlocked = false;
+            _maxStreamsWatchTimer?.cancel();
+            _maxStreamsWatchTimer = null;
+            debugPrint(
+              'QUIC aux stream watcher: server granted more bidi stream credits '
+              '(MAX_STREAMS frame count increased to $rxMaxBidi); '
+              'lazy aux stream opens via _selectSendTarget will now succeed',
+            );
+          }
+        }),
+      );
     });
   }
 
@@ -1249,42 +1290,46 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   Future<void> _logQuicCloseReason() async {
     final conn = _connection;
     if (conn == null) {
-      debugPrint('QUIC connection closed (no connection arc available for close-reason query)');
+      debugPrint(
+        'QUIC connection closed (no connection arc available for close-reason query)',
+      );
       return;
     }
     try {
       final reason = await connectionCloseReason(connection: conn);
-      if (reason == null) {
-        debugPrint('QUIC connection closed cleanly (no error reported)');
-        return;
+      QuicConnectionStats? stats;
+      try {
+        stats = await connectionStats(connection: conn);
+      } catch (_) {
+        // The close reason is still useful if the connection arc was disposed
+        // before the final statistics could be copied across FFI.
       }
-      final String who;
-      final String detail;
-      if (reason.contains('LocallyClosed')) {
-        who = 'LOCAL (we closed it)';
-        detail = reason;
-      } else if (reason.contains('ApplicationClosed')) {
-        who = 'REMOTE (peer sent APPLICATION_CLOSE)';
-        detail = reason;
-      } else if (reason.contains('TimedOut')) {
-        who = 'TIMEOUT (idle timeout — neither side sent keepalive in time)';
-        detail = reason;
-      } else if (reason.contains('Reset')) {
-        who = 'REMOTE (stateless reset from peer)';
-        detail = reason;
-      } else if (reason.contains('TransportError')) {
-        who = 'TRANSPORT ERROR (QUIC protocol error)';
-        detail = reason;
-      } else if (reason.contains('VersionMismatch')) {
-        who = 'VERSION MISMATCH';
-        detail = reason;
-      } else {
-        who = 'UNKNOWN';
-        detail = reason;
-      }
-      debugPrint('QUIC connection closed: $who — $detail');
+      final now = DateTime.now();
+      final attribution = describeQuicCloseAttribution(reason);
+      final idle = _quicNegotiatedIdleTimeoutMs == null
+          ? 'infinite'
+          : '${_quicNegotiatedIdleTimeoutMs}ms';
+      final peerCloseFrames = stats?.frameRx.connectionClose;
+      final path = stats?.path;
+      Log.w(
+        'QuicTransport',
+        'connection dropped: attribution=$attribution '
+            'reason=${reason ?? 'none (control stream ended without a QUIC close error)'} '
+            'negotiated_idle_timeout=$idle '
+            'connection_age=${_formatDiagnosticAge(now, _quicConnectedAt)} '
+            'last_receive_age=${_formatDiagnosticAge(now, _lastQuicReceiveAt)} '
+            'last_send_age=${_formatDiagnosticAge(now, _lastQuicSendAt)} '
+            'last_ping_age=${_formatDiagnosticAge(now, _lastQuicPingAt)} '
+            'peer_close_frames=${peerCloseFrames ?? 'unavailable'} '
+            'rtt_ms=${path?.rttMillis ?? 'unavailable'} '
+            'lost_packets=${path?.lostPackets ?? 'unavailable'} '
+            'sent_packets=${path?.sentPackets ?? 'unavailable'}',
+      );
     } catch (e) {
-      debugPrint('QUIC connection closed (could not query close reason: $e)');
+      Log.w(
+        'QuicTransport',
+        'connection dropped: attribution=unknown; close diagnostics unavailable: $e',
+      );
     }
   }
 
@@ -1296,6 +1341,28 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         message.contains('ApplicationClosed') ||
         message.contains('Reset');
   }
+}
+
+/// Converts Quinn's close variant into a careful client/server attribution.
+///
+/// A local `TimedOut` observation says that this client's negotiated idle
+/// timer expired. It cannot establish whether the server independently timed
+/// out first, because a server or the network may silently discard packets.
+@visibleForTesting
+String describeQuicCloseAttribution(String? reason) {
+  if (reason == null) return 'unknown-clean-stream-end';
+  if (reason.contains('LocallyClosed')) return 'client-initiated';
+  if (reason.contains('ApplicationClosed')) return 'server-initiated';
+  if (reason.contains('TimedOut')) return 'client-observed-idle-timeout';
+  if (reason.contains('Reset')) return 'server-or-network-reset';
+  if (reason.contains('TransportError')) return 'quic-transport-error';
+  if (reason.contains('VersionMismatch')) return 'quic-version-mismatch';
+  return 'unknown';
+}
+
+String _formatDiagnosticAge(DateTime now, DateTime? then) {
+  if (then == null) return 'never';
+  return '${now.difference(then).inMilliseconds}ms';
 }
 
 List<InternetAddress> buildQuicHappyEyeballsPlan(
@@ -1354,11 +1421,11 @@ bool isStanzaPayload(String payload) {
       i++;
       continue;
     }
-    if (ch != 0x3c /* '<' */) {
+    if (ch != 0x3c /* '<' */ ) {
       return false;
     }
     // Skip XML prolog `<?xml … ?>`.
-    if (i + 1 < length && payload.codeUnitAt(i + 1) == 0x3f /* '?' */) {
+    if (i + 1 < length && payload.codeUnitAt(i + 1) == 0x3f /* '?' */ ) {
       final end = payload.indexOf('?>', i + 2);
       if (end < 0) {
         return false;
@@ -1371,8 +1438,12 @@ bool isStanzaPayload(String payload) {
     var j = nameStart;
     while (j < length) {
       final c = payload.codeUnitAt(j);
-      if (c == 0x20 || c == 0x09 || c == 0x0a || c == 0x0d ||
-          c == 0x2f /* '/' */ || c == 0x3e /* '>' */) {
+      if (c == 0x20 ||
+          c == 0x09 ||
+          c == 0x0a ||
+          c == 0x0d ||
+          c == 0x2f /* '/' */ ||
+          c == 0x3e /* '>' */ ) {
         break;
       }
       j++;
