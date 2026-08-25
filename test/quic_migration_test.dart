@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_quic/flutter_quic.dart'
     show
         QuicConnectionStats,
+        QuicConnection,
         QuicEndpoint,
         QuicFrameStats,
         QuicPathStats,
@@ -24,12 +25,21 @@ class _FakeEndpoint implements QuicEndpoint {
   bool get isDisposed => false;
 }
 
+class _FakeConnection implements QuicConnection {
+  @override
+  void dispose() {}
+
+  @override
+  bool get isDisposed => false;
+}
+
 /// Testable subclass of [QuicCapableXmppSocket] that returns a controlled
 /// sequence of stats from [getQuicStats] without touching real FFI.
 class _TestableSocket extends QuicCapableXmppSocket {
   _TestableSocket({
     required List<QuicConnectionStats?> statsSequence,
     required super.migrationProbeTimeout,
+    required super.migrationProbeInterval,
   }) : _statsSequence = List.of(statsSequence);
 
   final List<QuicConnectionStats?> _statsSequence;
@@ -105,6 +115,7 @@ QuicConnectionStats makeStats(int pathChallengeRx, {int udpDatagramsRx = 0}) {
 
 void main() {
   final fakeEndpoint = _FakeEndpoint();
+  final fakeConnection = _FakeConnection();
 
   /// Builds a socket with QUIC active, a fake endpoint, and a no-op rebind.
   _TestableSocket makeQuicSocket({
@@ -114,10 +125,13 @@ void main() {
     final socket = _TestableSocket(
       statsSequence: statsSequence,
       migrationProbeTimeout: timeout,
+      migrationProbeInterval: const Duration(milliseconds: 10),
     );
     socket.useQuicForTesting = true;
     socket.endpointForTesting = fakeEndpoint;
+    socket.connectionForTesting = fakeConnection;
     socket.rebindOverride = (_) async {};
+    socket.migrationPingOverride = (_) async {};
     return socket;
   }
 
@@ -126,6 +140,7 @@ void main() {
       final socket = _TestableSocket(
         statsSequence: const [],
         migrationProbeTimeout: const Duration(milliseconds: 50),
+        migrationProbeInterval: const Duration(milliseconds: 10),
       );
       // _useQuic defaults to false; no endpoint set.
       final result = await socket.attemptMigration();
@@ -136,9 +151,11 @@ void main() {
       final socket = _TestableSocket(
         statsSequence: const [],
         migrationProbeTimeout: const Duration(milliseconds: 50),
+        migrationProbeInterval: const Duration(milliseconds: 10),
       );
       socket.useQuicForTesting = true;
       // endpoint left null — rebindOverride won't be reached
+      socket.connectionForTesting = fakeConnection;
       socket.rebindOverride = (_) async {};
       final result = await socket.attemptMigration();
       expect(result, MigrationResult.failed);
@@ -187,9 +204,11 @@ void main() {
       final socket = _TestableSocket(
         statsSequence: [makeStats(0)],
         migrationProbeTimeout: const Duration(milliseconds: 50),
+        migrationProbeInterval: const Duration(milliseconds: 10),
       );
       socket.useQuicForTesting = true;
       socket.endpointForTesting = fakeEndpoint;
+      socket.connectionForTesting = fakeConnection;
       socket.rebindOverride = (_) async => throw Exception('rebind error');
       final result = await socket.attemptMigration();
       expect(result, MigrationResult.failed);
@@ -217,6 +236,25 @@ void main() {
       expect(await first, MigrationResult.success);
       expect(await second, MigrationResult.success);
       expect(rebindCount, 1);
+    });
+
+    test('repeats migration probes until the slow path responds', () async {
+      final socket = makeQuicSocket(
+        statsSequence: [
+          makeStats(0, udpDatagramsRx: 10),
+          makeStats(0, udpDatagramsRx: 10),
+          makeStats(0, udpDatagramsRx: 10),
+          makeStats(0, udpDatagramsRx: 11),
+        ],
+        timeout: const Duration(seconds: 1),
+      );
+      var probeCount = 0;
+      socket.migrationPingOverride = (_) async => probeCount++;
+
+      final result = await socket.attemptMigration();
+
+      expect(result, MigrationResult.success);
+      expect(probeCount, greaterThan(1));
     });
   });
 

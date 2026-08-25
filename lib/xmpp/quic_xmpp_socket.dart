@@ -18,7 +18,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
     this.quicConnectMaxAttempts = 3,
     this.quicConnectParallelAttempts = 3,
-    this.migrationProbeTimeout = const Duration(seconds: 5),
+    this.migrationProbeTimeout = const Duration(seconds: 15),
+    this.migrationProbeInterval = const Duration(seconds: 1),
   });
 
   final Duration quicConnectTimeout;
@@ -42,10 +43,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   @visibleForTesting
   final Duration migrationProbeTimeout;
 
+  /// Interval between explicit ack-eliciting PINGs on the replacement path.
+  @visibleForTesting
+  final Duration migrationProbeInterval;
+
   /// Override for [endpointRebindToCurrentAddress] used in tests to avoid
   /// real FFI calls.  When null the real FFI function is used.
   @visibleForTesting
   Future<void> Function(QuicEndpoint endpoint)? rebindOverride;
+  @visibleForTesting
+  Future<void> Function(QuicConnection connection)? migrationPingOverride;
   final XmppWebSocketIo _fallbackSocket = XmppWebSocketIo(
     hostLookup: resolveHostCached,
   );
@@ -157,6 +164,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   @visibleForTesting
   set endpointForTesting(QuicEndpoint? value) => _endpoint = value;
 
+  /// Directly sets the connection for migration tests without opening QUIC.
+  @visibleForTesting
+  set connectionForTesting(QuicConnection? value) => _connection = value;
+
   @override
   Future<XmppWebSocket> connect<S>(
     String host,
@@ -244,7 +255,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
   Future<MigrationResult> _attemptMigration() async {
     final endpoint = _endpoint;
-    if (!_useQuic || endpoint == null) {
+    final connection = _connection;
+    if (!_useQuic || endpoint == null || connection == null) {
       return MigrationResult.failed;
     }
     // Snapshot the current path_challenge RX counter before rebinding.
@@ -270,9 +282,27 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       debugPrint('QUIC migration: rebind failed: $e');
       return MigrationResult.failed;
     }
-    // Poll for PATH_CHALLENGE acknowledgement.
+    // Send repeated ack-eliciting probes. Quinn performs its own PTO-based
+    // recovery, but explicit periodic PINGs give a newly activated, lossy
+    // mobile path several independent chances to carry traffic.
     final deadline = DateTime.now().add(migrationProbeTimeout);
+    var nextProbeAt = DateTime.now();
     while (DateTime.now().isBefore(deadline)) {
+      final now = DateTime.now();
+      if (!now.isBefore(nextProbeAt)) {
+        try {
+          final sendProbe = migrationPingOverride;
+          if (sendProbe != null) {
+            await sendProbe(connection);
+          } else {
+            await connectionSendPing(connection: connection);
+          }
+        } catch (_) {
+          // A transient send failure does not end migration; later probes may
+          // succeed once Android finishes activating the replacement route.
+        }
+        nextProbeAt = now.add(migrationProbeInterval);
+      }
       await Future<void>.delayed(const Duration(milliseconds: 200));
       try {
         final stats = await getQuicStats();
