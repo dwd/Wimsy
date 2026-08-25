@@ -50,6 +50,38 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Message composer requests normal sentence text input', (
+    WidgetTester tester,
+  ) async {
+    final controller = TextEditingController();
+    final focusNode = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(focusNode.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageComposerTextField(
+            controller: controller,
+            focusNode: focusNode,
+            autofocus: false,
+            enabled: true,
+            onChanged: (_) {},
+            onSubmitted: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    final composer = tester.widget<TextField>(
+      find.byKey(const Key('message-composer-input')),
+    );
+    expect(composer.keyboardType, TextInputType.text);
+    expect(composer.textCapitalization, TextCapitalization.sentences);
+    expect(composer.autocorrect, isTrue);
+    expect(composer.enableSuggestions, isTrue);
+  });
+
   testWidgets('Login screen displays and clears live connection logs', (
     WidgetTester tester,
   ) async {

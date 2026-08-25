@@ -1657,7 +1657,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Expanded(
-                          child: TextField(
+                          child: MessageComposerTextField(
                             controller: _messageController,
                             focusNode: _messageFocusNode,
                             autofocus: canSend,
@@ -1666,12 +1666,6 @@ class _WimsyHomeState extends State<WimsyHome> {
                             // wrap the text instead of scrolling
                             // horizontally, so a long message stays fully
                             // visible while composing it.
-                            minLines: 1,
-                            maxLines: 6,
-                            textInputAction: TextInputAction.send,
-                            decoration: const InputDecoration(
-                              labelText: 'Message',
-                            ),
                             onChanged: (value) {
                               if (activeChat == null || isBookmark) {
                                 return;
@@ -3878,6 +3872,50 @@ void _showReactionPickerSheet({
       );
     },
   );
+}
+
+/// The text entry field used by the chat composer.
+///
+/// Its text input hints intentionally describe ordinary prose so mobile
+/// keyboards enable sentence capitalization, autocorrection, and suggestions.
+class MessageComposerTextField extends StatelessWidget {
+  const MessageComposerTextField({
+    super.key,
+    required this.controller,
+    required this.focusNode,
+    required this.autofocus,
+    required this.enabled,
+    required this.onChanged,
+    required this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool autofocus;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      key: const Key('message-composer-input'),
+      controller: controller,
+      focusNode: focusNode,
+      autofocus: autofocus,
+      enabled: enabled,
+      keyboardType: TextInputType.text,
+      textCapitalization: TextCapitalization.sentences,
+      autocorrect: true,
+      enableSuggestions: true,
+      minLines: 1,
+      maxLines: 6,
+      textInputAction: TextInputAction.send,
+      decoration: const InputDecoration(labelText: 'Message'),
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+    );
+  }
 }
 
 class _MessageBubble extends StatelessWidget {
