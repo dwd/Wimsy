@@ -349,18 +349,17 @@ class StreamManagementModule extends Negotiator {
     if (!_connection.isOpened()) {
       return;
     }
-    // H2: log the fact that probeKeepalive is being called on a QUIC connection.
-    // The _handleConnectionState QUIC guard prevents this from being called
-    // from within StreamManagementModule itself, but external callers (e.g.
-    // XmppService._setupKeepalive) can bypass that guard.  Logging here lets
-    // us see if a QUIC probe is being started when it should be skipped.
+    // QUIC has transport-level PINGs, and XEP-0198 does not apply to it.
+    // More importantly, an IQ response may arrive on another XEP-0467 stream
+    // and never reach this module's inStanzasStream subscription. Treating
+    // that as a dead connection would force-close a healthy QUIC session.
     if (_connection.isQuic) {
-      Log.w(
+      Log.d(
         TAG,
-        'probeKeepalive called on QUIC connection — '
-        'ping reply routing via inStanzasStream may not work on QUIC; '
-        'smEnabled=${_isSmEnabled()} shortTimeout=$shortTimeout',
+        'Ignoring XMPP keepalive probe on QUIC connection; '
+        'transport keepalive is active',
       );
+      return;
     }
     if (_isSmEnabled()) {
       sendAckRequest(force: true, shortTimeout: shortTimeout);
@@ -692,7 +691,8 @@ class StreamManagementModule extends Negotiator {
     final scaled = base * multiplier;
     final floor = Duration(seconds: shortTimeout ? 5 : 10);
     final candidate = scaled > floor ? scaled : floor;
-    final result = candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
+    final result =
+        candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
     // H1: log the computed timeout and the latency it was based on, so we can
     //     confirm that a zero/missing latency baseline is causing the 10 s floor
     //     to be used on the very first probe after connection.

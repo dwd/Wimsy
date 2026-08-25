@@ -10,6 +10,9 @@ import 'package:xmpp_stone/src/features/streammanagement/KeepaliveState.dart';
 import 'package:xmpp_stone/src/features/streammanagement/StreamManagmentModule.dart';
 
 class _FakeSocket extends Stream<String> implements XmppWebSocket {
+  _FakeSocket({this.quic = false});
+
+  final bool quic;
   final List<String> writes = <String>[];
 
   @override
@@ -21,7 +24,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
-      bool useWebTransport = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
@@ -39,7 +42,7 @@ class _FakeSocket extends Stream<String> implements XmppWebSocket {
   @override
   Future<dynamic> getQuicStats() => Future.value(null);
   @override
-  bool get isQuic => false;
+  bool get isQuic => quic;
 
   @override
   Future<SecureSocket?> secure({
@@ -134,8 +137,21 @@ void main() {
     expect(failure.shortTimeout, isTrue);
   });
 
-  test('StreamManagementModule.configure overrides start out at defaults',
-      () {
+  test('probeKeepalive does not send an XMPP ping on QUIC', () async {
+    final account = XmppAccountSettings.fromJid('quic@example.com', 'secret')
+      ..bufferedWritesEnabled = false;
+    final connection = Connection.getInstance(account);
+    StreamManagementModule.getInstance(connection);
+    final socket = _FakeSocket(quic: true);
+    connection.socket = socket;
+
+    connection.probeKeepalive(shortTimeout: true);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(socket.writes, isEmpty);
+  });
+
+  test('StreamManagementModule.configure overrides start out at defaults', () {
     final setup = _newConnection();
     final module = StreamManagementModule.getInstance(setup.connection);
 
@@ -153,8 +169,7 @@ void main() {
     );
   });
 
-  test('StreamManagementModule.configure applies only the given overrides',
-      () {
+  test('StreamManagementModule.configure applies only the given overrides', () {
     final setup = _newConnection();
     final module = StreamManagementModule.getInstance(setup.connection);
 
@@ -199,7 +214,8 @@ void main() {
     expect(module.keepaliveMaxTimeout, const Duration(seconds: 90));
   });
 
-  test('Connection.configureKeepalive is a no-op without a stream management module',
+  test(
+      'Connection.configureKeepalive is a no-op without a stream management module',
       () {
     final account = XmppAccountSettings.fromJid('bob@example.com', 'secret')
       ..bufferedWritesEnabled = false;

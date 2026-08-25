@@ -60,7 +60,10 @@ The server side (Quinn-based) already supports migration with `ServerConfig::mig
 ### 3. `lib/xmpp/xmpp_service.dart`
 - Modify `handleConnectivityChange(bool online)` to:
     1. If the active socket is `QuicCapableXmppSocket`, call `socket.attemptMigration()`.
-    2. On `MigrationResult.success`, call only `probeKeepalive(shortTimeout: true)` — no full reconnect.
+    2. On `MigrationResult.success`, retain the session without an XMPP IQ
+       probe. The successful PATH_CHALLENGE/datagram observation already
+       proves the rebound path, while IQ response routing across XEP-0467
+       streams cannot safely drive a connection-failure timeout.
     3. On `MigrationResult.failed` or non-QUIC transport, keep existing `requestReconnect(networkChanged)` path.
     4. Log migration start/success/failure via `debugPrint`.
 
@@ -126,7 +129,8 @@ On a network change the client attempts QUIC migration before falling back to a 
 - In `lib/xmpp/xmpp_service.dart`, modify `handleConnectivityChange(bool online)`:
     - Cast the active socket to `QuicCapableXmppSocket` when the socket type indicates QUIC.
     - Call `socket.attemptMigration()` and await the result.
-    - On `MigrationResult.success`, call `probeKeepalive(shortTimeout: true)` only — skip the full `requestReconnect`.
+    - On `MigrationResult.success`, retain the session without an XMPP IQ
+      probe and skip the full `requestReconnect`.
     - On `MigrationResult.failed` or non-QUIC socket, preserve the existing `requestReconnect(reason: networkChanged, immediate: true)` call.
     - Add `debugPrint` log lines for migration attempt start, success, and failure.
 - In `lib/main.dart`, remove the `Platform.isAndroid` guard around the `onConnectivityChanged` subscription so iOS (and other IO platforms) also trigger migration.

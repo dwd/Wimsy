@@ -884,7 +884,10 @@ class XmppService extends ChangeNotifier {
         }
         if (result == MigrationResult.success) {
           debugPrint('QUIC migration: success — keeping XMPP session');
-          _connection?.probeKeepalive(shortTimeout: true);
+          // attemptMigration() only succeeds after traffic arrives on the
+          // rebound UDP socket. That is stronger evidence than an XMPP ping
+          // here, and avoids a false timeout because QUIC IQ replies can be
+          // delivered on a different XEP-0467 stream.
         } else {
           debugPrint('QUIC migration: failed — falling back to full reconnect');
           _connection?.requestReconnect(
