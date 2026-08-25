@@ -32,6 +32,8 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+enum _ManualTransport { startTls, directTls, quic }
+
 class _LoginScreenState extends State<LoginScreen> {
   static const int _maximumVisibleLogEntries = 200;
 
@@ -58,6 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   bool _useQuic = true;
+  _ManualTransport _manualTransport = _ManualTransport.startTls;
   bool _discoveryOptionsExpanded = false;
   bool _manualConnectionExpanded = false;
   bool _endpointDiscoveryBusy = false;
@@ -133,6 +136,13 @@ class _LoginScreenState extends State<LoginScreen> {
         _useDirectTls = kIsWeb ? false : account.directTls;
         _useTcp = kIsWeb ? true : account.useTcp;
         _useQuic = account.useQuic;
+        if (account.host.isNotEmpty) {
+          _manualTransport = account.directTls
+              ? _ManualTransport.directTls
+              : account.useQuic && !account.useTcp
+              ? _ManualTransport.quic
+              : _ManualTransport.startTls;
+        }
         _connectionUrlController.text = account.connectionUrl;
       }
       _loadedAccount = true;
@@ -141,9 +151,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _handleConnect() {
     final port = int.tryParse(_portController.text.trim()) ?? 5222;
-    final useWebSocket = kIsWeb || _useWebSocket;
-    final useDirectTls = kIsWeb ? false : _useDirectTls;
-    final useTcp = kIsWeb ? true : _useTcp;
+    final hasManualHost = _hostController.text.trim().isNotEmpty;
+    final useWebSocket = kIsWeb || (!hasManualHost && _useWebSocket);
+    final useDirectTls = kIsWeb
+        ? false
+        : hasManualHost
+        ? _manualTransport == _ManualTransport.directTls
+        : _useDirectTls;
+    final useTcp = kIsWeb
+        ? true
+        : hasManualHost
+        ? _manualTransport == _ManualTransport.startTls
+        : _useTcp;
+    final useQuic = hasManualHost
+        ? _manualTransport == _ManualTransport.quic
+        : _useQuic;
     final account = AccountRecord(
       jid: _jidController.text.trim(),
       password: _rememberPassword ? _passwordController.text : '',
@@ -156,7 +178,7 @@ class _LoginScreenState extends State<LoginScreen> {
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
       connectionUrl: _connectionUrlController.text.trim(),
-      useQuic: _useQuic,
+      useQuic: useQuic,
       useTcp: useTcp,
     );
     widget.storage.storeAccount(account.toMap());
@@ -170,7 +192,7 @@ class _LoginScreenState extends State<LoginScreen> {
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
       connectionUrl: account.connectionUrl,
-      useQuic: _useQuic,
+      useQuic: useQuic,
       useTcp: useTcp,
     );
   }
@@ -353,8 +375,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Builds the "Manual connection" expandable section.
   ///
-  /// On native platforms: host, port, resource, and (when WebSocket is
-  /// enabled) WebSocket endpoint URL and subprotocols.
+  /// On native platforms: host, port, transport protocol, resource, and
+  /// (when WebSocket is enabled) the connection endpoint URL.
   ///
   /// On web: only resource and WebSocket endpoint fields are shown, since
   /// TCP host/port are not applicable and WebSocket is always active.
@@ -412,6 +434,32 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<_ManualTransport>(
+              key: const Key('manual-transport-selector'),
+              initialValue: _manualTransport,
+              decoration: const InputDecoration(labelText: 'Protocol'),
+              items: const [
+                DropdownMenuItem(
+                  value: _ManualTransport.startTls,
+                  child: Text('StartTLS'),
+                ),
+                DropdownMenuItem(
+                  value: _ManualTransport.directTls,
+                  child: Text('Direct TLS'),
+                ),
+                DropdownMenuItem(
+                  value: _ManualTransport.quic,
+                  child: Text('QUIC'),
+                ),
+              ],
+              onChanged: service.isConnecting
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() => _manualTransport = value);
+                    },
             ),
             const SizedBox(height: 12),
           ],

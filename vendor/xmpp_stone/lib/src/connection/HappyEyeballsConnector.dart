@@ -28,7 +28,13 @@ class HappyEyeballsConnector {
   final Duration connectTimeout;
 
   Future<Socket> connect(String host, int port) async {
-    final addresses = await _hostLookup(host);
+    final unwrappedHost = host.startsWith('[') && host.endsWith(']')
+        ? host.substring(1, host.length - 1)
+        : host;
+    final literalAddress = InternetAddress.tryParse(unwrappedHost);
+    final addresses = literalAddress == null
+        ? await _hostLookup(host)
+        : <InternetAddress>[literalAddress];
     if (addresses.isEmpty) {
       throw const SocketException('Host lookup returned no addresses');
     }

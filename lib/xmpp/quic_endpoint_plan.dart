@@ -4,10 +4,15 @@ import 'srv_target.dart';
 
 List<XmppQuicEndpoint> buildQuicEndpointPlan({
   required String domain,
+  String resolvedHost = '',
+  int resolvedPort = 443,
   List<XmppSrvTarget> srvCandidates = const <XmppSrvTarget>[],
 }) {
   if (srvCandidates.isEmpty) {
-    return const <XmppQuicEndpoint>[];
+    if (resolvedHost.isEmpty) return const <XmppQuicEndpoint>[];
+    return <XmppQuicEndpoint>[
+      XmppQuicEndpoint(host: resolvedHost, port: resolvedPort, tlsHost: domain),
+    ];
   }
   return srvCandidates
       .map(

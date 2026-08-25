@@ -5,6 +5,24 @@ import 'package:wimsy/xmpp/dns_cache.dart';
 InternetAddress _addr(String ip) => InternetAddress(ip);
 
 void main() {
+  test('literal IPv4 and IPv6 addresses bypass hostname lookup', () async {
+    var lookupCount = 0;
+    Future<List<InternetAddress>> lookup(
+      String host, {
+      InternetAddressType type = InternetAddressType.any,
+    }) async {
+      lookupCount++;
+      return <InternetAddress>[];
+    }
+
+    final ipv4 = await resolveHostCachedWith('192.0.2.10', lookup);
+    final ipv6 = await resolveHostCachedWith('[2001:db8::10]', lookup);
+
+    expect(ipv4.single.address, '192.0.2.10');
+    expect(ipv6.single.address, '2001:db8::10');
+    expect(lookupCount, 0);
+  });
+
   group('DnsCache', () {
     late DnsCache cache;
 
@@ -81,29 +99,31 @@ void main() {
       dnsCache.clear();
     });
 
-    test('returns cached result on second call without invoking lookup again',
-        () async {
-      var lookupCount = 0;
-      final fakeAddresses = [_addr('10.0.0.1')];
+    test(
+      'returns cached result on second call without invoking lookup again',
+      () async {
+        var lookupCount = 0;
+        final fakeAddresses = [_addr('10.0.0.1')];
 
-      Future<List<InternetAddress>> fakeLookup(
-        String host, {
-        InternetAddressType type = InternetAddressType.any,
-      }) async {
-        lookupCount++;
-        return fakeAddresses;
-      }
+        Future<List<InternetAddress>> fakeLookup(
+          String host, {
+          InternetAddressType type = InternetAddressType.any,
+        }) async {
+          lookupCount++;
+          return fakeAddresses;
+        }
 
-      // First call — populates cache.
-      final result1 = await resolveHostCachedWith('example.com', fakeLookup);
-      expect(result1.first.address, '10.0.0.1');
-      expect(lookupCount, 1);
+        // First call — populates cache.
+        final result1 = await resolveHostCachedWith('example.com', fakeLookup);
+        expect(result1.first.address, '10.0.0.1');
+        expect(lookupCount, 1);
 
-      // Second call — should hit cache, not call lookup again.
-      final result2 = await resolveHostCachedWith('example.com', fakeLookup);
-      expect(result2.first.address, '10.0.0.1');
-      expect(lookupCount, 1);
-    });
+        // Second call — should hit cache, not call lookup again.
+        final result2 = await resolveHostCachedWith('example.com', fakeLookup);
+        expect(result2.first.address, '10.0.0.1');
+        expect(lookupCount, 1);
+      },
+    );
 
     test('retries on failure and succeeds on second attempt', () async {
       var callCount = 0;

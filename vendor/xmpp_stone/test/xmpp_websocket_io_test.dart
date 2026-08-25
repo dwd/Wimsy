@@ -115,6 +115,31 @@ void main() {
       expect(attempted, [InternetAddressType.IPv6, InternetAddressType.IPv4]);
     });
 
+    test('literal IPv4 and IPv6 hosts bypass hostname lookup', () async {
+      var lookupCount = 0;
+      final attempted = <InternetAddress>[];
+      final socket = XmppWebSocketIo(
+        hostLookup: (host, {type = InternetAddressType.any}) async {
+          lookupCount++;
+          return <InternetAddress>[];
+        },
+        tcpConnect: (address, port, {timeout}) {
+          attempted.add(address);
+          return Future.value(MockSocket());
+        },
+        happyEyeballsDelay: Duration.zero,
+      );
+
+      await socket.connect('192.0.2.10', 5222);
+      await socket.connect('[2001:db8::10]', 5222);
+
+      expect(lookupCount, 0);
+      expect(attempted.map((address) => address.address), [
+        '192.0.2.10',
+        '2001:db8::10',
+      ]);
+    });
+
     test('Happy Eyeballs throws after exhausting all addresses', () async {
       final attempted = <InternetAddressType>[];
       final v6 = InternetAddress('2001:db8::2');

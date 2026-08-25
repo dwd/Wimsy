@@ -973,7 +973,9 @@ class XmppService extends ChangeNotifier {
     final fullJid = normalized.contains('/')
         ? normalized
         : '$bareJid/$resource';
-    var resolvedHost = host?.trim().isNotEmpty == true ? host!.trim() : '';
+    final manualHost = host?.trim() ?? '';
+    final hasManualHost = manualHost.isNotEmpty;
+    var resolvedHost = hasManualHost ? manualHost : '';
     var resolvedPort = port;
     var resolvedDirectTls = directTls;
     List<XmppSrvTarget> quicSrvCandidates = const [];
@@ -1127,6 +1129,8 @@ class XmppService extends ChangeNotifier {
                 ? 'WebTransport'
                 : shouldUseWebSocket
                 ? 'WebSocket'
+                : useQuic && hasManualHost
+                ? 'QUIC'
                 : quicSrvCandidates.isNotEmpty
                 ? 'QUIC (with TCP fallback)'
                 : resolvedDirectTls
@@ -1151,16 +1155,20 @@ class XmppService extends ChangeNotifier {
         account.quicEndpoints = (quicTransportAvailable && useQuic)
             ? buildQuicEndpointPlan(
                 domain: account.domain,
+                resolvedHost: hasManualHost ? resolvedHost : '',
+                resolvedPort: resolvedPort,
                 srvCandidates: quicSrvCandidates,
               )
             : const [];
-        account.tcpEndpoints = buildTcpEndpointPlan(
-          domain: account.domain,
-          resolvedHost: resolvedHost,
-          resolvedPort: resolvedPort,
-          directTls: resolvedDirectTls,
-          srvCandidates: tcpSrvCandidates,
-        );
+        account.tcpEndpoints = useTcp || resolvedDirectTls
+            ? buildTcpEndpointPlan(
+                domain: account.domain,
+                resolvedHost: resolvedHost,
+                resolvedPort: resolvedPort,
+                directTls: resolvedDirectTls,
+                srvCandidates: tcpSrvCandidates,
+              )
+            : const [];
       }
       if (wsConfig != null) {
         account.wsUrl = wsConfig.uri.toString();

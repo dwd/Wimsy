@@ -19,11 +19,9 @@ class _DnsCacheEntry {
 /// outage (e.g. after the machine wakes from sleep) does not prevent
 /// reconnection when the addresses are unlikely to have changed.
 class DnsCache {
-  DnsCache({
-    Duration? ttl,
-    Duration? maxStaleness,
-  })  : _ttl = ttl ?? const Duration(minutes: 5),
-        _maxStaleness = maxStaleness ?? const Duration(hours: 1);
+  DnsCache({Duration? ttl, Duration? maxStaleness})
+    : _ttl = ttl ?? const Duration(minutes: 5),
+      _maxStaleness = maxStaleness ?? const Duration(hours: 1);
 
   /// Default TTL applied to every successful lookup result.
   final Duration _ttl;
@@ -70,10 +68,11 @@ class DnsCache {
 final dnsCache = DnsCache();
 
 /// Signature for a hostname-to-address lookup function.
-typedef HostLookupFn = Future<List<InternetAddress>> Function(
-  String host, {
-  InternetAddressType type,
-});
+typedef HostLookupFn =
+    Future<List<InternetAddress>> Function(
+      String host, {
+      InternetAddressType type,
+    });
 
 /// How many times to retry a failed hostname lookup before giving up.
 const _dnsRetryCount = 3;
@@ -95,14 +94,12 @@ const _dnsRetryDelay = Duration(seconds: 2);
 Future<List<InternetAddress>> resolveHostCached(
   String host, {
   InternetAddressType type = InternetAddressType.any,
-}) =>
-    resolveHostCachedWith(host, _defaultLookup, type: type);
+}) => resolveHostCachedWith(host, _defaultLookup, type: type);
 
 Future<List<InternetAddress>> _defaultLookup(
   String host, {
   InternetAddressType type = InternetAddressType.any,
-}) =>
-    InternetAddress.lookup(host, type: type);
+}) => InternetAddress.lookup(host, type: type);
 
 /// Testable core of [resolveHostCached] with injectable [lookup], [cache],
 /// [retryCount], and [retryDelay].
@@ -116,6 +113,14 @@ Future<List<InternetAddress>> resolveHostCachedWith(
   int retryCount = _dnsRetryCount,
   Duration retryDelay = _dnsRetryDelay,
 }) async {
+  final unwrappedHost = host.startsWith('[') && host.endsWith(']')
+      ? host.substring(1, host.length - 1)
+      : host;
+  final literalAddress = InternetAddress.tryParse(unwrappedHost);
+  if (literalAddress != null) {
+    debugPrint('DNS lookup: using literal address $host directly');
+    return <InternetAddress>[literalAddress];
+  }
   final effectiveCache = cache ?? dnsCache;
 
   // Return fresh cached result immediately.

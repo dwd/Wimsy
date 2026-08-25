@@ -80,4 +80,31 @@ void main() {
 
     expect(find.textContaining('Negotiating secure connection'), findsNothing);
   });
+
+  testWidgets('Manual connection offers each native transport protocol', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(
+          service: XmppService(),
+          storage: StorageService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Manual connection'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('manual-transport-selector')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('manual-transport-selector')));
+    await tester.pumpAndSettle();
+    expect(find.text('StartTLS'), findsWidgets);
+    expect(find.text('Direct TLS'), findsOneWidget);
+    expect(find.text('QUIC'), findsOneWidget);
+  });
 }

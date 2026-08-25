@@ -578,7 +578,7 @@ class Connection {
               : const <XmppQuicEndpoint>[]);
       final endpoints = useWebSocket
           ? const <XmppTcpEndpoint>[]
-          : (account.tcpEndpoints != null && account.tcpEndpoints!.isNotEmpty
+          : (account.tcpEndpoints != null
               ? account.tcpEndpoints!
               : <XmppTcpEndpoint>[
                   XmppTcpEndpoint(

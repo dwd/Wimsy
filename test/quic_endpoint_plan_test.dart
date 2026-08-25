@@ -39,4 +39,17 @@ void main() {
     );
     expect(endpoints, isEmpty);
   });
+
+  test('builds a manual QUIC endpoint without SRV candidates', () {
+    final endpoints = buildQuicEndpointPlan(
+      domain: 'example.com',
+      resolvedHost: '2001:db8::10',
+      resolvedPort: 4433,
+    );
+
+    expect(endpoints, hasLength(1));
+    expect(endpoints.single.host, '2001:db8::10');
+    expect(endpoints.single.port, 4433);
+    expect(endpoints.single.tlsHost, 'example.com');
+  });
 }
