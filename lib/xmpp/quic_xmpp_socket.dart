@@ -18,7 +18,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
     this.quicConnectMaxAttempts = 3,
     this.quicConnectParallelAttempts = 3,
-    this.migrationProbeTimeout = const Duration(seconds: 2),
+    this.migrationProbeTimeout = const Duration(seconds: 5),
   });
 
   final Duration quicConnectTimeout;
@@ -37,9 +37,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// the server even on very lossy paths.
   final int quicConnectParallelAttempts;
 
-  /// Maximum time to wait for a PATH_CHALLENGE acknowledgement after rebinding
-  /// the UDP socket during a migration attempt. Exposed for testing so tests
-  /// can use a short timeout without sleeping for the full 2 seconds.
+  /// Maximum time to wait for traffic proving the rebound UDP path works.
+  /// Exposed for testing so tests can use a short timeout.
   @visibleForTesting
   final Duration migrationProbeTimeout;
 
@@ -219,14 +218,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   /// Attempt QUIC connection migration after a network-interface change.
   ///
   /// Rebinds the endpoint's UDP socket to a fresh unspecified address on the
-  /// same address family, which causes Quinn to send a PATH_CHALLENGE on the
-  /// new path (RFC 9000 §9).  Polls [getQuicStats] every 200 ms for up to
-  /// [migrationProbeTimeout] waiting for the `path_challenge` RX counter to
-  /// increment, which indicates the server has acknowledged the new path.
+  /// same address family, which causes Quinn to probe the new path (RFC 9000
+  /// §9). Polls [getQuicStats] every 200 ms for up to
+  /// [migrationProbeTimeout] waiting for either a received `PATH_CHALLENGE` or
+  /// any UDP datagram on the new socket. The latter is sufficient proof that
+  /// the new bidirectional path works and covers peers that do not emit an
+  /// observable challenge during NAT rebinding.
   ///
-  /// Returns [MigrationResult.success] when the PATH_CHALLENGE is confirmed,
-  /// or [MigrationResult.failed] on timeout, FFI error, or when QUIC is not
-  /// active.
+  /// Returns [MigrationResult.success] when the new path carries traffic, or
+  /// [MigrationResult.failed] on timeout, FFI error, or when QUIC is inactive.
   Future<MigrationResult> attemptMigration() {
     final inFlight = _migrationFuture;
     if (inFlight != null) {
@@ -249,11 +249,14 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
     // Snapshot the current path_challenge RX counter before rebinding.
     BigInt baselinePathChallenge;
+    BigInt baselineUdpDatagrams;
     try {
       final stats = await getQuicStats();
       baselinePathChallenge = stats?.frameRx.pathChallenge ?? BigInt.zero;
+      baselineUdpDatagrams = stats?.udpRx.datagrams ?? BigInt.zero;
     } catch (_) {
       baselinePathChallenge = BigInt.zero;
+      baselineUdpDatagrams = BigInt.zero;
     }
     // Rebind the UDP socket to trigger PATH_CHALLENGE on the new path.
     try {
@@ -273,8 +276,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       try {
         final stats = await getQuicStats();
-        final current = stats?.frameRx.pathChallenge ?? BigInt.zero;
-        if (current > baselinePathChallenge) {
+        final currentPathChallenge =
+            stats?.frameRx.pathChallenge ?? BigInt.zero;
+        final currentUdpDatagrams = stats?.udpRx.datagrams ?? BigInt.zero;
+        if (currentPathChallenge > baselinePathChallenge ||
+            currentUdpDatagrams > baselineUdpDatagrams) {
           return MigrationResult.success;
         }
       } catch (_) {

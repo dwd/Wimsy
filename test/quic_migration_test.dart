@@ -48,9 +48,9 @@ class _TestableSocket extends QuicCapableXmppSocket {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Builds a [QuicConnectionStats] whose only meaningful field is
-/// [frameRx.pathChallenge]; all other counters are zero.
-QuicConnectionStats makeStats(int pathChallengeRx) {
+/// Builds migration-relevant connection statistics; all other counters are
+/// zero.
+QuicConnectionStats makeStats(int pathChallengeRx, {int udpDatagramsRx = 0}) {
   final zero = BigInt.zero;
   final zeroFrame = QuicFrameStats(
     acks: zero,
@@ -85,12 +85,17 @@ QuicConnectionStats makeStats(int pathChallengeRx) {
     congestionEvents: zero,
   );
   final zeroUdp = QuicUdpStats(datagrams: zero, bytes: zero, ios: zero);
+  final rxUdp = QuicUdpStats(
+    datagrams: BigInt.from(udpDatagramsRx),
+    bytes: zero,
+    ios: zero,
+  );
   return QuicConnectionStats(
     path: zeroPath,
     frameTx: zeroFrame,
     frameRx: zeroFrame,
     udpTx: zeroUdp,
-    udpRx: zeroUdp,
+    udpRx: rxUdp,
   );
 }
 
@@ -151,6 +156,23 @@ void main() {
       final result = await socket.attemptMigration();
       expect(result, MigrationResult.success);
     });
+
+    test(
+      'returns success when the rebound socket receives a datagram',
+      () async {
+        final socket = makeQuicSocket(
+          statsSequence: [
+            makeStats(0, udpDatagramsRx: 10),
+            makeStats(0, udpDatagramsRx: 11),
+          ],
+          timeout: const Duration(milliseconds: 500),
+        );
+
+        final result = await socket.attemptMigration();
+
+        expect(result, MigrationResult.success);
+      },
+    );
 
     test('returns failed when counter never changes (timeout)', () async {
       final socket = makeQuicSocket(
