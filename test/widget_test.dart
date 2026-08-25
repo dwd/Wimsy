@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/login_screen.dart';
 import 'package:wimsy/main.dart';
@@ -41,6 +42,42 @@ void main() {
     );
 
     expect(find.text('Remember password on this device'), findsOneWidget);
+    expect(find.byKey(const Key('connection-log-panel')), findsOneWidget);
+    expect(
+      find.text('Connection details will appear here after you tap Connect.'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Login screen displays and clears live connection logs', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(
+          service: XmppService(),
+          storage: StorageService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+
+    Log.i('LoginTest', 'Negotiating secure connection');
+    await tester.pump();
+
+    expect(
+      find.textContaining('Negotiating secure connection'),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(find.text('Clear'));
+    await tester.tap(find.text('Clear'));
+    await tester.pump();
+
+    expect(find.textContaining('Negotiating secure connection'), findsNothing);
   });
 }

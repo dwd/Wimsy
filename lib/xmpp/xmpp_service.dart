@@ -966,6 +966,10 @@ class XmppService extends ChangeNotifier {
     }
 
     final bareJid = _bareJid(normalized);
+    Log.i(
+      'XmppService',
+      'Starting connection for $bareJid; discovering available transports',
+    );
     final fullJid = normalized.contains('/')
         ? normalized
         : '$bareJid/$resource';
@@ -988,6 +992,7 @@ class XmppService extends ChangeNotifier {
 
     if (!kIsWeb && resolvedHost.isEmpty) {
       final domain = _domainFromBareJid(bareJid);
+      Log.i('XmppService', 'Looking up XMPP services for $domain');
       final srvSpan = _startSpan(
         _connectTransaction,
         'xmpp.srv_lookup',
@@ -1018,6 +1023,11 @@ class XmppService extends ChangeNotifier {
         );
       }
       tcpSrvCandidates = filteredTcpSrv;
+      Log.i(
+        'XmppService',
+        'Service discovery found ${quicSrvCandidates.length} QUIC and '
+            '${tcpSrvCandidates.length} TCP candidate(s)',
+      );
       _finishSpan(srvSpan);
       if (quicTransportAvailable && quicSrvCandidates.isNotEmpty) {
         final first = quicSrvCandidates.first;
@@ -1050,6 +1060,10 @@ class XmppService extends ChangeNotifier {
 
     if (shouldUseWebSocket && wsConfig == null) {
       final domain = _domainFromBareJid(bareJid);
+      Log.i(
+        'XmppService',
+        'Discovering WebTransport or WebSocket endpoint for $domain',
+      );
       final wsSpan = _startSpan(
         _connectTransaction,
         'xmpp.ws_discovery',
@@ -1084,6 +1098,10 @@ class XmppService extends ChangeNotifier {
         );
         return;
       }
+      Log.i(
+        'XmppService',
+        'Discovered ${useWebTransport ? 'WebTransport' : 'WebSocket'} endpoint',
+      );
     }
 
     await _safeClose(preserveCache: true);
@@ -1101,6 +1119,19 @@ class XmppService extends ChangeNotifier {
       );
       debugPrint(
         'XMPP connect: bareJid=$bareJid host=$normalizedHost port=$resolvedPort resource=$resource',
+      );
+      Log.i(
+        'XmppService',
+        'Opening connection via '
+            '${useWebTransport
+                ? 'WebTransport'
+                : shouldUseWebSocket
+                ? 'WebSocket'
+                : quicSrvCandidates.isNotEmpty
+                ? 'QUIC (with TCP fallback)'
+                : resolvedDirectTls
+                ? 'direct TLS'
+                : 'TCP with StartTLS'}',
       );
       final account = XmppAccountSettings.fromJid(fullJid, password);
       account.host = resolvedHost.isNotEmpty ? resolvedHost : null;
@@ -7955,6 +7986,7 @@ class XmppService extends ChangeNotifier {
   }
 
   void _setError(String message) {
+    Log.e('XmppService', message);
     _status = XmppStatus.error;
     _errorMessage = message;
     notifyListeners();

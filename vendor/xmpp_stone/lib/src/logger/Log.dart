@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer';
 
 class Log {
@@ -6,6 +7,15 @@ class Log {
   static bool logXmpp = true;
   static bool logToConsole = true;
 
+  /// Broadcasts the same timestamped entries written to the developer log.
+  ///
+  /// Applications can use this to surface connection diagnostics in their UI
+  /// on devices where a console is not readily available.
+  static final StreamController<String> _messageController =
+      StreamController<String>.broadcast(sync: true);
+
+  static Stream<String> get messages => _messageController.stream;
+
   static String _timestamp() {
     return DateTime.now().toUtc().toIso8601String();
   }
@@ -13,6 +23,7 @@ class Log {
   static void _emit(String message) {
     final stamped = '${_timestamp()} $message';
     log(stamped);
+    _messageController.add(stamped);
     if (logToConsole) {
       // Keep console output visible in Flutter run logs.
       // ignore: avoid_print
@@ -71,7 +82,6 @@ class Log {
       _emit('$message');
     }
   }
-
 }
 
 enum LogLevel { VERBOSE, DEBUG, INFO, WARNING, ERROR, OFF }

@@ -33,6 +33,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const int _maximumVisibleLogEntries = 200;
+
   final TextEditingController _jidController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _hostController = TextEditingController();
@@ -42,15 +44,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _resourceController = TextEditingController(
     text: 'wimsy',
   );
-  final TextEditingController _connectionUrlController = TextEditingController();
+  final TextEditingController _connectionUrlController =
+      TextEditingController();
 
   bool _loadedAccount = false;
   bool _rememberPassword = false;
   bool _useWebSocket = kIsWeb;
   bool _useDirectTls = false;
+
   /// Whether to attempt plain TCP (`_xmpp-client._tcp` SRV records and the
   /// non-TLS fallback). When false, plain-TCP SRV records are ignored.
   bool _useTcp = true;
+
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   bool _useQuic = true;
   bool _discoveryOptionsExpanded = false;
@@ -59,16 +64,41 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _endpointDiscoveryMessage;
   String? _lastEndpointDiscoveryDomain;
   Timer? _endpointDiscoveryDebounce;
+  final ScrollController _connectionLogScrollController = ScrollController();
+  final List<String> _connectionLogEntries = [];
+  StreamSubscription<String>? _connectionLogSubscription;
 
   @override
   void initState() {
     super.initState();
+    _connectionLogSubscription = Log.messages.listen(_appendConnectionLog);
     _loadAccount();
+  }
+
+  void _appendConnectionLog(String entry) {
+    if (!mounted) return;
+    setState(() {
+      _connectionLogEntries.add(entry);
+      if (_connectionLogEntries.length > _maximumVisibleLogEntries) {
+        _connectionLogEntries.removeRange(
+          0,
+          _connectionLogEntries.length - _maximumVisibleLogEntries,
+        );
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_connectionLogScrollController.hasClients) return;
+      _connectionLogScrollController.jumpTo(
+        _connectionLogScrollController.position.maxScrollExtent,
+      );
+    });
   }
 
   @override
   void dispose() {
     _endpointDiscoveryDebounce?.cancel();
+    _connectionLogSubscription?.cancel();
+    _connectionLogScrollController.dispose();
     _jidController.dispose();
     _passwordController.dispose();
     _hostController.dispose();
@@ -242,9 +272,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   });
                 },
           icon: Icon(
-            _discoveryOptionsExpanded
-                ? Icons.expand_less
-                : Icons.expand_more,
+            _discoveryOptionsExpanded ? Icons.expand_less : Icons.expand_more,
           ),
           label: Text(
             _discoveryOptionsExpanded
@@ -350,9 +378,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   });
                 },
           icon: Icon(
-            _manualConnectionExpanded
-                ? Icons.expand_less
-                : Icons.expand_more,
+            _manualConnectionExpanded ? Icons.expand_less : Icons.expand_more,
           ),
           label: Text(
             _manualConnectionExpanded
@@ -401,7 +427,8 @@ class _LoginScreenState extends State<LoginScreen> {
               enabled: !service.isConnecting,
               decoration: const InputDecoration(
                 labelText: 'Connection URL',
-                hintText: 'wss://host/xmpp-websocket  or  https://host/xmpp-webtransport',
+                hintText:
+                    'wss://host/xmpp-websocket  or  https://host/xmpp-webtransport',
               ),
             ),
           ],
@@ -414,8 +441,8 @@ class _LoginScreenState extends State<LoginScreen> {
               'When left blank, the endpoint is discovered automatically '
               'from host-meta.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ],
@@ -609,11 +636,79 @@ class _LoginScreenState extends State<LoginScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 20),
+                  _buildConnectionLog(theme),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Displays the live xmpp_stone log below the login card. Keeping this log
+  /// on the setup screen makes connection negotiation observable on Android,
+  /// where developer console output is normally unavailable to the user.
+  Widget _buildConnectionLog(ThemeData theme) {
+    return Container(
+      key: const Key('connection-log-panel'),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF17202A).withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Connection log',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _connectionLogEntries.isEmpty
+                    ? null
+                    : () => setState(_connectionLogEntries.clear),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 220,
+            child: _connectionLogEntries.isEmpty
+                ? Text(
+                    'Connection details will appear here after you tap Connect.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white70,
+                    ),
+                  )
+                : Scrollbar(
+                    controller: _connectionLogScrollController,
+                    child: ListView.builder(
+                      controller: _connectionLogScrollController,
+                      itemCount: _connectionLogEntries.length,
+                      itemBuilder: (context, index) => SelectableText(
+                        _connectionLogEntries[index],
+                        style: const TextStyle(
+                          color: Color(0xFFD6EAF8),
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }
