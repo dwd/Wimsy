@@ -221,4 +221,44 @@ void main() {
     expect(requested, isNull);
     expect(adapter.queries, isEmpty);
   });
+
+  test('catch-up continuation is not blocked by duplicate throttle', () {
+    final store = MamCursorStore(
+      now: () => DateTime.utc(2026, 1, 1),
+      schedule: _FakeScheduler().schedule,
+    );
+    final adapter = _FakeAdapter();
+    final coordinator = MamCoordinator(cursorStore: store, adapter: adapter);
+
+    coordinator.requestCatchUpStep(
+      bareJid: 'room@example.com',
+      isRoom: true,
+      seeded: true,
+      latestMamId: 'page-1-last',
+      scopeKey: 'room:room@example.com',
+      onFallback: () {},
+    );
+    final throttled = coordinator.requestCatchUpStep(
+      bareJid: 'room@example.com',
+      isRoom: true,
+      seeded: true,
+      latestMamId: 'page-2-last',
+      scopeKey: 'room:room@example.com',
+      onFallback: () {},
+    );
+    final continued = coordinator.requestCatchUpStep(
+      bareJid: 'room@example.com',
+      isRoom: true,
+      seeded: true,
+      latestMamId: 'page-2-last',
+      scopeKey: 'room:room@example.com',
+      onFallback: () {},
+      continuation: true,
+    );
+
+    expect(throttled, isNull);
+    expect(continued, 'page-2-last');
+    expect(adapter.queries, hasLength(2));
+    expect(adapter.queries.last.plan.afterId, 'page-2-last');
+  });
 }

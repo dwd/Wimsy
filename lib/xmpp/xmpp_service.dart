@@ -235,7 +235,7 @@ class XmppService extends ChangeNotifier {
   // through `StorageService.storeDisplayedSyncPending` so the resolution
   // survives restarts.
   final Map<String, String> _displayedSyncPending = {};
-  // R2.1: globally newest MAM id we have ingested across all chats.
+  // R2.1: globally newest MAM id ingested from the account (DM) archive.
   // Persisted via `StorageService.storeLastMamIdSeen` so future sessions
   // can issue a single unified catch-up query (`afterId=` this anchor)
   // instead of fanning out per-chat. The unified-query wiring is a
@@ -515,8 +515,8 @@ class XmppService extends ChangeNotifier {
     _lastMamIdSeen = storage.loadLastMamIdSeen();
   }
 
-  /// R2.1: returns the globally newest MAM id we have ingested across all
-  /// chats, persisted across restarts. May be null on a fresh install.
+  /// R2.1: returns the globally newest account-archive MAM id we have
+  /// ingested, persisted across restarts. May be null on a fresh install.
   String? get lastMamIdSeen => _lastMamIdSeen;
 
   /// R2.1: update the global MAM-id anchor. We compare lexicographically
@@ -7102,8 +7102,6 @@ class XmppService extends ChangeNotifier {
       _resolveDisplayedSyncPending(normalized, stanzaId);
       notifyListeners();
       _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
-      // R2.1: bump the global MAM-id anchor for prepended MAM messages.
-      _bumpLastMamIdSeen(mamId);
       debugPrint(
         'NewMsg[MUC-prepend] chat=$normalized outgoing=$outgoing '
         'mamId=$mamId stanzaId=$stanzaId timestamp=$timestamp '
@@ -7143,8 +7141,6 @@ class XmppService extends ChangeNotifier {
     _resolveDisplayedSyncPending(normalized, stanzaId);
     notifyListeners();
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
-    // R2.1: bump the global MAM-id anchor.
-    _bumpLastMamIdSeen(mamId);
     final hasMamIdRoom = mamId != null && mamId.isNotEmpty;
     final catchUpCompleteRoom = _isMamCatchUpComplete(normalized, isRoom: true);
     final shouldNotifyRoom = _shouldNotifyRoomMessage(normalized, timestamp);
@@ -8508,7 +8504,11 @@ class XmppService extends ChangeNotifier {
     _runMamCatchUpStep(bareJid, isRoom: isRoom);
   }
 
-  void _runMamCatchUpStep(String bareJid, {required bool isRoom}) {
+  void _runMamCatchUpStep(
+    String bareJid, {
+    required bool isRoom,
+    bool continuation = false,
+  }) {
     final connection = _connection;
     if (connection == null) {
       return;
@@ -8530,6 +8530,7 @@ class XmppService extends ChangeNotifier {
           : _seededMessageJids.contains(normalized),
       latestMamId: latest,
       scopeKey: scopeKey,
+      continuation: continuation,
       onFallback: () {
         if (isRoom) {
           _dispatchMamPlan(
@@ -8553,7 +8554,7 @@ class XmppService extends ChangeNotifier {
       if (nextLatest != null &&
           nextLatest.isNotEmpty &&
           nextLatest != requestedLatest) {
-        _runMamCatchUpStep(normalized, isRoom: isRoom);
+        _runMamCatchUpStep(normalized, isRoom: isRoom, continuation: true);
       } else {
         _mamCatchUpTimers.remove(scopeKey);
         _finishMamSyncIfIdle();

@@ -100,6 +100,7 @@ class MamCoordinator {
     required String? latestMamId,
     required String scopeKey,
     required void Function() onFallback,
+    bool continuation = false,
   }) {
     final plan = MamQueryPlanner.catchUp(
       isRoom: isRoom,
@@ -110,7 +111,11 @@ class MamCoordinator {
       onFallback();
       return null;
     }
-    if (_cursorStore.shouldThrottleCatchUp(scopeKey)) {
+    // A continuation is scheduled only after the previous page advanced the
+    // local cursor.  It must not be suppressed by the duplicate-request
+    // throttle: catch-up pages are intentionally scheduled sooner than the
+    // throttle window so large offline gaps can be drained promptly.
+    if (!continuation && _cursorStore.shouldThrottleCatchUp(scopeKey)) {
       return null;
     }
     _cursorStore.markCatchUp(scopeKey);
