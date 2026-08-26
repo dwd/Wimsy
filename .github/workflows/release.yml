@@ -82,12 +82,12 @@ jobs:
           EOF
           dpkg-deb --build "$PKG_DIR"
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-linux
           path: wimsy-linux.tar.gz
       - name: Upload Linux .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-linux-deb
           path: wimsy_*.deb
@@ -131,12 +131,12 @@ jobs:
         run: |
           powershell -Command "Compress-Archive -Path build\\windows\\x64\\runner\\Release\\* -DestinationPath wimsy-windows.zip"
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-windows
           path: wimsy-windows.zip
       - name: Upload Windows MSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-windows-msix
           path: build/windows/x64/runner/Release/*.msix
@@ -174,7 +174,7 @@ jobs:
         run: |
           tar -C build/macos/Build/Products -czf wimsy-macos.tar.gz Release
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-macos
           path: wimsy-macos.tar.gz
@@ -215,7 +215,7 @@ jobs:
       - name: Build Android (release)
         run: flutter build apk --release
       - name: Upload Android artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-android
           path: build/app/outputs/flutter-apk/app-release.apk
@@ -253,7 +253,7 @@ jobs:
         run: |
           tar -C build -czf wimsy-web.tar.gz web
       - name: Upload Web artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wimsy-web
           path: wimsy-web.tar.gz
