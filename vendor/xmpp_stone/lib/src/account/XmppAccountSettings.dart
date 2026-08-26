@@ -41,6 +41,9 @@ class XmppAccountSettings {
   String? wsHost;
   int? wsPort;
   String? wsPath;
+
+  /// Base64-encoded SHA-256 digest passed to WebTransport certificate pinning.
+  String? serverCertificateHash;
   List<XmppTcpEndpoint>? tcpEndpoints;
   List<XmppQuicEndpoint>? quicEndpoints;
   bool preferSasl2 = true;

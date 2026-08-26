@@ -25,6 +25,7 @@ class XmppWebSocketHtml extends XmppWebSocket {
   // When the caller requests WebTransport and the browser supports it, we
   // delegate all operations to an XmppWebTransportHtml instance.
   XmppWebTransportHtml? _webTransportDelegate;
+  String? serverCertificateHash;
 
   XmppWebSocketHtml();
 
@@ -40,7 +41,9 @@ class XmppWebSocketHtml extends XmppWebSocket {
       String? tlsHost}) async {
     // Try WebTransport first when requested and supported by the browser.
     if (useWebTransport && XmppWebTransportHtml.isSupported()) {
-      final wt = XmppWebTransportHtml();
+      final wt = XmppWebTransportHtml(
+        serverCertificateHash: serverCertificateHash,
+      );
       await wt.connect<S>(
         host,
         port,

@@ -33,11 +33,13 @@ void main() {
         useWebSocket: false,
         directTls: false,
         connectionUrl: '',
+        serverCertificateHash: 'certificate-digest',
         useTcp: false,
       );
       final restored = AccountRecord.fromMap(record.toMap());
       expect(restored, isNotNull);
-      expect(restored!.useTcp, isFalse);
+      expect(restored!.serverCertificateHash, 'certificate-digest');
+      expect(restored.useTcp, isFalse);
     });
 
     test('fromMap defaults useTcp to true for legacy records', () {
@@ -72,7 +74,10 @@ void main() {
         'wsEndpoint': 'wss://legacy.example.com/xmpp-websocket',
       });
       expect(restored, isNotNull);
-      expect(restored!.connectionUrl, 'wss://legacy.example.com/xmpp-websocket');
+      expect(
+        restored!.connectionUrl,
+        'wss://legacy.example.com/xmpp-websocket',
+      );
     });
 
     test('fromMap prefers connectionUrl over legacy wsEndpoint', () {
@@ -89,7 +94,10 @@ void main() {
         'wsEndpoint': 'wss://old.example.com/xmpp-websocket',
       });
       expect(restored, isNotNull);
-      expect(restored!.connectionUrl, 'https://new.example.com/xmpp-webtransport');
+      expect(
+        restored!.connectionUrl,
+        'https://new.example.com/xmpp-webtransport',
+      );
     });
 
     test('fromMap honours explicit useTcp=false', () {

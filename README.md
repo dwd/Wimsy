@@ -47,3 +47,19 @@ Builds, but untested on:
   and surface XML traffic during debugging.
 - macOS builds that use `flutter_secure_storage` require the `keychain-access-groups`
   entitlement (not `com.apple.security.keychain-access-groups`) to avoid `-34018`.
+
+## Web deployment defaults
+
+A deployment can pre-fill and enforce its WebTransport endpoint at compile
+time without changing the source:
+
+```sh
+flutter build web --release \
+  --dart-define=WIMSY_DEFAULT_JID=user@example.com \
+  --dart-define=WIMSY_DEFAULT_WEBTRANSPORT_URL=https://xmpp.example.com/xmpp-webtransport \
+  --dart-define=WIMSY_SERVER_CERTIFICATE_HASH=BASE64_SHA256_DIGEST
+```
+
+The certificate hash is the base64 encoding of the certificate's raw SHA-256
+digest. When `WIMSY_DEFAULT_WEBTRANSPORT_URL` is non-empty, it overrides saved
+connection URLs and disables host-meta endpoint discovery for that web build.

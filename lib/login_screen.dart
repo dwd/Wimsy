@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
+import 'deployment_defaults.dart';
 import 'storage/account_record.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
@@ -47,6 +48,8 @@ class _LoginScreenState extends State<LoginScreen> {
     text: 'wimsy',
   );
   final TextEditingController _connectionUrlController =
+      TextEditingController();
+  final TextEditingController _serverCertificateHashController =
       TextEditingController();
 
   bool _loadedAccount = false;
@@ -108,6 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _portController.dispose();
     _resourceController.dispose();
     _connectionUrlController.dispose();
+    _serverCertificateHashController.dispose();
     super.dispose();
   }
 
@@ -144,6 +148,21 @@ class _LoginScreenState extends State<LoginScreen> {
               : _ManualTransport.startTls;
         }
         _connectionUrlController.text = account.connectionUrl;
+        _serverCertificateHashController.text = account.serverCertificateHash;
+      }
+      // Deployment values describe the endpoint this particular web build is
+      // intended to use, so they take precedence over a previously cached
+      // account from another deployment.
+      if (kIsWeb && defaultJid.isNotEmpty) {
+        _jidController.text = defaultJid;
+      }
+      if (kIsWeb && defaultWebTransportUrl.isNotEmpty) {
+        _connectionUrlController.text = defaultWebTransportUrl;
+        _manualConnectionExpanded = true;
+      }
+      if (kIsWeb && defaultServerCertificateHash.isNotEmpty) {
+        _serverCertificateHashController.text = defaultServerCertificateHash;
+        _manualConnectionExpanded = true;
       }
       _loadedAccount = true;
     });
@@ -178,6 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
       connectionUrl: _connectionUrlController.text.trim(),
+      serverCertificateHash: _serverCertificateHashController.text.trim(),
       useQuic: useQuic,
       useTcp: useTcp,
     );
@@ -192,12 +212,16 @@ class _LoginScreenState extends State<LoginScreen> {
       useWebSocket: useWebSocket,
       directTls: useDirectTls,
       connectionUrl: account.connectionUrl,
+      serverCertificateHash: account.serverCertificateHash,
       useQuic: useQuic,
       useTcp: useTcp,
     );
   }
 
   void _scheduleEndpointDiscovery(String jid, {bool immediate = false}) {
+    if (kIsWeb && defaultWebTransportUrl.isNotEmpty) {
+      return;
+    }
     if (!kIsWeb && !_useWebSocket) {
       return;
     }
@@ -223,6 +247,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _discoverEndpoint(String jid) async {
+    if (kIsWeb && defaultWebTransportUrl.isNotEmpty) {
+      return;
+    }
     final parsed = Jid.fromFullJid(jid);
     if (!parsed.isValid()) {
       return;
@@ -477,6 +504,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 labelText: 'Connection URL',
                 hintText:
                     'wss://host/xmpp-websocket  or  https://host/xmpp-webtransport',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _serverCertificateHashController,
+              enabled: !service.isConnecting,
+              decoration: const InputDecoration(
+                labelText: 'Server certificate hash',
+                hintText: 'Base64-encoded SHA-256 digest (WebTransport)',
               ),
             ),
           ],

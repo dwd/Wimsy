@@ -591,6 +591,10 @@ class Connection {
 
       if (useWebSocket) {
         final socket = _socketFactory();
+        if (account.useWebTransport) {
+          (socket as dynamic).serverCertificateHash =
+              account.serverCertificateHash;
+        }
         await socket.connect(
           socketHost,
           socketPort,

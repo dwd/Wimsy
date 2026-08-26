@@ -9,6 +9,7 @@ class AccountRecord {
     required this.useWebSocket,
     required this.directTls,
     required this.connectionUrl,
+    this.serverCertificateHash = '',
     this.useQuic = true,
     this.useTcp = true,
   });
@@ -21,9 +22,14 @@ class AccountRecord {
   final bool rememberPassword;
   final bool useWebSocket;
   final bool directTls;
+
   /// Manual connection URL override. The scheme determines the transport:
   /// `wss://` / `ws://` → WebSocket; `https://` / `http://` → WebTransport.
   final String connectionUrl;
+
+  /// Base64-encoded SHA-256 certificate digest used by browser WebTransport.
+  final String serverCertificateHash;
+
   /// Whether to attempt QUIC transport (XEP-0467) when available.
   final bool useQuic;
 
@@ -43,6 +49,7 @@ class AccountRecord {
       'useWebSocket': useWebSocket,
       'directTls': directTls,
       'connectionUrl': connectionUrl,
+      'serverCertificateHash': serverCertificateHash,
       'useQuic': useQuic,
       'useTcp': useTcp,
     };
@@ -63,9 +70,13 @@ class AccountRecord {
     // Support both the new 'connectionUrl' key and the legacy 'wsEndpoint' key.
     final connectionUrl =
         (map['connectionUrl'] ?? map['wsEndpoint'])?.toString() ?? '';
+    final serverCertificateHash =
+        map['serverCertificateHash']?.toString() ?? '';
     final useQuicRaw = map['useQuic'];
     final useTcpRaw = map['useTcp'];
-    final port = portRaw is int ? portRaw : int.tryParse(portRaw?.toString() ?? '') ?? 5222;
+    final port = portRaw is int
+        ? portRaw
+        : int.tryParse(portRaw?.toString() ?? '') ?? 5222;
     if (jid.isEmpty) {
       return null;
     }
@@ -88,6 +99,7 @@ class AccountRecord {
       useWebSocket: useWebSocket,
       directTls: directTls,
       connectionUrl: connectionUrl,
+      serverCertificateHash: serverCertificateHash,
       useQuic: useQuic,
       useTcp: useTcp,
     );

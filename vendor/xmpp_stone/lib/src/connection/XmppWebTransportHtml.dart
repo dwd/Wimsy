@@ -14,6 +14,17 @@ typedef WebTransportStreamFactory = Future<WebTransportStreams> Function(
   String url,
 );
 
+/// Decodes the base64 SHA-256 digest accepted by WebTransport options.
+Uint8List decodeWebTransportCertificateHash(String value) {
+  final bytes = Uint8List.fromList(base64Decode(value.trim()));
+  if (bytes.length != 32) {
+    throw const FormatException(
+      'WebTransport server certificate hash must be a 32-byte SHA-256 digest',
+    );
+  }
+  return bytes;
+}
+
 /// Browser stream handles used by the WebTransport adapter.
 ///
 /// Exposed separately from [web.WebTransport] so browser tests can exercise
@@ -61,6 +72,7 @@ class XmppWebTransportHtml extends XmppWebSocket {
   late String Function(String event) _map;
   String Function(String) Function()? _makeAuxMapper;
   final WebTransportStreamFactory? _streamFactory;
+  final String? serverCertificateHash;
   void Function()? _closeStream;
   Future<void> _writeQueue = Future<void>.value();
   bool _closed = false;
@@ -75,8 +87,10 @@ class XmppWebTransportHtml extends XmppWebSocket {
   // Controller that bridges the ReadableStream chunks to a Dart Stream<String>.
   final StreamController<String> _controller = StreamController<String>();
 
-  XmppWebTransportHtml({WebTransportStreamFactory? streamFactory})
-      : _streamFactory = streamFactory;
+  XmppWebTransportHtml({
+    WebTransportStreamFactory? streamFactory,
+    this.serverCertificateHash,
+  }) : _streamFactory = streamFactory;
 
   /// Returns true if the current browser environment supports WebTransport.
   static bool isSupported() {
@@ -130,7 +144,22 @@ class XmppWebTransportHtml extends XmppWebSocket {
       _closeStream = streams.close;
     } else {
       Log.i(TAG, 'Creating WebTransport session url=$url');
-      final transport = web.WebTransport(url);
+      final certificateHash = serverCertificateHash?.trim() ?? '';
+      final transport = certificateHash.isEmpty
+          ? web.WebTransport(url)
+          : web.WebTransport(
+              url,
+              web.WebTransportOptions(
+                serverCertificateHashes: <web.WebTransportHash>[
+                  web.WebTransportHash(
+                    algorithm: 'sha-256',
+                    value: decodeWebTransportCertificateHash(
+                      certificateHash,
+                    ).toJS,
+                  ),
+                ].toJS,
+              ),
+            );
       unawaited(
         transport.closed.toDart.then(
           (info) => Log.i(

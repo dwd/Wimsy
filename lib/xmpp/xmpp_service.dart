@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:xmpp_stone/xmpp_stone.dart';
+
+import '../deployment_defaults.dart';
 import '../models/chat_message.dart';
 import '../models/contact_entry.dart';
 import '../models/keepalive_tuning.dart';
@@ -81,6 +83,7 @@ class _ConnectArgs {
     required this.useWebSocket,
     required this.directTls,
     this.connectionUrl,
+    this.serverCertificateHash,
     required this.useQuic,
     required this.useTcp,
   });
@@ -93,6 +96,7 @@ class _ConnectArgs {
   final bool useWebSocket;
   final bool directTls;
   final String? connectionUrl;
+  final String? serverCertificateHash;
   final bool useQuic;
   final bool useTcp;
 }
@@ -935,9 +939,17 @@ class XmppService extends ChangeNotifier {
     bool useWebSocket = false,
     bool directTls = false,
     String? connectionUrl,
+    String? serverCertificateHash,
     bool useQuic = true,
     bool useTcp = true,
   }) async {
+    final effectiveConnectionUrl = kIsWeb && defaultWebTransportUrl.isNotEmpty
+        ? defaultWebTransportUrl
+        : connectionUrl;
+    final effectiveServerCertificateHash =
+        kIsWeb && defaultServerCertificateHash.isNotEmpty
+        ? defaultServerCertificateHash
+        : serverCertificateHash;
     // Cancel any pending retry so we don't double-connect.
     _connectRetryTimer?.cancel();
     _connectRetryTimer = null;
@@ -950,7 +962,8 @@ class XmppService extends ChangeNotifier {
       port: port,
       useWebSocket: useWebSocket,
       directTls: directTls,
-      connectionUrl: connectionUrl,
+      connectionUrl: effectiveConnectionUrl,
+      serverCertificateHash: effectiveServerCertificateHash,
       useQuic: useQuic,
       useTcp: useTcp,
     );
@@ -964,7 +977,7 @@ class XmppService extends ChangeNotifier {
     final shouldUseWebSocket = kIsWeb || useWebSocket;
     WsEndpointConfig? wsConfig;
     if (shouldUseWebSocket) {
-      wsConfig = parseWsEndpoint(connectionUrl ?? '');
+      wsConfig = parseWsEndpoint(effectiveConnectionUrl ?? '');
     }
     // Derive transport type from the URL scheme: https/http → WebTransport,
     // wss/ws → WebSocket.  This is re-evaluated after auto-discovery below.
@@ -1154,6 +1167,7 @@ class XmppService extends ChangeNotifier {
       account.resource = resource;
       account.useWebSocket = shouldUseWebSocket;
       account.useWebTransport = useWebTransport;
+      account.serverCertificateHash = effectiveServerCertificateHash?.trim();
       account.directTls = resolvedDirectTls;
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
@@ -1418,6 +1432,7 @@ class XmppService extends ChangeNotifier {
         useWebSocket: args.useWebSocket,
         directTls: args.directTls,
         connectionUrl: args.connectionUrl,
+        serverCertificateHash: args.serverCertificateHash,
         useQuic: args.useQuic,
         useTcp: args.useTcp,
       );

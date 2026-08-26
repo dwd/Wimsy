@@ -11,6 +11,22 @@ import 'package:web/web.dart' as web;
 import 'package:xmpp_stone/src/connection/XmppWebTransportHtml.dart';
 
 void main() {
+  test('decodes a base64 WebTransport server certificate hash', () {
+    expect(
+      decodeWebTransportCertificateHash(
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      ),
+      List<int>.filled(32, 0),
+    );
+  });
+
+  test('rejects a certificate hash that is not a SHA-256 digest', () {
+    expect(
+      () => decodeWebTransportCertificateHash('AAECAwQ='),
+      throwsFormatException,
+    );
+  });
+
   test('WebTransport adapter exchanges ordered UTF-8 bytes', () async {
     final inbound = web.TransformStream();
     final outbound = web.TransformStream();
