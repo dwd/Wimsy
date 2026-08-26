@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:universal_io/io.dart';
 import 'package:wimsy/xmpp/dns_cache.dart';
 
 InternetAddress _addr(String ip) => InternetAddress(ip);

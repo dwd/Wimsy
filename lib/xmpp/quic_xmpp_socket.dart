@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:universal_io/io.dart';
 // ignore_for_file: implementation_imports
 
 import 'package:flutter_quic/flutter_quic.dart';

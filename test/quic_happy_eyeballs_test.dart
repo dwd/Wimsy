@@ -1,6 +1,5 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:universal_io/io.dart';
 import 'package:wimsy/xmpp/quic_xmpp_socket.dart';
 
 void main() {
@@ -39,26 +38,29 @@ void main() {
   });
 
   group('QuicCapableXmppSocket connect tuning defaults', () {
-    test('defaults expose increased timeout, 3 retry attempts, and 3 parallel attempts', () {
-      final socket = QuicCapableXmppSocket();
+    test(
+      'defaults expose increased timeout, 3 retry attempts, and 3 parallel attempts',
+      () {
+        final socket = QuicCapableXmppSocket();
 
-      // Per-attempt timeout is 15s so QUIC handshakes on high-loss paths
-      // (where multiple Initial packets may be dropped before one gets
-      // through) have a realistic budget.
-      expect(socket.quicConnectTimeout, const Duration(seconds: 15));
+        // Per-attempt timeout is 15s so QUIC handshakes on high-loss paths
+        // (where multiple Initial packets may be dropped before one gets
+        // through) have a realistic budget.
+        expect(socket.quicConnectTimeout, const Duration(seconds: 15));
 
-      // Happy Eyeballs stagger between candidate launches.
-      expect(socket.happyEyeballsDelay, const Duration(milliseconds: 250));
+        // Happy Eyeballs stagger between candidate launches.
+        expect(socket.happyEyeballsDelay, const Duration(milliseconds: 250));
 
-      // The whole Happy Eyeballs round is retried up to 3 times before
-      // we give up and fall back to TCP.
-      expect(socket.quicConnectMaxAttempts, 3);
+        // The whole Happy Eyeballs round is retried up to 3 times before
+        // we give up and fall back to TCP.
+        expect(socket.quicConnectMaxAttempts, 3);
 
-      // Each candidate address is attempted 3 times in parallel (staggered
-      // by happyEyeballsDelay) so that multiple QUIC Initial packets are
-      // in-flight simultaneously on lossy paths.
-      expect(socket.quicConnectParallelAttempts, 3);
-    });
+        // Each candidate address is attempted 3 times in parallel (staggered
+        // by happyEyeballsDelay) so that multiple QUIC Initial packets are
+        // in-flight simultaneously on lossy paths.
+        expect(socket.quicConnectParallelAttempts, 3);
+      },
+    );
 
     test('explicit overrides are honoured', () {
       final socket = QuicCapableXmppSocket(

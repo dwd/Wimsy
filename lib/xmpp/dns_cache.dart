@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:universal_io/io.dart';
 
 /// A single cached hostname resolution result.
 class _DnsCacheEntry {
