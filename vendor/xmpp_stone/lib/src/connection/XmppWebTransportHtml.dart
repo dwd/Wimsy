@@ -6,6 +6,7 @@ import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 import 'package:web/web.dart' as web;
+import 'package:xmpp_stone/src/logger/Log.dart';
 import 'XmppWebsocketApi.dart';
 
 typedef WebTransportStreamFactory = Future<WebTransportStreams> Function(
@@ -90,18 +91,47 @@ class XmppWebTransportHtml extends XmppWebSocket {
     final streamFactory = _streamFactory;
     late web.ReadableStream readable;
     if (streamFactory != null) {
+      Log.d(TAG, 'Creating injected WebTransport streams url=$url');
       final streams = await streamFactory(url);
       readable = streams.readable;
       _writable = streams.writable;
       _closeStream = streams.close;
     } else {
+      Log.i(TAG, 'Creating WebTransport session url=$url');
       final transport = web.WebTransport(url);
+      unawaited(
+        transport.closed.toDart.then(
+          (info) => Log.i(
+            TAG,
+            'WebTransport session closed code=${info.closeCode} '
+            'reason=${info.reason.isEmpty ? '(none)' : info.reason}',
+          ),
+          onError: (Object error, StackTrace stackTrace) {
+            Log.e(TAG, 'WebTransport session failed: $error');
+          },
+        ),
+      );
 
       // Wait for the connection to be ready.
-      await transport.ready.toDart;
+      Log.d(TAG, 'Waiting for WebTransport session readiness');
+      try {
+        await transport.ready.toDart;
+      } catch (error) {
+        Log.e(TAG, 'WebTransport readiness failed: $error');
+        rethrow;
+      }
+      Log.i(TAG, 'WebTransport session ready');
 
       // Open a single bidirectional stream for the XMPP session.
-      final bidiStream = await transport.createBidirectionalStream().toDart;
+      Log.d(TAG, 'Opening WebTransport bidirectional XMPP stream');
+      late web.WebTransportBidirectionalStream bidiStream;
+      try {
+        bidiStream = await transport.createBidirectionalStream().toDart;
+      } catch (error) {
+        Log.e(TAG, 'WebTransport bidirectional stream failed: $error');
+        rethrow;
+      }
+      Log.i(TAG, 'WebTransport bidirectional XMPP stream opened');
       readable = bidiStream.readable as web.ReadableStream;
       _writable = bidiStream.writable as web.WritableStream;
       _closeStream = () => transport.close();
@@ -123,6 +153,7 @@ class XmppWebTransportHtml extends XmppWebSocket {
       while (true) {
         final result = await reader.read().toDart;
         if (result.done) {
+          Log.i(TAG, 'WebTransport XMPP receive stream ended');
           final trailing = decoder.decode();
           if (trailing.isNotEmpty && !_controller.isClosed) {
             _controller.add(_map(trailing));
@@ -142,12 +173,21 @@ class XmppWebTransportHtml extends XmppWebSocket {
           web.TextDecodeOptions(stream: true),
         );
         if (!_controller.isClosed) {
+          Log.d(
+            TAG,
+            'WebTransport received bytes=${bytes.length} '
+            'decodedCharacters=${chunk.length}',
+          );
+          if (chunk.isNotEmpty) {
+            Log.xmppp_receiving(chunk, channel: 'webtransport');
+          }
           _controller.add(_map(chunk));
         }
       }
     }
 
     readNext().catchError((Object error) {
+      Log.e(TAG, 'WebTransport receive failed: $error');
       if (!_controller.isClosed) {
         _controller.addError(error);
         _controller.close();
@@ -161,14 +201,21 @@ class XmppWebTransportHtml extends XmppWebSocket {
     if (writable == null) return;
     final bytes =
         message is List<int> ? message : utf8.encode(message?.toString() ?? '');
+    final payload = message?.toString() ?? '';
+    Log.d(TAG, 'WebTransport write queued bytes=${bytes.length}');
     _writeQueue = _writeQueue.then((_) async {
       final writer = writable.getWriter();
       try {
+        if (payload.isNotEmpty) {
+          Log.xmppp_sending(payload, channel: 'webtransport');
+        }
         await writer.write(Uint8List.fromList(bytes).toJS).toDart;
+        Log.d(TAG, 'WebTransport write completed bytes=${bytes.length}');
       } finally {
         writer.releaseLock();
       }
     }).catchError((Object error, StackTrace stackTrace) {
+      Log.e(TAG, 'WebTransport write failed: $error');
       if (!_controller.isClosed) {
         _controller.addError(error, stackTrace);
       }
@@ -177,6 +224,7 @@ class XmppWebTransportHtml extends XmppWebSocket {
 
   @override
   void close() {
+    Log.i(TAG, 'Closing WebTransport session');
     _closeStream?.call();
     if (!_controller.isClosed) {
       _controller.close();
