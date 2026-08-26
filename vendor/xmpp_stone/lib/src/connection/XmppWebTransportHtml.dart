@@ -1,11 +1,32 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 import 'package:web/web.dart' as web;
 import 'XmppWebsocketApi.dart';
+
+typedef WebTransportStreamFactory = Future<WebTransportStreams> Function(
+  String url,
+);
+
+/// Browser stream handles used by the WebTransport adapter.
+///
+/// Exposed separately from [web.WebTransport] so browser tests can exercise
+/// the same byte-stream code without opening an external network connection.
+class WebTransportStreams {
+  WebTransportStreams({
+    required this.readable,
+    required this.writable,
+    required this.close,
+  });
+
+  final web.ReadableStream readable;
+  final web.WritableStream writable;
+  final void Function() close;
+}
 
 /// WebTransport-based XMPP socket for the web platform.
 ///
@@ -18,14 +39,17 @@ import 'XmppWebsocketApi.dart';
 class XmppWebTransportHtml extends XmppWebSocket {
   static const String TAG = 'XmppWebTransportHtml';
 
-  web.WebTransport? _transport;
-  web.WebTransportBidirectionalStream? _bidiStream;
+  web.WritableStream? _writable;
   late String Function(String event) _map;
+  final WebTransportStreamFactory? _streamFactory;
+  void Function()? _closeStream;
+  Future<void> _writeQueue = Future<void>.value();
 
   // Controller that bridges the ReadableStream chunks to a Dart Stream<String>.
   final StreamController<String> _controller = StreamController<String>();
 
-  XmppWebTransportHtml();
+  XmppWebTransportHtml({WebTransportStreamFactory? streamFactory})
+      : _streamFactory = streamFactory;
 
   /// Returns true if the current browser environment supports WebTransport.
   static bool isSupported() {
@@ -63,19 +87,29 @@ class XmppWebTransportHtml extends XmppWebSocket {
         ? rawUri.replace(scheme: 'https').toString()
         : rawUri.toString();
 
-    final transport = web.WebTransport(url);
-    _transport = transport;
+    final streamFactory = _streamFactory;
+    late web.ReadableStream readable;
+    if (streamFactory != null) {
+      final streams = await streamFactory(url);
+      readable = streams.readable;
+      _writable = streams.writable;
+      _closeStream = streams.close;
+    } else {
+      final transport = web.WebTransport(url);
 
-    // Wait for the connection to be ready.
-    await transport.ready.toDart;
+      // Wait for the connection to be ready.
+      await transport.ready.toDart;
 
-    // Open a single bidirectional stream for the XMPP session.
-    final bidiStream = await transport.createBidirectionalStream().toDart;
-    _bidiStream = bidiStream;
+      // Open a single bidirectional stream for the XMPP session.
+      final bidiStream = await transport.createBidirectionalStream().toDart;
+      readable = bidiStream.readable as web.ReadableStream;
+      _writable = bidiStream.writable as web.WritableStream;
+      _closeStream = () => transport.close();
+    }
 
     // Start pumping incoming bytes from the readable side into _controller.
     // readable is typed as JSObject in the web package; cast to ReadableStream.
-    _pumpIncoming(bidiStream.readable as web.ReadableStream);
+    _pumpIncoming(readable);
 
     return this;
   }
@@ -83,27 +117,30 @@ class XmppWebTransportHtml extends XmppWebSocket {
   /// Reads chunks from the WebTransport readable stream and emits decoded
   /// UTF-8 strings into [_controller].
   void _pumpIncoming(web.ReadableStream readable) {
-    final reader =
-        web.ReadableStreamDefaultReader(readable);
+    final reader = web.ReadableStreamDefaultReader(readable);
+    final decoder = web.TextDecoder();
     Future<void> readNext() async {
       while (true) {
         final result = await reader.read().toDart;
         if (result.done) {
+          final trailing = decoder.decode();
+          if (trailing.isNotEmpty && !_controller.isClosed) {
+            _controller.add(_map(trailing));
+          }
           if (!_controller.isClosed) {
             await _controller.close();
           }
           return;
         }
         final value = result.value;
-        String chunk;
         final dartValue = value?.dartify();
-        if (dartValue is Uint8List) {
-          chunk = String.fromCharCodes(dartValue);
-        } else if (dartValue is List<int>) {
-          chunk = String.fromCharCodes(dartValue);
-        } else {
-          chunk = dartValue?.toString() ?? '';
-        }
+        final bytes = dartValue is Uint8List
+            ? dartValue
+            : Uint8List.fromList((dartValue as List).cast<int>());
+        final chunk = decoder.decode(
+          bytes.toJS,
+          web.TextDecodeOptions(stream: true),
+        );
         if (!_controller.isClosed) {
           _controller.add(_map(chunk));
         }
@@ -120,25 +157,27 @@ class XmppWebTransportHtml extends XmppWebSocket {
 
   @override
   void write(Object? message) {
-    if (_bidiStream == null) return;
-    // writable is typed as JSObject; cast to WritableStream.
-    final writable = _bidiStream!.writable as web.WritableStream;
-    final writer = writable.getWriter();
-    final List<int> bytes;
-    if (message is String) {
-      bytes = message.codeUnits;
-    } else if (message is List<int>) {
-      bytes = message;
-    } else {
-      bytes = message.toString().codeUnits;
-    }
-    final jsBytes = Uint8List.fromList(bytes).toJS;
-    writer.write(jsBytes).toDart.then((_) => writer.releaseLock());
+    final writable = _writable;
+    if (writable == null) return;
+    final bytes =
+        message is List<int> ? message : utf8.encode(message?.toString() ?? '');
+    _writeQueue = _writeQueue.then((_) async {
+      final writer = writable.getWriter();
+      try {
+        await writer.write(Uint8List.fromList(bytes).toJS).toDart;
+      } finally {
+        writer.releaseLock();
+      }
+    }).catchError((Object error, StackTrace stackTrace) {
+      if (!_controller.isClosed) {
+        _controller.addError(error, stackTrace);
+      }
+    });
   }
 
   @override
   void close() {
-    _transport?.close();
+    _closeStream?.call();
     if (!_controller.isClosed) {
       _controller.close();
     }

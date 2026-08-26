@@ -440,6 +440,8 @@ jobs:
           echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
+      - name: Test WebTransport in Chrome
+        run: flutter test --platform chrome test/webtransport_browser_test.dart
       - name: Build Web
         run: flutter build web --release
       - name: Upload Web artifact
