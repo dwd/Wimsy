@@ -33,14 +33,22 @@ void main() {
       useWebTransport: true,
     );
 
+    final streamOpening = socket.getStreamOpeningElement('dave.cridland.net');
+    expect(
+      streamOpening,
+      "<?xml version='1.0'?><stream:stream xmlns='jabber:client' "
+      "version='1.0' xmlns:stream='http://etherx.jabber.org/streams' "
+      "to='dave.cridland.net' xml:lang='en'>",
+    );
+
     final outboundReader =
         outbound.readable.getReader() as web.ReadableStreamDefaultReader;
-    socket.write('<open to="dave.cridland.net"/>');
+    socket.write(streamOpening);
     socket.write('<message>Jabberwocky \u0394</message>');
 
     final first = await outboundReader.read().toDart;
     final second = await outboundReader.read().toDart;
-    expect(_decode(first.value), '<open to="dave.cridland.net"/>');
+    expect(_decode(first.value), streamOpening);
     expect(_decode(second.value), '<message>Jabberwocky \u0394</message>');
 
     final received = Completer<String>();

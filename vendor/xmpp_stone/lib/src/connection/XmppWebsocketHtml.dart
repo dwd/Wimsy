@@ -125,6 +125,10 @@ class XmppWebSocketHtml extends XmppWebSocket {
 
   @override
   String getStreamOpeningElement(String domain) {
+    final webTransport = _webTransportDelegate;
+    if (webTransport != null) {
+      return webTransport.getStreamOpeningElement(domain);
+    }
     return """<open xmlns='urn:ietf:params:xml:ns:xmpp-framing' to='$domain' version='1.0'/>""";
   }
 }

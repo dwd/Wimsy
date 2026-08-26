@@ -259,7 +259,11 @@ class XmppWebTransportHtml extends XmppWebSocket {
 
   @override
   String getStreamOpeningElement(String domain) {
-    return "<open xmlns='urn:ietf:params:xml:ns:xmpp-framing' to='$domain' version='1.0'/>";
+    // XMPP over WebTransport uses the native XML stream framing used by
+    // XMPP-over-QUIC, not the RFC 7395 <open/> WebSocket framing element.
+    return "<?xml version='1.0'?><stream:stream xmlns='jabber:client' "
+        "version='1.0' xmlns:stream='http://etherx.jabber.org/streams' "
+        "to='$domain' xml:lang='en'>";
   }
 
   /// True for callers that need to distinguish WebTransport from WebSocket.
