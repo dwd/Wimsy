@@ -147,7 +147,12 @@ impl Assembler {
 
     // Note: If a packet contains many frames from the same stream, the estimated over-allocation
     // will be much higher because we are counting the same allocation multiple times.
-    pub(super) fn insert(&mut self, mut offset: u64, mut bytes: Bytes, allocation_size: usize) {
+    pub(super) fn insert(
+        &mut self,
+        mut offset: u64,
+        mut bytes: Bytes,
+        allocation_size: usize,
+    ) -> Result<(), TooManyChunks> {
         debug_assert!(
             bytes.len() <= allocation_size,
             "allocation_size less than bytes.len(): {:?} < {:?}",
@@ -174,7 +179,7 @@ impl Assembler {
             }
         } else if offset < self.bytes_read {
             if (offset + bytes.len() as u64) <= self.bytes_read {
-                return;
+                return Ok(());
             } else {
                 let diff = self.bytes_read - offset;
                 offset += diff;
@@ -183,7 +188,7 @@ impl Assembler {
         }
 
         if bytes.is_empty() {
-            return;
+            return Ok(());
         }
         let buffer = Buffer::new(offset, bytes, allocation_size);
         self.buffered += buffer.bytes.len();
@@ -204,8 +209,13 @@ impl Assembler {
         // balance between defragmentation overhead and over-allocation.
         let threshold = 32768.max(buffered * 3 / 2);
         if over_allocation > threshold {
-            self.defragment()
+            self.defragment();
+            if self.data.len() > 1024 {
+                return Err(TooManyChunks);
+            }
         }
+
+        Ok(())
     }
 
     /// Number of bytes consumed by the application
@@ -335,10 +345,28 @@ impl State {
 #[derive(Debug)]
 pub struct IllegalOrderedRead;
 
+/// Error indicating that too many chunks are buffered due to maliciously small/gapped frames.
+#[derive(Debug)]
+pub(crate) struct TooManyChunks;
+
 #[cfg(test)]
 mod test {
     use super::*;
     use assert_matches::assert_matches;
+
+    #[test]
+    fn rejects_excessive_gapped_chunks() {
+        let mut assembler = Assembler::new();
+        for offset in 0..1024 {
+            assembler
+                .insert(offset * 2, Bytes::from_static(b"x"), 32770)
+                .unwrap();
+        }
+        assert_matches!(
+            assembler.insert(2048, Bytes::from_static(b"x"), 32770),
+            Err(TooManyChunks)
+        );
+    }
 
     #[test]
     fn assemble_ordered() {
