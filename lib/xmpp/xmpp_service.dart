@@ -6647,6 +6647,7 @@ class XmppService extends ChangeNotifier {
         final reaction = _messageStanzaParser.extractReactionUpdate(
           message.messageStanza,
         );
+        final invite = parseMucDirectInvite(message.messageStanza);
         if (reaction != null) {
           final targetBare = _reactionChatTarget(from, to);
           if (targetBare.isNotEmpty) {
@@ -6654,7 +6655,9 @@ class XmppService extends ChangeNotifier {
           }
           continue;
         }
-        if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
+        if (body.trim().isEmpty &&
+            (oobUrl == null || oobUrl.isEmpty) &&
+            invite == null) {
           continue;
         }
         final outgoing = from == (_currentUserBareJid ?? '');
@@ -6689,6 +6692,9 @@ class XmppService extends ChangeNotifier {
           messageId: message.messageId,
           mamId: message.mamResultId,
           stanzaId: message.stanzaId,
+          inviteRoomJid: invite?.roomJid,
+          inviteReason: invite?.reason,
+          invitePassword: invite?.password,
           replyToId: parsedReply?.replyToId,
           replyToJid: parsedReply?.replyToJid,
           replyFallback: parsedReply?.fallbackBody,

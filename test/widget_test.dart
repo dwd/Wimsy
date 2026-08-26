@@ -206,6 +206,58 @@ void main() {
     expect(find.text('Reply'), findsOneWidget);
   });
 
+  testWidgets('bodyless room invitation renders its card and join action', (
+    WidgetTester tester,
+  ) async {
+    var joined = false;
+    final message = ChatMessage(
+      from: 'juliet@example.com',
+      to: 'romeo@example.com',
+      body: '',
+      timestamp: DateTime.utc(2026),
+      outgoing: false,
+      messageId: 'invite-card-test',
+      inviteRoomJid: 'room@example.com',
+      inviteReason: 'Join the discussion',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'Juliet',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: 'room@example.com',
+            inviteRoomName: 'Discussion room',
+            inviteAvatarBytes: null,
+            inviteReason: 'Join the discussion',
+            onJoinInvite: () => joined = true,
+            selfReactionSenderId: 'romeo@example.com',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Discussion room'), findsOneWidget);
+    expect(find.text('Join the discussion'), findsOneWidget);
+    expect(find.text('Join'), findsOneWidget);
+
+    await tester.tap(find.text('Join'));
+    expect(joined, isTrue);
+  });
+
   testWidgets('Login screen displays and clears live connection logs', (
     WidgetTester tester,
   ) async {

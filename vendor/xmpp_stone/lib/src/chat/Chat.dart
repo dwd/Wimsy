@@ -41,7 +41,7 @@ class ChatImpl implements Chat {
 
   void parseMessage(Message message) {
     if (message.type == MessageStanzaType.CHAT) {
-      if (message.text != null && message.text!.isNotEmpty) {
+      if (isRenderableChatMessage(message)) {
         messages!.add(message);
         _newMessageController.add(message);
       }
@@ -62,13 +62,11 @@ class ChatImpl implements Chat {
     stanza.body = text;
     var receiptRequest = XmppElement();
     receiptRequest.name = 'request';
-    receiptRequest.addAttribute(
-        XmppAttribute('xmlns', 'urn:xmpp:receipts'));
+    receiptRequest.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
     stanza.addChild(receiptRequest);
     var markable = XmppElement();
     markable.name = 'markable';
-    markable.addAttribute(
-        XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
+    markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
     stanza.addChild(markable);
     var message = Message.fromStanza(stanza);
     messages!.add(message);
@@ -90,6 +88,24 @@ class ChatImpl implements Chat {
     _connection.writeStanza(stanza);
     _myState = state;
   }
+}
+
+/// Whether a chat message carries visible content for the conversation.
+///
+/// XEP-0249 invitations commonly omit `<body>`, but still need to reach the
+/// application so it can render the invitation card.
+bool isRenderableChatMessage(Message message) {
+  return (message.text != null && message.text!.isNotEmpty) ||
+      _containsMucDirectInvite(message.messageStanza);
+}
+
+bool _containsMucDirectInvite(XmppElement element) {
+  if (element.name == 'x' &&
+      element.getAttribute('xmlns')?.value == 'jabber:x:conference' &&
+      (element.getAttribute('jid')?.value?.isNotEmpty ?? false)) {
+    return true;
+  }
+  return element.children.any(_containsMucDirectInvite);
 }
 
 abstract class Chat {
