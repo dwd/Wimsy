@@ -2654,7 +2654,7 @@ class XmppService extends ChangeNotifier {
     if (!_isLikelyEmoji(trimmed)) {
       return;
     }
-    final targetId = message.stanzaId ?? message.messageId;
+    final targetId = reactionTargetIdForMessage(message, isRoom: isRoom);
     if (targetId == null || targetId.isEmpty) {
       return;
     }
@@ -2738,6 +2738,20 @@ class XmppService extends ChangeNotifier {
       toJid: toJid,
       fallback: '$fallbackQuote\n\n',
     );
+  }
+
+  /// Resolves the stable message id required by XEP-0444 reactions.
+  String? reactionTargetIdForMessage(
+    ChatMessage message, {
+    required bool isRoom,
+  }) {
+    // A MUC MAM result id is the room-assigned XEP-0359 stanza id, so it is
+    // the correct target when an archived message omits an explicit
+    // <stanza-id/>. A personal archive id does not have that property.
+    final targetId = isRoom
+        ? (message.stanzaId ?? message.mamId)
+        : message.messageId;
+    return targetId == null || targetId.isEmpty ? null : targetId;
   }
 
   String _buildReplyFallbackQuote(String body) {

@@ -1488,7 +1488,10 @@ class _WimsyHomeState extends State<WimsyHome> {
                                   )
                                 : null,
                             onReply:
-                                ((message.stanzaId ?? message.messageId) ?? '')
+                                ((isBookmark
+                                            ? message.stanzaId ?? message.mamId
+                                            : message.messageId) ??
+                                        '')
                                     .isNotEmpty
                                 ? () => _startReplyingToMessage(
                                     activeChat: activeChat,
@@ -4730,6 +4733,7 @@ class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
   Timer? _timer;
   int? _pointer;
   Offset? _startPosition;
+  bool _longPressRecognized = false;
 
   void _handlePointerDown(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.touch &&
@@ -4741,11 +4745,8 @@ class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
     _pointer = event.pointer;
     _startPosition = event.position;
     _timer = Timer(kLongPressTimeout, () {
-      final position = _startPosition;
       _timer = null;
-      if (position != null) {
-        widget.onLongPress(position);
-      }
+      _longPressRecognized = _startPosition != null;
     });
   }
 
@@ -4760,7 +4761,17 @@ class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
 
   void _handlePointerEnd(PointerEvent event) {
     if (event.pointer == _pointer) {
+      final position = _startPosition;
+      final recognized = _longPressRecognized;
       _cancel();
+      // Do not insert the popup route while Android is still dispatching the
+      // pointer sequence which recognized this long press. Otherwise the
+      // release can hit the newly opened menu and immediately select or
+      // dismiss an action. Opening after release gives the menu a fresh
+      // gesture sequence.
+      if (recognized && position != null && event is PointerUpEvent) {
+        widget.onLongPress(position);
+      }
     }
   }
 
@@ -4769,6 +4780,7 @@ class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
     _timer = null;
     _pointer = null;
     _startPosition = null;
+    _longPressRecognized = false;
   }
 
   @override

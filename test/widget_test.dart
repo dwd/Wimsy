@@ -5,6 +5,7 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -151,6 +152,58 @@ void main() {
     await tester.tap(find.text('Add reaction'));
     await tester.pumpAndSettle();
     expect(find.text('👍'), findsOneWidget);
+  });
+
+  testWidgets('long-press menu waits for the recognizing touch to end', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'bob@example.com',
+      to: 'alice@example.com',
+      body: 'Hold this message',
+      timestamp: DateTime.utc(2026),
+      outgoing: false,
+      messageId: 'held-menu-test',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'Bob',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'alice@example.com',
+            recentReactionOptions: const [],
+            onReact: (_) {},
+            onEdit: null,
+            onReply: () {},
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text('Hold this message')),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    expect(find.text('Reply'), findsNothing);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Reply'), findsOneWidget);
   });
 
   testWidgets('Login screen displays and clears live connection logs', (
