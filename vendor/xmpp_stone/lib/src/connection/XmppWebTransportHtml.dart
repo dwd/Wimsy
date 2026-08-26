@@ -6,6 +6,7 @@ import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 import 'package:web/web.dart' as web;
+import 'package:xmpp_stone/src/connection/XmppStreamRouting.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 import 'XmppWebsocketApi.dart';
 
@@ -22,29 +23,54 @@ class WebTransportStreams {
     required this.readable,
     required this.writable,
     required this.close,
+    this.openBidirectionalStream,
+    this.incomingBidirectionalStreams,
   });
 
   final web.ReadableStream readable;
   final web.WritableStream writable;
   final void Function() close;
+  final Future<WebTransportStreamChannel> Function()? openBidirectionalStream;
+  final web.ReadableStream? incomingBidirectionalStreams;
+}
+
+class WebTransportStreamChannel {
+  WebTransportStreamChannel({required this.readable, required this.writable});
+
+  final web.ReadableStream readable;
+  final web.WritableStream writable;
 }
 
 /// WebTransport-based XMPP socket for the web platform.
 ///
-/// Opens a single reliable bidirectional stream over WebTransport (HTTP/3 /
-/// QUIC) and uses it to carry the full XMPP XML stream, matching Phase 1 of
-/// the WebTransport plan (one channel first).
+/// Opens a reliable control stream over WebTransport (HTTP/3 / QUIC), then
+/// routes post-bind stanzas across auxiliary bidirectional streams using the
+/// same bare-JID policy as native XMPP over QUIC. Server-initiated streams are
+/// accepted immediately and can also be reused for outbound stanzas.
 ///
 /// If the browser does not support WebTransport, or if the connection attempt
 /// fails, this class throws so the caller can fall back to WebSocket.
 class XmppWebTransportHtml extends XmppWebSocket {
   static const String TAG = 'XmppWebTransportHtml';
 
-  web.WritableStream? _writable;
+  static const int _auxStreamSlots = 20;
+  static const int _maxControlBufferChars = 16 * 1024;
+
+  WebTransportStreamChannel? _controlStream;
+  Future<WebTransportStreamChannel> Function()? _openBidirectionalStream;
   late String Function(String event) _map;
+  String Function(String) Function()? _makeAuxMapper;
   final WebTransportStreamFactory? _streamFactory;
   void Function()? _closeStream;
   Future<void> _writeQueue = Future<void>.value();
+  bool _closed = false;
+  bool _postBindReady = false;
+  String? _accountBareJid;
+  String _controlBuffer = '';
+  final Map<int, WebTransportStreamChannel> _auxStreamsBySlot = {};
+  final Map<int, Future<WebTransportStreamChannel>> _auxStreamOpening = {};
+  final Map<int, List<String>> _auxStreamPendingQueue = {};
+  final List<WebTransportStreamChannel> _serverStreamPool = [];
 
   // Controller that bridges the ReadableStream chunks to a Dart Stream<String>.
   final StreamController<String> _controller = StreamController<String>();
@@ -72,6 +98,7 @@ class XmppWebTransportHtml extends XmppWebSocket {
     String? tlsHost,
   }) async {
     _map = map ?? (e) => e;
+    _closed = false;
 
     // Derive the WebTransport URL from wsUri or construct from host/port/path.
     // WebTransport uses https:// (not wss://).
@@ -89,12 +116,17 @@ class XmppWebTransportHtml extends XmppWebSocket {
         : rawUri.toString();
 
     final streamFactory = _streamFactory;
-    late web.ReadableStream readable;
+    late WebTransportStreamChannel controlStream;
+    web.ReadableStream? incomingStreams;
     if (streamFactory != null) {
       Log.d(TAG, 'Creating injected WebTransport streams url=$url');
       final streams = await streamFactory(url);
-      readable = streams.readable;
-      _writable = streams.writable;
+      controlStream = WebTransportStreamChannel(
+        readable: streams.readable,
+        writable: streams.writable,
+      );
+      _openBidirectionalStream = streams.openBidirectionalStream;
+      incomingStreams = streams.incomingBidirectionalStreams;
       _closeStream = streams.close;
     } else {
       Log.i(TAG, 'Creating WebTransport session url=$url');
@@ -132,33 +164,48 @@ class XmppWebTransportHtml extends XmppWebSocket {
         rethrow;
       }
       Log.i(TAG, 'WebTransport bidirectional XMPP stream opened');
-      readable = bidiStream.readable as web.ReadableStream;
-      _writable = bidiStream.writable as web.WritableStream;
+      controlStream = _channelFromBrowserStream(bidiStream);
+      _openBidirectionalStream = () async => _channelFromBrowserStream(
+            await transport.createBidirectionalStream().toDart,
+          );
+      incomingStreams = transport.incomingBidirectionalStreams;
       _closeStream = () => transport.close();
     }
 
-    // Start pumping incoming bytes from the readable side into _controller.
-    // readable is typed as JSObject in the web package; cast to ReadableStream.
-    _pumpIncoming(readable);
+    _controlStream = controlStream;
+    _pumpIncoming(
+      controlStream.readable,
+      channel: 'webtransport-control',
+      isControl: true,
+      mapper: _map,
+    );
+    if (incomingStreams != null) {
+      _startIncomingStreamAcceptLoop(incomingStreams);
+    }
 
     return this;
   }
 
   /// Reads chunks from the WebTransport readable stream and emits decoded
   /// UTF-8 strings into [_controller].
-  void _pumpIncoming(web.ReadableStream readable) {
+  void _pumpIncoming(
+    web.ReadableStream readable, {
+    required String channel,
+    required bool isControl,
+    required String Function(String) mapper,
+  }) {
     final reader = web.ReadableStreamDefaultReader(readable);
     final decoder = web.TextDecoder();
     Future<void> readNext() async {
       while (true) {
         final result = await reader.read().toDart;
         if (result.done) {
-          Log.i(TAG, 'WebTransport XMPP receive stream ended');
+          Log.i(TAG, 'WebTransport XMPP receive stream ended channel=$channel');
           final trailing = decoder.decode();
           if (trailing.isNotEmpty && !_controller.isClosed) {
-            _controller.add(_map(trailing));
+            _controller.add(mapper(trailing));
           }
-          if (!_controller.isClosed) {
+          if (isControl && !_controller.isClosed) {
             await _controller.close();
           }
           return;
@@ -179,9 +226,10 @@ class XmppWebTransportHtml extends XmppWebSocket {
             'decodedCharacters=${chunk.length}',
           );
           if (chunk.isNotEmpty) {
-            Log.xmppp_receiving(chunk, channel: 'webtransport');
+            Log.xmppp_receiving(chunk, channel: channel);
+            if (isControl) _captureBindResult(chunk);
           }
-          _controller.add(_map(chunk));
+          _controller.add(mapper(chunk));
         }
       }
     }
@@ -190,27 +238,103 @@ class XmppWebTransportHtml extends XmppWebSocket {
       Log.e(TAG, 'WebTransport receive failed: $error');
       if (!_controller.isClosed) {
         _controller.addError(error);
-        _controller.close();
+        if (isControl) _controller.close();
       }
     });
   }
 
+  WebTransportStreamChannel _channelFromBrowserStream(
+    web.WebTransportBidirectionalStream stream,
+  ) {
+    return WebTransportStreamChannel(
+      readable: stream.readable as web.ReadableStream,
+      writable: stream.writable as web.WritableStream,
+    );
+  }
+
+  void _startIncomingStreamAcceptLoop(web.ReadableStream incoming) {
+    final reader = web.ReadableStreamDefaultReader(incoming);
+    unawaited(Future<void>(() async {
+      var index = 0;
+      while (!_closed) {
+        try {
+          final result = await reader.read().toDart;
+          if (result.done) break;
+          final browserStream =
+              result.value as web.WebTransportBidirectionalStream;
+          final stream = _channelFromBrowserStream(browserStream);
+          final channel = 'webtransport-server-${index++}';
+          Log.i(TAG, 'Accepted server-initiated stream channel=$channel');
+          _pumpIncoming(
+            stream.readable,
+            channel: channel,
+            isControl: false,
+            mapper: _makeAuxMapper?.call() ?? _map,
+          );
+          _serverStreamPool.add(stream);
+        } catch (error) {
+          if (!_closed) Log.e(TAG, 'Server stream accept failed: $error');
+          break;
+        }
+      }
+    }));
+  }
+
   @override
   void write(Object? message) {
-    final writable = _writable;
-    if (writable == null) return;
-    final bytes =
-        message is List<int> ? message : utf8.encode(message?.toString() ?? '');
     final payload = message?.toString() ?? '';
-    Log.d(TAG, 'WebTransport write queued bytes=${bytes.length}');
-    _writeQueue = _writeQueue.then((_) async {
-      final writer = writable.getWriter();
-      try {
-        if (payload.isNotEmpty) {
-          Log.xmppp_sending(payload, channel: 'webtransport');
+    if (payload.isEmpty || _controlStream == null) return;
+    if (!_postBindReady || !isStanzaPayload(payload)) {
+      _queueWrite(_controlStream!, payload, 'webtransport-control');
+      return;
+    }
+    final toBare = extractToBareJidForRouting(payload);
+    final accountDomain = _accountBareJid?.split('@').last;
+    if (toBare == null ||
+        toBare == _accountBareJid ||
+        toBare == accountDomain) {
+      _queueWrite(_controlStream!, payload, 'webtransport-control');
+      return;
+    }
+    final slot = xmppAuxSlotForBareJid(toBare, _auxStreamSlots);
+    final existing = _auxStreamsBySlot[slot];
+    if (existing != null) {
+      _queueWrite(existing, payload, 'webtransport-aux-$slot');
+      return;
+    }
+    _auxStreamPendingQueue.putIfAbsent(slot, () => []).add(payload);
+    _ensureAuxStream(slot).then(
+      (stream) => _flushAuxPendingQueue(slot, stream),
+      onError: (Object error) {
+        Log.w(TAG,
+            'Aux stream open failed slot=$slot error=$error; using control');
+        final queued = _auxStreamPendingQueue.remove(slot) ?? [];
+        for (final stanza in queued) {
+          _queueWrite(
+            _controlStream!,
+            stanza,
+            'webtransport-control-fallback',
+          );
         }
+      },
+    );
+  }
+
+  void _queueWrite(
+    WebTransportStreamChannel stream,
+    String payload,
+    String channel,
+  ) {
+    final bytes = utf8.encode(payload);
+    Log.d(TAG,
+        'WebTransport write queued channel=$channel bytes=${bytes.length}');
+    _writeQueue = _writeQueue.then((_) async {
+      final writer = stream.writable.getWriter();
+      try {
+        Log.xmppp_sending(payload, channel: channel);
         await writer.write(Uint8List.fromList(bytes).toJS).toDart;
-        Log.d(TAG, 'WebTransport write completed bytes=${bytes.length}');
+        Log.d(TAG,
+            'WebTransport write completed channel=$channel bytes=${bytes.length}');
       } finally {
         writer.releaseLock();
       }
@@ -222,8 +346,67 @@ class XmppWebTransportHtml extends XmppWebSocket {
     });
   }
 
+  Future<WebTransportStreamChannel> _ensureAuxStream(int slot) {
+    final existing = _auxStreamsBySlot[slot];
+    if (existing != null) return Future.value(existing);
+    return _auxStreamOpening.putIfAbsent(slot, () => _openAuxStream(slot));
+  }
+
+  Future<WebTransportStreamChannel> _openAuxStream(int slot) async {
+    try {
+      if (_serverStreamPool.isNotEmpty) {
+        final pooled = _serverStreamPool.removeAt(0);
+        _auxStreamsBySlot[slot] = pooled;
+        Log.i(TAG, 'Assigned server-initiated stream to aux slot=$slot');
+        return pooled;
+      }
+      final open = _openBidirectionalStream;
+      if (open == null) {
+        throw StateError('Bidirectional stream opener unavailable');
+      }
+      final stream = await open();
+      if (_closed) {
+        throw StateError('WebTransport closed during aux stream open');
+      }
+      _auxStreamsBySlot[slot] = stream;
+      Log.i(TAG, 'Opened client-initiated auxiliary stream slot=$slot');
+      _pumpIncoming(
+        stream.readable,
+        channel: 'webtransport-aux-$slot',
+        isControl: false,
+        mapper: _makeAuxMapper?.call() ?? _map,
+      );
+      return stream;
+    } finally {
+      _auxStreamOpening.remove(slot);
+    }
+  }
+
+  void _flushAuxPendingQueue(int slot, WebTransportStreamChannel stream) {
+    final queued = _auxStreamPendingQueue.remove(slot) ?? [];
+    for (final stanza in queued) {
+      _queueWrite(stream, stanza, 'webtransport-aux-$slot');
+    }
+  }
+
+  void _captureBindResult(String chunk) {
+    if (_postBindReady) return;
+    _controlBuffer += chunk;
+    if (_controlBuffer.length > _maxControlBufferChars) {
+      _controlBuffer = _controlBuffer.substring(
+        _controlBuffer.length - _maxControlBufferChars,
+      );
+    }
+    final bare = extractBoundBareJid(_controlBuffer);
+    if (bare == null) return;
+    _accountBareJid = bare;
+    _postBindReady = true;
+    Log.i(TAG, 'WebTransport multi-stream routing enabled account=$bare');
+  }
+
   @override
   void close() {
+    _closed = true;
     Log.i(TAG, 'Closing WebTransport session');
     _closeStream?.call();
     if (!_controller.isClosed) {
@@ -268,4 +451,10 @@ class XmppWebTransportHtml extends XmppWebSocket {
 
   /// True for callers that need to distinguish WebTransport from WebSocket.
   bool get isWebTransport => true;
+
+  bool get isMultiplexed => true;
+
+  void setAuxMapperFactory(String Function(String) Function() factory) {
+    _makeAuxMapper = factory;
+  }
 }

@@ -602,6 +602,9 @@ class Connection {
           tlsHost: account.domain,
           map: prepareStreamResponse,
         );
+        if (account.useWebTransport) {
+          (socket as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
+        }
         _attachOpenedSocket(socket);
         return;
       }

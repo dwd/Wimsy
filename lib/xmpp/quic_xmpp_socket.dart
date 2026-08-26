@@ -6,8 +6,12 @@ import 'package:universal_io/io.dart';
 
 import 'package:flutter_quic/flutter_quic.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
+import 'package:xmpp_stone/src/connection/XmppStreamRouting.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 import 'dns_cache.dart';
+
+export 'package:xmpp_stone/src/connection/XmppStreamRouting.dart'
+    show bareJidForRouting, extractToBareJidForRouting, isStanzaPayload;
 
 /// Result of a QUIC connection migration attempt.
 enum MigrationResult { success, failed }
@@ -894,7 +898,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       );
     }
 
-    final slot = quicAuxSlotForBareJid(toBare, _auxStreamSlots);
+    final slot = xmppAuxSlotForBareJid(toBare, _auxStreamSlots);
     final existing = _auxStreamsBySlot[slot];
     if (existing == null) {
       // The aux stream for this slot is not yet open. Enqueue the payload so
@@ -1117,16 +1121,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       );
     }
 
-    final bindResult = RegExp(
-      '<bind\\b[^>]*xmlns=(["\\\'])urn:ietf:params:xml:ns:xmpp-bind\\1[^>]*>.*?<jid>([^<]+)</jid>',
-      dotAll: true,
-      caseSensitive: false,
-    ).firstMatch(_controlBuffer);
-    if (bindResult == null) {
-      return;
-    }
-    final fullJid = bindResult.group(2);
-    final bare = bareJidForRouting(fullJid);
+    final bare = extractBoundBareJid(_controlBuffer);
     if (bare == null || bare.isEmpty) {
       return;
     }
@@ -1453,94 +1448,10 @@ List<InternetAddress> buildQuicHappyEyeballsPlan(
   return plan;
 }
 
-/// Returns true when [payload] begins with a top-level XMPP stanza element
-/// (`message`, `presence`, or `iq`).
-///
-/// Per XEP-0467 §Multiple Streams, only stanzas may be sent on aux streams;
-/// every other top level element (stream errors, CSI, `<r/>`/`<a/>`, SASL
-/// frames, the `<stream:stream>` opener, etc.) MUST be sent on the initial
-/// stream. This helper looks at the first XML element name in the payload,
-/// skipping any leading `<?xml…?>` prolog and whitespace, and matching the
-/// XMPP-defined stanza local-names case-sensitively as required by the
-/// `jabber:client` namespace.
-bool isStanzaPayload(String payload) {
-  var i = 0;
-  final length = payload.length;
-  while (i < length) {
-    final ch = payload.codeUnitAt(i);
-    // Skip whitespace.
-    if (ch == 0x20 || ch == 0x09 || ch == 0x0a || ch == 0x0d) {
-      i++;
-      continue;
-    }
-    if (ch != 0x3c /* '<' */ ) {
-      return false;
-    }
-    // Skip XML prolog `<?xml … ?>`.
-    if (i + 1 < length && payload.codeUnitAt(i + 1) == 0x3f /* '?' */ ) {
-      final end = payload.indexOf('?>', i + 2);
-      if (end < 0) {
-        return false;
-      }
-      i = end + 2;
-      continue;
-    }
-    // First real element starts at i+1.
-    final nameStart = i + 1;
-    var j = nameStart;
-    while (j < length) {
-      final c = payload.codeUnitAt(j);
-      if (c == 0x20 ||
-          c == 0x09 ||
-          c == 0x0a ||
-          c == 0x0d ||
-          c == 0x2f /* '/' */ ||
-          c == 0x3e /* '>' */ ) {
-        break;
-      }
-      j++;
-    }
-    final name = payload.substring(nameStart, j);
-    return name == 'message' || name == 'presence' || name == 'iq';
-  }
-  return false;
-}
-
 bool _isStanzaPayload(String payload) => isStanzaPayload(payload);
 
-String? extractToBareJidForRouting(String payload) {
-  final toMatch = RegExp('\\bto=(["\\\'])([^"\\\']+)\\1').firstMatch(payload);
-  if (toMatch == null) {
-    return null;
-  }
-  return bareJidForRouting(toMatch.group(2));
-}
-
-String? bareJidForRouting(String? jid) {
-  if (jid == null) {
-    return null;
-  }
-  final trimmed = jid.trim();
-  if (trimmed.isEmpty) {
-    return null;
-  }
-  final slash = trimmed.indexOf('/');
-  if (slash == -1) {
-    return trimmed;
-  }
-  return trimmed.substring(0, slash);
-}
-
 int quicAuxSlotForBareJid(String bareJid, int slotCount) {
-  if (slotCount <= 0) {
-    throw ArgumentError.value(slotCount, 'slotCount', 'must be > 0');
-  }
-  var hash = 0x811c9dc5;
-  for (final unit in bareJid.codeUnits) {
-    hash ^= unit;
-    hash = (hash * 0x01000193) & 0xffffffff;
-  }
-  return hash % slotCount;
+  return xmppAuxSlotForBareJid(bareJid, slotCount);
 }
 
 class _QuicConnectResult {

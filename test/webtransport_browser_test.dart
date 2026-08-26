@@ -78,6 +78,134 @@ void main() {
     socket.close();
     expect(closed, isTrue);
   });
+
+  test(
+    'routes post-bind stanzas onto client-initiated auxiliary streams',
+    () async {
+      final controlInbound = web.TransformStream();
+      final controlOutbound = web.TransformStream();
+      final auxiliaryInbound = web.TransformStream();
+      final auxiliaryOutbound = web.TransformStream();
+      var auxiliaryOpenCount = 0;
+      final socket = XmppWebTransportHtml(
+        streamFactory: (_) async => WebTransportStreams(
+          readable: controlInbound.readable,
+          writable: controlOutbound.writable,
+          close: () {},
+          openBidirectionalStream: () async {
+            auxiliaryOpenCount++;
+            return WebTransportStreamChannel(
+              readable: auxiliaryInbound.readable,
+              writable: auxiliaryOutbound.writable,
+            );
+          },
+        ),
+      );
+      await socket.connect('example.test', 443, useWebTransport: true);
+
+      final bindReceived = Completer<void>();
+      socket.listen((chunk) {
+        if (chunk.contains('<bound')) bindReceived.complete();
+      });
+      final controlWriter = controlInbound.writable.getWriter();
+      await controlWriter
+          .write(
+            Uint8List.fromList(
+              utf8.encode(
+                "<bound xmlns='urn:xmpp:bind:0'>"
+                '<jid>test1@example.test/browser</jid></bound>',
+              ),
+            ).toJS,
+          )
+          .toDart;
+      await bindReceived.future;
+
+      const stanza = '<message to="contact@example.test/phone" id="m1"/>';
+      socket.write(stanza);
+      final auxiliaryReader =
+          auxiliaryOutbound.readable.getReader()
+              as web.ReadableStreamDefaultReader;
+      final written = await auxiliaryReader.read().toDart;
+      expect(_decode(written.value), stanza);
+      expect(auxiliaryOpenCount, 1);
+
+      controlWriter.releaseLock();
+      socket.close();
+    },
+  );
+
+  test('accepts and reuses server-initiated bidirectional streams', () async {
+    final controlInbound = web.TransformStream();
+    final controlOutbound = web.TransformStream();
+    final incomingStreams = web.TransformStream();
+    final serverInbound = web.TransformStream();
+    final serverOutbound = web.TransformStream();
+    var clientOpenCount = 0;
+    final socket = XmppWebTransportHtml(
+      streamFactory: (_) async => WebTransportStreams(
+        readable: controlInbound.readable,
+        writable: controlOutbound.writable,
+        close: () {},
+        incomingBidirectionalStreams: incomingStreams.readable,
+        openBidirectionalStream: () async {
+          clientOpenCount++;
+          throw StateError('server stream should be reused');
+        },
+      ),
+    );
+    await socket.connect('example.test', 443, useWebTransport: true);
+
+    final receivedServerStanza = Completer<String>();
+    final bindReceived = Completer<void>();
+    socket.listen((chunk) {
+      if (chunk.contains('<bind')) bindReceived.complete();
+      if (chunk.contains('server-message')) {
+        receivedServerStanza.complete(chunk);
+      }
+    });
+
+    final incomingWriter = incomingStreams.writable.getWriter();
+    final serverPair = web.ReadableWritablePair(
+      readable: serverInbound.readable,
+      writable: serverOutbound.writable,
+    );
+    await incomingWriter.write(serverPair).toDart;
+    final serverWriter = serverInbound.writable.getWriter();
+    await serverWriter
+        .write(
+          Uint8List.fromList(
+            utf8.encode('<message id="server-message"/>'),
+          ).toJS,
+        )
+        .toDart;
+    expect(await receivedServerStanza.future, '<message id="server-message"/>');
+
+    final controlWriter = controlInbound.writable.getWriter();
+    await controlWriter
+        .write(
+          Uint8List.fromList(
+            utf8.encode(
+              "<bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'>"
+              '<jid>test1@example.test/browser</jid></bind>',
+            ),
+          ).toJS,
+        )
+        .toDart;
+    await bindReceived.future;
+
+    const outbound = '<message to="contact@example.test" id="client-message"/>';
+    socket.write(outbound);
+    final serverOutboundReader =
+        serverOutbound.readable.getReader() as web.ReadableStreamDefaultReader;
+    final reusedWrite = await serverOutboundReader.read().toDart;
+    expect(_decode(reusedWrite.value), outbound);
+    expect(clientOpenCount, 0);
+
+    incomingWriter.releaseLock();
+    serverWriter.releaseLock();
+    controlWriter.releaseLock();
+    socket.close();
+  });
 }
 
 String _decode(JSAny? value) {

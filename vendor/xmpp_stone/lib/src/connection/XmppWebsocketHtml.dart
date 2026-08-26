@@ -123,6 +123,12 @@ class XmppWebSocketHtml extends XmppWebSocket {
   /// True when this socket is backed by a WebTransport connection.
   bool get isWebTransport => _webTransportDelegate != null;
 
+  bool get isMultiplexed => _webTransportDelegate != null;
+
+  void setAuxMapperFactory(String Function(String) Function() factory) {
+    _webTransportDelegate?.setAuxMapperFactory(factory);
+  }
+
   @override
   String getStreamOpeningElement(String domain) {
     final webTransport = _webTransportDelegate;
