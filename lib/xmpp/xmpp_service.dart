@@ -2192,18 +2192,13 @@ class XmppService extends ChangeNotifier {
     final invitePassword = _roomPasswordFor(normalizedRoom);
 
     final directId = AbstractStanza.getRandomId();
-    final directStanza = MessageStanza(directId, MessageStanzaType.NORMAL);
-    directStanza.toJid = Jid.fromFullJid(normalizedInvitee);
-    final direct = XmppElement()..name = 'x';
-    direct.addAttribute(XmppAttribute('xmlns', mucDirectInviteNamespace));
-    direct.addAttribute(XmppAttribute('jid', normalizedRoom));
-    if (inviteReason != null && inviteReason.isNotEmpty) {
-      direct.addAttribute(XmppAttribute('reason', inviteReason));
-    }
-    if (invitePassword != null && invitePassword.isNotEmpty) {
-      direct.addAttribute(XmppAttribute('password', invitePassword));
-    }
-    directStanza.addChild(direct);
+    final directStanza = buildMucDirectInviteStanza(
+      id: directId,
+      inviteeJid: normalizedInvitee,
+      roomJid: normalizedRoom,
+      reason: inviteReason,
+      password: invitePassword,
+    );
     connection.writeStanza(directStanza);
 
     final rawXml = _serializeStanza(directStanza);
@@ -6634,7 +6629,7 @@ class XmppService extends ChangeNotifier {
           message.messageStanza,
           body: message.text,
         );
-        final body = parsedReply?.cleanedBody ?? message.text ?? '';
+        var body = parsedReply?.cleanedBody ?? message.text ?? '';
         final oobInfo = _messageStanzaParser.extractOobInfo(
           message.messageStanza,
         );
@@ -6648,6 +6643,9 @@ class XmppService extends ChangeNotifier {
           message.messageStanza,
         );
         final invite = parseMucDirectInvite(message.messageStanza);
+        if (invite != null) {
+          body = stripMucDirectInviteFallback(message.messageStanza, body);
+        }
         if (reaction != null) {
           final targetBare = _reactionChatTarget(from, to);
           if (targetBare.isNotEmpty) {
@@ -6710,7 +6708,7 @@ class XmppService extends ChangeNotifier {
         message.messageStanza,
         body: message.text,
       );
-      final body = parsedReply?.cleanedBody ?? message.text ?? '';
+      var body = parsedReply?.cleanedBody ?? message.text ?? '';
       final oobInfo = _messageStanzaParser.extractOobInfo(
         message.messageStanza,
       );
@@ -6724,6 +6722,9 @@ class XmppService extends ChangeNotifier {
         message.messageStanza,
       );
       final invite = parseMucDirectInvite(message.messageStanza);
+      if (invite != null) {
+        body = stripMucDirectInviteFallback(message.messageStanza, body);
+      }
       final outgoing = from == (_currentUserBareJid ?? '');
       final targetBare = outgoing ? to : from;
       if (replaceId != null && replaceId.isNotEmpty && targetBare.isNotEmpty) {

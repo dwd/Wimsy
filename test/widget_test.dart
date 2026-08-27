@@ -258,6 +258,53 @@ void main() {
     expect(joined, isTrue);
   });
 
+  testWidgets('sent room invitation renders a non-interactive card', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'romeo@example.com',
+      to: 'juliet@example.com',
+      body: '',
+      timestamp: DateTime.utc(2026),
+      outgoing: true,
+      messageId: 'sent-invite-card-test',
+      inviteRoomJid: 'room@example.com',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'You',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: 'room@example.com',
+            inviteRoomName: 'Discussion room',
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'romeo@example.com',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Discussion room'), findsOneWidget);
+    expect(find.text('room@example.com'), findsOneWidget);
+    expect(find.text('Join'), findsNothing);
+  });
+
   testWidgets('Login screen displays and clears live connection logs', (
     WidgetTester tester,
   ) async {

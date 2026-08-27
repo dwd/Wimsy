@@ -2,6 +2,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 const String mucDirectInviteNamespace = 'jabber:x:conference';
 const String _mucUserNamespace = 'http://jabber.org/protocol/muc#user';
+const String _fallbackNamespace = 'urn:xmpp:fallback:0';
 
 class MucDirectInvite {
   MucDirectInvite({required this.roomJid, this.reason, this.password});
@@ -23,6 +24,80 @@ class MucMediatedInvite {
   final String? inviterJid;
   final String? reason;
   final String? password;
+}
+
+MessageStanza buildMucDirectInviteStanza({
+  required String id,
+  required String inviteeJid,
+  required String roomJid,
+  String? reason,
+  String? password,
+}) {
+  final stanza = MessageStanza(id, MessageStanzaType.NORMAL)
+    ..toJid = Jid.fromFullJid(inviteeJid);
+  final fallbackBody = 'You have been invited to $roomJid.';
+  stanza.body = fallbackBody;
+
+  final direct = XmppElement()..name = 'x';
+  direct.addAttribute(XmppAttribute('xmlns', mucDirectInviteNamespace));
+  direct.addAttribute(XmppAttribute('jid', roomJid));
+  final trimmedReason = _trimmed(reason);
+  if (trimmedReason != null) {
+    direct.addAttribute(XmppAttribute('reason', trimmedReason));
+  }
+  final trimmedPassword = _trimmed(password);
+  if (trimmedPassword != null) {
+    direct.addAttribute(XmppAttribute('password', trimmedPassword));
+  }
+  stanza.addChild(direct);
+
+  // XEP-0428 lets invitation-aware clients replace the plain-text body with
+  // richer UI while clients without XEP-0249 support still show useful text.
+  final fallback = XmppElement()..name = 'fallback';
+  fallback.addAttribute(XmppAttribute('xmlns', _fallbackNamespace));
+  fallback.addAttribute(XmppAttribute('for', mucDirectInviteNamespace));
+  final bodyRange = XmppElement()..name = 'body';
+  bodyRange.addAttribute(XmppAttribute('start', '0'));
+  bodyRange.addAttribute(
+    XmppAttribute('end', fallbackBody.runes.length.toString()),
+  );
+  fallback.addChild(bodyRange);
+  stanza.addChild(fallback);
+  return stanza;
+}
+
+/// Removes the plain-text XEP-0428 fallback when an invitation card is shown.
+String stripMucDirectInviteFallback(MessageStanza stanza, String body) {
+  for (final container in _messageContainers(stanza)) {
+    final hasInvite = container.children.any(
+      (child) =>
+          child.name == 'x' &&
+          child.getAttribute('xmlns')?.value == mucDirectInviteNamespace,
+    );
+    if (!hasInvite) {
+      continue;
+    }
+    for (final child in container.children) {
+      if (child.name != 'fallback' ||
+          child.getAttribute('xmlns')?.value != _fallbackNamespace ||
+          child.getAttribute('for')?.value != mucDirectInviteNamespace) {
+        continue;
+      }
+      final range = child.getChild('body');
+      final start = int.tryParse(range?.getAttribute('start')?.value ?? '');
+      final end = int.tryParse(range?.getAttribute('end')?.value ?? '');
+      final runes = body.runes.toList();
+      if (start == null ||
+          end == null ||
+          start < 0 ||
+          end < start ||
+          end > runes.length) {
+        continue;
+      }
+      return String.fromCharCodes([...runes.take(start), ...runes.skip(end)]);
+    }
+  }
+  return body;
 }
 
 MucDirectInvite? parseMucDirectInvite(MessageStanza stanza) {

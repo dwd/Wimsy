@@ -3,6 +3,23 @@ import 'package:wimsy/xmpp/muc_invite.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 void main() {
+  test('buildMucDirectInviteStanza includes body and feature fallback', () {
+    final stanza = buildMucDirectInviteStanza(
+      id: 'invite-1',
+      inviteeJid: 'juliet@example.com',
+      roomJid: 'room@example.com',
+      reason: 'Join us',
+    );
+
+    expect(stanza.body, 'You have been invited to room@example.com.');
+    final parsed = parseMucDirectInvite(stanza);
+    expect(parsed?.roomJid, 'room@example.com');
+    expect(parsed?.reason, 'Join us');
+    expect(stripMucDirectInviteFallback(stanza, stanza.body!), isEmpty);
+    final fallback = stanza.getChild('fallback');
+    expect(fallback?.getAttribute('for')?.value, mucDirectInviteNamespace);
+  });
+
   test('parseMucDirectInvite extracts room and reason', () {
     final stanza = MessageStanza('m1', MessageStanzaType.NORMAL);
     final invite = XmppElement()..name = 'x';
