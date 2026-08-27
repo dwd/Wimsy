@@ -3115,6 +3115,12 @@ class XmppService extends ChangeNotifier {
   }
 
   void _handleJingleEvent(JingleSessionEvent event) {
+    Log.d(
+      'XmppService',
+      'Call ${event.sid} received Jingle ${event.action.name} from '
+          '${event.from.fullJid ?? event.from.userAtDomain} '
+          'with ${event.contents.length} content(s).',
+    );
     switch (event.action) {
       case JingleAction.sessionInitiate:
         _handleJingleSessionInitiate(event);
@@ -4255,8 +4261,14 @@ class XmppService extends ChangeNotifier {
       case JmiAction.proceed:
         final sid = parseJmiSid(stanza);
         if (sid == null) {
+          Log.w('XmppService', 'Received JMI proceed without a session id.');
           return;
         }
+        Log.d(
+          'XmppService',
+          'Call $sid received JMI proceed from '
+              '${fromJid.fullJid ?? fromJid.userAtDomain}.',
+        );
         _storeCallPeerFullJid(sid, fromJid);
         _jmiFallbackTimers.remove(sid)?.cancel();
         unawaited(_sendPendingJingleInitiate(sid, fromJid));
@@ -4307,6 +4319,10 @@ class XmppService extends ChangeNotifier {
   }
 
   void _sendJmiProceed(Jid to, String sid) {
+    Log.d(
+      'XmppService',
+      'Call $sid sending JMI proceed to ${to.fullJid ?? to.userAtDomain}.',
+    );
     _sendJmiMessage(to, buildJmiProceedElement(sid: sid));
   }
 
@@ -4367,22 +4383,44 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> _sendPendingJingleInitiate(String sid, Jid to) async {
+    final requestedTarget = to.fullJid ?? to.userAtDomain;
+    Log.d(
+      'XmppService',
+      'Call $sid preparing Jingle session-initiate for $requestedTarget.',
+    );
     final jingle = _jingleManager;
     if (jingle == null) {
+      Log.w(
+        'XmppService',
+        'Call $sid cannot send session-initiate: Jingle is not initialized.',
+      );
       return;
     }
     _storeCallPeerFullJid(sid, to);
-    final targetKey = to.fullJid ?? to.userAtDomain;
+    final targetKey = requestedTarget;
     if (targetKey.isEmpty) {
+      Log.w(
+        'XmppService',
+        'Call $sid cannot send session-initiate: target JID is empty.',
+      );
       return;
     }
     final previousTarget = _jingleInitiatedTargets[sid];
     if (previousTarget == targetKey) {
+      Log.d(
+        'XmppService',
+        'Call $sid already sent session-initiate to $targetKey.',
+      );
       return;
     }
     final descriptions = _callLocalDescriptionsBySid[sid];
     final transports = _callLocalTransportsBySid[sid];
     if (descriptions == null || transports == null) {
+      Log.w(
+        'XmppService',
+        'Call $sid cannot send session-initiate: local descriptions '
+            'or transports are missing.',
+      );
       return;
     }
     final contents = _buildCallContents(descriptions, transports);
@@ -4404,10 +4442,18 @@ class XmppService extends ChangeNotifier {
       return;
     }
     if (filteredContents.isEmpty) {
+      Log.w(
+        'XmppService',
+        'Call $sid cannot send session-initiate: no Jingle contents were built.',
+      );
       return;
     }
     final toJid = _callPeerJidForSid(sid, to.userAtDomain);
     if (toJid == null) {
+      Log.w(
+        'XmppService',
+        'Call $sid cannot send session-initiate: no full peer JID is available.',
+      );
       _failCallSession(sid, CallState.failed);
       return;
     }
@@ -4425,11 +4471,24 @@ class XmppService extends ChangeNotifier {
       );
     }
     _jingleInitiatedTargets[sid] = toJid.fullJid ?? toJid.userAtDomain;
+    Log.d(
+      'XmppService',
+      'Call $sid sending Jingle session-initiate to '
+          '${toJid.fullJid ?? toJid.userAtDomain} with '
+          '${filteredContents.length} content(s).',
+    );
     _flushPendingIceCandidates(sid);
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
+      final outcome = result == null
+          ? 'timed out'
+          : 'returned ${result.type.name}'
+                '${result.type == IqStanzaType.ERROR ? ' (${_iqErrorCondition(result) ?? 'unknown error'})' : ''}';
+      Log.w('XmppService', 'Call $sid Jingle session-initiate $outcome.');
       _failCallSession(sid, CallState.failed);
+      return;
     }
+    Log.d('XmppService', 'Call $sid Jingle session-initiate was acknowledged.');
   }
 
   Future<void> _applyRemoteDescriptionsForCall({
