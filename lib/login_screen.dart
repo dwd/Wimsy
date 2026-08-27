@@ -35,6 +35,26 @@ class LoginScreen extends StatefulWidget {
 
 enum _ManualTransport { startTls, directTls, quic }
 
+/// Chooses the JID shown when the login screen opens.
+///
+/// A last-used JID represents the user's most recent input and therefore takes
+/// priority over both the stored account and a deployment-provided web default.
+@visibleForTesting
+String initialLoginJid({
+  required String? cachedJid,
+  required String? accountJid,
+  required String deploymentJid,
+  required bool isWeb,
+}) {
+  if (cachedJid != null && cachedJid.isNotEmpty) {
+    return cachedJid;
+  }
+  if (accountJid != null && accountJid.isNotEmpty) {
+    return accountJid;
+  }
+  return isWeb ? deploymentJid : '';
+}
+
 class _LoginScreenState extends State<LoginScreen> {
   static const int _maximumVisibleLogEntries = 200;
 
@@ -122,11 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() {
-      if (cachedJid != null && cachedJid.isNotEmpty) {
-        _jidController.text = cachedJid;
-      }
       if (account != null) {
-        _jidController.text = account.jid;
         _rememberPassword = account.rememberPassword;
         if (_rememberPassword) {
           _passwordController.text = account.password;
@@ -150,12 +166,12 @@ class _LoginScreenState extends State<LoginScreen> {
         _connectionUrlController.text = account.connectionUrl;
         _serverCertificateHashController.text = account.serverCertificateHash;
       }
-      // Deployment values describe the endpoint this particular web build is
-      // intended to use, so they take precedence over a previously cached
-      // account from another deployment.
-      if (kIsWeb && defaultJid.isNotEmpty) {
-        _jidController.text = defaultJid;
-      }
+      _jidController.text = initialLoginJid(
+        cachedJid: cachedJid,
+        accountJid: account?.jid,
+        deploymentJid: defaultJid,
+        isWeb: kIsWeb,
+      );
       if (kIsWeb && defaultWebTransportUrl.isNotEmpty) {
         _connectionUrlController.text = defaultWebTransportUrl;
         _manualConnectionExpanded = true;
