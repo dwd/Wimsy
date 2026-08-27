@@ -54,11 +54,16 @@ A deployment can pre-fill and enforce its WebTransport endpoint at compile
 time without changing the source:
 
 ```sh
-flutter build web --release \
+flutter build web --release --no-web-resources-cdn \
   --dart-define=WIMSY_DEFAULT_JID=user@example.com \
   --dart-define=WIMSY_DEFAULT_WEBTRANSPORT_URL=https://xmpp.example.com/xmpp-webtransport \
   --dart-define=WIMSY_SERVER_CERTIFICATE_HASH=BASE64_SHA256_DIGEST
 ```
+
+Always pass `--no-web-resources-cdn` when producing a deployable web build.
+This packages the Flutter renderer assets with the application instead of
+loading them from `www.gstatic.com`, so the deployed application is fully
+self-hosted.
 
 The certificate hash is the base64 encoding of the certificate's raw SHA-256
 digest. When `WIMSY_DEFAULT_WEBTRANSPORT_URL` is non-empty, it overrides saved
