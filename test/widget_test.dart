@@ -19,6 +19,15 @@ import 'package:wimsy/storage/storage_service.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 
 void main() {
+  test('window title includes the active bare JID', () {
+    expect(windowTitleFor(null), 'Wimsy');
+    expect(windowTitleFor(''), 'Wimsy');
+    expect(
+      windowTitleFor('dave.cridland@example.com'),
+      'Wimsy - dave.cridland@example.com',
+    );
+  });
+
   testWidgets('App launches smoke test', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await PreferencesService.load();

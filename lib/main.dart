@@ -110,6 +110,14 @@ class WimsyApp extends StatefulWidget {
   State<WimsyApp> createState() => _WimsyAppState();
 }
 
+/// Builds the native window and browser-tab title for the active account.
+String windowTitleFor(String? bareJid) {
+  if (bareJid == null || bareJid.isEmpty) {
+    return 'Wimsy';
+  }
+  return 'Wimsy - $bareJid';
+}
+
 class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   final XmppService _service = XmppService();
   final StorageService _storage = StorageService();
@@ -119,11 +127,13 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _appIsForeground = true;
   late final Future<void> _initFuture;
+  String? _titleBareJid;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _service.addListener(_updateWindowTitle);
     if (!_isFlutterTest) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _notifications.initialize(onEvent: _handleNotificationEvent);
@@ -154,6 +164,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _service.removeListener(_updateWindowTitle);
     _connectivitySubscription?.cancel();
     _service.setIncomingMessageHandler(null);
     _service.setIncomingRoomMessageHandler(null);
@@ -162,6 +173,14 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     _service.dispose();
     _storage.lock();
     super.dispose();
+  }
+
+  void _updateWindowTitle() {
+    final bareJid = _service.currentUserBareJid;
+    if (bareJid == _titleBareJid) {
+      return;
+    }
+    setState(() => _titleBareJid = bareJid);
   }
 
   @override
@@ -385,7 +404,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
         onPointerDown: (_) => _service.noteUserActivity(),
         onPointerSignal: (_) => _service.noteUserActivity(),
         child: MaterialApp(
-          title: 'Wimsy',
+          title: windowTitleFor(_titleBareJid),
           theme: ThemeData(
             colorScheme: colorScheme,
             useMaterial3: true,
