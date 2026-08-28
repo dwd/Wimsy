@@ -129,7 +129,7 @@ void main() {
   group('buildReplyReference 1:1 chat', () {
     final service = XmppService();
 
-    test('uses stanzaId for an incoming 1:1 message', () {
+    test('uses messageId for an incoming 1:1 message', () {
       final message = _chatMessage(
         from: 'alice@example.com',
         messageId: 'msg-id',
@@ -143,10 +143,10 @@ void main() {
       );
 
       expect(ref, isNotNull);
-      expect(ref!.id, 'server-stanza-id');
+      expect(ref!.id, 'msg-id');
     });
 
-    test('uses stanzaId for an archived peer message without a messageId', () {
+    test('rejects an archived peer message without a messageId', () {
       final message = _chatMessage(
         from: 'alice@example.com',
         messageId: null,
@@ -159,8 +159,7 @@ void main() {
         isRoom: false,
       );
 
-      expect(ref, isNotNull);
-      expect(ref!.id, 'server-stanza-id');
+      expect(ref, isNull);
     });
 
     test('uses messageId for an outgoing 1:1 message', () {
@@ -201,24 +200,21 @@ void main() {
       },
     );
 
-    test(
-      'falls back to messageId when a live message has an empty stanzaId',
-      () {
-        final message = _chatMessage(
-          from: 'alice@example.com',
-          messageId: 'msg-id',
-          stanzaId: '',
-        );
+    test('uses messageId when a live message has an empty stanzaId', () {
+      final message = _chatMessage(
+        from: 'alice@example.com',
+        messageId: 'msg-id',
+        stanzaId: '',
+      );
 
-        final ref = service.buildReplyReference(
-          chatJid: 'alice@example.com',
-          message: message,
-          isRoom: false,
-        );
+      final ref = service.buildReplyReference(
+        chatJid: 'alice@example.com',
+        message: message,
+        isRoom: false,
+      );
 
-        expect(ref, isNotNull);
-        expect(ref!.id, 'msg-id');
-      },
-    );
+      expect(ref, isNotNull);
+      expect(ref!.id, 'msg-id');
+    });
   });
 }

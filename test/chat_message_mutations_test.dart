@@ -83,6 +83,7 @@ void main() {
         list,
         'alice@example.com',
         ReactionUpdate('s2', ['👍']),
+        isRoom: true,
       );
 
       expect(changed, isTrue);
@@ -111,6 +112,7 @@ void main() {
       list,
       'alice@example.com',
       ReactionUpdate('s3', ['😀', '🔥']),
+      isRoom: true,
     );
 
     expect(changed, isTrue);
@@ -173,70 +175,69 @@ void main() {
     },
   );
 
-  test(
-    'applyCorrectionInList returns false when exact sender does not match '
-    'and matchSenderBare is false',
-    () {
-      final list = <ChatMessage>[
-        _message(
-          from: 'alice@example.com/phone',
-          to: 'bob@example.com',
-          body: 'original',
-          id: 'm-exact-mismatch',
-        ),
-      ];
-
-      // Same bare JID but different resource — must not match when
-      // matchSenderBare is false.
-      final applied = ChatMessageMutations.applyCorrectionInList(
-        list,
-        sender: 'alice@example.com/laptop',
-        replaceId: 'm-exact-mismatch',
-        newBody: 'updated',
-        rawXml: '<message/>',
-        timestamp: DateTime.utc(2026, 1, 2),
-        matchSenderBare: false,
-        bareJid: (jid) => jid.split('/').first,
-      );
-
-      expect(applied, isFalse);
-      expect(list.single.body, 'original');
-    },
-  );
-
-  test('applyCorrectionInList applies correction to most-recent matching message',
-      () {
-    // Two messages with the same ID (shouldn't happen in practice, but the
-    // implementation iterates from the end — verify it picks the last one).
+  test('applyCorrectionInList returns false when exact sender does not match '
+      'and matchSenderBare is false', () {
     final list = <ChatMessage>[
       _message(
-        from: 'alice@example.com',
+        from: 'alice@example.com/phone',
         to: 'bob@example.com',
-        body: 'first',
-        id: 'm-dup',
-      ),
-      _message(
-        from: 'alice@example.com',
-        to: 'bob@example.com',
-        body: 'second',
-        id: 'm-dup',
+        body: 'original',
+        id: 'm-exact-mismatch',
       ),
     ];
 
-    ChatMessageMutations.applyCorrectionInList(
+    // Same bare JID but different resource — must not match when
+    // matchSenderBare is false.
+    final applied = ChatMessageMutations.applyCorrectionInList(
       list,
-      sender: 'alice@example.com',
-      replaceId: 'm-dup',
-      newBody: 'corrected',
+      sender: 'alice@example.com/laptop',
+      replaceId: 'm-exact-mismatch',
+      newBody: 'updated',
       rawXml: '<message/>',
       timestamp: DateTime.utc(2026, 1, 2),
       matchSenderBare: false,
       bareJid: (jid) => jid.split('/').first,
     );
 
-    expect(list[0].body, 'first');
-    expect(list[1].body, 'corrected');
+    expect(applied, isFalse);
+    expect(list.single.body, 'original');
   });
+
+  test(
+    'applyCorrectionInList applies correction to most-recent matching message',
+    () {
+      // Two messages with the same ID (shouldn't happen in practice, but the
+      // implementation iterates from the end — verify it picks the last one).
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'first',
+          id: 'm-dup',
+        ),
+        _message(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'second',
+          id: 'm-dup',
+        ),
+      ];
+
+      ChatMessageMutations.applyCorrectionInList(
+        list,
+        sender: 'alice@example.com',
+        replaceId: 'm-dup',
+        newBody: 'corrected',
+        rawXml: '<message/>',
+        timestamp: DateTime.utc(2026, 1, 2),
+        matchSenderBare: false,
+        bareJid: (jid) => jid.split('/').first,
+      );
+
+      expect(list[0].body, 'first');
+      expect(list[1].body, 'corrected');
+    },
+  );
 
   test('updateReactionsInList returns false when stanza ID not found', () {
     final list = <ChatMessage>[
@@ -253,6 +254,7 @@ void main() {
       list,
       'alice@example.com',
       ReactionUpdate('no-such-stanza', ['👍']),
+      isRoom: true,
     );
 
     expect(changed, isFalse);
@@ -274,6 +276,7 @@ void main() {
       list,
       '',
       ReactionUpdate('s6', ['👍']),
+      isRoom: true,
     );
 
     expect(changed, isFalse);
@@ -294,10 +297,35 @@ void main() {
       list,
       'bob@example.com',
       ReactionUpdate('m7', ['❤️']),
+      isRoom: false,
     );
 
     expect(changed, isTrue);
-    expect(list.single.reactions, {'❤️': ['bob@example.com']});
+    expect(list.single.reactions, {
+      '❤️': ['bob@example.com'],
+    });
+  });
+
+  test('direct reactions do not match a private stanzaId', () {
+    final list = <ChatMessage>[
+      _message(
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'hello',
+        id: 'message-id',
+        stanzaId: 'private-server-id',
+      ),
+    ];
+
+    final changed = ChatMessageMutations.updateReactionsInList(
+      list,
+      'bob@example.com',
+      ReactionUpdate('private-server-id', ['❤️']),
+      isRoom: false,
+    );
+
+    expect(changed, isFalse);
+    expect(list.single.reactions, isNull);
   });
 
   test(
@@ -321,6 +349,7 @@ void main() {
         list,
         'alice@example.com',
         ReactionUpdate('s4', const []),
+        isRoom: true,
       );
 
       expect(changed, isTrue);

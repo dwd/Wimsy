@@ -2728,15 +2728,13 @@ class XmppService extends ChangeNotifier {
     // *is* defined by XEP-0313 to equal the room's XEP-0359 stanza-id for a
     // MUC archive, so fall back to that id when the dedicated element is
     // missing. If neither is available we cannot build a valid reference.
-    // For an incoming 1:1 message, prefer the server-applied stanza-id: it is
-    // the stable identifier shared with the sender and may be the only stanza
-    // identifier retained by MAM. For our own outgoing messages, use the
-    // original message id that the peer received.
+    // For 1:1 chats, XEP-0461 requires the origin-id when present or the
+    // stanza's id attribute otherwise. ChatMessage.messageId contains that
+    // stanza attribute; a server-applied stanza-id is private to this user's
+    // archive and must not be exposed to the peer.
     final candidateIds = isRoom
         ? [message.stanzaId, message.mamId]
-        : message.outgoing
-        ? [message.messageId]
-        : [message.stanzaId, message.messageId];
+        : [message.messageId];
     final targetId = candidateIds.whereType<String>().firstWhere(
       (id) => id.isNotEmpty,
       orElse: () => '',
@@ -5303,7 +5301,7 @@ class XmppService extends ChangeNotifier {
     if (list == null || list.isEmpty) {
       return;
     }
-    final changed = _updateReactionsInList(list, sender, update);
+    final changed = _updateReactionsInList(list, sender, update, isRoom: false);
     if (!changed) {
       return;
     }
@@ -5417,6 +5415,7 @@ class XmppService extends ChangeNotifier {
       list,
       sender,
       ReactionUpdate(targetId, reactions),
+      isRoom: true,
     );
     if (!changed) {
       return;
@@ -5428,9 +5427,15 @@ class XmppService extends ChangeNotifier {
   bool _updateReactionsInList(
     List<ChatMessage> list,
     String sender,
-    ReactionUpdate update,
-  ) {
-    return ChatMessageMutations.updateReactionsInList(list, sender, update);
+    ReactionUpdate update, {
+    required bool isRoom,
+  }) {
+    return ChatMessageMutations.updateReactionsInList(
+      list,
+      sender,
+      update,
+      isRoom: isRoom,
+    );
   }
 
   String _serializeStanza(XmppElement stanza) {

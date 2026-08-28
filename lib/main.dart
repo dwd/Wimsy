@@ -1238,8 +1238,8 @@ class _WimsyHomeState extends State<WimsyHome> {
     final messages = activeChat == null
         ? allMessages
         : messageWindow(allMessages, _messageWindowFor(activeChat));
-    final messageById = _indexMessagesById(messages);
-    _indexMessagePositions(activeChat, messages);
+    final messageById = _indexMessagesById(messages, isRoom: isBookmark);
+    _indexMessagePositions(activeChat, messages, isRoom: isBookmark);
     final roomEntry = activeChat == null ? null : service.roomFor(activeChat);
     _activeChatForKeyHandler = activeChat;
     _activeChatIsBookmark = isBookmark;
@@ -1412,6 +1412,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                           final messageKey = _keyForMessage(
                             activeChat,
                             message,
+                            isRoom: isBookmark,
                           );
                           final senderName = isBookmark
                               ? (message.outgoing ? 'You' : message.from)
@@ -2198,11 +2199,15 @@ class _WimsyHomeState extends State<WimsyHome> {
     return '${String.fromCharCodes(compact.runes.take(maxChars))}…';
   }
 
-  GlobalKey? _keyForMessage(String? activeChat, ChatMessage message) {
+  GlobalKey? _keyForMessage(
+    String? activeChat,
+    ChatMessage message, {
+    required bool isRoom,
+  }) {
     if (activeChat == null) {
       return null;
     }
-    final ids = _messageIds(message);
+    final ids = _messageIds(message, isRoom: isRoom);
     if (ids.isEmpty) {
       return null;
     }
@@ -2221,39 +2226,46 @@ class _WimsyHomeState extends State<WimsyHome> {
     return key;
   }
 
-  Set<String> _messageIds(ChatMessage message) {
+  Set<String> _messageIds(ChatMessage message, {required bool isRoom}) {
     final ids = <String>{};
     final messageId = message.messageId;
     final stanzaId = message.stanzaId;
     final mamId = message.mamId;
-    if (messageId != null && messageId.isNotEmpty) {
+    if (!isRoom && messageId != null && messageId.isNotEmpty) {
       ids.add(messageId);
     }
-    if (stanzaId != null && stanzaId.isNotEmpty) {
+    if (isRoom && stanzaId != null && stanzaId.isNotEmpty) {
       ids.add(stanzaId);
     }
-    if (mamId != null && mamId.isNotEmpty) {
+    if (isRoom && mamId != null && mamId.isNotEmpty) {
       ids.add(mamId);
     }
     return ids;
   }
 
-  Map<String, ChatMessage> _indexMessagesById(List<ChatMessage> messages) {
+  Map<String, ChatMessage> _indexMessagesById(
+    List<ChatMessage> messages, {
+    required bool isRoom,
+  }) {
     final map = <String, ChatMessage>{};
     for (final message in messages) {
-      for (final id in _messageIds(message)) {
+      for (final id in _messageIds(message, isRoom: isRoom)) {
         map[id] = message;
       }
     }
     return map;
   }
 
-  void _indexMessagePositions(String? activeChat, List<ChatMessage> messages) {
+  void _indexMessagePositions(
+    String? activeChat,
+    List<ChatMessage> messages, {
+    required bool isRoom,
+  }) {
     if (activeChat == null) {
       return;
     }
     for (var i = 0; i < messages.length; i += 1) {
-      for (final id in _messageIds(messages[i])) {
+      for (final id in _messageIds(messages[i], isRoom: isRoom)) {
         _messageIndexByChatAndId['$activeChat|$id'] = i;
       }
     }

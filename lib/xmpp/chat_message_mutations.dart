@@ -61,15 +61,19 @@ class ChatMessageMutations {
   static bool updateReactionsInList(
     List<ChatMessage> list,
     String sender,
-    ReactionUpdate update,
-  ) {
+    ReactionUpdate update, {
+    required bool isRoom,
+  }) {
     if (sender.isEmpty || update.targetId.isEmpty) {
       return false;
     }
     for (var i = list.length - 1; i >= 0; i--) {
       final existing = list[i];
-      if (existing.stanzaId != update.targetId &&
-          existing.messageId != update.targetId) {
+      final matchesTarget = isRoom
+          ? existing.stanzaId == update.targetId ||
+                existing.mamId == update.targetId
+          : existing.messageId == update.targetId;
+      if (!matchesTarget) {
         continue;
       }
       final nextReactions = _nextReactions(
@@ -80,9 +84,7 @@ class ChatMessageMutations {
       if (_reactionsEqual(existing.reactions ?? const {}, nextReactions)) {
         return true;
       }
-      list[i] = existing.copyWith(
-        reactions: nextReactions,
-      );
+      list[i] = existing.copyWith(reactions: nextReactions);
       return true;
     }
     return false;
