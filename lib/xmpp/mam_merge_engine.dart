@@ -54,6 +54,12 @@ bool mergeMamIdsIntoExisting(
       continue;
     }
     list[i] = existing.copyWith(
+      messageId:
+          (existing.messageId ?? '').isEmpty &&
+              messageId != null &&
+              messageId.isNotEmpty
+          ? messageId
+          : existing.messageId,
       mamId: (mamId != null && mamId.isNotEmpty) ? mamId : existing.mamId,
       stanzaId: (stanzaId != null && stanzaId.isNotEmpty)
           ? stanzaId

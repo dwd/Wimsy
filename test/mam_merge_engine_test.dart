@@ -77,6 +77,28 @@ void main() {
     expect(list.single.stanzaId, 'sid-2');
   });
 
+  test('MAM enrichment fills a missing stanza attribute messageId', () {
+    final list = <ChatMessage>[
+      _message(timestamp: DateTime.utc(2026, 1, 1, 10)),
+    ];
+
+    final merged = mergeMamIdsIntoExisting(
+      list,
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'hello',
+      outgoing: false,
+      timestamp: DateTime.utc(2026, 1, 1, 10, 0, 30),
+      messageId: 'peer-message-id',
+      mamId: 'mam-2',
+      stanzaId: 'private-server-id',
+    );
+
+    expect(merged, isTrue);
+    expect(list.single.messageId, 'peer-message-id');
+    expect(list.single.stanzaId, 'private-server-id');
+  });
+
   test('does not merge by heuristic when existing already has archive ids', () {
     final list = <ChatMessage>[
       _message(
@@ -146,10 +168,7 @@ void main() {
 
   test('merges oobUrl and oobDescription via message-id match', () {
     final list = <ChatMessage>[
-      _message(
-        timestamp: DateTime.utc(2026, 1, 1, 10),
-        messageId: 'msg-oob',
-      ),
+      _message(timestamp: DateTime.utc(2026, 1, 1, 10), messageId: 'msg-oob'),
     ];
 
     final merged = mergeMamIdsIntoExisting(
