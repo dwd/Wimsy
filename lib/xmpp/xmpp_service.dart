@@ -2728,12 +2728,20 @@ class XmppService extends ChangeNotifier {
     // *is* defined by XEP-0313 to equal the room's XEP-0359 stanza-id for a
     // MUC archive, so fall back to that id when the dedicated element is
     // missing. If neither is available we cannot build a valid reference.
-    // For 1:1 chats the stanza-id is ignored but the message id is a valid
-    // fallback.
-    final targetId = isRoom
-        ? (message.stanzaId ?? message.mamId)
-        : message.messageId;
-    if (targetId == null || targetId.isEmpty) {
+    // For an incoming 1:1 message, prefer the server-applied stanza-id: it is
+    // the stable identifier shared with the sender and may be the only stanza
+    // identifier retained by MAM. For our own outgoing messages, use the
+    // original message id that the peer received.
+    final candidateIds = isRoom
+        ? [message.stanzaId, message.mamId]
+        : message.outgoing
+        ? [message.messageId]
+        : [message.stanzaId, message.messageId];
+    final targetId = candidateIds.whereType<String>().firstWhere(
+      (id) => id.isNotEmpty,
+      orElse: () => '',
+    );
+    if (targetId.isEmpty) {
       return null;
     }
     final normalized = _bareJid(chatJid);

@@ -24,15 +24,16 @@ ChatMessage _mucMessage({
 
 ChatMessage _chatMessage({
   required String from,
-  required String messageId,
+  String? messageId,
   String? stanzaId,
+  bool outgoing = false,
 }) {
   return ChatMessage(
     from: from,
     to: 'bob@example.com',
     body: 'hello',
     timestamp: DateTime.utc(2024, 1, 1),
-    outgoing: false,
+    outgoing: outgoing,
     messageId: messageId,
     stanzaId: stanzaId,
     rawXml: '<message/>',
@@ -56,14 +57,19 @@ void main() {
         isRoom: true,
       );
 
-      expect(ref, isNotNull,
-          reason: 'should produce a reference when stanzaId is set');
-      expect(ref!.id, 'room-applied-stanza-id',
-          reason: 'MUC reply must use the room-applied stanza-id per XEP-0461');
+      expect(
+        ref,
+        isNotNull,
+        reason: 'should produce a reference when stanzaId is set',
+      );
+      expect(
+        ref!.id,
+        'room-applied-stanza-id',
+        reason: 'MUC reply must use the room-applied stanza-id per XEP-0461',
+      );
     });
 
-    test(
-        'falls back to the MAM archive id (XEP-0313) for MUC reply when no '
+    test('falls back to the MAM archive id (XEP-0313) for MUC reply when no '
         'dedicated stanza-id element is present', () {
       // Messages delivered via MAM catch-up sometimes omit the dedicated
       // <stanza-id/> element. Per XEP-0313, the MAM <result id="..."/> for a
@@ -82,39 +88,48 @@ void main() {
         isRoom: true,
       );
 
-      expect(ref, isNotNull,
-          reason: 'should fall back to the MAM archive id per XEP-0313');
+      expect(
+        ref,
+        isNotNull,
+        reason: 'should fall back to the MAM archive id per XEP-0313',
+      );
       expect(ref!.id, 'mam-archive-id');
     });
 
-    test('returns null for MUC reply when no room stanza-id or mamId is available', () {
-      // When the room has not assigned a stanza-id, and no MAM archive id is
-      // known either, the client cannot build a valid XEP-0461 reply
-      // reference; returning null is the correct behaviour (no <reply>
-      // element will be included in the outgoing stanza).
-      final message = _mucMessage(
-        from: 'alice',
-        messageId: 'stanza-own-id',
-        stanzaId: null,
-        mamId: null,
-      );
+    test(
+      'returns null for MUC reply when no room stanza-id or mamId is available',
+      () {
+        // When the room has not assigned a stanza-id, and no MAM archive id is
+        // known either, the client cannot build a valid XEP-0461 reply
+        // reference; returning null is the correct behaviour (no <reply>
+        // element will be included in the outgoing stanza).
+        final message = _mucMessage(
+          from: 'alice',
+          messageId: 'stanza-own-id',
+          stanzaId: null,
+          mamId: null,
+        );
 
-      final ref = service.buildReplyReference(
-        chatJid: 'room@conference.example',
-        message: message,
-        isRoom: true,
-      );
+        final ref = service.buildReplyReference(
+          chatJid: 'room@conference.example',
+          message: message,
+          isRoom: true,
+        );
 
-      expect(ref, isNull,
+        expect(
+          ref,
+          isNull,
           reason:
-              'must not fall back to the stanza own id for a MUC reply per XEP-0461');
-    });
+              'must not fall back to the stanza own id for a MUC reply per XEP-0461',
+        );
+      },
+    );
   });
 
   group('buildReplyReference 1:1 chat', () {
     final service = XmppService();
 
-    test('ignores stanzaId when available for 1:1 chat reply', () {
+    test('uses stanzaId for an incoming 1:1 message', () {
       final message = _chatMessage(
         from: 'alice@example.com',
         messageId: 'msg-id',
@@ -128,15 +143,32 @@ void main() {
       );
 
       expect(ref, isNotNull);
-      expect(ref!.id, 'msg-id');
+      expect(ref!.id, 'server-stanza-id');
     });
 
-    test('falls back to messageId for 1:1 chat reply when stanzaId is absent',
-        () {
+    test('uses stanzaId for an archived peer message without a messageId', () {
       final message = _chatMessage(
         from: 'alice@example.com',
+        messageId: null,
+        stanzaId: 'server-stanza-id',
+      );
+
+      final ref = service.buildReplyReference(
+        chatJid: 'alice@example.com',
+        message: message,
+        isRoom: false,
+      );
+
+      expect(ref, isNotNull);
+      expect(ref!.id, 'server-stanza-id');
+    });
+
+    test('uses messageId for an outgoing 1:1 message', () {
+      final message = _chatMessage(
+        from: 'me@example.com',
         messageId: 'msg-id',
-        stanzaId: null,
+        stanzaId: 'server-stanza-id',
+        outgoing: true,
       );
 
       final ref = service.buildReplyReference(
@@ -148,5 +180,45 @@ void main() {
       expect(ref, isNotNull);
       expect(ref!.id, 'msg-id');
     });
+
+    test(
+      'falls back to messageId for 1:1 chat reply when stanzaId is absent',
+      () {
+        final message = _chatMessage(
+          from: 'alice@example.com',
+          messageId: 'msg-id',
+          stanzaId: null,
+        );
+
+        final ref = service.buildReplyReference(
+          chatJid: 'alice@example.com',
+          message: message,
+          isRoom: false,
+        );
+
+        expect(ref, isNotNull);
+        expect(ref!.id, 'msg-id');
+      },
+    );
+
+    test(
+      'falls back to messageId when a live message has an empty stanzaId',
+      () {
+        final message = _chatMessage(
+          from: 'alice@example.com',
+          messageId: 'msg-id',
+          stanzaId: '',
+        );
+
+        final ref = service.buildReplyReference(
+          chatJid: 'alice@example.com',
+          message: message,
+          isRoom: false,
+        );
+
+        expect(ref, isNotNull);
+        expect(ref!.id, 'msg-id');
+      },
+    );
   });
 }
