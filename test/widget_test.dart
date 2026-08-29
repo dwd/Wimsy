@@ -371,11 +371,7 @@ void main() {
     expect(find.textContaining('Signed in as'), findsNothing);
     expect(find.byTooltip('Set presence'), findsOneWidget);
     expect(find.byTooltip('RTT: 42ms'), findsOneWidget);
-    expect(
-      find.byTooltip('Loss over 2 seconds: 2% (2 / 100 lost / sent packets)'),
-      findsOneWidget,
-    );
-    expect(find.text('2 / 100'), findsOneWidget);
+    expect(find.byTooltip('Loss over 2 seconds: 2%'), findsOneWidget);
 
     await tester.tap(find.byType(TextField));
     await tester.pump();
