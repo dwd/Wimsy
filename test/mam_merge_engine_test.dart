@@ -12,12 +12,14 @@ ChatMessage _message({
   String to = 'bob@example.com',
   String rawXml = '<message/>',
   bool outgoing = false,
+  bool receiptReceived = false,
 }) {
   return ChatMessage(
     from: from,
     to: to,
     body: body,
     outgoing: outgoing,
+    receiptReceived: receiptReceived,
     timestamp: timestamp,
     messageId: messageId,
     mamId: mamId,
@@ -28,6 +30,33 @@ ChatMessage _message({
 }
 
 void main() {
+  test('outgoing MAM enrichment defaults to delivered tick state', () {
+    final list = <ChatMessage>[
+      _message(
+        timestamp: DateTime.utc(2026, 1, 1, 10),
+        messageId: 'local-1',
+        from: 'me@example.com',
+        to: 'alice@example.com',
+        outgoing: true,
+      ),
+    ];
+
+    final merged = mergeMamIdsIntoExisting(
+      list,
+      from: 'me@example.com',
+      to: 'alice@example.com',
+      body: 'hello',
+      outgoing: true,
+      timestamp: DateTime.utc(2026, 1, 1, 10, 0, 10),
+      messageId: 'local-1',
+      mamId: 'mam-1',
+      stanzaId: 'sid-1',
+    );
+
+    expect(merged, isTrue);
+    expect(list.single.receiptReceived, isTrue);
+  });
+
   test('merges ids into message-id match that lacks MAM metadata', () {
     final list = <ChatMessage>[
       _message(

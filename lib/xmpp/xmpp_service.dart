@@ -7174,6 +7174,8 @@ class XmppService extends ChangeNotifier {
           to: to,
           body: body,
           outgoing: outgoing,
+          // An outgoing message returned by MAM reached the server.
+          receiptReceived: outgoing,
           timestamp: timestamp,
           messageId: messageId,
           mamId: mamId,
@@ -7200,6 +7202,8 @@ class XmppService extends ChangeNotifier {
       to: to,
       body: body,
       outgoing: outgoing,
+      // An outgoing message returned by MAM reached the server.
+      receiptReceived: outgoing && mamId != null && mamId.isNotEmpty,
       timestamp: timestamp,
       messageId: messageId,
       mamId: mamId,
@@ -7352,8 +7356,7 @@ class XmppService extends ChangeNotifier {
           body: body,
           outgoing: outgoing,
           // Outgoing messages in the MAM archive were received by the server.
-          receiptReceived:
-              outgoing && (stanzaId != null && stanzaId.isNotEmpty),
+          receiptReceived: outgoing,
           timestamp: timestamp,
           messageId: messageId,
           mamId: mamId,
@@ -7393,7 +7396,7 @@ class XmppService extends ChangeNotifier {
       body: body,
       outgoing: outgoing,
       // Outgoing messages in the MAM archive were received by the server.
-      receiptReceived: outgoing && (stanzaId != null && stanzaId.isNotEmpty),
+      receiptReceived: outgoing && mamId != null && mamId.isNotEmpty,
       timestamp: timestamp,
       messageId: messageId,
       mamId: mamId,
@@ -7813,6 +7816,7 @@ class XmppService extends ChangeNotifier {
         displayed: nextDisplayed,
       );
       notifyListeners();
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
       return true;
     }
     return false;

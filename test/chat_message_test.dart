@@ -50,6 +50,43 @@ void main() {
     expect(roundtrip.replyFallback, '> hello');
   });
 
+  test('ChatMessage persists outgoing tick state', () {
+    final message = ChatMessage(
+      from: 'me@example.com',
+      to: 'alice@example.com',
+      body: 'hello',
+      timestamp: DateTime.parse('2024-08-09T10:11:12Z'),
+      outgoing: true,
+      rawXml: '<message><body>hello</body></message>',
+      acked: true,
+      receiptReceived: true,
+      displayed: true,
+    );
+
+    final roundtrip = ChatMessage.fromMap(message.toMap());
+
+    expect(roundtrip, isNotNull);
+    expect(roundtrip!.acked, isTrue);
+    expect(roundtrip.receiptReceived, isTrue);
+    expect(roundtrip.displayed, isTrue);
+  });
+
+  test('legacy outgoing message without tick state defaults to two ticks', () {
+    final message = ChatMessage.fromMap({
+      'from': 'me@example.com',
+      'to': 'alice@example.com',
+      'body': 'historical',
+      'timestamp': '2024-08-09T10:11:12Z',
+      'outgoing': true,
+      'rawXml': '<message><body>historical</body></message>',
+    });
+
+    expect(message, isNotNull);
+    expect(message!.acked, isFalse);
+    expect(message.receiptReceived, isTrue);
+    expect(message.displayed, isFalse);
+  });
+
   test('ChatMessage rejects cached entries without raw XML', () {
     final roundtrip = ChatMessage.fromMap({
       'from': 'alice@example.com',

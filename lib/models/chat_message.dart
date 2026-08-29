@@ -246,7 +246,12 @@ class ChatMessage {
     final replyToJid = map['replyToJid']?.toString();
     final replyFallback = map['replyFallback']?.toString();
     final acked = map['acked'] == true;
-    final receiptReceived = map['receiptReceived'] == true;
+    // Older cache records predate persisted tick state. An outgoing message
+    // restored without that state is necessarily historical, so treat it as
+    // delivered instead of regressing it to the pending/no-tick state.
+    final receiptReceived = map.containsKey('receiptReceived')
+        ? map['receiptReceived'] == true
+        : outgoing;
     final displayed = map['displayed'] == true;
     final readByMe = map['readByMe'] == true;
     final markerSent = map['markerSent'] == true;

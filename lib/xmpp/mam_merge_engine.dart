@@ -35,6 +35,9 @@ bool mergeMamIdsIntoExisting(
             : existing.stanzaId,
         oobDescription: nextOobDescription,
         rawXml: nextRawXml,
+        // Finding an outgoing message in MAM proves that the server received
+        // it, even when no separate delivery receipt survived.
+        receiptReceived: existing.receiptReceived || outgoing,
       );
       return true;
     }
@@ -64,6 +67,7 @@ bool mergeMamIdsIntoExisting(
       stanzaId: (stanzaId != null && stanzaId.isNotEmpty)
           ? stanzaId
           : existing.stanzaId,
+      receiptReceived: existing.receiptReceived || outgoing,
     );
     return true;
   }
