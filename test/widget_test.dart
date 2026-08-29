@@ -188,7 +188,12 @@ void main() {
       joined: true,
     );
     final service = XmppService()
-      ..seedConnectedRoomForTesting(room, name: 'The Lounge');
+      ..seedConnectedRoomForTesting(
+        room,
+        name: 'The Lounge',
+        quicRtt: const [35, 42],
+        quicLoss: const [0, 2],
+      );
 
     await tester.pumpWidget(
       MaterialApp(
@@ -201,7 +206,12 @@ void main() {
       ),
     );
     await tester.pump();
-    service.seedConnectedRoomForTesting(room, name: 'The Lounge');
+    service.seedConnectedRoomForTesting(
+      room,
+      name: 'The Lounge',
+      quicRtt: const [35, 42],
+      quicLoss: const [0, 2],
+    );
     await tester.pump();
 
     expect(find.byKey(const Key('chat-header-details-button')), findsOneWidget);
@@ -213,6 +223,8 @@ void main() {
     expect(find.byTooltip('Send'), findsOneWidget);
     expect(find.textContaining('Signed in as'), findsNothing);
     expect(find.byTooltip('Set presence'), findsOneWidget);
+    expect(find.byTooltip('RTT: 42ms'), findsOneWidget);
+    expect(find.byTooltip('Loss average: 1'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('message-composer-input')));
     await tester.pump();

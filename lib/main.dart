@@ -1473,6 +1473,23 @@ class _WimsyHomeState extends State<WimsyHome> {
                         ? 'Leave room'
                         : 'Join room',
                   ),
+                if (showPresenceMenu && service.quicRttHistory.isNotEmpty) ...[
+                  _QuicStatsGraph(
+                    label: 'RTT',
+                    data: service.quicRttHistory,
+                    color: Colors.blue,
+                    unit: 'ms',
+                  ),
+                  const SizedBox(width: 8),
+                  _QuicStatsGraph(
+                    label: 'Loss',
+                    data: service.quicLossHistory,
+                    color: Colors.red,
+                    unit: '',
+                    showAverage: true,
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 if (showPresenceMenu)
                   _PresenceMenu(
                     service: service,

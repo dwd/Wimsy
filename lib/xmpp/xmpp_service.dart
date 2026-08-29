@@ -5018,10 +5018,21 @@ class XmppService extends ChangeNotifier {
   }
 
   @visibleForTesting
-  void seedConnectedRoomForTesting(RoomEntry room, {String? name}) {
+  void seedConnectedRoomForTesting(
+    RoomEntry room, {
+    String? name,
+    List<int> quicRtt = const [],
+    List<int> quicLoss = const [],
+  }) {
     _status = XmppStatus.connected;
     _currentUserBareJid = 'tester@example.com';
     _rooms[_bareJid(room.roomJid)] = room;
+    _quicRttHistory
+      ..clear()
+      ..addAll(quicRtt);
+    _quicLossHistory
+      ..clear()
+      ..addAll(quicLoss);
     seedBookmarks([
       ContactEntry(
         jid: room.roomJid,
