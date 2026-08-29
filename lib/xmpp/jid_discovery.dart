@@ -10,6 +10,32 @@ class JidSuggestion {
   final String? name;
 }
 
+/// Matches directory and roster suggestions by either their JID or name.
+bool jidSuggestionMatches(JidSuggestion suggestion, String input) {
+  final query = input.trim().toLowerCase();
+  if (query.isEmpty) {
+    return false;
+  }
+  return suggestion.jid.toLowerCase().contains(query) ||
+      (suggestion.name?.toLowerCase().contains(query) ?? false);
+}
+
+/// Resolves an incomplete person JID using search results or the local domain.
+String? completeLocalPersonJid(
+  String input,
+  String? selfJid,
+  Iterable<JidSuggestion> suggestions,
+) {
+  final localPart = input.trim();
+  if (localPart.isEmpty || localPart.contains('@')) return null;
+  for (final suggestion in suggestions) {
+    if (suggestion.kind == DiscoveredJidKind.person) return suggestion.jid;
+  }
+  if (selfJid == null) return null;
+  final domain = Jid.fromFullJid(selfJid).domain;
+  return domain.isEmpty ? null : '$localPart@$domain';
+}
+
 class JidDiscoveryResult {
   const JidDiscoveryResult({
     required this.kind,

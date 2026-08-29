@@ -3081,59 +3081,17 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (roomJid == null || roomJid.trim().isEmpty) {
       return;
     }
-    final jidController = TextEditingController();
-    final reasonController = TextEditingController();
-    final result = await showDialog<bool>(
+    final result = await showDialog<_RoomInviteResult>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Invite to room'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: jidController,
-                  decoration: const InputDecoration(
-                    labelText: 'Invitee JID',
-                    hintText: 'user@example.com',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: reasonController,
-                  decoration: const InputDecoration(
-                    labelText: 'Reason (optional)',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Send invite'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _RoomInviteDialog(service: widget.service),
     );
-    if (result != true || !mounted) {
-      return;
-    }
-    final invitee = jidController.text.trim();
-    if (invitee.isEmpty) {
-      _showSnack('Invitee JID required.');
+    if (result == null || !mounted) {
       return;
     }
     final error = await widget.service.inviteToRoom(
       roomJid: roomJid,
-      inviteeJid: invitee,
-      reason: reasonController.text,
+      inviteeJid: result.jid,
+      reason: result.reason,
     );
     if (!mounted) {
       return;
@@ -5063,6 +5021,128 @@ class _ContactActionsMenu extends StatelessWidget {
   }
 }
 
+class _RoomInviteResult {
+  const _RoomInviteResult(this.jid, this.reason);
+  final String jid;
+  final String reason;
+}
+
+class _RoomInviteDialog extends StatefulWidget {
+  const _RoomInviteDialog({required this.service});
+  final XmppService service;
+
+  @override
+  State<_RoomInviteDialog> createState() => _RoomInviteDialogState();
+}
+
+@visibleForTesting
+Widget roomInviteDialogForTesting(XmppService service) =>
+    _RoomInviteDialog(service: service);
+
+class _RoomInviteDialogState extends State<_RoomInviteDialog> {
+  final _jidController = TextEditingController();
+  final _reasonController = TextEditingController();
+  Timer? _debounce;
+  int _token = 0;
+  List<JidSuggestion> _suggestions = const [];
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _jidController.addListener(_search);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _jidController.dispose();
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  void _search() {
+    final term = _jidController.text.trim();
+    final token = ++_token;
+    _debounce?.cancel();
+    setState(() {
+      _error = null;
+      _suggestions = const [];
+    });
+    if (term.isEmpty || term.contains('@')) return;
+    _debounce = Timer(const Duration(milliseconds: 350), () async {
+      final results = await widget.service.suggestLocalJids(term);
+      if (!mounted || token != _token) return;
+      setState(() {
+        _suggestions = results
+            .where((result) => result.kind == DiscoveredJidKind.person)
+            .toList(growable: false);
+      });
+    });
+  }
+
+  void _submit() {
+    var jid = _jidController.text.trim();
+    if (jid.isEmpty) {
+      setState(() => _error = 'Invitee JID required.');
+      return;
+    }
+    if (!jid.contains('@')) {
+      jid =
+          completeLocalPersonJid(
+            jid,
+            widget.service.currentUserBareJid,
+            _suggestions,
+          ) ??
+          jid;
+    }
+    Navigator.of(context).pop(_RoomInviteResult(jid, _reasonController.text));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Invite to room'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _jidController,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Invitee JID',
+              hintText: 'user@example.com',
+              errorText: _error,
+            ),
+          ),
+          ..._suggestions.map(
+            (suggestion) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.person_outline),
+              title: Text(suggestion.name ?? suggestion.jid),
+              subtitle: suggestion.name == null ? null : Text(suggestion.jid),
+              onTap: () => _jidController.text = suggestion.jid,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _reasonController,
+            decoration: const InputDecoration(labelText: 'Reason (optional)'),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('Send invite')),
+    ],
+  );
+}
+
 enum _AddTargetType { person, room }
 
 class _AddByJidResult {
@@ -5262,11 +5342,11 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
           .firstOrNull
           ?.jid;
       if (normalized == null && wantedKind == DiscoveredJidKind.person) {
-        final self = widget.service.currentUserBareJid;
-        final domain = self == null ? '' : Jid.fromFullJid(self).domain;
-        if (localPart.isNotEmpty && domain.isNotEmpty) {
-          normalized = '$localPart@$domain';
-        }
+        normalized = completeLocalPersonJid(
+          localPart,
+          widget.service.currentUserBareJid,
+          _suggestions,
+        );
       }
     }
     if (normalized == null) {

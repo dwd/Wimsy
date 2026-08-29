@@ -832,13 +832,20 @@ class XmppService extends ChangeNotifier {
     final suggestions = <JidSuggestion>[];
     final seen = <String>{};
     void add(JidSuggestion suggestion) {
-      final query = term.toLowerCase();
-      final matches =
-          suggestion.jid.toLowerCase().contains(query) ||
-          (suggestion.name?.toLowerCase().contains(query) ?? false);
-      if (matches && seen.add(suggestion.jid.toLowerCase())) {
+      if (jidSuggestionMatches(suggestion, term) &&
+          seen.add(suggestion.jid.toLowerCase())) {
         suggestions.add(suggestion);
       }
+    }
+
+    for (final contact in _contacts) {
+      add(
+        JidSuggestion(
+          jid: contact.jid,
+          kind: DiscoveredJidKind.person,
+          name: contact.name,
+        ),
+      );
     }
 
     if (!term.contains('@')) {

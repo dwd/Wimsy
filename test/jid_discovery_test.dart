@@ -148,4 +148,37 @@ void main() {
 
     expect(results.map((result) => result.jid), ['alice@example.com']);
   });
+
+  test('suggestion matching checks both name and JID case-insensitively', () {
+    const suggestion = JidSuggestion(
+      jid: 'alice@example.com',
+      kind: DiscoveredJidKind.person,
+      name: 'Alice Example',
+    );
+
+    expect(jidSuggestionMatches(suggestion, 'ALICE@'), isTrue);
+    expect(jidSuggestionMatches(suggestion, 'Alice Example'), isTrue);
+    expect(jidSuggestionMatches(suggestion, 'missing'), isFalse);
+  });
+
+  test('local person completion prefers a search result', () {
+    const suggestions = [
+      JidSuggestion(
+        jid: 'alice@directory.example',
+        kind: DiscoveredJidKind.person,
+        name: 'Alice',
+      ),
+    ];
+    expect(
+      completeLocalPersonJid('ali', 'me@example.com', suggestions),
+      'alice@directory.example',
+    );
+  });
+
+  test('local person completion falls back to the account domain', () {
+    expect(
+      completeLocalPersonJid('alice', 'me@example.com', const []),
+      'alice@example.com',
+    );
+  });
 }

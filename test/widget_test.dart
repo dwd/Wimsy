@@ -18,7 +18,25 @@ import 'package:wimsy/models/room_entry.dart';
 import 'package:wimsy/notifications/notification_service.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
+import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
+
+class _SuggestionXmppService extends XmppService {
+  @override
+  String? get currentUserBareJid => 'me@example.com';
+
+  @override
+  Future<List<JidSuggestion>> suggestLocalJids(
+    String input, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async => const [
+    JidSuggestion(
+      jid: 'alice@example.com',
+      kind: DiscoveredJidKind.person,
+      name: 'Alice Example',
+    ),
+  ];
+}
 
 void main() {
   test('window title includes the active bare JID', () {
@@ -101,6 +119,21 @@ void main() {
     );
     expect(dialogSize, const Size(360, 640));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('room invitation offers person search suggestions', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: roomInviteDialogForTesting(_SuggestionXmppService())),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'ali');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    expect(find.text('Alice Example'), findsOneWidget);
+    expect(find.text('alice@example.com'), findsOneWidget);
   });
 
   testWidgets('portrait room chat folds details and keeps composer actions', (
