@@ -226,10 +226,14 @@ void main() {
     expect(find.byTooltip('RTT: 42ms'), findsOneWidget);
     expect(find.byTooltip('Loss average: 1'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('message-composer-input')));
+    await tester.tap(find.byType(TextField));
     await tester.pump();
+    final regularEditableState = tester.state<EditableTextState>(
+      find.byType(EditableText),
+    );
     tester.view.viewInsets = const FakeViewPadding(bottom: 240);
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(
       find.byKey(const Key('landscape-fullscreen-composer')),
       findsOneWidget,
@@ -239,12 +243,13 @@ void main() {
     expect(find.byTooltip('Send file'), findsOneWidget);
     expect(find.byTooltip('Send photo'), findsOneWidget);
     expect(find.byTooltip('Send'), findsOneWidget);
-    expect(find.byKey(const Key('message-composer-input')), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
     expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('message-composer-input')))
-          .focusNode
-          ?.hasFocus,
+      tester.state<EditableTextState>(find.byType(EditableText)),
+      same(regularEditableState),
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
       isTrue,
     );
     expect(tester.takeException(), isNull);

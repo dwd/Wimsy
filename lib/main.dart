@@ -568,6 +568,7 @@ class WimsyHome extends StatefulWidget {
 class _WimsyHomeState extends State<WimsyHome> {
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
+  final GlobalKey _messageInputKey = GlobalKey();
   final ScrollController _messageScrollController = ScrollController();
   final Map<String, DateTime> _lastReadAtByChat = {};
   // Busy chats can have tens of thousands of cached messages. Rendering and
@@ -1336,6 +1337,7 @@ class _WimsyHomeState extends State<WimsyHome> {
             children: [
               Expanded(
                 child: MessageComposerTextField(
+                  fieldKey: _messageInputKey,
                   controller: _messageController,
                   focusNode: _messageFocusNode,
                   autofocus: true,
@@ -1846,6 +1848,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                       children: [
                         Expanded(
                           child: MessageComposerTextField(
+                            fieldKey: _messageInputKey,
                             controller: _messageController,
                             focusNode: _messageFocusNode,
                             autofocus: canSend,
@@ -4033,6 +4036,7 @@ void _showReactionPickerSheet({
 class MessageComposerTextField extends StatelessWidget {
   const MessageComposerTextField({
     super.key,
+    this.fieldKey,
     required this.controller,
     required this.focusNode,
     required this.autofocus,
@@ -4043,6 +4047,7 @@ class MessageComposerTextField extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final Key? fieldKey;
   final FocusNode focusNode;
   final bool autofocus;
   final bool enabled;
@@ -4053,7 +4058,7 @@ class MessageComposerTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TextField(
-      key: const Key('message-composer-input'),
+      key: fieldKey ?? const Key('message-composer-input'),
       controller: controller,
       focusNode: focusNode,
       autofocus: autofocus,
