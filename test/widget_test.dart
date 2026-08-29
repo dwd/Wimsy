@@ -14,6 +14,8 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:wimsy/login_screen.dart';
 import 'package:wimsy/main.dart';
 import 'package:wimsy/models/chat_message.dart';
+import 'package:wimsy/models/room_entry.dart';
+import 'package:wimsy/notifications/notification_service.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
@@ -98,6 +100,74 @@ void main() {
       find.byKey(const Key('add-by-jid-fullscreen-dialog')),
     );
     expect(dialogSize, const Size(360, 640));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('portrait room chat folds details and keeps composer actions', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final service = XmppService()
+      ..seedConnectedRoomForTesting(
+        RoomEntry(
+          roomJid: 'lounge@conference.example.com',
+          nick: 'tester',
+          subject: 'A useful room subject',
+          joined: true,
+          occupantCount: 12,
+        ),
+        name: 'The Lounge',
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    // WimsyHome seeds its initially empty storage asynchronously; restore the
+    // in-memory room fixture after that first frame completes.
+    service.seedConnectedRoomForTesting(
+      RoomEntry(
+        roomJid: 'lounge@conference.example.com',
+        nick: 'tester',
+        subject: 'A useful room subject',
+        joined: true,
+        occupantCount: 12,
+      ),
+      name: 'The Lounge',
+    );
+    await tester.pump();
+
+    expect(find.text('The Lounge'), findsOneWidget);
+    expect(
+      find.text('A useful room subject', findRichText: true),
+      findsNothing,
+    );
+    expect(find.byTooltip('Invite to room'), findsOneWidget);
+    expect(find.byTooltip('Leave room'), findsOneWidget);
+    expect(find.text('Leave'), findsNothing);
+    expect(find.byTooltip('Send file'), findsOneWidget);
+    expect(find.byTooltip('Send photo'), findsOneWidget);
+    expect(find.byTooltip('Send'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('chat-header-details-button')));
+    await tester.pump();
+    expect(find.text('lounge@conference.example.com'), findsOneWidget);
+    expect(
+      find.text('A useful room subject', findRichText: true),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 

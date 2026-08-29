@@ -5018,6 +5018,22 @@ class XmppService extends ChangeNotifier {
   }
 
   @visibleForTesting
+  void seedConnectedRoomForTesting(RoomEntry room, {String? name}) {
+    _status = XmppStatus.connected;
+    _currentUserBareJid = 'tester@example.com';
+    _rooms[_bareJid(room.roomJid)] = room;
+    seedBookmarks([
+      ContactEntry(
+        jid: room.roomJid,
+        name: name,
+        groups: const [],
+        isBookmark: true,
+      ),
+    ]);
+    selectChat(room.roomJid);
+  }
+
+  @visibleForTesting
   List<MessageIntent> buildMessageIntentsForTesting(MessageStanza stanza) {
     return _buildMessageIntents(stanza);
   }

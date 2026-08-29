@@ -586,6 +586,7 @@ class _WimsyHomeState extends State<WimsyHome> {
   String? _lastFocusedChat;
   int _lastMessageCount = 0;
   final Map<String, bool> _roomSubjectExpanded = {};
+  final Map<String, bool> _chatHeaderDetailsExpanded = {};
   bool _wasAtBottom = true;
   bool _showScrollToBottomButton = false;
   String? _editingMessageId;
@@ -1241,6 +1242,17 @@ class _WimsyHomeState extends State<WimsyHome> {
     final messageById = _indexMessagesById(messages, isRoom: isBookmark);
     _indexMessagePositions(activeChat, messages, isRoom: isBookmark);
     final roomEntry = activeChat == null ? null : service.roomFor(activeChat);
+    final displayName = activeChat == null
+        ? ''
+        : service.displayNameFor(activeChat).trim();
+    final chatTitle = activeChat == null
+        ? 'Select a chat'
+        : displayName.isNotEmpty && displayName != activeChat
+        ? displayName
+        : activeChat;
+    final headerDetailsExpanded = activeChat != null
+        ? (_chatHeaderDetailsExpanded[activeChat] ?? false)
+        : false;
     _activeChatForKeyHandler = activeChat;
     _activeChatIsBookmark = isBookmark;
     _activeChatRoomJoined = roomEntry?.joined ?? false;
@@ -1300,35 +1312,75 @@ class _WimsyHomeState extends State<WimsyHome> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        activeChat ?? 'Select a chat',
+                        chatTitle,
                         style: theme.textTheme.titleLarge,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      Text(
-                        activeChat == null
-                            ? 'Secure connection active'
-                            : isBookmark
-                            ? _roomSubtitle(roomEntry)
-                            : service.chatStateLabelFor(activeChat).isNotEmpty
-                            ? service.chatStateLabelFor(activeChat)
-                            : 'Secure connection active',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                      if (!showBack || headerDetailsExpanded) ...[
+                        if (activeChat != null && chatTitle != activeChat)
+                          Text(
+                            activeChat,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        Text(
+                          activeChat == null
+                              ? 'Secure connection active'
+                              : isBookmark
+                              ? _roomSubtitle(roomEntry)
+                              : service.chatStateLabelFor(activeChat).isNotEmpty
+                              ? service.chatStateLabelFor(activeChat)
+                              : 'Secure connection active',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
-                      ),
-                      if (activeChat != null && isBookmark)
-                        _buildRoomSubjectHeader(
-                          roomEntry: roomEntry,
-                          roomJid: activeChat,
-                          theme: theme,
-                        ),
+                        if (activeChat != null && isBookmark)
+                          _buildRoomSubjectHeader(
+                            roomEntry: roomEntry,
+                            roomJid: activeChat,
+                            theme: theme,
+                          ),
+                      ],
                     ],
                   ),
                 ),
+                if (showBack && activeChat != null)
+                  IconButton(
+                    key: const Key('chat-header-details-button'),
+                    onPressed: () => setState(() {
+                      _chatHeaderDetailsExpanded[activeChat] =
+                          !headerDetailsExpanded;
+                    }),
+                    icon: Icon(
+                      headerDetailsExpanded
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                    ),
+                    tooltip: headerDetailsExpanded
+                        ? 'Hide chat details'
+                        : 'Show chat details',
+                  ),
                 if (isBookmark && (roomEntry?.joined ?? false))
                   IconButton(
                     onPressed: () => _showInviteDialog(activeChat),
                     icon: const Icon(Icons.person_add),
                     tooltip: 'Invite to room',
+                  ),
+                if (showBack && isBookmark)
+                  IconButton(
+                    key: const Key('room-membership-button'),
+                    onPressed: (roomEntry?.joined ?? false)
+                        ? () => service.leaveRoom(activeChat)
+                        : () => service.joinRoom(activeChat),
+                    icon: Icon(
+                      (roomEntry?.joined ?? false) ? Icons.logout : Icons.login,
+                    ),
+                    tooltip: (roomEntry?.joined ?? false)
+                        ? 'Leave room'
+                        : 'Join room',
                   ),
                 if (activeChat != null && !isBookmark) ...[
                   Builder(
@@ -1572,7 +1624,8 @@ class _WimsyHomeState extends State<WimsyHome> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (activeChat != null &&
+                if (!showBack &&
+                    activeChat != null &&
                     service.chatStateLabelFor(activeChat).isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -1585,7 +1638,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                     ),
                   ),
                 ],
-                if (isBookmark) ...[
+                if (!showBack && isBookmark) ...[
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
@@ -1664,11 +1717,6 @@ class _WimsyHomeState extends State<WimsyHome> {
                 ],
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    // On narrow screens (e.g. phones or split panes), the
-                    // attachment and camera actions are combined into a
-                    // single menu button so the message field stays as
-                    // wide as possible.
-                    final isCompact = constraints.maxWidth < 420;
                     final canSend =
                         activeChat != null &&
                         (!isBookmark || (roomEntry?.joined ?? false));
@@ -1699,71 +1747,28 @@ class _WimsyHomeState extends State<WimsyHome> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        if (isCompact)
-                          PopupMenuButton<_ComposerAttachmentAction>(
-                            enabled: canSend,
-                            icon: const Icon(Icons.attach_file),
-                            tooltip: 'Attach',
-                            onSelected: (action) {
-                              switch (action) {
-                                case _ComposerAttachmentAction.file:
-                                  _sendAttachment(
-                                    activeChat,
-                                    isBookmark: isBookmark,
-                                    roomEntry: roomEntry,
-                                  );
-                                  break;
-                                case _ComposerAttachmentAction.photo:
-                                  _sendPhotoMessage(
-                                    activeChat,
-                                    isBookmark: isBookmark,
-                                    roomEntry: roomEntry,
-                                  );
-                                  break;
-                              }
-                            },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
-                                value: _ComposerAttachmentAction.file,
-                                child: ListTile(
-                                  leading: Icon(Icons.attach_file),
-                                  title: Text('Send file'),
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: _ComposerAttachmentAction.photo,
-                                child: ListTile(
-                                  leading: Icon(Icons.photo_camera),
-                                  title: Text('Send photo'),
-                                ),
-                              ),
-                            ],
-                          )
-                        else ...[
-                          IconButton(
-                            onPressed: canSend
-                                ? () => _sendAttachment(
-                                    activeChat,
-                                    isBookmark: isBookmark,
-                                    roomEntry: roomEntry,
-                                  )
-                                : null,
-                            icon: const Icon(Icons.attach_file),
-                            tooltip: 'Send file',
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            onPressed: canSend
-                                ? () => _sendPhotoMessage(
-                                    activeChat,
-                                    isBookmark: isBookmark,
-                                    roomEntry: roomEntry,
-                                  )
-                                : null,
-                            icon: const Icon(Icons.photo_camera),
-                            tooltip: 'Send photo',
-                          ),
-                        ],
+                        IconButton(
+                          onPressed: canSend
+                              ? () => _sendAttachment(
+                                  activeChat,
+                                  isBookmark: isBookmark,
+                                  roomEntry: roomEntry,
+                                )
+                              : null,
+                          icon: const Icon(Icons.attach_file),
+                          tooltip: 'Send file',
+                        ),
+                        IconButton(
+                          onPressed: canSend
+                              ? () => _sendPhotoMessage(
+                                  activeChat,
+                                  isBookmark: isBookmark,
+                                  roomEntry: roomEntry,
+                                )
+                              : null,
+                          icon: const Icon(Icons.photo_camera),
+                          tooltip: 'Send photo',
+                        ),
                         const SizedBox(width: 4),
                         IconButton(
                           onPressed: canSend
@@ -2567,7 +2572,8 @@ class _WimsyHomeState extends State<WimsyHome> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
                 'Subject',
@@ -3784,10 +3790,6 @@ enum _AfterOwnMessageChoice {
   final Duration? period;
   final bool always;
 }
-
-/// Actions available in the combined attachment menu shown on narrow
-/// screens, where the file and photo actions are merged into one button.
-enum _ComposerAttachmentAction { file, photo }
 
 class _PhotoSelection {
   const _PhotoSelection({
