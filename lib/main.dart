@@ -794,8 +794,8 @@ class _WimsyHomeState extends State<WimsyHome> {
                         label: 'Loss',
                         data: service.quicLossHistory,
                         color: Colors.red,
-                        unit: '',
-                        showAverage: true,
+                        unit: '%',
+                        displayValue: service.quicLossPercentage,
                       ),
                       const SizedBox(width: 16),
                     ],
@@ -1488,8 +1488,8 @@ class _WimsyHomeState extends State<WimsyHome> {
                     label: 'Loss',
                     data: service.quicLossHistory,
                     color: Colors.red,
-                    unit: '',
-                    showAverage: true,
+                    unit: '%',
+                    displayValue: service.quicLossPercentage,
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -7247,22 +7247,24 @@ class _QuicStatsGraph extends StatelessWidget {
     required this.data,
     required this.color,
     required this.unit,
-    this.showAverage = false,
+    this.displayValue,
   });
 
   final String label;
   final List<int> data;
   final Color color;
   final String unit;
-  final bool showAverage;
+  final double? displayValue;
 
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return const SizedBox.shrink();
-    final value = showAverage
-        ? formatGraphAverage(graphAverage(data)!)
+    final value = displayValue != null
+        ? formatGraphAverage(displayValue!)
         : data.last.toString();
-    final description = showAverage ? '$label average' : label;
+    final description = displayValue != null
+        ? '$label over ${data.length} seconds'
+        : label;
     final theme = Theme.of(context);
     return Tooltip(
       message: '$description: $value$unit',

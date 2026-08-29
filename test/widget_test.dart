@@ -338,6 +338,7 @@ void main() {
         name: 'The Lounge',
         quicRtt: const [35, 42],
         quicLoss: const [0, 2],
+        quicSent: const [50, 50],
       );
 
     await tester.pumpWidget(
@@ -356,6 +357,7 @@ void main() {
       name: 'The Lounge',
       quicRtt: const [35, 42],
       quicLoss: const [0, 2],
+      quicSent: const [50, 50],
     );
     await tester.pump();
 
@@ -369,7 +371,7 @@ void main() {
     expect(find.textContaining('Signed in as'), findsNothing);
     expect(find.byTooltip('Set presence'), findsOneWidget);
     expect(find.byTooltip('RTT: 42ms'), findsOneWidget);
-    expect(find.byTooltip('Loss average: 1'), findsOneWidget);
+    expect(find.byTooltip('Loss over 2 seconds: 2%'), findsOneWidget);
 
     await tester.tap(find.byType(TextField));
     await tester.pump();

@@ -19,3 +19,20 @@ String formatGraphAverage(double value) {
   }
   return value.toStringAsFixed(2);
 }
+
+/// Returns outbound packet loss as a percentage for matching sample windows.
+double? packetLossPercentage(
+  Iterable<int> lostPacketSamples,
+  Iterable<int> sentPacketSamples,
+) {
+  final lostPackets = lostPacketSamples.fold<int>(
+    0,
+    (sum, value) => sum + value,
+  );
+  final sentPackets = sentPacketSamples.fold<int>(
+    0,
+    (sum, value) => sum + value,
+  );
+  if (sentPackets == 0) return null;
+  return lostPackets / sentPackets * 100;
+}

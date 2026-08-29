@@ -21,4 +21,14 @@ void main() {
       expect(formatGraphAverage(2), '2');
     });
   });
+
+  group('packetLossPercentage', () {
+    test('calculates loss from packet totals across the window', () {
+      expect(packetLossPercentage([1, 0], [10, 90]), 1);
+    });
+
+    test('returns null when no packets were sent', () {
+      expect(packetLossPercentage([0], [0]), isNull);
+    });
+  });
 }

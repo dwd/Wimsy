@@ -25,6 +25,7 @@ import '../av/call_quality.dart';
 import '../av/media_session.dart';
 import '../av/muji_session.dart';
 import '../av/sdp_mapper.dart';
+import '../utils/graph_statistics.dart';
 import 'call_ice.dart';
 import 'extdisco.dart';
 import 'jmi.dart';
@@ -191,12 +192,16 @@ class XmppService extends ChangeNotifier {
   String? _activeChatBareJid;
   final List<int> _quicRttHistory = [];
   final List<int> _quicLossHistory = [];
+  final List<int> _quicSentHistory = [];
   BigInt _lastQuicLostPackets = BigInt.zero;
+  BigInt _lastQuicSentPackets = BigInt.zero;
   Timer? _quicStatsTimer;
   static const int _maxQuicHistory = 60;
 
   List<int> get quicRttHistory => _quicRttHistory;
   List<int> get quicLossHistory => _quicLossHistory;
+  double? get quicLossPercentage =>
+      packetLossPercentage(_quicLossHistory, _quicSentHistory);
 
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
   void Function(String roomJid, ChatMessage message)?
@@ -5119,6 +5124,7 @@ class XmppService extends ChangeNotifier {
     String? name,
     List<int> quicRtt = const [],
     List<int> quicLoss = const [],
+    List<int> quicSent = const [],
   }) {
     _status = XmppStatus.connected;
     _currentUserBareJid = 'tester@example.com';
@@ -5129,6 +5135,9 @@ class XmppService extends ChangeNotifier {
     _quicLossHistory
       ..clear()
       ..addAll(quicLoss);
+    _quicSentHistory
+      ..clear()
+      ..addAll(quicSent);
     seedBookmarks([
       ContactEntry(
         jid: room.roomJid,
@@ -6727,7 +6736,9 @@ class XmppService extends ChangeNotifier {
     _quicStatsTimer?.cancel();
     _quicRttHistory.clear();
     _quicLossHistory.clear();
+    _quicSentHistory.clear();
     _lastQuicLostPackets = BigInt.zero;
+    _lastQuicSentPackets = BigInt.zero;
 
     final socket = _connection?.socket;
     if (socket == null || !socket.isQuic) return;
@@ -6793,8 +6804,13 @@ class XmppService extends ChangeNotifier {
       final deltaLoss = currentLoss - _lastQuicLostPackets;
       _lastQuicLostPackets = currentLoss;
       _quicLossHistory.add(deltaLoss.toInt());
+      final currentSent = stats.path.sentPackets;
+      final deltaSent = currentSent - _lastQuicSentPackets;
+      _lastQuicSentPackets = currentSent;
+      _quicSentHistory.add(deltaSent.toInt());
       if (_quicLossHistory.length > _maxQuicHistory) {
         _quicLossHistory.removeAt(0);
+        _quicSentHistory.removeAt(0);
       }
 
       notifyListeners();
@@ -8356,7 +8372,9 @@ class XmppService extends ChangeNotifier {
     _quicStatsTimer = null;
     _quicRttHistory.clear();
     _quicLossHistory.clear();
+    _quicSentHistory.clear();
     _lastQuicLostPackets = BigInt.zero;
+    _lastQuicSentPackets = BigInt.zero;
     _csiIdleTimer?.cancel();
     _csiIdleTimer = null;
     _mucSelfPingTimer?.cancel();
