@@ -3142,26 +3142,24 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     if (result.isRoom) {
-      final nick = result.nick ?? widget.service.defaultRoomNick;
+      final nick = result.nick!;
       widget.service.joinRoom(
         result.jid,
         nick: nick,
         password: result.password,
       );
-      if (result.saveBookmark) {
-        final bookmark = ContactEntry(
-          jid: result.jid,
-          name: result.roomName,
-          groups: const [],
-          isBookmark: true,
-          bookmarkNick: nick,
-          bookmarkPassword: result.password,
-          bookmarkAutoJoin: result.autoJoin,
-        );
-        final ok = await widget.service.upsertBookmark(bookmark);
-        if (!ok) {
-          _showSnack('Failed to save bookmark.');
-        }
+      final bookmark = ContactEntry(
+        jid: result.jid,
+        name: result.roomName,
+        groups: const [],
+        isBookmark: true,
+        bookmarkNick: nick,
+        bookmarkPassword: result.password,
+        bookmarkAutoJoin: true,
+      );
+      final ok = await widget.service.upsertBookmark(bookmark);
+      if (!ok) {
+        _showSnack('Failed to save bookmark.');
       }
       return;
     }
@@ -4921,18 +4919,14 @@ class _AddByJidResult {
     required this.isRoom,
     this.nick,
     this.password,
-    required this.saveBookmark,
     this.roomName,
-    required this.autoJoin,
   });
 
   final String jid;
   final bool isRoom;
   final String? nick;
   final String? password;
-  final bool saveBookmark;
   final String? roomName;
-  final bool autoJoin;
 }
 
 class _AddByJidDialog extends StatefulWidget {
@@ -4953,17 +4947,18 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   int _discoveryToken = 0;
   bool _discovering = false;
   bool _manualTypeOverride = false;
-  bool _saveBookmark = false;
-  bool _autoJoin = false;
   String? _jidError;
+  String? _nickError;
   String? _discoveryMessage;
   String? _discoveredName;
+  String? _discoveredRoomNamePrefill;
   List<JidSuggestion> _suggestions = const [];
   _AddTargetType _selectedType = _AddTargetType.person;
 
   @override
   void initState() {
     super.initState();
+    _nickController.text = widget.service.defaultRoomNick;
     _jidController.addListener(_handleJidChanged);
   }
 
@@ -5035,9 +5030,18 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
       if (!mounted || token != _discoveryToken) {
         return;
       }
+      final identityName = result.identityName?.trim();
+      final currentRoomName = _roomNameController.text.trim();
+      if (result.kind == DiscoveredJidKind.room &&
+          identityName?.isNotEmpty == true &&
+          (currentRoomName.isEmpty ||
+              currentRoomName == _discoveredRoomNamePrefill)) {
+        _roomNameController.text = identityName!;
+        _discoveredRoomNamePrefill = identityName;
+      }
       setState(() {
         _discovering = false;
-        _discoveredName = result.identityName?.trim();
+        _discoveredName = identityName;
         switch (result.kind) {
           case DiscoveredJidKind.room:
             _discoveryMessage = 'Detected: Room';
@@ -5117,6 +5121,12 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
     }
     final isRoom = _selectedType == _AddTargetType.room;
     final nick = _nickController.text.trim();
+    if (isRoom && nick.isEmpty) {
+      setState(() {
+        _nickError = 'Enter a nickname.';
+      });
+      return;
+    }
     final password = _passwordController.text.trim();
     final roomName = _roomNameController.text.trim();
     Navigator.of(context).pop(
@@ -5125,9 +5135,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
         isRoom: isRoom,
         nick: nick.isEmpty ? null : nick,
         password: password.isEmpty ? null : password,
-        saveBookmark: isRoom && _saveBookmark,
         roomName: roomName.isEmpty ? null : roomName,
-        autoJoin: isRoom && _saveBookmark ? _autoJoin : false,
       ),
     );
   }
@@ -5265,9 +5273,14 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                   TextField(
                     controller: _nickController,
                     decoration: InputDecoration(
-                      labelText: 'Nickname (optional)',
-                      hintText: widget.service.defaultRoomNick,
+                      labelText: 'Nickname',
+                      errorText: _nickError,
                     ),
+                    onChanged: (_) {
+                      if (_nickError != null) {
+                        setState(() => _nickError = null);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -5278,28 +5291,12 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                     obscureText: true,
                   ),
                   const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: _saveBookmark,
-                    onChanged: (value) => setState(() => _saveBookmark = value),
-                    title: const Text('Save bookmark'),
+                  TextField(
+                    controller: _roomNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Room name (optional)',
+                    ),
                   ),
-                  if (_saveBookmark) ...[
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _roomNameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Room name (optional)',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: _autoJoin,
-                      onChanged: (value) => setState(() => _autoJoin = value),
-                      title: const Text('Auto-join'),
-                    ),
-                  ],
                 ],
               ],
             ),
