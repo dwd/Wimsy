@@ -4957,6 +4957,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   String? _jidError;
   String? _discoveryMessage;
   String? _discoveredName;
+  List<JidSuggestion> _suggestions = const [];
   _AddTargetType _selectedType = _AddTargetType.person;
 
   @override
@@ -4988,16 +4989,37 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
         _discoveryMessage = null;
         _discoveredName = null;
         _jidError = null;
+        _suggestions = const [];
         _selectedType = _AddTargetType.person;
       });
       return;
     }
     if (normalized == null) {
+      if (!raw.contains('@') && raw.isNotEmpty && !raw.contains(' ')) {
+        setState(() {
+          _discovering = true;
+          _jidError = null;
+          _discoveryMessage = 'Finding local matches...';
+        });
+        _discoveryDebounce = Timer(const Duration(milliseconds: 350), () async {
+          final suggestions = await widget.service.suggestLocalJids(raw);
+          if (!mounted || token != _discoveryToken) return;
+          setState(() {
+            _discovering = false;
+            _suggestions = suggestions;
+            _discoveryMessage = suggestions.isEmpty
+                ? 'No local matches found.'
+                : 'Choose a suggested JID.';
+          });
+        });
+        return;
+      }
       setState(() {
         _discovering = false;
         _discoveryMessage = null;
         _discoveredName = null;
         _jidError = 'Enter a valid JID.';
+        _suggestions = const [];
       });
       return;
     }
@@ -5005,6 +5027,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
       _jidError = null;
       _discovering = true;
       _discoveryMessage = 'Checking...';
+      _suggestions = const [];
     });
     _discoveryDebounce = Timer(const Duration(milliseconds: 500), () async {
       final result = await widget.service.discoverJidKind(normalized);
@@ -5067,7 +5090,24 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   }
 
   void _submit() {
-    final normalized = _normalizeJid(_jidController.text);
+    var normalized = _normalizeJid(_jidController.text);
+    if (normalized == null && !_jidController.text.trim().contains('@')) {
+      final localPart = _jidController.text.trim();
+      final wantedKind = _selectedType == _AddTargetType.room
+          ? DiscoveredJidKind.room
+          : DiscoveredJidKind.person;
+      normalized = _suggestions
+          .where((suggestion) => suggestion.kind == wantedKind)
+          .firstOrNull
+          ?.jid;
+      if (normalized == null && wantedKind == DiscoveredJidKind.person) {
+        final self = widget.service.currentUserBareJid;
+        final domain = self == null ? '' : Jid.fromFullJid(self).domain;
+        if (localPart.isNotEmpty && domain.isNotEmpty) {
+          normalized = '$localPart@$domain';
+        }
+      }
+    }
     if (normalized == null) {
       setState(() {
         _jidError = 'Enter a valid JID.';
@@ -5125,6 +5165,34 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                   ),
                   autofocus: true,
                 ),
+                if (_suggestions.isNotEmpty)
+                  ..._suggestions.map(
+                    (suggestion) => ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        suggestion.kind == DiscoveredJidKind.room
+                            ? Icons.meeting_room_outlined
+                            : Icons.person_outline,
+                      ),
+                      title: Text(suggestion.name ?? suggestion.jid),
+                      subtitle: suggestion.name == null
+                          ? null
+                          : Text(suggestion.jid),
+                      onTap: () {
+                        _jidController.text = suggestion.jid;
+                        _jidController.selection = TextSelection.collapsed(
+                          offset: suggestion.jid.length,
+                        );
+                        setState(() {
+                          _selectedType =
+                              suggestion.kind == DiscoveredJidKind.room
+                              ? _AddTargetType.room
+                              : _AddTargetType.person;
+                        });
+                      },
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 SegmentedButton<_AddTargetType>(
                   segments: const [

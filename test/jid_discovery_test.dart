@@ -27,6 +27,29 @@ IqStanza _discoInfoResult({
   return iq;
 }
 
+IqStanza _searchResult(List<Map<String, String>> entries) {
+  final iq = IqStanza('id-1', IqStanzaType.RESULT);
+  final query = XmppElement()..name = 'query';
+  query.addAttribute(XmppAttribute('xmlns', jidSearchNamespace));
+  for (final entry in entries) {
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('jid', entry['jid'] ?? ''));
+    for (final field in const ['nick', 'first', 'last']) {
+      final value = entry[field];
+      if (value != null) {
+        item.addChild(
+          XmppElement()
+            ..name = field
+            ..textValue = value,
+        );
+      }
+    }
+    query.addChild(item);
+  }
+  iq.addChild(query);
+  return iq;
+}
+
 void main() {
   test('classifies conference identity as room', () {
     final result = classifyJidFromDiscoInfo(
@@ -99,5 +122,30 @@ void main() {
       ),
     );
     expect(result.identityName, 'Alice Laptop');
+  });
+
+  test('parses and names legacy XEP-0055 results', () {
+    final results = parseJidSearchResults(
+      _searchResult(const [
+        {'jid': 'alice@example.com', 'first': 'Alice', 'last': 'Example'},
+      ]),
+    );
+
+    expect(results, hasLength(1));
+    expect(results.single.jid, 'alice@example.com');
+    expect(results.single.name, 'Alice Example');
+    expect(results.single.kind, DiscoveredJidKind.person);
+  });
+
+  test('ignores duplicate and malformed XEP-0055 results', () {
+    final results = parseJidSearchResults(
+      _searchResult(const [
+        {'jid': 'alice@example.com'},
+        {'jid': 'ALICE@example.com'},
+        {'jid': ''},
+      ]),
+    );
+
+    expect(results.map((result) => result.jid), ['alice@example.com']);
   });
 }

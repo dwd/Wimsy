@@ -799,6 +799,74 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  /// Suggests server-local contacts and rooms for an incomplete JID.
+  ///
+  /// Service discovery provides component/room JIDs. Components advertising
+  /// XEP-0055 are queried as optional user directories.
+  Future<List<JidSuggestion>> suggestLocalJids(
+    String input, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final connection = _connection;
+    final self = _currentUserBareJid;
+    final term = input.trim();
+    if (connection == null || self == null || term.isEmpty) {
+      return const [];
+    }
+    final serverDomain = Jid.fromFullJid(self).domain;
+    final suggestions = <JidSuggestion>[];
+    final seen = <String>{};
+    void add(JidSuggestion suggestion) {
+      final query = term.toLowerCase();
+      final matches =
+          suggestion.jid.toLowerCase().contains(query) ||
+          (suggestion.name?.toLowerCase().contains(query) ?? false);
+      if (matches && seen.add(suggestion.jid.toLowerCase())) {
+        suggestions.add(suggestion);
+      }
+    }
+
+    if (!term.contains('@')) {
+      add(
+        JidSuggestion(
+          jid: '$term@$serverDomain',
+          kind: DiscoveredJidKind.person,
+        ),
+      );
+    }
+    try {
+      final items = await _requestDiscoItems(serverDomain).timeout(timeout);
+      for (final item in items) {
+        final info = await _requestDiscoInfo(item).timeout(timeout);
+        final classified = classifyJidFromDiscoInfo(info);
+        if (classified.kind == DiscoveredJidKind.room) {
+          if (!term.contains('@')) {
+            add(
+              JidSuggestion(
+                jid: '$term@$item',
+                kind: DiscoveredJidKind.room,
+                name: classified.identityName,
+              ),
+            );
+          }
+          final rooms = await _requestDiscoItems(item).timeout(timeout);
+          for (final room in rooms) {
+            add(JidSuggestion(jid: room, kind: DiscoveredJidKind.room));
+          }
+        }
+        if (classified.features.contains(jidSearchNamespace)) {
+          final matches = await _requestJidSearch(item, term).timeout(timeout);
+          for (final match in matches) {
+            add(match);
+          }
+        }
+      }
+    } catch (_) {
+      // Local-domain completion remains useful when optional discovery fails.
+    }
+    return suggestions.take(8).toList(growable: false);
+  }
+
   ChatState? chatStateFor(String bareJid) {
     return _chatStates[_bareJid(bareJid)];
   }
@@ -5512,6 +5580,22 @@ class XmppService extends ChangeNotifier {
     );
     iqStanza.addChild(query);
     return _sendIqAndAwait(iqStanza);
+  }
+
+  Future<List<JidSuggestion>> _requestJidSearch(
+    String searchService,
+    String term,
+  ) async {
+    final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET)
+      ..toJid = Jid.fromFullJid(searchService);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', jidSearchNamespace));
+    final nick = XmppElement()
+      ..name = 'nick'
+      ..textValue = term;
+    query.addChild(nick);
+    iq.addChild(query);
+    return parseJidSearchResults(await _sendIqAndAwait(iq));
   }
 
   Future<HttpUploadSlot?> _requestHttpUploadSlot({

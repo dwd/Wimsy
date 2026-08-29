@@ -2,6 +2,14 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 enum DiscoveredJidKind { person, room, unknown }
 
+class JidSuggestion {
+  const JidSuggestion({required this.jid, required this.kind, this.name});
+
+  final String jid;
+  final DiscoveredJidKind kind;
+  final String? name;
+}
+
 class JidDiscoveryResult {
   const JidDiscoveryResult({
     required this.kind,
@@ -16,6 +24,36 @@ class JidDiscoveryResult {
 
 const String _discoInfoNamespace = 'http://jabber.org/protocol/disco#info';
 const String _mucNamespace = 'http://jabber.org/protocol/muc';
+const String jidSearchNamespace = 'jabber:iq:search';
+
+List<JidSuggestion> parseJidSearchResults(IqStanza? response) {
+  if (response == null || response.type != IqStanzaType.RESULT) {
+    return const [];
+  }
+  final query = response.getChild('query');
+  if (query?.getAttribute('xmlns')?.value != jidSearchNamespace) {
+    return const [];
+  }
+  final results = <JidSuggestion>[];
+  final seen = <String>{};
+  for (final item in query!.children.where((child) => child.name == 'item')) {
+    final jid = item.getAttribute('jid')?.value?.trim() ?? '';
+    if (jid.isEmpty || !seen.add(jid.toLowerCase())) {
+      continue;
+    }
+    String? name;
+    for (final field in const ['nick', 'first', 'last']) {
+      final value = item.getChild(field)?.textValue?.trim();
+      if (value != null && value.isNotEmpty) {
+        name = name == null ? value : '$name $value';
+      }
+    }
+    results.add(
+      JidSuggestion(jid: jid, kind: DiscoveredJidKind.person, name: name),
+    );
+  }
+  return results;
+}
 
 JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
   if (discoInfo == null || discoInfo.type != IqStanzaType.RESULT) {
