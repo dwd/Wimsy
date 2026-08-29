@@ -200,6 +200,10 @@ class XmppService extends ChangeNotifier {
 
   List<int> get quicRttHistory => _quicRttHistory;
   List<int> get quicLossHistory => _quicLossHistory;
+  int get quicLostPackets =>
+      _quicLossHistory.fold(0, (sum, value) => sum + value);
+  int get quicSentPackets =>
+      _quicSentHistory.fold(0, (sum, value) => sum + value);
   double? get quicLossPercentage =>
       packetLossPercentage(_quicLossHistory, _quicSentHistory);
 

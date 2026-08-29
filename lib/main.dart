@@ -796,6 +796,8 @@ class _WimsyHomeState extends State<WimsyHome> {
                         color: Colors.red,
                         unit: '%',
                         displayValue: service.quicLossPercentage,
+                        lostPackets: service.quicLostPackets,
+                        sentPackets: service.quicSentPackets,
                       ),
                       const SizedBox(width: 16),
                     ],
@@ -1490,6 +1492,8 @@ class _WimsyHomeState extends State<WimsyHome> {
                     color: Colors.red,
                     unit: '%',
                     displayValue: service.quicLossPercentage,
+                    lostPackets: service.quicLostPackets,
+                    sentPackets: service.quicSentPackets,
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -7248,6 +7252,8 @@ class _QuicStatsGraph extends StatelessWidget {
     required this.color,
     required this.unit,
     this.displayValue,
+    this.lostPackets,
+    this.sentPackets,
   });
 
   final String label;
@@ -7255,19 +7261,26 @@ class _QuicStatsGraph extends StatelessWidget {
   final Color color;
   final String unit;
   final double? displayValue;
+  final int? lostPackets;
+  final int? sentPackets;
 
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return const SizedBox.shrink();
     final value = displayValue != null
-        ? formatGraphAverage(displayValue!)
+        ? formatPacketLossPercentage(displayValue!)
         : data.last.toString();
     final description = displayValue != null
         ? '$label over ${data.length} seconds'
         : label;
     final theme = Theme.of(context);
+    final packetCounts = lostPackets != null && sentPackets != null
+        ? '$lostPackets / $sentPackets'
+        : null;
     return Tooltip(
-      message: '$description: $value$unit',
+      message: packetCounts == null
+          ? '$description: $value$unit'
+          : '$description: $value$unit ($packetCounts lost / sent packets)',
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -7279,6 +7292,14 @@ class _QuicStatsGraph extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          if (packetCounts != null)
+            Text(
+              packetCounts,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 7,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           const SizedBox(height: 1),
           Container(
             width: 36,

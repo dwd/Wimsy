@@ -20,6 +20,14 @@ String formatGraphAverage(double value) {
   return value.toStringAsFixed(2);
 }
 
+/// Formats packet loss without rounding a measured non-zero value to zero.
+String formatPacketLossPercentage(double value) {
+  if (value == 0 || value >= 1) return formatGraphAverage(value);
+  if (value >= 0.01) return value.toStringAsFixed(2);
+  if (value >= 0.001) return value.toStringAsFixed(3);
+  return '<0.001';
+}
+
 /// Returns outbound packet loss as a percentage for matching sample windows.
 double? packetLossPercentage(
   Iterable<int> lostPacketSamples,

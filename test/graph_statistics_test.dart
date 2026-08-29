@@ -31,4 +31,15 @@ void main() {
       expect(packetLossPercentage([0], [0]), isNull);
     });
   });
+
+  group('formatPacketLossPercentage', () {
+    test('does not display a small non-zero percentage as zero', () {
+      expect(formatPacketLossPercentage(0.004), '0.004');
+      expect(formatPacketLossPercentage(0.0004), '<0.001');
+    });
+
+    test('formats an actual zero without decimals', () {
+      expect(formatPacketLossPercentage(0), '0');
+    });
+  });
 }
