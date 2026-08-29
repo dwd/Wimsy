@@ -27,6 +27,7 @@ import 'notifications/notification_service.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/jid_discovery.dart';
+import 'xmpp/jid_normalization.dart';
 import 'xmpp/vcard_utils.dart';
 import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
@@ -3209,8 +3210,8 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (result != true) {
       return;
     }
-    final jid = jidController.text.trim();
-    if (jid.isEmpty) {
+    final jid = normalizeEnteredJid(jidController.text, bare: true);
+    if (jid == null) {
       _showSnack('Enter a JID to save.');
       return;
     }
@@ -5201,6 +5202,7 @@ class _RoomInviteDialogState extends State<_RoomInviteDialog> {
           ) ??
           jid;
     }
+    jid = normalizeEnteredJid(jid, bare: true) ?? jid;
     Navigator.of(context).pop(_RoomInviteResult(jid, _reasonController.text));
   }
 
@@ -5428,12 +5430,10 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   }
 
   String? _normalizeJid(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) {
+    final bare = normalizeEnteredJid(raw, bare: true);
+    if (bare == null) {
       return null;
     }
-    final parsed = Jid.fromFullJid(trimmed);
-    final bare = parsed.userAtDomain;
     if (!_isValidBareJid(bare)) {
       return null;
     }

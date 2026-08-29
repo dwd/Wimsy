@@ -6,14 +6,21 @@ class Jid {
   String? _resource = '';
 
   Jid(String local, String domain, String? resource) {
-    _local = local;
-    _domain = domain;
+    // XMPP nodeprep/nameprep case mapping makes the localpart and domain
+    // case-insensitive. Dart does not currently provide Stringprep/PRECIS,
+    // so apply the essential case normalization here. Resources are opaque
+    // and case-sensitive and must therefore be preserved verbatim.
+    _local = local.toLowerCase();
+    _domain = domain.toLowerCase();
     _resource = resource;
   }
 
   @override
   bool operator ==(other) {
-    return other is Jid && local == other.local && domain == other.domain && resource == other.resource;
+    return other is Jid &&
+        local == other.local &&
+        domain == other.domain &&
+        resource == other.resource;
   }
 
   String get local => _local;

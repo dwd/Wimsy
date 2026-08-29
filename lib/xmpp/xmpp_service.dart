@@ -1057,6 +1057,11 @@ class XmppService extends ChangeNotifier {
     bool useQuic = true,
     bool useTcp = true,
   }) async {
+    final enteredJid = jid.trim();
+    final parsedEnteredJid = Jid.fromFullJid(enteredJid);
+    final normalizedJid = parsedEnteredJid.isValid()
+        ? parsedEnteredJid.fullJid!
+        : enteredJid;
     final effectiveConnectionUrl = kIsWeb && defaultWebTransportUrl.isNotEmpty
         ? defaultWebTransportUrl
         : connectionUrl;
@@ -1069,7 +1074,7 @@ class XmppService extends ChangeNotifier {
     _connectRetryTimer = null;
     // Persist args so the retry timer can call connect() with the same params.
     _lastConnectArgs = _ConnectArgs(
-      jid: jid,
+      jid: normalizedJid,
       password: password,
       resource: resource,
       host: host,
@@ -1097,7 +1102,7 @@ class XmppService extends ChangeNotifier {
     // wss/ws → WebSocket.  This is re-evaluated after auto-discovery below.
     var useWebTransport = wsConfig?.isWebTransport ?? false;
 
-    final normalized = jid.trim();
+    final normalized = normalizedJid;
     if (!_looksLikeJid(normalized)) {
       _setError('Enter a full JID like user@domain.');
       return;
@@ -8532,11 +8537,13 @@ class XmppService extends ChangeNotifier {
 
   String _bareJid(String jid) {
     final trimmed = jid.trim();
-    final slashIndex = trimmed.indexOf('/');
-    if (slashIndex == -1) {
-      return trimmed;
+    final parsed = Jid.fromFullJid(trimmed);
+    if (parsed.domain.isNotEmpty) {
+      return parsed.userAtDomain;
     }
-    return trimmed.substring(0, slashIndex);
+    final slashIndex = trimmed.indexOf('/');
+    return (slashIndex == -1 ? trimmed : trimmed.substring(0, slashIndex))
+        .toLowerCase();
   }
 
   String _mamScopeKey(String bareJid, {required bool isRoom}) {

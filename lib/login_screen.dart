@@ -9,6 +9,7 @@ import 'storage/account_record.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/alt_connection.dart';
+import 'xmpp/jid_normalization.dart';
 import 'xmpp/ws_endpoint.dart';
 import 'xmpp/xmpp_service.dart';
 
@@ -201,8 +202,10 @@ class _LoginScreenState extends State<LoginScreen> {
     final useQuic = hasManualHost
         ? _manualTransport == _ManualTransport.quic
         : _useQuic;
+    final enteredJid = _jidController.text.trim();
+    final normalizedJid = normalizeEnteredJid(enteredJid) ?? enteredJid;
     final account = AccountRecord(
-      jid: _jidController.text.trim(),
+      jid: normalizedJid,
       password: _rememberPassword ? _passwordController.text : '',
       host: _hostController.text.trim(),
       port: port,
@@ -716,8 +719,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     key: const Key('stop-connecting-button'),
                                     style: FilledButton.styleFrom(
                                       padding: EdgeInsets.zero,
-                                      backgroundColor:
-                                          theme.colorScheme.error,
+                                      backgroundColor: theme.colorScheme.error,
                                       foregroundColor:
                                           theme.colorScheme.onError,
                                       shape: RoundedRectangleBorder(
