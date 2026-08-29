@@ -873,7 +873,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                   child: FilledButton.icon(
                     onPressed: _showAddByJidDialog,
                     icon: const Icon(Icons.person_search),
-                    label: const Text('Add by JID'),
+                    label: const Text('New Chat'),
                   ),
                 ),
               ],
@@ -5414,7 +5414,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
           shape: isCompact
               ? const RoundedRectangleBorder(borderRadius: BorderRadius.zero)
               : null,
-          title: const Text('Add by JID'),
+          title: const Text('New Chat'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,

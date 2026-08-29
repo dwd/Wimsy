@@ -91,7 +91,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Add by JID uses a full-screen dialog on compact displays', (
+  testWidgets('New Chat uses a full-screen dialog on compact displays', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(360, 640);
@@ -120,6 +120,7 @@ void main() {
       find.byKey(const Key('add-by-jid-fullscreen-dialog')),
       findsOneWidget,
     );
+    expect(find.text('New Chat'), findsOneWidget);
     final dialogSize = tester.getSize(
       find.byKey(const Key('add-by-jid-fullscreen-dialog')),
     );
@@ -144,7 +145,7 @@ void main() {
     expect(service.lastExcludeRosterContacts, isFalse);
   });
 
-  testWidgets('Add by JID explicitly excludes roster contacts', (
+  testWidgets('New Chat explicitly excludes roster contacts', (
     WidgetTester tester,
   ) async {
     final service = _SuggestionXmppService();
