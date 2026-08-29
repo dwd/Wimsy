@@ -4311,7 +4311,10 @@ class MessageBubble extends StatelessWidget {
         color: theme.colorScheme.onSurfaceVariant,
       );
     }
-    return null;
+    return _PendingMessageClock(
+      key: const Key('pending-message-clock'),
+      color: theme.colorScheme.onSurfaceVariant,
+    );
   }
 
   List<TextSpan> _linkifyText(
@@ -4829,6 +4832,88 @@ class MessageBubble extends StatelessWidget {
       ],
     );
   }
+}
+
+/// A compact ticking clock shown while an outgoing message is awaiting its
+/// first confirmation from the server.
+class _PendingMessageClock extends StatefulWidget {
+  const _PendingMessageClock({super.key, required this.color});
+
+  final Color color;
+
+  @override
+  State<_PendingMessageClock> createState() => _PendingMessageClockState();
+}
+
+class _PendingMessageClockState extends State<_PendingMessageClock>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Message sending',
+      child: ExcludeSemantics(
+        child: RepaintBoundary(
+          child: SizedBox.square(
+            dimension: 14,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) => CustomPaint(
+                painter: _PendingMessageClockPainter(
+                  color: widget.color,
+                  progress: _controller.value,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingMessageClockPainter extends CustomPainter {
+  const _PendingMessageClockPainter({
+    required this.color,
+    required this.progress,
+  });
+
+  final Color color;
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2 - 1;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawCircle(center, radius, paint);
+    canvas.drawLine(center, center + const Offset(0, -3), paint);
+
+    final angle = progress * math.pi * 2 - math.pi / 2;
+    canvas.drawLine(
+      center,
+      center + Offset(math.cos(angle), math.sin(angle)) * 4.2,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_PendingMessageClockPainter oldDelegate) =>
+      progress != oldDelegate.progress || color != oldDelegate.color;
 }
 
 class _MessageMenuRegion extends StatefulWidget {

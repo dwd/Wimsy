@@ -369,6 +369,99 @@ void main() {
     expect(composer.enableSuggestions, isTrue);
   });
 
+  testWidgets('unconfirmed outgoing message shows a pending clock', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'Still sending',
+      timestamp: DateTime.utc(2026),
+      outgoing: true,
+      messageId: 'pending-message-test',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'You',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'alice@example.com',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('pending-message-clock')), findsOneWidget);
+    expect(find.bySemanticsLabel('Message sending'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('confirmed outgoing message replaces the pending clock', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'Sent',
+      timestamp: DateTime.utc(2026),
+      outgoing: true,
+      messageId: 'acked-message-test',
+      acked: true,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'You',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'alice@example.com',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('pending-message-clock')), findsNothing);
+    expect(find.byIcon(Icons.done), findsOneWidget);
+  });
+
   testWidgets('long pressing a message opens its complete action menu', (
     WidgetTester tester,
   ) async {
