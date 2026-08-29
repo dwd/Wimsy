@@ -5234,7 +5234,10 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
           _discoveryMessage = 'Finding local matches...';
         });
         _discoveryDebounce = Timer(const Duration(milliseconds: 350), () async {
-          final suggestions = await widget.service.suggestLocalJids(raw);
+          final suggestions = await widget.service.suggestLocalJids(
+            raw,
+            excludeRosterContacts: true,
+          );
           if (!mounted || token != _discoveryToken) return;
           setState(() {
             _discovering = false;

@@ -817,10 +817,13 @@ class XmppService extends ChangeNotifier {
   /// Suggests server-local contacts and rooms for an incomplete JID.
   ///
   /// Service discovery provides component/room JIDs. Components advertising
-  /// XEP-0055 are queried as optional user directories.
+  /// XEP-0055 are queried as optional user directories. When
+  /// [excludeRosterContacts] is true, roster JIDs are suppressed regardless
+  /// of whether they also appear in local-domain or directory results.
   Future<List<JidSuggestion>> suggestLocalJids(
     String input, {
     Duration timeout = const Duration(seconds: 5),
+    bool excludeRosterContacts = false,
   }) async {
     final connection = _connection;
     final self = _currentUserBareJid;
@@ -830,7 +833,10 @@ class XmppService extends ChangeNotifier {
     }
     final serverDomain = Jid.fromFullJid(self).domain;
     final suggestions = <JidSuggestion>[];
-    final seen = <String>{};
+    final rosterJids = _contacts
+        .map((contact) => contact.jid.toLowerCase())
+        .toSet();
+    final seen = excludeRosterContacts ? {...rosterJids} : <String>{};
     void add(JidSuggestion suggestion) {
       if (jidSuggestionMatches(suggestion, term) &&
           seen.add(suggestion.jid.toLowerCase())) {
@@ -838,14 +844,16 @@ class XmppService extends ChangeNotifier {
       }
     }
 
-    for (final contact in _contacts) {
-      add(
-        JidSuggestion(
-          jid: contact.jid,
-          kind: DiscoveredJidKind.person,
-          name: contact.name,
-        ),
-      );
+    if (!excludeRosterContacts) {
+      for (final contact in _contacts) {
+        add(
+          JidSuggestion(
+            jid: contact.jid,
+            kind: DiscoveredJidKind.person,
+            name: contact.name,
+          ),
+        );
+      }
     }
 
     if (!term.contains('@')) {

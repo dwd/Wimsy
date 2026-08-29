@@ -22,6 +22,8 @@ import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 
 class _SuggestionXmppService extends XmppService {
+  bool? lastExcludeRosterContacts;
+
   @override
   String? get currentUserBareJid => 'me@example.com';
 
@@ -29,13 +31,17 @@ class _SuggestionXmppService extends XmppService {
   Future<List<JidSuggestion>> suggestLocalJids(
     String input, {
     Duration timeout = const Duration(seconds: 5),
-  }) async => const [
-    JidSuggestion(
-      jid: 'alice@example.com',
-      kind: DiscoveredJidKind.person,
-      name: 'Alice Example',
-    ),
-  ];
+    bool excludeRosterContacts = false,
+  }) async {
+    lastExcludeRosterContacts = excludeRosterContacts;
+    return const [
+      JidSuggestion(
+        jid: 'alice@example.com',
+        kind: DiscoveredJidKind.person,
+        name: 'Alice Example',
+      ),
+    ];
+  }
 }
 
 void main() {
@@ -124,8 +130,9 @@ void main() {
   testWidgets('room invitation offers person search suggestions', (
     WidgetTester tester,
   ) async {
+    final service = _SuggestionXmppService();
     await tester.pumpWidget(
-      MaterialApp(home: roomInviteDialogForTesting(_SuggestionXmppService())),
+      MaterialApp(home: roomInviteDialogForTesting(service)),
     );
 
     await tester.enterText(find.byType(TextField).first, 'ali');
@@ -134,6 +141,22 @@ void main() {
 
     expect(find.text('Alice Example'), findsOneWidget);
     expect(find.text('alice@example.com'), findsOneWidget);
+    expect(service.lastExcludeRosterContacts, isFalse);
+  });
+
+  testWidgets('Add by JID explicitly excludes roster contacts', (
+    WidgetTester tester,
+  ) async {
+    final service = _SuggestionXmppService();
+    await tester.pumpWidget(
+      MaterialApp(home: addByJidDialogForTesting(service)),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'ali');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    expect(service.lastExcludeRosterContacts, isTrue);
   });
 
   testWidgets('portrait room chat folds details and keeps composer actions', (
