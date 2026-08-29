@@ -44,6 +44,21 @@ class _SuggestionXmppService extends XmppService {
   }
 }
 
+class _ConnectingXmppService extends XmppService {
+  bool _connecting = true;
+  bool disconnectCalled = false;
+
+  @override
+  bool get isConnecting => _connecting;
+
+  @override
+  Future<void> disconnect() async {
+    disconnectCalled = true;
+    _connecting = false;
+    notifyListeners();
+  }
+}
+
 void main() {
   test('window title includes the active bare JID', () {
     expect(windowTitleFor(null), 'Wimsy');
@@ -763,6 +778,37 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('Negotiating secure connection'), findsNothing);
+  });
+
+  testWidgets('Stop button cancels connecting and re-enables inputs', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final service = _ConnectingXmppService();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AnimatedBuilder(
+          animation: service,
+          builder: (context, _) => LoginScreen(
+            service: service,
+            storage: StorageService(),
+            preferences: prefs,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('stop-connecting-button')), findsOneWidget);
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'JID')).enabled, isFalse);
+
+    await tester.tap(find.byKey(const Key('stop-connecting-button')));
+    await tester.pump();
+
+    expect(service.disconnectCalled, isTrue);
+    expect(find.byKey(const Key('stop-connecting-button')), findsNothing);
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'JID')).enabled, isTrue);
   });
 
   testWidgets('Manual connection offers each native transport protocol', (

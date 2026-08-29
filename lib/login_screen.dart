@@ -706,6 +706,31 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                             ),
+                            if (service.isConnecting) ...[
+                              const SizedBox(width: 12),
+                              Tooltip(
+                                message: 'Stop connecting',
+                                child: SizedBox.square(
+                                  dimension: 48,
+                                  child: FilledButton(
+                                    key: const Key('stop-connecting-button'),
+                                    style: FilledButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      backgroundColor:
+                                          theme.colorScheme.error,
+                                      foregroundColor:
+                                          theme.colorScheme.onError,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    onPressed: () =>
+                                        unawaited(service.disconnect()),
+                                    child: const Icon(Icons.stop),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                         if (!_loadedAccount) ...[
