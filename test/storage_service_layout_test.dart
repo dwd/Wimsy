@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:wimsy/models/chat_message.dart';
+import 'package:wimsy/models/avatar_metadata.dart';
 import 'package:wimsy/storage/secure_store.dart';
 import 'package:wimsy/storage/storage_service.dart';
 
@@ -30,7 +31,11 @@ ChatMessage _message(String id, {String body = 'hello'}) {
     from: 'alice@example.com',
     to: 'bob@example.com',
     body: body,
-    timestamp: DateTime.utc(2024, 1, 1).add(Duration(seconds: id.hashCode % 60)),
+    timestamp: DateTime.utc(
+      2024,
+      1,
+      1,
+    ).add(Duration(seconds: id.hashCode % 60)),
     outgoing: false,
     messageId: id,
     rawXml: "<message id='$id'><body>$body</body></message>",
@@ -56,7 +61,8 @@ void main() {
     }
   });
 
-  File boxFile() => File('${dir.path}${Platform.pathSeparator}wimsy_secure.hive');
+  File boxFile() =>
+      File('${dir.path}${Platform.pathSeparator}wimsy_secure.hive');
 
   group('per-record storage layout', () {
     test('messages round-trip through one record per chat', () async {
@@ -85,8 +91,11 @@ void main() {
       await storage.storeMessagesForJid('bob@example.com', [_message('tiny')]);
       final delta = boxFile().lengthSync() - before;
 
-      expect(delta, lessThan(4096),
-          reason: 'a small write must not re-append the whole cache');
+      expect(
+        delta,
+        lessThan(4096),
+        reason: 'a small write must not re-append the whole cache',
+      );
     });
 
     test('avatars and caps are stored individually', () async {
@@ -112,6 +121,29 @@ void main() {
 
       await storage.clearEntityCaps();
       expect(storage.loadEntityCaps(), isEmpty);
+    });
+
+    test('removing contact avatars only removes that contact', () async {
+      await storage.storeVcardAvatar('alice@example.com', 'AAAA');
+      await storage.storeVcardAvatar('bob@example.com', 'BBBB');
+      await storage.storeVcardAvatarState('alice@example.com', 'hash-a');
+      await storage.storeVcardAvatarState('bob@example.com', 'hash-b');
+      await storage.storeAvatarMetadata(
+        'alice@example.com',
+        AvatarMetadata.noPepAvatar(),
+      );
+      await storage.storeAvatarMetadata(
+        'bob@example.com',
+        AvatarMetadata.noPepAvatar(),
+      );
+
+      await storage.removeVcardAvatar('alice@example.com');
+      await storage.removeVcardAvatarState('alice@example.com');
+      await storage.removeAvatarMetadata('alice@example.com');
+
+      expect(storage.loadVcardAvatars(), {'bob@example.com': 'BBBB'});
+      expect(storage.loadVcardAvatarState(), {'bob@example.com': 'hash-b'});
+      expect(storage.loadAvatarMetadata().keys, ['bob@example.com']);
     });
 
     test('clearing a cache removes its records', () async {
@@ -177,10 +209,14 @@ void main() {
       storage.salvageThresholdBytes = 1;
       await storage.unlock('1234');
 
-      expect(storage.loadAccount(), {'jid': 'alice@example.com'},
-          reason: 'the account must survive so the user stays logged in');
-      expect(storage.loadMessages(), isEmpty,
-          reason: 're-fetchable caches are dropped during salvage');
+      expect(storage.loadAccount(), {
+        'jid': 'alice@example.com',
+      }, reason: 'the account must survive so the user stays logged in');
+      expect(
+        storage.loadMessages(),
+        isEmpty,
+        reason: 're-fetchable caches are dropped during salvage',
+      );
       expect(storage.loadVcardAvatars(), isEmpty);
 
       // The rebuilt box must be usable straight away.

@@ -41,6 +41,17 @@ class MamCursorStore {
     _archiveExhausted.remove(key);
   }
 
+  /// Removes all throttles and pagination state for one archive scope.
+  void remove(String key) {
+    _backfillAt.remove(key);
+    _pageRequestAt.remove(key);
+    _catchUpAt.remove(key);
+    _catchUpPending.remove(key);
+    _prependOffset.remove(key);
+    _prependReset.remove(key)?.cancel();
+    _archiveExhausted.remove(key);
+  }
+
   bool shouldThrottleBackfill(
     String key, {
     Duration window = const Duration(seconds: 30),

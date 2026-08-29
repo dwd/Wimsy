@@ -92,7 +92,9 @@ class PepManager {
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(bareJid);
     final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
     final items = XmppElement()..name = 'items';
     items.addAttribute(XmppAttribute('node', 'urn:xmpp:avatar:data'));
     final item = XmppElement()..name = 'item';
@@ -118,6 +120,18 @@ class PepManager {
     _avatarBlobs.clear();
     _pendingDataRequests.clear();
     _pendingMetadataRequests.clear();
+    _onUpdate();
+  }
+
+  /// Removes PEP avatar state belonging to a contact that was forgotten.
+  void removeContact(String bareJid) {
+    _metadataByJid.remove(bareJid);
+    _pendingMetadataRequests.removeWhere((_, jid) => jid == bareJid);
+    _pendingDataRequests.removeWhere(
+      (_, pending) => pending.bareJid == bareJid,
+    );
+    storage.removeAvatarMetadata(bareJid);
+    gcUnreferencedAvatarBlobs();
     _onUpdate();
   }
 
@@ -157,7 +171,9 @@ class PepManager {
     final iqStanza = IqStanza(id, IqStanzaType.SET);
     iqStanza.toJid = Jid.fromFullJid(bareJid);
     final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
     final subscribe = XmppElement()..name = 'subscribe';
     subscribe.addAttribute(XmppAttribute('node', 'urn:xmpp:avatar:metadata'));
     subscribe.addAttribute(XmppAttribute('jid', selfBareJid));
@@ -171,7 +187,9 @@ class PepManager {
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(bareJid);
     final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+    pubsub.addAttribute(
+      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    );
     final items = XmppElement()..name = 'items';
     items.addAttribute(XmppAttribute('node', 'urn:xmpp:avatar:metadata'));
     items.addAttribute(XmppAttribute('max_items', '1'));
@@ -185,7 +203,10 @@ class PepManager {
 
   void _handleEventMessage(MessageStanza stanza) {
     final event = stanza.children.firstWhere(
-      (child) => child.name == 'event' && child.getAttribute('xmlns')?.value == 'http://jabber.org/protocol/pubsub#event',
+      (child) =>
+          child.name == 'event' &&
+          child.getAttribute('xmlns')?.value ==
+              'http://jabber.org/protocol/pubsub#event',
       orElse: () => XmppElement(),
     );
     if (event.name != 'event') {
@@ -205,7 +226,9 @@ class PepManager {
     }
     final hash = item.getAttribute('id')?.value;
     final metadata = item.children.firstWhere(
-      (child) => child.name == 'metadata' && child.getAttribute('xmlns')?.value == 'urn:xmpp:avatar:metadata',
+      (child) =>
+          child.name == 'metadata' &&
+          child.getAttribute('xmlns')?.value == 'urn:xmpp:avatar:metadata',
       orElse: () => XmppElement(),
     );
     if (metadata.name != 'metadata') {
@@ -269,11 +292,14 @@ class PepManager {
       return;
     }
     final pubsub = stanza.getChild('pubsub');
-    if (pubsub == null || pubsub.getAttribute('xmlns')?.value != 'http://jabber.org/protocol/pubsub') {
+    if (pubsub == null ||
+        pubsub.getAttribute('xmlns')?.value !=
+            'http://jabber.org/protocol/pubsub') {
       return;
     }
     final items = pubsub.getChild('items');
-    if (items == null || items.getAttribute('node')?.value != 'urn:xmpp:avatar:data') {
+    if (items == null ||
+        items.getAttribute('node')?.value != 'urn:xmpp:avatar:data') {
       return;
     }
     final item = items.getChild('item');

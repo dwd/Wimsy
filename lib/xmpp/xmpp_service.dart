@@ -2061,9 +2061,53 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     _contacts.removeWhere((entry) => entry.jid == normalized);
+    _expungeDirectContactData(normalized);
     notifyListeners();
     _rosterPersistor?.call(List.unmodifiable(_contacts));
     return true;
+  }
+
+  /// Drops all local state associated with a removed one-to-one contact.
+  ///
+  /// Room history is deliberately stored separately and is not touched. This
+  /// lets an address entered as a person by mistake later become a room
+  /// without reviving the old direct conversation.
+  void _expungeDirectContactData(String bareJid) {
+    final normalized = _bareJid(bareJid);
+    _messages.remove(normalized);
+    _seededMessageJids.remove(normalized);
+    _messagePersistor?.call(normalized, const []);
+    if (_activeChatBareJid == normalized) {
+      _activeChatBareJid = null;
+    }
+    _presenceByBareJid.remove(normalized);
+    _presenceByFullJid.removeWhere((jid, _) => _bareJid(jid) == normalized);
+    _lastSeenAt.remove(normalized);
+    _serverNotFound.remove(normalized);
+    _chatStates.remove(normalized);
+    _lastDisplayedMarkerIdByChat.remove(normalized);
+    _displayedStanzaIdByChat.remove(normalized);
+    _displayedAtByChat.remove(normalized);
+    _displayedSyncPending.remove(normalized);
+    _storage?.storeDisplayedSync(Map.from(_displayedStanzaIdByChat));
+    _storage?.storeDisplayedSyncTimestamps(Map.from(_displayedAtByChat));
+    _storage?.storeDisplayedSyncPending(Map.from(_displayedSyncPending));
+    _vcardAvatarBytes.remove(normalized);
+    _vcardAvatarState.remove(normalized);
+    _vcardDisplayNames.remove(normalized);
+    _storage?.removeVcardAvatar(normalized);
+    _storage?.removeVcardAvatarState(normalized);
+    _pepManager?.removeContact(normalized);
+    final dmScope = _mamScopeKey(normalized, isRoom: false);
+    _mamCatchUpTimers.remove(dmScope)?.cancel();
+    _mamCursorStore.remove(dmScope);
+  }
+
+  @visibleForTesting
+  void expungeDirectContactDataForTesting(String bareJid) {
+    _contacts.removeWhere((entry) => entry.jid == _bareJid(bareJid));
+    _expungeDirectContactData(bareJid);
+    notifyListeners();
   }
 
   Future<bool> upsertBookmark(ContactEntry bookmark) async {

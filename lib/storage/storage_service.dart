@@ -887,6 +887,18 @@ class StorageService {
     await box.put(_avatarMetadataKey, next);
   }
 
+  Future<void> removeAvatarMetadata(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) return;
+    final existing = box.get(
+      _avatarMetadataKey,
+      defaultValue: <String, dynamic>{},
+    );
+    if (existing is! Map || !existing.containsKey(bareJid)) return;
+    final next = Map<String, dynamic>.from(existing)..remove(bareJid);
+    await box.put(_avatarMetadataKey, next);
+  }
+
   Map<String, String> loadAvatarBlobs() {
     return _loadPrefixedStrings(_avatarBlobPrefix);
   }
@@ -993,6 +1005,18 @@ class StorageService {
       return;
     }
     await box.delete('$_vcardAvatarPrefix$bareJid');
+  }
+
+  Future<void> removeVcardAvatarState(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) return;
+    final existing = box.get(
+      _vcardAvatarStateKey,
+      defaultValue: <String, dynamic>{},
+    );
+    if (existing is! Map || !existing.containsKey(bareJid)) return;
+    final next = Map<String, dynamic>.from(existing)..remove(bareJid);
+    await box.put(_vcardAvatarStateKey, next);
   }
 
   Future<void> storeVcardAvatarState(String bareJid, String state) async {
