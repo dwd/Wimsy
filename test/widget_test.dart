@@ -171,6 +171,48 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('landscape phone keeps the compact room chat layout', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(915, 412);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final room = RoomEntry(
+      roomJid: 'lounge@conference.example.com',
+      nick: 'tester',
+      subject: 'A useful room subject',
+      joined: true,
+    );
+    final service = XmppService()
+      ..seedConnectedRoomForTesting(room, name: 'The Lounge');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    service.seedConnectedRoomForTesting(room, name: 'The Lounge');
+    await tester.pump();
+
+    expect(find.byKey(const Key('chat-header-details-button')), findsOneWidget);
+    expect(find.byTooltip('Invite to room'), findsOneWidget);
+    expect(find.byTooltip('Leave room'), findsOneWidget);
+    expect(find.text('Leave'), findsNothing);
+    expect(find.byTooltip('Send file'), findsOneWidget);
+    expect(find.byTooltip('Send photo'), findsOneWidget);
+    expect(find.byTooltip('Send'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Login form builds without framework exceptions', (
     WidgetTester tester,
   ) async {

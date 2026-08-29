@@ -761,7 +761,11 @@ class _WimsyHomeState extends State<WimsyHome> {
   Widget _buildClient(BuildContext context, XmppService service) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth > 900;
+        // A phone can exceed the width breakpoint in landscape while still
+        // having very little vertical room. Keep those displays in the
+        // compact, single-pane layout regardless of orientation.
+        final isWide =
+            constraints.maxWidth > 900 && constraints.maxHeight >= 600;
         final activeChat = service.activeChatBareJid;
         _noteActiveChatRead(service, activeChat);
 
