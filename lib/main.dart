@@ -4938,6 +4938,10 @@ class _AddByJidDialog extends StatefulWidget {
   State<_AddByJidDialog> createState() => _AddByJidDialogState();
 }
 
+@visibleForTesting
+Widget addByJidDialogForTesting(XmppService service) =>
+    _AddByJidDialog(service: service);
+
 class _AddByJidDialogState extends State<_AddByJidDialog> {
   final TextEditingController _jidController = TextEditingController();
   final TextEditingController _nickController = TextEditingController();
@@ -5143,6 +5147,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isCompact = MediaQuery.sizeOf(context).width <= 600;
 
     return AnimatedBuilder(
       animation: widget.service,
@@ -5160,6 +5165,20 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
             : (serviceName != normalized ? serviceName : '');
         final isRoom = _selectedType == _AddTargetType.room;
         return AlertDialog(
+          key: Key(
+            isCompact
+                ? 'add-by-jid-fullscreen-dialog'
+                : 'add-by-jid-standard-dialog',
+          ),
+          insetPadding: isCompact ? EdgeInsets.zero : null,
+          constraints: isCompact
+              // Fill the route's currently available area. Unlike a fixed
+              // screen-sized constraint, this also shrinks above the keyboard.
+              ? const BoxConstraints.expand()
+              : const BoxConstraints(maxWidth: 560),
+          shape: isCompact
+              ? const RoundedRectangleBorder(borderRadius: BorderRadius.zero)
+              : null,
           title: const Text('Add by JID'),
           content: SingleChildScrollView(
             child: Column(
@@ -6382,6 +6401,13 @@ class _PinSetupScreen extends StatefulWidget {
   State<_PinSetupScreen> createState() => _PinSetupScreenState();
 }
 
+@visibleForTesting
+Widget pinSetupScreenForTesting(PreferencesService preferences) =>
+    _PinSetupScreen(
+      preferences: preferences,
+      onPinSet: (_, {required ignored}) async {},
+    );
+
 class _PinSetupScreenState extends State<_PinSetupScreen> {
   final TextEditingController _pinController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
@@ -6400,74 +6426,86 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
             padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Set a PIN', style: theme.textTheme.headlineSmall),
-                const SizedBox(height: 12),
-                Text(
-                  'Your PIN encrypts local storage for messages, passwords, and other account data.',
-                  style: theme.textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'You can continue without a PIN, but device access will allow access to local data.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: math.max(0, constraints.maxHeight - 48),
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Set a PIN', style: theme.textTheme.headlineSmall),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Your PIN encrypts local storage for messages, passwords, and other account data.',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'You can continue without a PIN, but device access will allow access to local data.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _pinController,
+                        obscureText: true,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'PIN'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _confirmController,
+                        obscureText: true,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Confirm PIN',
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _sentryOptIn,
+                        title: const Text('Share crash reports'),
+                        subtitle: const Text(
+                          'Help improve Wimsy by sending anonymized crash reports.',
+                        ),
+                        onChanged: _submitting
+                            ? null
+                            : (value) => setState(() => _sentryOptIn = value),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton(
+                        onPressed: _submitting ? null : _submit,
+                        child: Text(_submitting ? 'Setting...' : 'Set PIN'),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _submitting ? null : _continueWithoutPin,
+                        child: const Text('Continue without PIN'),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _error!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _pinController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'PIN'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _confirmController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Confirm PIN'),
-                ),
-                const SizedBox(height: 16),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _sentryOptIn,
-                  title: const Text('Share crash reports'),
-                  subtitle: const Text(
-                    'Help improve Wimsy by sending anonymized crash reports.',
-                  ),
-                  onChanged: _submitting
-                      ? null
-                      : (value) => setState(() => _sentryOptIn = value),
-                ),
-                const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: Text(_submitting ? 'Setting...' : 'Set PIN'),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: _submitting ? null : _continueWithoutPin,
-                  child: const Text('Continue without PIN'),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
         ),

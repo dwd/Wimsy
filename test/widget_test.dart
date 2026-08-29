@@ -36,6 +36,71 @@ void main() {
     expect(find.byType(WimsyApp), findsOneWidget);
   });
 
+  testWidgets('PIN setup scrolls on a small portrait display', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    await tester.pumpWidget(MaterialApp(home: pinSetupScreenForTesting(prefs)));
+    await tester.pump();
+
+    expect(find.text('Set a PIN'), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text('Set a PIN'),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      findsOneWidget,
+    );
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -200),
+    );
+    await tester.pump();
+    expect(find.text('Continue without PIN'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Add by JID uses a full-screen dialog on compact displays', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => addByJidDialogForTesting(XmppService()),
+            ),
+            child: const Text('Open dialog'),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Open dialog'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('add-by-jid-fullscreen-dialog')),
+      findsOneWidget,
+    );
+    final dialogSize = tester.getSize(
+      find.byKey(const Key('add-by-jid-fullscreen-dialog')),
+    );
+    expect(dialogSize, const Size(360, 640));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Login form builds without framework exceptions', (
     WidgetTester tester,
   ) async {
