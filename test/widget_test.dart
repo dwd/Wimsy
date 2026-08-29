@@ -382,6 +382,57 @@ void main() {
     expect(find.text('👍'), findsOneWidget);
   });
 
+  testWidgets('message menu can add a known room occupant to contacts', (
+    WidgetTester tester,
+  ) async {
+    var added = false;
+    final message = ChatMessage(
+      from: 'Bob',
+      to: 'room@conference.example.com',
+      body: 'Hello from a room',
+      timestamp: DateTime.utc(2026),
+      outgoing: false,
+      messageId: 'room-roster-menu-test',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'Bob',
+            timestamp: '12:00',
+            avatarBytes: null,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            onAddToRoster: () => added = true,
+            selfReactionSenderId: 'Alice',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    await tester.longPress(find.text('Hello from a room'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add to contacts'), findsOneWidget);
+
+    await tester.tap(find.text('Add to contacts'));
+    expect(added, isTrue);
+  });
+
   testWidgets('long-press menu waits for the recognizing touch to end', (
     WidgetTester tester,
   ) async {

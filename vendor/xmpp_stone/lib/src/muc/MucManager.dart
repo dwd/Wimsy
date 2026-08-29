@@ -50,6 +50,7 @@ class MucManager {
   Stream<MucPresenceUpdate> get roomPresenceStream =>
       _presenceController.stream;
   Stream<MucSubjectUpdate> get roomSubjectStream => _subjectController.stream;
+
   /// Emits an event when the server rejects a room join with an error presence.
   Stream<MucJoinError> get roomJoinErrorStream => _joinErrorController.stream;
 
@@ -158,6 +159,7 @@ class MucManager {
     final item = x.getChild('item');
     final role = item?.getAttribute('role')?.value;
     final affiliation = item?.getAttribute('affiliation')?.value;
+    final realJid = item?.getAttribute('jid')?.value;
     final statusCodes = x.children
         .where((child) => child.name == 'status')
         .map((child) => child.getAttribute('code')?.value ?? '')
@@ -170,6 +172,7 @@ class MucManager {
       nick: from.resource ?? '',
       role: role,
       affiliation: affiliation,
+      realJid: realJid,
       isSelf: isSelf,
       unavailable: isUnavailable,
       statusCodes: statusCodes,
@@ -554,6 +557,7 @@ class MucPresenceUpdate {
     required this.nick,
     this.role,
     this.affiliation,
+    this.realJid,
     required this.isSelf,
     required this.unavailable,
     required this.statusCodes,
@@ -563,6 +567,9 @@ class MucPresenceUpdate {
   final String nick;
   final String? role;
   final String? affiliation;
+
+  /// The occupant's real JID when the room discloses it.
+  final String? realJid;
   final bool isSelf;
   final bool unavailable;
   final Set<String> statusCodes;

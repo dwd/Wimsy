@@ -1637,6 +1637,16 @@ class _WimsyHomeState extends State<WimsyHome> {
                                   password: message.invitePassword,
                                 )
                               : null;
+                          final occupantRosterJid =
+                              isBookmark && !message.outgoing
+                              ? service.roomOccupantRealJid(
+                                  activeChat,
+                                  message.from,
+                                )
+                              : null;
+                          final canAddOccupantToRoster =
+                              occupantRosterJid != null &&
+                              occupantRosterJid != service.currentUserBareJid;
                           return MessageBubble(
                             key: messageKey,
                             message: message,
@@ -1656,6 +1666,9 @@ class _WimsyHomeState extends State<WimsyHome> {
                             inviteAvatarBytes: inviteAvatarBytes,
                             inviteReason: message.inviteReason,
                             onJoinInvite: joinRoom,
+                            onAddToRoster: canAddOccupantToRoster
+                                ? () => _addOccupantToRoster(occupantRosterJid)
+                                : null,
                             selfReactionSenderId: service.reactionSenderForChat(
                               activeChat,
                               isRoom: isBookmark,
@@ -3297,6 +3310,15 @@ class _WimsyHomeState extends State<WimsyHome> {
     await _promptPresenceSubscriptionActions(result.jid);
   }
 
+  Future<void> _addOccupantToRoster(String jid) async {
+    final ok = await widget.service.upsertRosterContact(jid);
+    if (!ok) {
+      _showSnack('Failed to save contact.');
+      return;
+    }
+    await _promptPresenceSubscriptionActions(jid);
+  }
+
   Future<void> _promptPresenceSubscriptionActions(String jid) async {
     if (!mounted) {
       return;
@@ -4093,6 +4115,7 @@ class MessageBubble extends StatelessWidget {
     required this.inviteAvatarBytes,
     required this.inviteReason,
     required this.onJoinInvite,
+    this.onAddToRoster,
     required this.selfReactionSenderId,
     required this.recentReactionOptions,
     required this.onReact,
@@ -4115,6 +4138,7 @@ class MessageBubble extends StatelessWidget {
   final Uint8List? inviteAvatarBytes;
   final String? inviteReason;
   final VoidCallback? onJoinInvite;
+  final VoidCallback? onAddToRoster;
   final String selfReactionSenderId;
   final List<String> recentReactionOptions;
   final void Function(String emoji)? onReact;
@@ -4155,6 +4179,7 @@ class MessageBubble extends StatelessWidget {
               onReact: onReact,
               onEdit: onEdit,
               onReply: onReply,
+              onAddToRoster: onAddToRoster,
               child: _AvatarPlaceholder(label: senderName, bytes: avatarBytes),
             ),
             const SizedBox(width: 12),
@@ -5501,6 +5526,7 @@ class _MessageMenuButton extends StatefulWidget {
     required this.onReact,
     required this.onEdit,
     required this.onReply,
+    this.onAddToRoster,
     this.child,
   });
 
@@ -5510,6 +5536,7 @@ class _MessageMenuButton extends StatefulWidget {
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
   final VoidCallback? onReply;
+  final VoidCallback? onAddToRoster;
   final Widget? child;
 
   @override
@@ -5554,6 +5581,11 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
         const PopupMenuItem(value: 'edit_message', child: Text('Edit message')),
       if (widget.onReply != null)
         const PopupMenuItem(value: 'reply_message', child: Text('Reply')),
+      if (widget.onAddToRoster != null)
+        const PopupMenuItem(
+          value: 'add_to_roster',
+          child: Text('Add to contacts'),
+        ),
       if (widget.onReact != null)
         const PopupMenuItem(value: 'add_reaction', child: Text('Add reaction')),
       if (reactions.isNotEmpty)
@@ -5571,6 +5603,8 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
         widget.onEdit?.call();
       case 'reply_message':
         widget.onReply?.call();
+      case 'add_to_roster':
+        widget.onAddToRoster?.call();
       case 'add_reaction':
         _showReactionSheet(context);
       case 'view_reactions':

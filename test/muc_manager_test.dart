@@ -24,6 +24,7 @@ PresenceStanza _buildMucPresence({
   required String fromFullJid,
   required String nick,
   required bool unavailable,
+  String? realJid,
 }) {
   final stanza = unavailable
       ? PresenceStanza.withType(PresenceType.UNAVAILABLE)
@@ -34,6 +35,9 @@ PresenceStanza _buildMucPresence({
   final item = XmppElement()..name = 'item';
   item.addAttribute(XmppAttribute('role', 'participant'));
   item.addAttribute(XmppAttribute('affiliation', 'member'));
+  if (realJid != null) {
+    item.addAttribute(XmppAttribute('jid', realJid));
+  }
   x.addChild(item);
   final status = XmppElement()..name = 'status';
   status.addAttribute(XmppAttribute('code', '110'));
@@ -44,7 +48,13 @@ PresenceStanza _buildMucPresence({
 
 void main() {
   test('MUC join builds presence stanza', () {
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     final muc = connection.getMucModule();
 
@@ -57,7 +67,13 @@ void main() {
   });
 
   test('MUC groupchat message emits stream', () async {
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     final muc = connection.getMucModule();
 
@@ -81,7 +97,13 @@ void main() {
   });
 
   test('MUC groupchat message exposes replace id', () async {
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     final muc = connection.getMucModule();
 
@@ -107,7 +129,13 @@ void main() {
   });
 
   test('MUC presence emits occupant updates', () async {
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     final muc = connection.getMucModule();
 
@@ -115,6 +143,7 @@ void main() {
       fromFullJid: 'room@conference.example',
       nick: 'me',
       unavailable: false,
+      realJid: 'me@example.com/resource',
     );
 
     final completer = Completer<MucPresenceUpdate>();
@@ -128,6 +157,7 @@ void main() {
     await sub.cancel();
 
     expect(update.roomJid, 'room@conference.example');
+    expect(update.realJid, 'me@example.com/resource');
     expect(update.nick, 'me');
     expect(update.isSelf, true);
     expect(update.unavailable, false);

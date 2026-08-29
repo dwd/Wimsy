@@ -179,6 +179,7 @@ class XmppService extends ChangeNotifier {
   final List<ContactEntry> _bookmarks = [];
   final Map<String, RoomEntry> _rooms = {};
   final Map<String, Set<String>> _roomOccupants = {};
+  final Map<String, String> _roomOccupantRealJids = {};
   final Map<String, MujiSessionState> _mujiSessions = {};
   final Map<String, StreamSubscription> _roomSubscriptions = {};
   final Map<String, PresenceData> _presenceByBareJid = {};
@@ -369,6 +370,10 @@ class XmppService extends ChangeNotifier {
   }
 
   RoomEntry? roomFor(String bareJid) => _rooms[_bareJid(bareJid)];
+  String? roomOccupantRealJid(String roomJid, String nick) {
+    return _roomOccupantRealJids['${_bareJid(roomJid)}/$nick'];
+  }
+
   Duration? get lastPingLatency => _lastPingLatency;
   DateTime? get lastPingAt => _lastPingAt;
   bool get carbonsEnabled => _carbonsEnabled;
@@ -1629,6 +1634,7 @@ class XmppService extends ChangeNotifier {
     _seededRoomMessageJids.clear();
     _rooms.clear();
     _roomOccupants.clear();
+    _roomOccupantRealJids.clear();
     _mucDefaultConfigSent.clear();
     _mujiSessions.clear();
     _mujiSessions.clear();
@@ -2161,6 +2167,10 @@ class XmppService extends ChangeNotifier {
     }
     muc.leaveRoom(Jid.fromFullJid(entry.roomJid), entry.nick!);
     _rooms[entry.roomJid] = entry.copyWith(joined: false);
+    _roomOccupants.remove(entry.roomJid);
+    _roomOccupantRealJids.removeWhere(
+      (occupantJid, _) => occupantJid.startsWith('${entry.roomJid}/'),
+    );
     notifyListeners();
   }
 
@@ -3139,10 +3149,16 @@ class XmppService extends ChangeNotifier {
         _sendMucDefaultConfig(roomJid);
       }
       final occupants = _roomOccupants.putIfAbsent(roomJid, () => <String>{});
+      final occupantKey = '$roomJid/${presence.nick}';
       if (presence.unavailable) {
         occupants.remove(presence.nick);
+        _roomOccupantRealJids.remove(occupantKey);
       } else {
         occupants.add(presence.nick);
+        final realJid = presence.realJid;
+        if (realJid != null && realJid.isNotEmpty) {
+          _roomOccupantRealJids[occupantKey] = _bareJid(realJid);
+        }
       }
       if (presence.isSelf && !presence.unavailable) {
         final joinSpan = _mucJoinTransactions.remove(roomJid);
@@ -8326,6 +8342,7 @@ class XmppService extends ChangeNotifier {
     _presenceByFullJid.clear();
     _rooms.clear();
     _roomOccupants.clear();
+    _roomOccupantRealJids.clear();
     _lastSeenAt.clear();
     _serverNotFound.clear();
     _chatStates.clear();
