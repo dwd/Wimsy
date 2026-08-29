@@ -214,6 +214,8 @@ void main() {
     expect(find.textContaining('Signed in as'), findsNothing);
     expect(find.byTooltip('Set presence'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('message-composer-input')));
+    await tester.pump();
     tester.view.viewInsets = const FakeViewPadding(bottom: 240);
     await tester.pump();
     expect(
@@ -222,10 +224,17 @@ void main() {
     );
     expect(find.text('The Lounge'), findsNothing);
     expect(find.byTooltip('Set presence'), findsNothing);
-    expect(find.byTooltip('Send file'), findsNothing);
-    expect(find.byTooltip('Send photo'), findsNothing);
-    expect(find.byTooltip('Send'), findsNothing);
+    expect(find.byTooltip('Send file'), findsOneWidget);
+    expect(find.byTooltip('Send photo'), findsOneWidget);
+    expect(find.byTooltip('Send'), findsOneWidget);
     expect(find.byKey(const Key('message-composer-input')), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('message-composer-input')))
+          .focusNode
+          ?.hasFocus,
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   });
 

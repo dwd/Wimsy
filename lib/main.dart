@@ -1319,6 +1319,14 @@ class _WimsyHomeState extends State<WimsyHome> {
     if (keyboardFullscreen) {
       final canSend =
           activeChat != null && (!isBookmark || (roomEntry?.joined ?? false));
+      // Switching from the regular composer to this expanded one replaces
+      // the TextField element. Reattach its shared FocusNode after layout so
+      // Android does not dismiss the keyboard during that transition.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_messageFocusNode.hasFocus) {
+          _messageFocusNode.requestFocus();
+        }
+      });
       return SafeArea(
         child: Container(
           key: const Key('landscape-fullscreen-composer'),
@@ -1339,6 +1347,38 @@ class _WimsyHomeState extends State<WimsyHome> {
                   },
                   onSubmitted: (_) => _sendMessage(activeChat),
                 ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: canSend
+                        ? () => _sendAttachment(
+                            activeChat,
+                            isBookmark: isBookmark,
+                            roomEntry: roomEntry,
+                          )
+                        : null,
+                    icon: const Icon(Icons.attach_file),
+                    tooltip: 'Send file',
+                  ),
+                  IconButton(
+                    onPressed: canSend
+                        ? () => _sendPhotoMessage(
+                            activeChat,
+                            isBookmark: isBookmark,
+                            roomEntry: roomEntry,
+                          )
+                        : null,
+                    icon: const Icon(Icons.photo_camera),
+                    tooltip: 'Send photo',
+                  ),
+                  IconButton(
+                    onPressed: canSend ? () => _sendMessage(activeChat) : null,
+                    icon: const Icon(Icons.send),
+                    tooltip: 'Send',
+                  ),
+                ],
               ),
             ],
           ),
