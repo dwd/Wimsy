@@ -22,7 +22,12 @@ import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 
 class _SuggestionXmppService extends XmppService {
+  _SuggestionXmppService({this.unknownFallback = false});
+
+  final bool unknownFallback;
   bool? lastExcludeRosterContacts;
+  int suggestionCalls = 0;
+  int discoveryCalls = 0;
 
   @override
   String? get currentUserBareJid => 'me@example.com';
@@ -33,7 +38,17 @@ class _SuggestionXmppService extends XmppService {
     Duration timeout = const Duration(seconds: 5),
     bool excludeRosterContacts = false,
   }) async {
+    suggestionCalls++;
     lastExcludeRosterContacts = excludeRosterContacts;
+    if (unknownFallback) {
+      return const [
+        JidSuggestion(
+          jid: 'ali@example.com',
+          kind: DiscoveredJidKind.person,
+          isUnverified: true,
+        ),
+      ];
+    }
     return const [
       JidSuggestion(
         jid: 'alice@example.com',
@@ -41,6 +56,15 @@ class _SuggestionXmppService extends XmppService {
         name: 'Alice Example',
       ),
     ];
+  }
+
+  @override
+  Future<JidDiscoveryResult> discoverJidKind(
+    String jid, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    discoveryCalls++;
+    return const JidDiscoveryResult(kind: DiscoveredJidKind.unknown);
   }
 }
 
@@ -173,6 +197,55 @@ void main() {
     await tester.pump();
 
     expect(service.lastExcludeRosterContacts, isTrue);
+  });
+
+  testWidgets('full addresses are probed without running a search', (
+    WidgetTester tester,
+  ) async {
+    final service = _SuggestionXmppService();
+    await tester.pumpWidget(
+      MaterialApp(home: addByJidDialogForTesting(service)),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'alice@example.com');
+    await tester.pump(const Duration(milliseconds: 550));
+    await tester.pump();
+
+    expect(service.suggestionCalls, 0);
+    expect(service.discoveryCalls, 1);
+  });
+
+  testWidgets('Inviter probes full addresses without running a search', (
+    WidgetTester tester,
+  ) async {
+    final service = _SuggestionXmppService();
+    await tester.pumpWidget(
+      MaterialApp(home: roomInviteDialogForTesting(service)),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'alice@example.com');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    expect(service.suggestionCalls, 0);
+    expect(service.discoveryCalls, 1);
+    expect(find.byIcon(Icons.help_outline), findsOneWidget);
+  });
+
+  testWidgets('unknown fallback suggestions use a question-mark icon', (
+    WidgetTester tester,
+  ) async {
+    final service = _SuggestionXmppService(unknownFallback: true);
+    await tester.pumpWidget(
+      MaterialApp(home: addByJidDialogForTesting(service)),
+    );
+
+    await tester.enterText(find.byType(TextField).first, 'ali');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    expect(find.text('ali@example.com'), findsOneWidget);
+    expect(find.byIcon(Icons.help_outline), findsOneWidget);
   });
 
   testWidgets('portrait room chat folds details and keeps composer actions', (
@@ -801,14 +874,20 @@ void main() {
     );
 
     expect(find.byKey(const Key('stop-connecting-button')), findsOneWidget);
-    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'JID')).enabled, isFalse);
+    expect(
+      tester.widget<TextField>(find.widgetWithText(TextField, 'JID')).enabled,
+      isFalse,
+    );
 
     await tester.tap(find.byKey(const Key('stop-connecting-button')));
     await tester.pump();
 
     expect(service.disconnectCalled, isTrue);
     expect(find.byKey(const Key('stop-connecting-button')), findsNothing);
-    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'JID')).enabled, isTrue);
+    expect(
+      tester.widget<TextField>(find.widgetWithText(TextField, 'JID')).enabled,
+      isTrue,
+    );
   });
 
   testWidgets('Manual connection offers each native transport protocol', (

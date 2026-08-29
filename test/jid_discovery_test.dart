@@ -5,6 +5,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 IqStanza _discoInfoResult({
   List<Map<String, String>> identities = const [],
   List<String> features = const [],
+  String? description,
 }) {
   final iq = IqStanza('id-1', IqStanzaType.RESULT);
   final query = XmppElement()..name = 'query';
@@ -22,6 +23,19 @@ IqStanza _discoInfoResult({
     final child = XmppElement()..name = 'feature';
     child.addAttribute(XmppAttribute('var', feature));
     query.addChild(child);
+  }
+  if (description != null) {
+    final form = XmppElement()..name = 'x';
+    form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+    final field = XmppElement()..name = 'field';
+    field.addAttribute(XmppAttribute('var', 'muc#roominfo_description'));
+    field.addChild(
+      XmppElement()
+        ..name = 'value'
+        ..textValue = description,
+    );
+    form.addChild(field);
+    query.addChild(form);
   }
   iq.addChild(query);
   return iq;
@@ -123,6 +137,30 @@ void main() {
     );
     expect(result.identityName, 'Alice Laptop');
   });
+
+  test(
+    'uses room identity, description, then disco item name for bookmarks',
+    () {
+      final described = classifyJidFromDiscoInfo(
+        _discoInfoResult(
+          features: const ['http://jabber.org/protocol/muc'],
+          description: 'A quiet place',
+        ),
+      );
+      expect(described.description, 'A quiet place');
+      expect(
+        discoveredRoomName(described, discoItemsName: 'Quiet Room'),
+        'A quiet place',
+      );
+      expect(
+        discoveredRoomName(
+          const JidDiscoveryResult(kind: DiscoveredJidKind.room),
+          discoItemsName: 'Quiet Room',
+        ),
+        'Quiet Room',
+      );
+    },
+  );
 
   test('parses and names legacy XEP-0055 results', () {
     final results = parseJidSearchResults(

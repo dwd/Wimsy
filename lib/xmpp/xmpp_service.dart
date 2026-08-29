@@ -833,6 +833,13 @@ class XmppService extends ChangeNotifier {
     }
     final serverDomain = Jid.fromFullJid(self).domain;
     final suggestions = <JidSuggestion>[];
+    final fallbackSuggestions = <JidSuggestion>[
+      JidSuggestion(
+        jid: '$term@$serverDomain',
+        kind: DiscoveredJidKind.person,
+        isUnverified: true,
+      ),
+    ];
     final rosterJids = _contacts
         .map((contact) => contact.jid.toLowerCase())
         .toSet();
@@ -856,32 +863,36 @@ class XmppService extends ChangeNotifier {
       }
     }
 
-    if (!term.contains('@')) {
-      add(
-        JidSuggestion(
-          jid: '$term@$serverDomain',
-          kind: DiscoveredJidKind.person,
-        ),
-      );
-    }
+    if (term.contains('@')) return const [];
     try {
       final items = await _requestDiscoItems(serverDomain).timeout(timeout);
       for (final item in items) {
         final info = await _requestDiscoInfo(item).timeout(timeout);
         final classified = classifyJidFromDiscoInfo(info);
         if (classified.kind == DiscoveredJidKind.room) {
-          if (!term.contains('@')) {
-            add(
-              JidSuggestion(
-                jid: '$term@$item',
-                kind: DiscoveredJidKind.room,
-                name: classified.identityName,
-              ),
-            );
-          }
-          final rooms = await _requestDiscoItems(item).timeout(timeout);
+          fallbackSuggestions.add(
+            JidSuggestion(
+              jid: '$term@$item',
+              kind: DiscoveredJidKind.room,
+              isUnverified: true,
+            ),
+          );
+          final rooms = await _requestDiscoItemSuggestions(
+            item,
+          ).timeout(timeout);
           for (final room in rooms) {
-            add(JidSuggestion(jid: room, kind: DiscoveredJidKind.room));
+            final roomInfo = classifyJidFromDiscoInfo(
+              await _requestDiscoInfo(room.jid).timeout(timeout),
+            );
+            if (roomInfo.kind == DiscoveredJidKind.room) {
+              add(
+                JidSuggestion(
+                  jid: room.jid,
+                  kind: DiscoveredJidKind.room,
+                  name: discoveredRoomName(roomInfo, discoItemsName: room.name),
+                ),
+              );
+            }
           }
         }
         if (classified.features.contains(jidSearchNamespace)) {
@@ -893,6 +904,11 @@ class XmppService extends ChangeNotifier {
       }
     } catch (_) {
       // Local-domain completion remains useful when optional discovery fails.
+    }
+    if (suggestions.isEmpty) {
+      for (final fallback in fallbackSuggestions) {
+        add(fallback);
+      }
     }
     return suggestions.take(8).toList(growable: false);
   }
@@ -5607,6 +5623,13 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<List<String>> _requestDiscoItems(String targetJid) async {
+    final suggestions = await _requestDiscoItemSuggestions(targetJid);
+    return suggestions.map((item) => item.jid).toList(growable: false);
+  }
+
+  Future<List<JidSuggestion>> _requestDiscoItemSuggestions(
+    String targetJid,
+  ) async {
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.GET);
     iqStanza.toJid = Jid.fromFullJid(targetJid);
@@ -5625,14 +5648,21 @@ class XmppService extends ChangeNotifier {
             'http://jabber.org/protocol/disco#items') {
       return const [];
     }
-    final items = <String>[];
+    final items = <JidSuggestion>[];
     for (final child in resultQuery.children) {
       if (child.name != 'item') {
         continue;
       }
       final jid = child.getAttribute('jid')?.value?.trim() ?? '';
       if (jid.isNotEmpty) {
-        items.add(jid);
+        final name = child.getAttribute('name')?.value?.trim();
+        items.add(
+          JidSuggestion(
+            jid: jid,
+            kind: DiscoveredJidKind.unknown,
+            name: name?.isNotEmpty == true ? name : null,
+          ),
+        );
       }
     }
     return items;

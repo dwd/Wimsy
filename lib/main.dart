@@ -5130,6 +5130,8 @@ class _RoomInviteDialogState extends State<_RoomInviteDialog> {
   Timer? _debounce;
   int _token = 0;
   List<JidSuggestion> _suggestions = const [];
+  DiscoveredJidKind? _probeKind;
+  bool _probing = false;
   String? _error;
 
   @override
@@ -5153,14 +5155,32 @@ class _RoomInviteDialogState extends State<_RoomInviteDialog> {
     setState(() {
       _error = null;
       _suggestions = const [];
+      _probeKind = null;
+      _probing = false;
     });
-    if (term.isEmpty || term.contains('@')) return;
+    if (term.isEmpty) return;
+    if (term.contains('@')) {
+      _probing = true;
+      _debounce = Timer(const Duration(milliseconds: 350), () async {
+        final result = await widget.service.discoverJidKind(term);
+        if (!mounted || token != _token) return;
+        setState(() {
+          _probing = false;
+          _probeKind = result.kind;
+        });
+      });
+      return;
+    }
     _debounce = Timer(const Duration(milliseconds: 350), () async {
       final results = await widget.service.suggestLocalJids(term);
       if (!mounted || token != _token) return;
       setState(() {
         _suggestions = results
-            .where((result) => result.kind == DiscoveredJidKind.person)
+            .where(
+              (result) =>
+                  result.kind == DiscoveredJidKind.person ||
+                  result.kind == DiscoveredJidKind.unknown,
+            )
             .toList(growable: false);
       });
     });
@@ -5198,13 +5218,34 @@ class _RoomInviteDialogState extends State<_RoomInviteDialog> {
               labelText: 'Invitee JID',
               hintText: 'user@example.com',
               errorText: _error,
+              suffixIcon: _probing
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : switch (_probeKind) {
+                      DiscoveredJidKind.person => const Icon(
+                        Icons.person_outline,
+                      ),
+                      DiscoveredJidKind.room => const Icon(
+                        Icons.meeting_room_outlined,
+                      ),
+                      DiscoveredJidKind.unknown => const Icon(
+                        Icons.help_outline,
+                      ),
+                      null => null,
+                    },
             ),
           ),
           ..._suggestions.map(
             (suggestion) => ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.person_outline),
+              leading: Icon(
+                suggestion.isUnverified
+                    ? Icons.help_outline
+                    : Icons.person_outline,
+              ),
               title: Text(suggestion.name ?? suggestion.jid),
               subtitle: suggestion.name == null ? null : Text(suggestion.jid),
               onTap: () => _jidController.text = suggestion.jid,
@@ -5355,13 +5396,14 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
         return;
       }
       final identityName = result.identityName?.trim();
+      final roomName = discoveredRoomName(result);
       final currentRoomName = _roomNameController.text.trim();
       if (result.kind == DiscoveredJidKind.room &&
-          identityName?.isNotEmpty == true &&
+          roomName?.isNotEmpty == true &&
           (currentRoomName.isEmpty ||
               currentRoomName == _discoveredRoomNamePrefill)) {
-        _roomNameController.text = identityName!;
-        _discoveredRoomNamePrefill = identityName;
+        _roomNameController.text = roomName!;
+        _discoveredRoomNamePrefill = roomName;
       }
       setState(() {
         _discovering = false;
@@ -5519,9 +5561,15 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(
-                        suggestion.kind == DiscoveredJidKind.room
-                            ? Icons.meeting_room_outlined
-                            : Icons.person_outline,
+                        suggestion.isUnverified
+                            ? Icons.help_outline
+                            : switch (suggestion.kind) {
+                                DiscoveredJidKind.room =>
+                                  Icons.meeting_room_outlined,
+                                DiscoveredJidKind.person =>
+                                  Icons.person_outline,
+                                DiscoveredJidKind.unknown => Icons.help_outline,
+                              },
                       ),
                       title: Text(suggestion.name ?? suggestion.jid),
                       subtitle: suggestion.name == null
@@ -5537,6 +5585,12 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                               suggestion.kind == DiscoveredJidKind.room
                               ? _AddTargetType.room
                               : _AddTargetType.person;
+                          if (suggestion.kind == DiscoveredJidKind.room &&
+                              suggestion.name?.trim().isNotEmpty == true) {
+                            _roomNameController.text = suggestion.name!.trim();
+                            _discoveredRoomNamePrefill = suggestion.name!
+                                .trim();
+                          }
                         });
                       },
                     ),

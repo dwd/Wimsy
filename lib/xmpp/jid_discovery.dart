@@ -3,11 +3,17 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 enum DiscoveredJidKind { person, room, unknown }
 
 class JidSuggestion {
-  const JidSuggestion({required this.jid, required this.kind, this.name});
+  const JidSuggestion({
+    required this.jid,
+    required this.kind,
+    this.name,
+    this.isUnverified = false,
+  });
 
   final String jid;
   final DiscoveredJidKind kind;
   final String? name;
+  final bool isUnverified;
 }
 
 /// Matches directory and roster suggestions by either their JID or name.
@@ -41,11 +47,13 @@ class JidDiscoveryResult {
     required this.kind,
     this.features = const <String>{},
     this.identityName,
+    this.description,
   });
 
   final DiscoveredJidKind kind;
   final Set<String> features;
   final String? identityName;
+  final String? description;
 }
 
 const String _discoInfoNamespace = 'http://jabber.org/protocol/disco#info';
@@ -96,6 +104,7 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
   var hasAccountIdentity = false;
   var hasImServerIdentity = false;
   String? identityName;
+  String? description;
 
   for (final child in query.children) {
     if (child.name == 'identity') {
@@ -119,6 +128,18 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
       if (value != null && value.isNotEmpty) {
         features.add(value);
       }
+    } else if (child.name == 'x' &&
+        child.getAttribute('xmlns')?.value == 'jabber:x:data') {
+      for (final field in child.children.where(
+        (item) => item.name == 'field',
+      )) {
+        if (field.getAttribute('var')?.value == 'muc#roominfo_description') {
+          final value = field.getChild('value')?.textValue?.trim();
+          if (value != null && value.isNotEmpty) {
+            description = value;
+          }
+        }
+      }
     }
   }
 
@@ -127,6 +148,7 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
       kind: DiscoveredJidKind.room,
       features: features,
       identityName: identityName,
+      description: description,
     );
   }
   if (hasAccountIdentity || hasImServerIdentity) {
@@ -134,11 +156,29 @@ JidDiscoveryResult classifyJidFromDiscoInfo(IqStanza? discoInfo) {
       kind: DiscoveredJidKind.person,
       features: features,
       identityName: identityName,
+      description: description,
     );
   }
   return JidDiscoveryResult(
     kind: DiscoveredJidKind.unknown,
     features: features,
     identityName: identityName,
+    description: description,
   );
+}
+
+/// Picks the most useful human-readable bookmark name for a discovered room.
+String? discoveredRoomName(
+  JidDiscoveryResult result, {
+  String? discoItemsName,
+}) {
+  for (final candidate in [
+    result.identityName,
+    result.description,
+    discoItemsName,
+  ]) {
+    final value = candidate?.trim();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  return null;
 }
