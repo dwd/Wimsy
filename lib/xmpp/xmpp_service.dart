@@ -53,6 +53,7 @@ import 'srv_target.dart';
 import 'alt_connection.dart';
 import 'quic_endpoint_plan.dart';
 import 'quic_xmpp_socket.dart';
+import 'room_nickname.dart';
 import 'tcp_endpoint_plan.dart';
 
 class ReplyReference {
@@ -632,6 +633,15 @@ class XmppService extends ChangeNotifier {
       return vcardName;
     }
     return normalized;
+  }
+
+  /// The nickname used for a new room when the user does not specify one.
+  String get defaultRoomNick {
+    final accountJid = _currentUserBareJid ?? '';
+    return defaultRoomNickname(
+      accountJid: accountJid,
+      profileDisplayName: _vcardDisplayNames[accountJid],
+    );
   }
 
   bool isBookmark(String bareJid) {
@@ -7970,9 +7980,7 @@ class XmppService extends ChangeNotifier {
     if (bookmark.jid.isNotEmpty && bookmark.bookmarkNick?.isNotEmpty == true) {
       return bookmark.bookmarkNick!;
     }
-    final bare = _currentUserBareJid ?? '';
-    final parts = bare.split('@');
-    return parts.isNotEmpty ? parts.first : 'wimsy';
+    return defaultRoomNick;
   }
 
   String? _roomPasswordFor(String roomJid) {

@@ -3142,9 +3142,10 @@ class _WimsyHomeState extends State<WimsyHome> {
       return;
     }
     if (result.isRoom) {
+      final nick = result.nick ?? widget.service.defaultRoomNick;
       widget.service.joinRoom(
         result.jid,
-        nick: result.nick,
+        nick: nick,
         password: result.password,
       );
       if (result.saveBookmark) {
@@ -3153,7 +3154,7 @@ class _WimsyHomeState extends State<WimsyHome> {
           name: result.roomName,
           groups: const [],
           isBookmark: true,
-          bookmarkNick: result.nick,
+          bookmarkNick: nick,
           bookmarkPassword: result.password,
           bookmarkAutoJoin: result.autoJoin,
         );
@@ -5263,8 +5264,9 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _nickController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Nickname (optional)',
+                      hintText: widget.service.defaultRoomNick,
                     ),
                   ),
                   const SizedBox(height: 12),
