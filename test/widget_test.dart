@@ -178,6 +178,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
     SharedPreferences.setMockInitialValues({});
     final prefs = await PreferencesService.load();
     final room = RoomEntry(
@@ -210,6 +211,21 @@ void main() {
     expect(find.byTooltip('Send file'), findsOneWidget);
     expect(find.byTooltip('Send photo'), findsOneWidget);
     expect(find.byTooltip('Send'), findsOneWidget);
+    expect(find.textContaining('Signed in as'), findsNothing);
+    expect(find.byTooltip('Set presence'), findsOneWidget);
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 240);
+    await tester.pump();
+    expect(
+      find.byKey(const Key('landscape-fullscreen-composer')),
+      findsOneWidget,
+    );
+    expect(find.text('The Lounge'), findsNothing);
+    expect(find.byTooltip('Set presence'), findsNothing);
+    expect(find.byTooltip('Send file'), findsNothing);
+    expect(find.byTooltip('Send photo'), findsNothing);
+    expect(find.byTooltip('Send'), findsNothing);
+    expect(find.byKey(const Key('message-composer-input')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

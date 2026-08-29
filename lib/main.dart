@@ -767,40 +767,47 @@ class _WimsyHomeState extends State<WimsyHome> {
         final isWide =
             constraints.maxWidth > 900 && constraints.maxHeight >= 600;
         final activeChat = service.activeChatBareJid;
+        final isLandscapePhone =
+            constraints.maxWidth > constraints.maxHeight &&
+            constraints.maxHeight < 600;
         _noteActiveChatRead(service, activeChat);
 
         return Scaffold(
-          appBar: AppBar(
-            title: Text('Signed in as ${service.currentUserBareJid ?? ''}'),
-            actions: [
-              if (service.quicRttHistory.isNotEmpty) ...[
-                _QuicStatsGraph(
-                  label: 'RTT',
-                  data: service.quicRttHistory,
-                  color: Colors.blue,
-                  unit: 'ms',
+          appBar: activeChat != null && isLandscapePhone
+              ? null
+              : AppBar(
+                  title: Text(
+                    'Signed in as ${service.currentUserBareJid ?? ''}',
+                  ),
+                  actions: [
+                    if (service.quicRttHistory.isNotEmpty) ...[
+                      _QuicStatsGraph(
+                        label: 'RTT',
+                        data: service.quicRttHistory,
+                        color: Colors.blue,
+                        unit: 'ms',
+                      ),
+                      const SizedBox(width: 8),
+                      _QuicStatsGraph(
+                        label: 'Loss',
+                        data: service.quicLossHistory,
+                        color: Colors.red,
+                        unit: '',
+                        showAverage: true,
+                      ),
+                      const SizedBox(width: 16),
+                    ],
+                    _PresenceMenu(
+                      service: service,
+                      preferences: widget.preferences,
+                      onClearCacheExit: _clearingCache
+                          ? null
+                          : _confirmClearCacheAndExit,
+                      onExit: _handleExit,
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                _QuicStatsGraph(
-                  label: 'Loss',
-                  data: service.quicLossHistory,
-                  color: Colors.red,
-                  unit: '',
-                  showAverage: true,
-                ),
-                const SizedBox(width: 16),
-              ],
-              _PresenceMenu(
-                service: service,
-                preferences: widget.preferences,
-                onClearCacheExit: _clearingCache
-                    ? null
-                    : _confirmClearCacheAndExit,
-                onExit: _handleExit,
-              ),
-              const SizedBox(width: 12),
-            ],
-          ),
           body: Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -823,13 +830,20 @@ class _WimsyHomeState extends State<WimsyHome> {
                           service,
                           activeChat,
                           showBack: false,
+                          showPresenceMenu: false,
                         ),
                       ),
                     ],
                   )
                 : activeChat == null
                 ? _buildRosterPane(context, service, isWide: false)
-                : _buildChatPane(context, service, activeChat, showBack: true),
+                : _buildChatPane(
+                    context,
+                    service,
+                    activeChat,
+                    showBack: true,
+                    showPresenceMenu: isLandscapePhone,
+                  ),
           ),
         );
       },
@@ -1219,6 +1233,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     XmppService service,
     String? activeChat, {
     required bool showBack,
+    required bool showPresenceMenu,
   }) {
     final theme = Theme.of(context);
     final isBookmark = activeChat != null && service.isBookmark(activeChat);
@@ -1297,6 +1312,38 @@ class _WimsyHomeState extends State<WimsyHome> {
           _scrollToBottom();
         }
       });
+    }
+
+    final keyboardFullscreen =
+        showPresenceMenu && MediaQuery.viewInsetsOf(context).bottom > 0;
+    if (keyboardFullscreen) {
+      final canSend =
+          activeChat != null && (!isBookmark || (roomEntry?.joined ?? false));
+      return SafeArea(
+        child: Container(
+          key: const Key('landscape-fullscreen-composer'),
+          padding: const EdgeInsets.all(12),
+          color: theme.colorScheme.surface,
+          child: Column(
+            children: [
+              Expanded(
+                child: MessageComposerTextField(
+                  controller: _messageController,
+                  focusNode: _messageFocusNode,
+                  autofocus: true,
+                  enabled: canSend,
+                  fullscreen: true,
+                  onChanged: (value) {
+                    if (activeChat == null || isBookmark) return;
+                    _handleTypingState(service, activeChat, value);
+                  },
+                  onSubmitted: (_) => _sendMessage(activeChat),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     return SafeArea(
@@ -1385,6 +1432,15 @@ class _WimsyHomeState extends State<WimsyHome> {
                     tooltip: (roomEntry?.joined ?? false)
                         ? 'Leave room'
                         : 'Join room',
+                  ),
+                if (showPresenceMenu)
+                  _PresenceMenu(
+                    service: service,
+                    preferences: widget.preferences,
+                    onClearCacheExit: _clearingCache
+                        ? null
+                        : _confirmClearCacheAndExit,
+                    onExit: _handleExit,
                   ),
                 if (activeChat != null && !isBookmark) ...[
                   Builder(
@@ -3926,6 +3982,7 @@ class MessageComposerTextField extends StatelessWidget {
     required this.enabled,
     required this.onChanged,
     required this.onSubmitted,
+    this.fullscreen = false,
   });
 
   final TextEditingController controller;
@@ -3934,6 +3991,7 @@ class MessageComposerTextField extends StatelessWidget {
   final bool enabled;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
+  final bool fullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -3947,8 +4005,9 @@ class MessageComposerTextField extends StatelessWidget {
       textCapitalization: TextCapitalization.sentences,
       autocorrect: true,
       enableSuggestions: true,
-      minLines: 1,
-      maxLines: 6,
+      minLines: fullscreen ? null : 1,
+      maxLines: fullscreen ? null : 6,
+      expands: fullscreen,
       textInputAction: TextInputAction.send,
       decoration: const InputDecoration(labelText: 'Message'),
       onChanged: onChanged,
