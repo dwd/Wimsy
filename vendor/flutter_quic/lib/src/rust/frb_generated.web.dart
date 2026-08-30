@@ -108,6 +108,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  QuicConnection
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+    dynamic raw,
+  );
+
+  @protected
+  QuicEndpoint
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicEndpoint(
+    dynamic raw,
+  );
+
+  @protected
   QuicClient
   dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicClient(
     dynamic raw,
@@ -159,10 +171,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  QuicRecvStream
+  dco_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+    dynamic raw,
+  );
+
+  @protected
+  QuicSendStream
+  dco_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+    dynamic raw,
+  );
+
+  @protected
   QuicClientConfig dco_decode_box_autoadd_quic_client_config(dynamic raw);
 
   @protected
   QuicReadException dco_decode_box_autoadd_quic_read_exception(dynamic raw);
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
 
   @protected
   BigInt dco_decode_box_autoadd_usize(dynamic raw);
@@ -178,6 +205,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  QuicRecvStream?
+  dco_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+    dynamic raw,
+  );
+
+  @protected
+  QuicSendStream?
+  dco_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+    dynamic raw,
+  );
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
   BigInt? dco_decode_opt_box_autoadd_usize(dynamic raw);
@@ -213,6 +255,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   QuicReadToEndException dco_decode_quic_read_to_end_exception(dynamic raw);
 
   @protected
+  QuicSendStreamStats dco_decode_quic_send_stream_stats(dynamic raw);
+
+  @protected
   QuicUdpStats dco_decode_quic_udp_stats(dynamic raw);
 
   @protected
@@ -227,66 +272,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   (QuicClient, String)
   dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_client_string(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, QuicSendStream)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, QuicSendStream, QuicRecvStream)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, BigInt?)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, Uint8List?)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, String?)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, QuicConnectionStats)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, QuicPeerTransportParams)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, SocketAddress)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, BigInt)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64(
-    dynamic raw,
-  );
-
-  @protected
-  (QuicConnection, BigInt)
-  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize(
     dynamic raw,
   );
 
@@ -309,8 +294,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  (QuicSendStream, QuicRecvStream)
+  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    dynamic raw,
+  );
+
+  @protected
+  (QuicSendStream, QuicSendStreamStats)
+  dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_quic_send_stream_stats(
+    dynamic raw,
+  );
+
+  @protected
   (QuicSendStream, BigInt)
   dco_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_usize(
+    dynamic raw,
+  );
+
+  @protected
+  (QuicSendStream?, QuicRecvStream?)
+  dco_decode_record_opt_box_autoadd_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_opt_box_autoadd_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
     dynamic raw,
   );
 
@@ -384,6 +387,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  QuicConnection
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  QuicEndpoint
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicEndpoint(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   QuicClient
   sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicClient(
     SseDeserializer deserializer,
@@ -435,6 +450,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  QuicRecvStream
+  sse_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  QuicSendStream
+  sse_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   QuicClientConfig sse_decode_box_autoadd_quic_client_config(
     SseDeserializer deserializer,
   );
@@ -443,6 +470,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   QuicReadException sse_decode_box_autoadd_quic_read_exception(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
   BigInt sse_decode_box_autoadd_usize(SseDeserializer deserializer);
@@ -460,6 +490,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  QuicRecvStream?
+  sse_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  QuicSendStream?
+  sse_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
   BigInt? sse_decode_opt_box_autoadd_usize(SseDeserializer deserializer);
@@ -505,6 +550,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  QuicSendStreamStats sse_decode_quic_send_stream_stats(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   QuicUdpStats sse_decode_quic_udp_stats(SseDeserializer deserializer);
 
   @protected
@@ -521,66 +571,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   (QuicClient, String)
   sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_client_string(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, QuicSendStream)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, QuicSendStream, QuicRecvStream)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, BigInt?)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, Uint8List?)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, String?)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, QuicConnectionStats)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, QuicPeerTransportParams)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, SocketAddress)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, BigInt)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  (QuicConnection, BigInt)
-  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize(
     SseDeserializer deserializer,
   );
 
@@ -603,8 +593,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  (QuicSendStream, QuicRecvStream)
+  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  (QuicSendStream, QuicSendStreamStats)
+  sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_quic_send_stream_stats(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   (QuicSendStream, BigInt)
   sse_decode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_usize(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  (QuicSendStream?, QuicRecvStream?)
+  sse_decode_record_opt_box_autoadd_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_opt_box_autoadd_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
     SseDeserializer deserializer,
   );
 
@@ -693,6 +701,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicConnection(
+    QuicConnection self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicEndpoint(
+    QuicEndpoint self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
   sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicClient(
     QuicClient self,
     SseSerializer serializer,
@@ -751,6 +773,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void
+  sse_encode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+    QuicRecvStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+    QuicSendStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_quic_client_config(
     QuicClientConfig self,
     SseSerializer serializer,
@@ -761,6 +797,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     QuicReadException self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_usize(BigInt self, SseSerializer serializer);
@@ -782,6 +821,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void
+  sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicRecvStream(
+    QuicRecvStream? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerQuicSendStream(
+    QuicSendStream? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_usize(BigInt? self, SseSerializer serializer);
@@ -841,6 +897,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_quic_send_stream_stats(
+    QuicSendStreamStats self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_quic_udp_stats(QuicUdpStats self, SseSerializer serializer);
 
   @protected
@@ -860,76 +922,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_client_string(
     (QuicClient, String) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream(
-    (QuicConnection, QuicSendStream) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
-    (QuicConnection, QuicSendStream, QuicRecvStream) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_box_autoadd_usize(
-    (QuicConnection, BigInt?) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_list_prim_u_8_strict(
-    (QuicConnection, Uint8List?) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_opt_string(
-    (QuicConnection, String?) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_connection_stats(
-    (QuicConnection, QuicConnectionStats) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_quic_peer_transport_params(
-    (QuicConnection, QuicPeerTransportParams) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_socket_address(
-    (QuicConnection, SocketAddress) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_u_64(
-    (QuicConnection, BigInt) self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void
-  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_connection_usize(
-    (QuicConnection, BigInt) self,
     SseSerializer serializer,
   );
 
@@ -956,8 +948,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    (QuicSendStream, QuicRecvStream) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_quic_send_stream_stats(
+    (QuicSendStream, QuicSendStreamStats) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
   sse_encode_record_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_usize(
     (QuicSendStream, BigInt) self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_record_opt_box_autoadd_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_send_stream_opt_box_autoadd_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_quic_recv_stream(
+    (QuicSendStream?, QuicRecvStream?) self,
     SseSerializer serializer,
   );
 

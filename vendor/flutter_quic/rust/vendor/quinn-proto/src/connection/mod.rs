@@ -1268,6 +1268,8 @@ impl Connection {
         let mut stats = self.stats;
         stats.path.rtt = self.path.rtt.get();
         stats.path.cwnd = self.path.congestion.window();
+        stats.path.bytes_in_flight = self.path.in_flight.bytes;
+        stats.path.ack_eliciting_packets_in_flight = self.path.in_flight.ack_eliciting;
         stats.path.current_mtu = self.path.mtud.current_mtu();
 
         stats

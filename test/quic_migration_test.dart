@@ -89,6 +89,8 @@ QuicConnectionStats makeStats(int pathChallengeRx, {int udpDatagramsRx = 0}) {
   final zeroPath = QuicPathStats(
     rttMillis: zero,
     cwnd: zero,
+    bytesInFlight: zero,
+    ackElicitingPacketsInFlight: zero,
     lostPackets: zero,
     lostBytes: zero,
     sentPackets: zero,

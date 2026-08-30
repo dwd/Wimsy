@@ -46,6 +46,11 @@ Future<QuicSendStream> sendStreamWriteAll({
   data: data,
 );
 
+/// Snapshot byte-range acknowledgement state without changing the stream.
+Future<(QuicSendStream, QuicSendStreamStats)> sendStreamStats({
+  required QuicSendStream stream,
+}) => RustLib.instance.api.crateApiBridgeSendStreamStats(stream: stream);
+
 /// Finish a QUIC send stream
 /// This exposes the QuicSendStream.finish() method to flutter_rust_bridge
 Future<QuicSendStream> sendStreamFinish({required QuicSendStream stream}) =>
@@ -137,12 +142,19 @@ Future<(QuicEndpoint, QuicConnection)> endpointConnect({
 /// This enables connection migration (RFC 9000 §9) after a network-interface
 /// change without tearing down the XMPP session.
 ///
+/// Takes a shared reference so the endpoint can remain in use while the
+/// rebind is in progress.
+///
 /// This exposes the QuicEndpoint.rebind_to_current_address() method to flutter_rust_bridge.
-Future<void> endpointRebindToCurrentAddress({
-  required QuicEndpoint endpoint,
-}) => RustLib.instance.api.crateApiBridgeEndpointRebindToCurrentAddress(
-  endpoint: endpoint,
-);
+///
+/// This must be `async` so that flutter_rust_bridge dispatches it on the Tokio
+/// executor thread pool.  Quinn's `Endpoint::rebind` internally touches the
+/// Tokio I/O driver, which panics with "there is no reactor running" when
+/// called from a plain OS thread outside a Tokio runtime context.
+Future<void> endpointRebindToCurrentAddress({required QuicEndpoint endpoint}) =>
+    RustLib.instance.api.crateApiBridgeEndpointRebindToCurrentAddress(
+      endpoint: endpoint,
+    );
 
 /// Send a datagram on a QUIC connection.
 ///
@@ -284,10 +296,10 @@ Future<QuicPeerTransportParams> connectionPeerTransportParams({
 /// the connection from being closed due to inactivity.
 ///
 /// Takes a shared reference — see `connection_open_bi` for rationale.
-Future<void> connectionSendPing({required QuicConnection connection}) =>
-    RustLib.instance.api.crateApiBridgeConnectionSendPing(
-      connection: connection,
-    );
+Future<void> connectionSendPing({required QuicConnection connection}) => RustLib
+    .instance
+    .api
+    .crateApiBridgeConnectionSendPing(connection: connection);
 
 /// Create a new server config with single certificate
 Future<QuicServerConfig> serverConfigWithSingleCert({

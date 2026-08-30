@@ -11,3 +11,34 @@ abstract class QuicRecvStream implements RustOpaqueInterface {}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<QuicSendStream>>
 abstract class QuicSendStream implements RustOpaqueInterface {}
+
+class QuicSendStreamStats {
+  final BigInt streamId;
+  final BigInt acceptedBytes;
+  final BigInt acknowledgedOffset;
+  final BigInt outstandingBytes;
+
+  const QuicSendStreamStats({
+    required this.streamId,
+    required this.acceptedBytes,
+    required this.acknowledgedOffset,
+    required this.outstandingBytes,
+  });
+
+  @override
+  int get hashCode =>
+      streamId.hashCode ^
+      acceptedBytes.hashCode ^
+      acknowledgedOffset.hashCode ^
+      outstandingBytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is QuicSendStreamStats &&
+          runtimeType == other.runtimeType &&
+          streamId == other.streamId &&
+          acceptedBytes == other.acceptedBytes &&
+          acknowledgedOffset == other.acknowledgedOffset &&
+          outstandingBytes == other.outstandingBytes;
+}

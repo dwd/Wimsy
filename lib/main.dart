@@ -806,6 +806,15 @@ class _WimsyHomeState extends State<WimsyHome> {
                         unit: '%',
                         displayValue: service.quicLossPercentage,
                       ),
+                      if (service.quicOutstandingHistory.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        _QuicStatsGraph(
+                          label: 'Unacknowledged application data',
+                          data: service.quicOutstandingHistory,
+                          color: Colors.orange,
+                          unit: 'B',
+                        ),
+                      ],
                       const SizedBox(width: 16),
                     ],
                     _PresenceMenu(
@@ -1500,6 +1509,15 @@ class _WimsyHomeState extends State<WimsyHome> {
                     unit: '%',
                     displayValue: service.quicLossPercentage,
                   ),
+                  if (service.quicOutstandingHistory.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    _QuicStatsGraph(
+                      label: 'Unacknowledged application data',
+                      data: service.quicOutstandingHistory,
+                      color: Colors.orange,
+                      unit: 'B',
+                    ),
+                  ],
                   const SizedBox(width: 8),
                 ],
                 if (showPresenceMenu)

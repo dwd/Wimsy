@@ -138,6 +138,10 @@ pub struct PathStats {
     pub rtt: Duration,
     /// Current congestion window of the connection
     pub cwnd: u64,
+    /// Retransmittable packet bytes that have not been acknowledged or lost.
+    pub bytes_in_flight: u64,
+    /// Outstanding packets containing ACK-eliciting frames.
+    pub ack_eliciting_packets_in_flight: u64,
     /// Congestion events on the connection
     pub congestion_events: u64,
     /// The amount of packets lost on this path

@@ -134,6 +134,14 @@ impl Send {
         self.pending.offset()
     }
 
+    pub(super) fn acknowledged_offset(&self) -> u64 {
+        self.pending.acknowledged_offset()
+    }
+
+    pub(super) fn outstanding(&self) -> u64 {
+        self.pending.unacked()
+    }
+
     pub(super) fn is_pending(&self) -> bool {
         self.pending.has_unsent_data() || self.fin_pending
     }

@@ -173,6 +173,8 @@ pub struct QuicConnectionStats {
 pub struct QuicPathStats {
     pub rtt_millis: u64,
     pub cwnd: u64,
+    pub bytes_in_flight: u64,
+    pub ack_eliciting_packets_in_flight: u64,
     pub lost_packets: u64,
     pub lost_bytes: u64,
     pub sent_packets: u64,
@@ -252,6 +254,8 @@ impl From<quinn::PathStats> for QuicPathStats {
         Self {
             rtt_millis: stats.rtt.as_millis() as u64,
             cwnd: stats.cwnd,
+            bytes_in_flight: stats.bytes_in_flight,
+            ack_eliciting_packets_in_flight: stats.ack_eliciting_packets_in_flight,
             lost_packets: stats.lost_packets,
             lost_bytes: stats.lost_bytes,
             sent_packets: stats.sent_packets,
@@ -297,4 +301,4 @@ impl From<quinn::UdpStats> for QuicUdpStats {
             ios: stats.ios, // Use ios instead of transmits
         }
     }
-} 
+}

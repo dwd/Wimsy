@@ -153,6 +153,8 @@ class QuicFrameStats {
 class QuicPathStats {
   final BigInt rttMillis;
   final BigInt cwnd;
+  final BigInt bytesInFlight;
+  final BigInt ackElicitingPacketsInFlight;
   final BigInt lostPackets;
   final BigInt lostBytes;
   final BigInt sentPackets;
@@ -161,6 +163,8 @@ class QuicPathStats {
   const QuicPathStats({
     required this.rttMillis,
     required this.cwnd,
+    required this.bytesInFlight,
+    required this.ackElicitingPacketsInFlight,
     required this.lostPackets,
     required this.lostBytes,
     required this.sentPackets,
@@ -171,6 +175,8 @@ class QuicPathStats {
   int get hashCode =>
       rttMillis.hashCode ^
       cwnd.hashCode ^
+      bytesInFlight.hashCode ^
+      ackElicitingPacketsInFlight.hashCode ^
       lostPackets.hashCode ^
       lostBytes.hashCode ^
       sentPackets.hashCode ^
@@ -183,6 +189,8 @@ class QuicPathStats {
           runtimeType == other.runtimeType &&
           rttMillis == other.rttMillis &&
           cwnd == other.cwnd &&
+          bytesInFlight == other.bytesInFlight &&
+          ackElicitingPacketsInFlight == other.ackElicitingPacketsInFlight &&
           lostPackets == other.lostPackets &&
           lostBytes == other.lostBytes &&
           sentPackets == other.sentPackets &&
@@ -207,8 +215,8 @@ class QuicPeerTransportParams {
   /// Peer's `initial_max_data` (connection-level flow-control window, bytes).
   final BigInt initialMaxData;
 
-  /// The negotiated idle timeout in milliseconds, or `null` if no timeout was
-  /// negotiated (i.e. the connection may remain idle indefinitely).
+  /// The negotiated idle timeout in milliseconds, or `None` if no timeout was negotiated
+  /// (i.e. the connection may remain idle indefinitely without being closed).
   final BigInt? negotiatedIdleTimeoutMs;
 
   const QuicPeerTransportParams({

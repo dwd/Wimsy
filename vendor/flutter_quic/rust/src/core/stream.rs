@@ -3,6 +3,14 @@
 use flutter_rust_bridge::frb;
 use crate::errors::{QuicWriteException, QuicReadException, QuicReadToEndException};
 
+#[derive(Debug, Clone)]
+pub struct QuicSendStreamStats {
+    pub stream_id: u64,
+    pub accepted_bytes: u64,
+    pub acknowledged_offset: u64,
+    pub outstanding_bytes: u64,
+}
+
 #[frb(opaque)]
 pub struct QuicSendStream {
     inner: quinn::SendStream,
@@ -74,6 +82,20 @@ impl QuicSendStream {
             Ok(()) => Ok(()),
             Err(write_error) => Err(QuicWriteException::from(write_error)),
         }
+    }
+
+    /// Capture stable application-byte counters for tracked writes.
+    pub fn stats(&self) -> Result<QuicSendStreamStats, QuicWriteException> {
+        let (accepted_bytes, acknowledged_offset, outstanding_bytes) = self
+            .inner
+            .write_stats()
+            .map_err(QuicWriteException::from)?;
+        Ok(QuicSendStreamStats {
+            stream_id: self.inner.id().index(),
+            accepted_bytes,
+            acknowledged_offset,
+            outstanding_bytes,
+        })
     }
     
     /// Get a reference to the inner Quinn send stream
@@ -169,4 +191,4 @@ impl QuicRecvStream {
 pub struct QuicStream {
     // This is kept for backward compatibility but not used in new API
     _unused: (),
-} 
+}

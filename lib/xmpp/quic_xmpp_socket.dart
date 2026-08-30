@@ -9,6 +9,7 @@ import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
 import 'package:xmpp_stone/src/connection/XmppStreamRouting.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 import 'dns_cache.dart';
+import 'quic_write_tracker.dart';
 
 export 'package:xmpp_stone/src/connection/XmppStreamRouting.dart'
     show bareJidForRouting, extractToBareJidForRouting, isStanzaPayload;
@@ -139,6 +140,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   Future<void> _writeQueue = Future<void>.value();
+  final QuicWriteTracker _writeTracker = QuicWriteTracker();
+  final StreamController<QuicWriteEvent> _writeEventController =
+      StreamController<QuicWriteEvent>.broadcast();
+
+  Stream<QuicWriteEvent> get quicWriteEvents => _writeEventController.stream;
+  int get quicOutstandingWriteCount => _writeTracker.outstandingWriteCount;
+  int get quicOutstandingBytes => _writeTracker.outstandingBytes;
 
   // Kept as members so the winning endpoint/connection remain alive while
   // stream objects are in use.
@@ -155,7 +163,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   final Map<int, Future<_QuicStreamChannel>> _auxStreamOpening = {};
   // Per-slot queue of stanzas that arrived while the aux stream for that slot
   // was still being opened. Flushed onto the aux stream once it is ready.
-  final Map<int, List<String>> _auxStreamPendingQueue = {};
+  final Map<int, List<_QueuedQuicPayload>> _auxStreamPendingQueue = {};
 
   // Pool of server-initiated bidirectional streams that have been accepted but
   // not yet assigned to a slot. When we need to open an aux stream for a new
@@ -210,6 +218,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     bool directTls = false,
     String? tlsHost,
   }) async {
+    _emitWriteEvents(
+      _writeTracker.failGeneration(
+        _connectionGeneration,
+        'connection replaced',
+      ),
+    );
     final generation = ++_connectionGeneration;
     _map = map ?? (element) => element;
     // If the caller supplied a map factory (Connection.makeStreamResponseMapper),
@@ -372,12 +386,20 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return;
     }
     final generation = _connectionGeneration;
+    final messageId = _transportTrackedMessageId(payload);
+    final writeId = messageId == null
+        ? null
+        : _writeTracker.queue(generation: generation, messageId: messageId);
+    if (writeId != null) {
+      _writeEventController.add(_writeTracker.eventForQueued(writeId));
+    }
+    final queued = _QueuedQuicPayload(payload, writeId);
     _writeQueue = _writeQueue.then((_) async {
       if (!_isCurrentGeneration(generation)) {
         return;
       }
       try {
-        final target = await _selectSendTarget(payload);
+        final target = await _selectSendTarget(queued);
         if (!_isCurrentGeneration(generation)) {
           return;
         }
@@ -387,14 +409,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         }
         Log.xmppp_sending(payload, channel: target.label);
         _lastQuicSendAt = DateTime.now();
-        final updated = await sendStreamWriteAll(
-          stream: target.stream,
-          data: utf8.encode(payload),
-        );
-        if (_isCurrentGeneration(generation)) {
-          target.update(updated);
-        }
+        await _sendPayload(target, queued, generation);
       } catch (error, stackTrace) {
+        if (writeId != null) {
+          final failed = _writeTracker.failWrite(
+            writeId: writeId,
+            generation: generation,
+            reason: error.toString(),
+          );
+          if (failed != null) _writeEventController.add(failed);
+        }
         if (!_quicStreamController.isClosed) {
           _quicStreamController.addError(error, stackTrace);
         }
@@ -405,6 +429,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   @override
   void close() {
     _closed = true;
+    _emitWriteEvents(
+      _writeTracker.failGeneration(_connectionGeneration, 'connection closed'),
+    );
     _connectionGeneration++;
     if (!_useQuic) {
       _fallbackSocket.close();
@@ -1023,7 +1050,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
-  Future<_QuicSendTarget?> _selectSendTarget(String payload) async {
+  Future<_QuicSendTarget?> _selectSendTarget(_QueuedQuicPayload queued) async {
+    final payload = queued.payload;
     final control = _sendStream;
     if (control == null) {
       throw StateError('QUIC control send stream is not connected');
@@ -1079,7 +1107,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       // The aux stream for this slot is not yet open. Enqueue the payload so
       // it is sent on the correct stream once it opens, rather than falling
       // back to the control stream and mixing traffic.
-      _auxStreamPendingQueue.putIfAbsent(slot, () => []).add(payload);
+      _auxStreamPendingQueue.putIfAbsent(slot, () => []).add(queued);
       // Kick off opening the aux stream (coalesced: concurrent calls for the
       // same slot share one future). On success flush the pending queue.
       _ensureAuxStream(slot, reason: 'on-demand routing for $toBare').then(
@@ -1095,15 +1123,22 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           );
           final queued = _auxStreamPendingQueue.remove(slot) ?? [];
           for (final qPayload in queued) {
-            Log.xmppp_sending(qPayload, channel: 'quic-control (fallback)');
+            Log.xmppp_sending(
+              qPayload.payload,
+              channel: 'quic-control (fallback)',
+            );
             _writeQueue = _writeQueue.then((_) async {
               if (_closed || _sendStream == null) return;
               try {
-                final updated = await sendStreamWriteAll(
-                  stream: _sendStream!,
-                  data: utf8.encode(qPayload),
+                await _sendPayload(
+                  _QuicSendTarget(
+                    stream: _sendStream!,
+                    update: (updated) => _sendStream = updated,
+                    label: 'quic-control (fallback)',
+                  ),
+                  qPayload,
+                  _connectionGeneration,
                 );
-                _sendStream = updated;
               } catch (_) {}
             });
           }
@@ -1130,21 +1165,121 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       'QUIC aux stream slot=$slot flushing ${queued.length} queued stanza(s)',
     );
     for (final qPayload in queued) {
-      Log.xmppp_sending(qPayload, channel: 'quic-aux-$slot (flushed)');
+      Log.xmppp_sending(qPayload.payload, channel: 'quic-aux-$slot (flushed)');
       _writeQueue = _writeQueue.then((_) async {
         if (_closed) return;
         try {
-          final updated = await sendStreamWriteAll(
-            stream: channel.sendStream,
-            data: utf8.encode(qPayload),
+          await _sendPayload(
+            _QuicSendTarget(
+              stream: channel.sendStream,
+              update: (updated) => channel.sendStream = updated,
+              label: 'quic-aux-$slot (flushed)',
+            ),
+            qPayload,
+            _connectionGeneration,
           );
-          channel.sendStream = updated;
         } catch (error, stackTrace) {
           if (!_quicStreamController.isClosed) {
             _quicStreamController.addError(error, stackTrace);
           }
         }
       });
+    }
+  }
+
+  Future<void> _sendPayload(
+    _QuicSendTarget target,
+    _QueuedQuicPayload queued,
+    int generation,
+  ) async {
+    var stream = target.stream;
+    QuicSendStreamStats? before;
+    if (queued.writeId != null) {
+      final snapshot = await sendStreamStats(stream: stream);
+      stream = snapshot.$1;
+      before = snapshot.$2;
+      target.update(stream);
+    }
+    stream = await sendStreamWriteAll(
+      stream: stream,
+      data: utf8.encode(queued.payload),
+    );
+    target.update(stream);
+    if (queued.writeId == null ||
+        before == null ||
+        !_isCurrentGeneration(generation)) {
+      return;
+    }
+    final snapshot = await sendStreamStats(stream: stream);
+    target.update(snapshot.$1);
+    final after = snapshot.$2;
+    _writeEventController.add(
+      _writeTracker.assignRange(
+        writeId: queued.writeId!,
+        generation: generation,
+        streamId: after.streamId.toInt(),
+        startOffset: before.acceptedBytes.toInt(),
+        endOffset: after.acceptedBytes.toInt(),
+      ),
+    );
+    _emitWriteEvents(
+      _writeTracker.updateStream(
+        generation: generation,
+        streamId: after.streamId.toInt(),
+        acknowledgedOffset: after.acknowledgedOffset.toInt(),
+      ),
+    );
+  }
+
+  /// Samples every live send stream and emits acknowledgement progress.
+  Future<void> pollQuicWriteTracking() {
+    final completer = Completer<void>();
+    final generation = _connectionGeneration;
+    _writeQueue = _writeQueue.then((_) async {
+      try {
+        final targets = <_QuicSendTarget>[];
+        if (_sendStream != null) {
+          targets.add(
+            _QuicSendTarget(
+              stream: _sendStream!,
+              update: (updated) => _sendStream = updated,
+              label: 'quic-control',
+            ),
+          );
+        }
+        for (final channel in _auxStreamsBySlot.values) {
+          targets.add(
+            _QuicSendTarget(
+              stream: channel.sendStream,
+              update: (updated) => channel.sendStream = updated,
+              label: 'quic-aux',
+            ),
+          );
+        }
+        for (final target in targets) {
+          final snapshot = await sendStreamStats(stream: target.stream);
+          target.update(snapshot.$1);
+          final stats = snapshot.$2;
+          _emitWriteEvents(
+            _writeTracker.updateStream(
+              generation: generation,
+              streamId: stats.streamId.toInt(),
+              acknowledgedOffset: stats.acknowledgedOffset.toInt(),
+            ),
+          );
+        }
+        completer.complete();
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
+  }
+
+  void _emitWriteEvents(Iterable<QuicWriteEvent> events) {
+    if (_writeEventController.isClosed) return;
+    for (final event in events) {
+      _writeEventController.add(event);
     }
   }
 
@@ -1799,4 +1934,23 @@ class _QuicSendTarget {
   final QuicSendStream stream;
   final void Function(QuicSendStream updated) update;
   final String label;
+}
+
+class _QueuedQuicPayload {
+  const _QueuedQuicPayload(this.payload, this.writeId);
+
+  final String payload;
+  final int? writeId;
+}
+
+String? _transportTrackedMessageId(String payload) {
+  final openingTag = RegExp(
+    r'^\s*<message\b[^>]*>',
+    caseSensitive: false,
+  ).firstMatch(payload)?.group(0);
+  if (openingTag == null) return null;
+  return RegExp(
+    "\\bid\\s*=\\s*(['\"])(.*?)\\1",
+    caseSensitive: false,
+  ).firstMatch(openingTag)?.group(2);
 }

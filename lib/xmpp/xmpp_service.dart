@@ -54,6 +54,7 @@ import 'srv_target.dart';
 import 'alt_connection.dart';
 import 'quic_endpoint_plan.dart';
 import 'quic_xmpp_socket.dart';
+import 'quic_write_tracker.dart';
 import 'liveness_controller.dart';
 import 'recovery_work_queue.dart';
 import 'room_nickname.dart';
@@ -148,6 +149,7 @@ class XmppService extends ChangeNotifier {
   StreamSubscription<ReconnectionState>? _reconnectStateSubscription;
   StreamSubscription<MessageStanza?>? _messageStanzaSubscription;
   StreamSubscription<AbstractStanza>? _smDeliveredSubscription;
+  StreamSubscription<QuicWriteEvent>? _quicWriteSubscription;
   StreamSubscription<AbstractStanza?>? _pepSubscription;
   StreamSubscription<AbstractStanza?>? _mucPresenceSubscription;
   Timer? _csiIdleTimer;
@@ -196,6 +198,10 @@ class XmppService extends ChangeNotifier {
   final List<int> _quicRttHistory = [];
   final List<int> _quicLossHistory = [];
   final List<int> _quicSentHistory = [];
+  final List<int> _quicOutstandingHistory = [];
+  final List<int> _quicAcknowledgedHistory = [];
+  final Map<int, int> _quicAcknowledgedByWrite = {};
+  int _quicNewlyAcknowledgedBytes = 0;
   BigInt _lastQuicLostPackets = BigInt.zero;
   BigInt _lastQuicSentPackets = BigInt.zero;
   BigInt _lastQuicReceivedDatagrams = BigInt.zero;
@@ -207,6 +213,8 @@ class XmppService extends ChangeNotifier {
 
   List<int> get quicRttHistory => _quicRttHistory;
   List<int> get quicLossHistory => _quicLossHistory;
+  List<int> get quicOutstandingHistory => _quicOutstandingHistory;
+  List<int> get quicAcknowledgedHistory => _quicAcknowledgedHistory;
   double? get quicLossPercentage =>
       packetLossPercentage(_quicLossHistory, _quicSentHistory);
   ConnectionHealth get connectionHealth => _connectionHealth;
@@ -3189,10 +3197,25 @@ class XmppService extends ChangeNotifier {
     if (connection == null) {
       return;
     }
-    final streamManagement = connection.streamManagementModule;
-    if (streamManagement == null) {
-      return;
+    _quicWriteSubscription?.cancel();
+    final socket = connection.socket;
+    if (socket is QuicCapableXmppSocket && socket.isQuic) {
+      _quicWriteSubscription = socket.quicWriteEvents.listen((event) {
+        final previous = _quicAcknowledgedByWrite[event.writeId] ?? 0;
+        if (event.acknowledgedBytes > previous) {
+          _quicNewlyAcknowledgedBytes += event.acknowledgedBytes - previous;
+          _quicAcknowledgedByWrite[event.writeId] = event.acknowledgedBytes;
+          _livenessController?.observeProgress();
+        }
+        if (event.phase == QuicWritePhase.transportDelivered &&
+            event.messageId != null) {
+          _applyAckByMessageId(event.messageId!);
+          _applyRoomAckByMessageId(event.messageId!);
+        }
+      });
     }
+    final streamManagement = connection.streamManagementModule;
+    if (streamManagement == null) return;
     _smDeliveredSubscription?.cancel();
     _smDeliveredSubscription = streamManagement.deliveredStanzasStream.listen((
       stanza,
@@ -6860,6 +6883,10 @@ class XmppService extends ChangeNotifier {
     _quicRttHistory.clear();
     _quicLossHistory.clear();
     _quicSentHistory.clear();
+    _quicOutstandingHistory.clear();
+    _quicAcknowledgedHistory.clear();
+    _quicAcknowledgedByWrite.clear();
+    _quicNewlyAcknowledgedBytes = 0;
     _lastQuicLostPackets = BigInt.zero;
     _lastQuicSentPackets = BigInt.zero;
     _lastQuicReceivedDatagrams = BigInt.zero;
@@ -6916,6 +6943,20 @@ class XmppService extends ChangeNotifier {
     }
 
     _quicStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (socket is QuicCapableXmppSocket) {
+        try {
+          await socket.pollQuicWriteTracking();
+        } catch (_) {
+          // Connection teardown can race a final statistics sample.
+        }
+        _quicOutstandingHistory.add(socket.quicOutstandingBytes);
+        _quicAcknowledgedHistory.add(_quicNewlyAcknowledgedBytes);
+        _quicNewlyAcknowledgedBytes = 0;
+        if (_quicOutstandingHistory.length > _maxQuicHistory) {
+          _quicOutstandingHistory.removeAt(0);
+          _quicAcknowledgedHistory.removeAt(0);
+        }
+      }
       final stats = await socket.getQuicStats();
       if (stats == null) return;
 
@@ -8541,6 +8582,10 @@ class XmppService extends ChangeNotifier {
     _quicRttHistory.clear();
     _quicLossHistory.clear();
     _quicSentHistory.clear();
+    _quicOutstandingHistory.clear();
+    _quicAcknowledgedHistory.clear();
+    _quicAcknowledgedByWrite.clear();
+    _quicNewlyAcknowledgedBytes = 0;
     _lastQuicLostPackets = BigInt.zero;
     _lastQuicSentPackets = BigInt.zero;
     _csiIdleTimer?.cancel();
@@ -8565,6 +8610,8 @@ class XmppService extends ChangeNotifier {
     _messageStanzaSubscription = null;
     _smDeliveredSubscription?.cancel();
     _smDeliveredSubscription = null;
+    _quicWriteSubscription?.cancel();
+    _quicWriteSubscription = null;
     _pepSubscription?.cancel();
     _pepSubscription = null;
     _mucPresenceSubscription?.cancel();

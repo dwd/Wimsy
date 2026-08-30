@@ -283,6 +283,20 @@ impl<'a> SendStream<'a> {
         }
     }
 
+    /// Returns application bytes accepted, the contiguous acknowledged
+    /// watermark, and bytes not yet acknowledged for this send stream.
+    pub fn write_stats(&self) -> Result<(u64, u64, u64), ClosedStream> {
+        match self.state.send.get(&self.id).as_ref() {
+            Some(Some(stream)) => Ok((
+                stream.offset(),
+                stream.acknowledged_offset(),
+                stream.outstanding(),
+            )),
+            Some(None) => Ok((0, 0, 0)),
+            None => Err(ClosedStream { _private: () }),
+        }
+    }
+
     /// Finish a send stream, signalling that no more data will be sent.
     ///
     /// If this fails, no [`StreamEvent::Finished`] will be generated.

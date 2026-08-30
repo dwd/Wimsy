@@ -273,6 +273,12 @@ impl SendStream {
         self.stream
     }
 
+    /// Snapshot the stream byte offsets used to track logical writes.
+    pub fn write_stats(&self) -> Result<(u64, u64, u64), ClosedStream> {
+        let mut conn = self.conn.state.lock("SendStream::write_stats");
+        conn.inner.send_stream(self.stream).write_stats()
+    }
+
     /// Attempt to write bytes from buf into the stream.
     ///
     /// On success, returns Poll::Ready(Ok(num_bytes_written)).

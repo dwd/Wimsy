@@ -9,7 +9,7 @@ pub fn init_app() {
 }
 
 // Core API exposure functions to ensure flutter_rust_bridge discovers our types
-use crate::core::{QuicEndpoint, QuicConnection, QuicSendStream, QuicRecvStream};
+use crate::core::{QuicEndpoint, QuicConnection, QuicSendStream, QuicRecvStream, QuicSendStreamStats};
 use crate::core::{QuicConnectionStats, QuicPathStats, QuicFrameStats, QuicUdpStats};
 use crate::core::connection::QuicPeerTransportParams;
 use crate::core::{QuicServerConfig, QuicTransportConfig, QuicEndpointConfig};
@@ -52,6 +52,14 @@ pub async fn send_stream_write_all(
 ) -> Result<QuicSendStream, QuicWriteException> {
     stream.write_all(data).await?;
     Ok(stream)
+}
+
+/// Snapshot byte-range acknowledgement state without changing the stream.
+pub fn send_stream_stats(
+    stream: QuicSendStream,
+) -> Result<(QuicSendStream, QuicSendStreamStats), QuicWriteException> {
+    let stats = stream.stats()?;
+    Ok((stream, stats))
 }
 
 /// Finish a QUIC send stream
