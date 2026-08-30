@@ -1384,6 +1384,10 @@ class XmppService extends ChangeNotifier {
         debugPrint('XMPP state: $state');
         Log.i('XmppService', 'Connection state: $state');
         _lastConnectionState = state;
+        if (state != XmppConnectionState.Ready &&
+            state != XmppConnectionState.Resumed) {
+          _suspendConnectionScopedWork();
+        }
         if (state == XmppConnectionState.Reconnecting ||
             state == XmppConnectionState.ForcefullyClosed) {
           // Any in-flight carbons enable request is tied to the old stream.
@@ -5329,6 +5333,30 @@ class XmppService extends ChangeNotifier {
         _tickMucSelfPing();
       },
     );
+  }
+
+  /// Stops work whose callbacks are only valid for an authenticated, bound
+  /// stream. A replacement stream starts each facility again after Ready.
+  void _suspendConnectionScopedWork() {
+    _csiIdleTimer?.cancel();
+    _csiIdleTimer = null;
+    _mucSelfPingTimer?.cancel();
+    _mucSelfPingTimer = null;
+    for (final timer in _mucSelfPingTimeouts.values) {
+      timer.cancel();
+    }
+    _mucSelfPingTimeouts.clear();
+    _pendingMucSelfPings.clear();
+    for (final timer in _mamCatchUpTimers.values) {
+      timer.cancel();
+    }
+    _mamCatchUpTimers.clear();
+    _quicStatsTimer?.cancel();
+    _quicStatsTimer = null;
+    final socket = _connection?.socket;
+    if (socket is QuicCapableXmppSocket) {
+      socket.stopPingTimer();
+    }
   }
 
   void _tickMucSelfPing() {

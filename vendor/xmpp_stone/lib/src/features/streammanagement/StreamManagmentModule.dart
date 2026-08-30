@@ -459,12 +459,17 @@ class StreamManagementModule extends Negotiator {
   void _handleConnectionState(XmppConnectionState state) {
     if (state == XmppConnectionState.Reconnecting) {
       backToIdle();
-      _clearPendingSmAck();
-      _clearPendingPing();
     }
-    if (!_connection.isOpened()) {
+    final sessionReady = state == XmppConnectionState.Ready ||
+        state == XmppConnectionState.Resumed;
+    if (!sessionReady) {
       _keepaliveTimer?.cancel();
       _keepaliveTimer = null;
+      _pendingAckRequestTimer?.cancel();
+      _pendingAckRequestTimer = null;
+      _clearPendingSmAck();
+      _clearPendingPing();
+      _emitKeepaliveState();
     }
     if (state == XmppConnectionState.Closed) {
       streamState = StreamState();
@@ -481,8 +486,7 @@ class StreamManagementModule extends Negotiator {
       _emitKeepaliveState();
       return;
     }
-    if (state == XmppConnectionState.Ready ||
-        state == XmppConnectionState.Resumed) {
+    if (sessionReady) {
       // On QUIC, XEP-0198 SM is disabled (see negotiate()), so there is no
       // SM ack machinery.  QUIC also has its own transport-level keepalive
       // (PING frames, configured in flutter_quic's endpoint.rs), so we do

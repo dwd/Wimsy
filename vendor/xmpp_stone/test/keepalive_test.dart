@@ -151,6 +151,24 @@ void main() {
     expect(socket.writes, isEmpty);
   });
 
+  test('leaving Ready clears a pending keepalive probe', () async {
+    final setup = _newConnection();
+    final states = <KeepaliveState>[];
+    final subscription = setup.connection.keepaliveStateStream.listen(
+      states.add,
+    );
+
+    setup.connection.probeKeepalive(shortTimeout: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(states.last.awaitingPing, isTrue);
+
+    setup.connection.setState(XmppConnectionState.Authenticating);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(states.last.awaitingPing, isFalse);
+    await subscription.cancel();
+  });
+
   test('StreamManagementModule.configure overrides start out at defaults', () {
     final setup = _newConnection();
     final module = StreamManagementModule.getInstance(setup.connection);
