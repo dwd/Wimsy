@@ -149,4 +149,29 @@ void main() {
     expect(connection.socket!.isQuic, isFalse);
     connection.dispose();
   });
+
+  test('network cancellation supersedes an in-flight acquisition', () async {
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..quicEndpoints = const <XmppQuicEndpoint>[
+        XmppQuicEndpoint(host: 'quic.example.com', port: 443),
+      ]
+      ..tcpEndpoints = const <XmppTcpEndpoint>[];
+    final connection = Connection(
+      account,
+      socketFactory: () => _RecordingSocket(
+        <String>[],
+        quicDelay: const Duration(milliseconds: 20),
+        quicSucceeds: true,
+      ),
+    );
+
+    final opening = connection.openSocket();
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    connection.cancelSocketAcquisition();
+
+    await opening;
+    expect(connection.socket, isNull);
+    expect(connection.state, XmppConnectionState.ForcefullyClosed);
+    connection.dispose();
+  });
 }

@@ -92,7 +92,8 @@ void main() {
     connection.setState(XmppConnectionState.Ready);
 
     final phases = <ReconnectionPhase>[];
-    final sub = connection.reconnectStateStream.listen((s) => phases.add(s.phase));
+    final sub =
+        connection.reconnectStateStream.listen((s) => phases.add(s.phase));
 
     // This is what xmpp_service.dart calls when QUIC migration fails.
     connection.requestReconnect(
@@ -110,8 +111,7 @@ void main() {
     await sub.cancel();
   });
 
-  test(
-      'reconnect continues after a failed attempt (no-network scenario)',
+  test('reconnect continues after a failed attempt (no-network scenario)',
       () async {
     // Regression test: when a reconnect attempt fails (all transports time
     // out), the connection goes ForcefullyClosed again while _phase is still
@@ -160,5 +160,27 @@ void main() {
 
     expect(delay.inMilliseconds, greaterThanOrEqualTo(750));
     expect(delay.inMilliseconds, lessThanOrEqualTo(1250));
+  });
+
+  test('backoff resets only after Ready remains stable', () async {
+    connection.setReconnectPolicy(
+      const ReconnectionPolicy(
+        baseDelay: Duration(milliseconds: 10),
+        maxDelay: Duration(seconds: 1),
+        jitterRatio: 0,
+        stableReadyDuration: Duration(milliseconds: 40),
+      ),
+    );
+    connection.setState(XmppConnectionState.ForcefullyClosed);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    connection.setState(XmppConnectionState.Ready);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final scheduledFuture = connection.reconnectStateStream.firstWhere(
+      (state) => state.phase == ReconnectionPhase.scheduled,
+    );
+    connection.setState(XmppConnectionState.ForcefullyClosed);
+
+    final scheduled = await scheduledFuture;
+    expect(scheduled.nextDelay, const Duration(milliseconds: 20));
   });
 }

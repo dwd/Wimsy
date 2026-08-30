@@ -16,6 +16,7 @@ class ReconnectionManager {
   ReconnectionReason? _lastReason;
   final Random _random = Random();
   Timer? timer;
+  Timer? _stableReadyTimer;
   late StreamSubscription<XmppConnectionState> _xmppConnectionStateSubscription;
   final StreamController<ReconnectionState> _stateController =
       StreamController.broadcast();
@@ -57,6 +58,7 @@ class ReconnectionManager {
       jitterRatio: jitter,
       unboundedRetries: policy.unboundedRetries,
       maxAttempts: policy.maxAttempts,
+      stableReadyDuration: policy.stableReadyDuration,
     );
     Log.i(
       TAG,
@@ -185,10 +187,17 @@ class ReconnectionManager {
       setTerminalState('Authentication failed');
       return;
     }
-    _attempt = 0;
-    isActive = false;
-    _cancelTimer();
-    _emit(ReconnectionPhase.idle, reason: _lastReason);
+    if (state == XmppConnectionState.Ready ||
+        state == XmppConnectionState.Resumed) {
+      _stableReadyTimer?.cancel();
+      _stableReadyTimer = Timer(_policy.stableReadyDuration, () {
+        _attempt = 0;
+        isActive = false;
+        _emit(ReconnectionPhase.idle, reason: _lastReason);
+      });
+      _cancelTimer();
+      _emit(ReconnectionPhase.idle, reason: _lastReason);
+    }
   }
 
   Duration _delayForAttempt(int attempt, {required bool shortTimeout}) {
@@ -254,6 +263,7 @@ class ReconnectionManager {
 
   void close() {
     _cancelTimer();
+    _stableReadyTimer?.cancel();
     _xmppConnectionStateSubscription.cancel();
     _stateController.close();
   }

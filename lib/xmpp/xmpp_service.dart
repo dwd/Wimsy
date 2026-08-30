@@ -172,6 +172,7 @@ class XmppService extends ChangeNotifier {
   XmppConnectionState? _lastConnectionState;
   bool _backgroundMode = false;
   bool _networkOnline = true;
+  Timer? _connectivityDebounceTimer;
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<ChatMessage>> _roomMessages = {};
   final Set<String> _seededMessageJids = {};
@@ -991,8 +992,18 @@ class XmppService extends ChangeNotifier {
       allowAutoReconnect: true,
     );
     if (!_networkOnline) {
+      _connectivityDebounceTimer?.cancel();
+      _connection?.cancelSocketAcquisition();
       return;
     }
+    _connectivityDebounceTimer?.cancel();
+    _connectivityDebounceTimer = Timer(const Duration(milliseconds: 750), () {
+      if (_networkOnline) _handleUsableNetworkChange();
+    });
+  }
+
+  void _handleUsableNetworkChange() {
+    _connection?.cancelSocketAcquisition();
     // Attempt QUIC connection migration before falling back to a full reconnect.
     // If the active socket is QUIC-capable, rebind the UDP socket so Quinn can
     // send a PATH_CHALLENGE on the new network path (RFC 9000 §9).  Only on

@@ -51,8 +51,31 @@ enum XmppConnectionState {
 
 typedef XmppSocketFactory = xmppSocket.XmppWebSocket Function();
 
+Duration? acquisitionPhaseTimeout(XmppConnectionState state) {
+  switch (state) {
+    case XmppConnectionState.SocketOpening:
+      return const Duration(seconds: 60);
+    case XmppConnectionState.SocketOpened:
+      return const Duration(seconds: 30);
+    case XmppConnectionState.PlainAuthentication:
+    case XmppConnectionState.Authenticating:
+      return const Duration(seconds: 45);
+    case XmppConnectionState.Authenticated:
+    case XmppConnectionState.AuthenticatedSasl2AwaitingFeatures:
+    case XmppConnectionState.DoneParsingFeatures:
+    case XmppConnectionState.SessionInitialized:
+      return const Duration(seconds: 30);
+    default:
+      return null;
+  }
+}
+
 class Connection {
   var lock = Lock(reentrant: true);
+  Timer? _acquisitionDeadlineTimer;
+  Timer? _phaseDeadlineTimer;
+  int _socketAcquisitionGeneration = 0;
+  final Set<xmppSocket.XmppWebSocket> _acquiringSockets = {};
 
   static String TAG = 'Connection';
 
@@ -547,6 +570,7 @@ class Connection {
   }
 
   Future<void> openSocket() async {
+    final acquisitionGeneration = ++_socketAcquisitionGeneration;
     _sasl2InlineFeatures = _buildCachedSasl2InlineFeatures();
     _sasl2SuccessElements = [];
     _iapAdvertisedInCurrentStream = false;
@@ -630,6 +654,7 @@ class Connection {
         Object? lastError;
         for (final endpoint in quicEndpoints) {
           final socket = _socketFactory();
+          _acquiringSockets.add(socket);
           try {
             Log.i(
               TAG,
@@ -644,6 +669,11 @@ class Connection {
               tlsHost: endpoint.tlsHost ?? account.domain,
               map: prepareStreamResponse,
             );
+            if (acquisitionGeneration != _socketAcquisitionGeneration) {
+              socket.close();
+              _acquiringSockets.remove(socket);
+              return null;
+            }
             // Supply a per-aux-stream mapper factory so each QUIC aux stream
             // gets its own independent XML buffer. Without this, all streams
             // share the single restOfResponse field in prepareStreamResponse,
@@ -654,6 +684,7 @@ class Connection {
             }
             return socket;
           } catch (error) {
+            _acquiringSockets.remove(socket);
             lastError = error;
             try {
               socket.close();
@@ -677,6 +708,7 @@ class Connection {
         Object? lastError;
         for (final endpoint in endpoints) {
           final socket = _socketFactory();
+          _acquiringSockets.add(socket);
           try {
             Log.i(
               TAG,
@@ -692,8 +724,14 @@ class Connection {
               tlsHost: endpoint.tlsHost ?? account.domain,
               map: prepareStreamResponse,
             );
+            if (acquisitionGeneration != _socketAcquisitionGeneration) {
+              socket.close();
+              _acquiringSockets.remove(socket);
+              return null;
+            }
             return socket;
           } catch (error) {
+            _acquiringSockets.remove(socket);
             lastError = error;
             try {
               socket.close();
@@ -724,6 +762,7 @@ class Connection {
           Log.i(TAG, '$transport won delayed transport acquisition');
           winner.complete(candidate);
         } else if (candidate != null) {
+          _acquiringSockets.remove(candidate);
           candidate.close();
         } else if (completedTransports == transportCount &&
             !winner.isCompleted) {
@@ -753,6 +792,7 @@ class Connection {
         }));
       }
       final opened = await winner.future;
+      _acquiringSockets.remove(opened);
       if (opened.isQuic) {
         (opened as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
       }
@@ -763,6 +803,15 @@ class Connection {
       print('XMPP socket error: $error');
       handleConnectionError(error.toString());
     }
+  }
+
+  /// Supersedes transport work that belongs to the current network path.
+  void cancelSocketAcquisition() {
+    _socketAcquisitionGeneration++;
+    for (final socket in _acquiringSockets.toList()) {
+      socket.close();
+    }
+    _acquiringSockets.clear();
   }
 
   Map<String, XmppElement> _buildCachedSasl2InlineFeatures() {
@@ -847,6 +896,9 @@ class Connection {
   ///
   /// If you intend to re-use the connection later, consider just calling [close] instead.
   void dispose() {
+    cancelSocketAcquisition();
+    _acquisitionDeadlineTimer?.cancel();
+    _phaseDeadlineTimer?.cancel();
     close();
     RosterManager.removeInstance(this);
     PresenceManager.removeInstance(this);
@@ -1293,9 +1345,36 @@ class Connection {
 
   void setState(XmppConnectionState state) {
     _state = state;
+    _updateAcquisitionDeadlines(state);
     _fireConnectionStateChangedEvent(state);
     _processState(state);
     Log.d(TAG, 'State: $_state');
+  }
+
+  void _updateAcquisitionDeadlines(XmppConnectionState state) {
+    _phaseDeadlineTimer?.cancel();
+    if (state == XmppConnectionState.SocketOpening) {
+      _acquisitionDeadlineTimer?.cancel();
+      _acquisitionDeadlineTimer = Timer(const Duration(seconds: 120), () {
+        Log.w(TAG, 'Total connection acquisition deadline exceeded');
+        simulateForcefulClose();
+      });
+    }
+    final timeout = acquisitionPhaseTimeout(state);
+    if (timeout != null) {
+      _phaseDeadlineTimer = Timer(timeout, () {
+        if (_state != state) return;
+        Log.w(TAG, 'Connection phase deadline exceeded state=$state');
+        simulateForcefulClose();
+      });
+    }
+    if (state == XmppConnectionState.Ready ||
+        state == XmppConnectionState.Resumed ||
+        state == XmppConnectionState.Closed ||
+        state == XmppConnectionState.ForcefullyClosed) {
+      _acquisitionDeadlineTimer?.cancel();
+      _acquisitionDeadlineTimer = null;
+    }
   }
 
   XmppConnectionState get state {

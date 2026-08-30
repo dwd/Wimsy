@@ -22,6 +22,7 @@ class ReconnectionPolicy {
     this.jitterRatio = 0.25,
     this.unboundedRetries = true,
     this.maxAttempts,
+    this.stableReadyDuration = const Duration(seconds: 30),
   });
 
   final Duration baseDelay;
@@ -29,6 +30,7 @@ class ReconnectionPolicy {
   final double jitterRatio;
   final bool unboundedRetries;
   final int? maxAttempts;
+  final Duration stableReadyDuration;
 }
 
 /// Snapshot of reconnection controller state for observers.
