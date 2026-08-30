@@ -55,6 +55,27 @@ void main() {
 
       expect(connection.state, XmppConnectionState.ForcefullyClosed);
     });
+
+    test('does not flush an old batch onto a replacement socket', () async {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..bufferedWritesEnabled = true;
+      final connection = Connection(account);
+      final oldSocket = _RecordingSocket();
+      final replacementSocket = _RecordingSocket();
+      connection.socket = oldSocket;
+      connection.setState(XmppConnectionState.SessionInitialized);
+
+      connection.write('<message id="old"/>');
+      connection.socket = replacementSocket;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(oldSocket.writes, isEmpty);
+      expect(replacementSocket.writes, isEmpty);
+
+      connection.write('<message id="new"/>');
+      await Future<void>.delayed(Duration.zero);
+      expect(replacementSocket.writes, equals(['<message id="new"/>']));
+    });
   });
 }
 
@@ -71,7 +92,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
-      bool useWebTransport = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
@@ -88,6 +109,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   void close() {
     _controller.close();
   }
+
   @override
   Future<dynamic> getQuicStats() => Future.value(null);
   @override

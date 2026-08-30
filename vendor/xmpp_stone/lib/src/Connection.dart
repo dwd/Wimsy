@@ -257,13 +257,15 @@ class Connection {
   bool get isQuic => _socket?.isQuic ?? false;
 
   xmppSocket.XmppWebSocket? _socket;
+  _ConnectionWriteSink? _writeSink;
+  int _writeSinkGeneration = 0;
   StreamSubscription<String>? _socketSubscription;
 
   xmppSocket.XmppWebSocket? get socket => _socket;
 
   // for testing purpose
   set socket(xmppSocket.XmppWebSocket? value) {
-    _socket = value;
+    _installWriteSink(value);
   }
 
   XmppConnectionState _state = XmppConnectionState.Idle;
@@ -271,6 +273,7 @@ class Connection {
   ReconnectionManager? reconnectionManager;
   final XmppSocketFactory _socketFactory;
   final StringBuffer _pendingWriteBuffer = StringBuffer();
+  _ConnectionWriteSink? _pendingWriteSink;
   bool _flushScheduled = false;
   int _inboundProcessingDepth = 0;
 
@@ -283,6 +286,16 @@ class Connection {
     IqRouter.getInstance(this);
     connectionNegotatiorManager = ConnectionNegotiatorManager(this, account);
     reconnectionManager = ReconnectionManager(this);
+  }
+
+  void _installWriteSink(xmppSocket.XmppWebSocket? socket) {
+    _socket = socket;
+    _writeSink = socket == null
+        ? null
+        : _ConnectionWriteSink(++_writeSinkGeneration, socket);
+    _pendingWriteBuffer.clear();
+    _pendingWriteSink = null;
+    _flushScheduled = false;
   }
 
   void _openStream() {
@@ -731,11 +744,12 @@ class Connection {
     // if not closed in meantime
     if (_state != XmppConnectionState.Closed) {
       setState(XmppConnectionState.SocketOpened);
-      _socket = socket;
+      _installWriteSink(socket);
       _socketSubscription?.cancel();
       _socketSubscription =
           socket.listen(handleResponse, onDone: handleConnectionDone);
       _pendingWriteBuffer.clear();
+      _pendingWriteSink = null;
       _flushScheduled = false;
       _inboundProcessingDepth = 0;
       restOfResponse = '';
@@ -758,6 +772,7 @@ class Connection {
           setState(XmppConnectionState.Closing);
           _socketSubscription?.cancel();
           _pendingWriteBuffer.clear();
+          _pendingWriteSink = null;
           _flushScheduled = false;
           _socket!.write('</stream:stream>');
         } on Exception {
@@ -927,12 +942,21 @@ class Connection {
       return;
     }
     if (account.bufferedWritesEnabled) {
+      final sink = _writeSink;
+      if (sink == null) {
+        return;
+      }
+      final pendingSink = _pendingWriteSink;
+      if (pendingSink != null && !identical(pendingSink, sink)) {
+        _pendingWriteBuffer.clear();
+      }
+      _pendingWriteSink = sink;
       _pendingWriteBuffer.write(message.toString());
       if (_inboundProcessingDepth <= 0) {
         _scheduleFlush();
       }
     } else {
-      _safeSocketWrite(message);
+      _safeSocketWrite(message, _writeSink);
     }
   }
 
@@ -950,19 +974,25 @@ class Connection {
   void _flushPendingWrites() {
     if (!isOpened()) {
       _pendingWriteBuffer.clear();
+      _pendingWriteSink = null;
       return;
     }
     if (_pendingWriteBuffer.isEmpty) {
       return;
     }
     final payload = _pendingWriteBuffer.toString();
+    final sink = _pendingWriteSink;
     _pendingWriteBuffer.clear();
-    _safeSocketWrite(payload);
+    _pendingWriteSink = null;
+    _safeSocketWrite(payload, sink);
   }
 
-  void _safeSocketWrite(Object? payload) {
-    final socket = _socket;
-    if (socket == null) {
+  void _safeSocketWrite(Object? payload, _ConnectionWriteSink? sink) {
+    if (sink == null) {
+      return;
+    }
+    if (!identical(sink, _writeSink)) {
+      Log.d(TAG, 'Discarding write for superseded sink ${sink.generation}');
       return;
     }
     final serialized = payload?.toString() ?? '';
@@ -975,7 +1005,7 @@ class Connection {
       return;
     }
     try {
-      socket.write(payload);
+      sink.socket.write(payload);
     } catch (error, stackTrace) {
       reportError(error, stackTrace);
       Log.e(TAG, 'Socket write failed: $error');
@@ -1425,4 +1455,11 @@ class _ExtractResult {
   const _ExtractResult({required this.emitted, required this.remainder});
   final String emitted;
   final String remainder;
+}
+
+class _ConnectionWriteSink {
+  const _ConnectionWriteSink(this.generation, this.socket);
+
+  final int generation;
+  final xmppSocket.XmppWebSocket socket;
 }
