@@ -39,7 +39,7 @@ void main() {
 
   group('QuicCapableXmppSocket connect tuning defaults', () {
     test(
-      'defaults expose increased timeout, 3 retry attempts, and 3 parallel attempts',
+      'defaults expose increased timeout, 3 rounds, and one attempt per address',
       () {
         final socket = QuicCapableXmppSocket();
 
@@ -55,10 +55,9 @@ void main() {
         // we give up and fall back to TCP.
         expect(socket.quicConnectMaxAttempts, 3);
 
-        // Each candidate address is attempted 3 times in parallel (staggered
-        // by happyEyeballsDelay) so that multiple QUIC Initial packets are
-        // in-flight simultaneously on lossy paths.
-        expect(socket.quicConnectParallelAttempts, 3);
+        // Quinn retransmits within an attempt. Duplicating each candidate
+        // multiplies load without creating an independent network path.
+        expect(socket.quicConnectParallelAttempts, 1);
       },
     );
 
@@ -75,6 +74,33 @@ void main() {
       expect(socket.quicConnectParallelAttempts, 5);
     });
   });
+
+  test(
+    'repeated IPv6 failures temporarily prefer IPv4 without removing IPv6',
+    () {
+      final health = QuicAddressHealth(ipv4PreferenceThreshold: 2);
+      final ipv6 = InternetAddress('2001:db8::1');
+      final ipv4 = InternetAddress('192.0.2.1');
+      health
+        ..recordFailure(ipv6)
+        ..recordFailure(ipv6);
+
+      final plan = buildQuicHappyEyeballsPlan([ipv6, ipv4], health: health);
+
+      expect(plan.map((address) => address.address), [
+        '192.0.2.1',
+        '2001:db8::1',
+      ]);
+      health.recordSuccess(ipv6);
+      expect(
+        buildQuicHappyEyeballsPlan([
+          ipv6,
+          ipv4,
+        ], health: health).map((address) => address.address),
+        ['2001:db8::1', '192.0.2.1'],
+      );
+    },
+  );
 
   group('QUIC connection generations', () {
     test('new generations supersede all earlier async work', () {

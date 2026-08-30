@@ -21,7 +21,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     this.quicConnectTimeout = const Duration(seconds: 15),
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
     this.quicConnectMaxAttempts = 3,
-    this.quicConnectParallelAttempts = 3,
+    this.quicConnectParallelAttempts = 1,
     this.migrationProbeTimeout = const Duration(seconds: 15),
     this.migrationProbeInterval = const Duration(seconds: 1),
   });
@@ -94,6 +94,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   DateTime? _lastQuicPingAt;
   Future<MigrationResult>? _migrationFuture;
   final Set<Future<void>> _loserCleanupTasks = <Future<void>>{};
+  static final QuicAddressHealth _addressHealth = QuicAddressHealth();
 
   /// Identifies the currently active logical connection attempt. Async work
   /// captures this value and must stop before mutating state when it changes.
@@ -539,7 +540,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (addresses.isEmpty) {
       throw SocketException('No addresses found for QUIC host $host');
     }
-    final candidates = buildQuicHappyEyeballsPlan(addresses);
+    final candidates = buildQuicHappyEyeballsPlan(
+      addresses,
+      health: _addressHealth,
+    );
 
     final maxAttempts = quicConnectMaxAttempts < 1 ? 1 : quicConnectMaxAttempts;
     Object? lastError;
@@ -569,6 +573,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           );
         }
         final winnerAddress = connected.address;
+        if (winnerAddress != null) {
+          _addressHealth.recordSuccess(winnerAddress);
+        }
         debugPrint(
           'QUIC connect winner: generation=${connected.generation} '
           'attempt=${connected.attemptId} '
@@ -637,6 +644,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     var nextAttemptId = 0;
 
     void recordFailure(InternetAddress address, Object error) {
+      _addressHealth.recordFailure(address);
       errors.add('${address.address}/${address.type.name}: $error');
       pending--;
       if (pending == 0 && !completer.isCompleted) {
@@ -1581,8 +1589,9 @@ String _formatDiagnosticAge(DateTime now, DateTime? then) {
 }
 
 List<InternetAddress> buildQuicHappyEyeballsPlan(
-  List<InternetAddress> addresses,
-) {
+  List<InternetAddress> addresses, {
+  QuicAddressHealth? health,
+}) {
   final ipv6 = <InternetAddress>[];
   final ipv4 = <InternetAddress>[];
   for (final address in addresses) {
@@ -1594,7 +1603,13 @@ List<InternetAddress> buildQuicHappyEyeballsPlan(
   }
 
   final preferIpv6 =
-      addresses.isNotEmpty && addresses.first.type == InternetAddressType.IPv6;
+      !(health?.shouldTemporarilyPreferIpv4 ?? false) &&
+      addresses.isNotEmpty &&
+      addresses.first.type == InternetAddressType.IPv6;
+  if (health != null) {
+    ipv6.replaceRange(0, ipv6.length, health.order(ipv6));
+    ipv4.replaceRange(0, ipv4.length, health.order(ipv4));
+  }
   final plan = <InternetAddress>[];
   while (ipv6.isNotEmpty || ipv4.isNotEmpty) {
     if (preferIpv6) {
@@ -1614,6 +1629,54 @@ List<InternetAddress> buildQuicHappyEyeballsPlan(
     }
   }
   return plan;
+}
+
+/// Short-lived endpoint health used only to order future QUIC candidates.
+/// Failures decay, so an unhealthy family continues to be probed.
+class QuicAddressHealth {
+  QuicAddressHealth({
+    this.failureWindow = const Duration(minutes: 10),
+    this.ipv4PreferenceThreshold = 2,
+  });
+
+  final Duration failureWindow;
+  final int ipv4PreferenceThreshold;
+  final Map<String, List<DateTime>> _failures = <String, List<DateTime>>{};
+
+  void recordFailure(InternetAddress address) {
+    _prune();
+    _failures
+        .putIfAbsent(address.address, () => <DateTime>[])
+        .add(DateTime.now());
+  }
+
+  void recordSuccess(InternetAddress address) =>
+      _failures.remove(address.address);
+
+  bool get shouldTemporarilyPreferIpv4 {
+    _prune();
+    final failures = _failures.entries.where(
+      (entry) =>
+          InternetAddress.tryParse(entry.key)?.type == InternetAddressType.IPv6,
+    );
+    return failures.fold<int>(0, (sum, entry) => sum + entry.value.length) >=
+        ipv4PreferenceThreshold;
+  }
+
+  List<InternetAddress> order(List<InternetAddress> addresses) =>
+      List<InternetAddress>.of(addresses)..sort(
+        (a, b) => (_failures[a.address]?.length ?? 0).compareTo(
+          _failures[b.address]?.length ?? 0,
+        ),
+      );
+
+  void _prune() {
+    final cutoff = DateTime.now().subtract(failureWindow);
+    _failures.removeWhere((_, failures) {
+      failures.removeWhere((failure) => failure.isBefore(cutoff));
+      return failures.isEmpty;
+    });
+  }
 }
 
 bool _isStanzaPayload(String payload) => isStanzaPayload(payload);
