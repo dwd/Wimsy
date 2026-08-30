@@ -55,6 +55,7 @@ import 'alt_connection.dart';
 import 'quic_endpoint_plan.dart';
 import 'quic_xmpp_socket.dart';
 import 'liveness_controller.dart';
+import 'recovery_work_queue.dart';
 import 'room_nickname.dart';
 import 'tcp_endpoint_plan.dart';
 
@@ -201,6 +202,7 @@ class XmppService extends ChangeNotifier {
   Timer? _quicStatsTimer;
   LivenessController? _livenessController;
   ConnectionHealth _connectionHealth = ConnectionHealth.healthy;
+  final RecoveryWorkQueue _recoveryWork = RecoveryWorkQueue(maxConcurrent: 2);
   static const int _maxQuicHistory = 60;
 
   List<int> get quicRttHistory => _quicRttHistory;
@@ -1466,6 +1468,8 @@ class XmppService extends ChangeNotifier {
           _errorMessage = null;
           notifyListeners();
           _setupLiveness(connection);
+          _recoveryWork.reset();
+          _recoveryWork.resume();
           _setupKeepalive();
           _setupQuicStats();
           _setupDeliveryTracking();
@@ -1474,7 +1478,7 @@ class XmppService extends ChangeNotifier {
           // Stream management normally replays queued stanzas, but the
           // account archive is the authoritative source for anything the
           // server could not retain on the resumed stream.
-          _primeMamSync();
+          _scheduleMamRecovery();
           _applyClientState();
           return;
         }
@@ -1493,6 +1497,8 @@ class XmppService extends ChangeNotifier {
           _status = XmppStatus.connected;
           _errorMessage = null;
           _setupLiveness(connection);
+          _recoveryWork.reset();
+          _recoveryWork.resume();
           notifyListeners();
           _pepVcardConversionSupported = connection.getSupportedFeatures().any(
             (feature) => feature.xmppVar == 'urn:xmpp:pep-vcard-conversion:0',
@@ -1543,8 +1549,8 @@ class XmppService extends ChangeNotifier {
           _setupBlocking();
           _setupDisplayedSync();
           _refreshExternalServices();
-          _primeMamSync();
-          _requestVcardDetails(_currentUserBareJid!, preferName: true);
+          _scheduleMamRecovery();
+          _scheduleVcardRecovery(_currentUserBareJid!);
           _sendInitialPresence();
           _applyClientState();
         } else if (_isTerminalError(state)) {
@@ -5399,6 +5405,7 @@ class XmppService extends ChangeNotifier {
   /// Stops work whose callbacks are only valid for an authenticated, bound
   /// stream. A replacement stream starts each facility again after Ready.
   void _suspendConnectionScopedWork() {
+    _recoveryWork.reset(paused: true);
     _csiIdleTimer?.cancel();
     _csiIdleTimer = null;
     _mucSelfPingTimer?.cancel();
@@ -5421,6 +5428,7 @@ class XmppService extends ChangeNotifier {
   }
 
   void _suspendBulkWork() {
+    _recoveryWork.pause();
     _mucSelfPingTimer?.cancel();
     _mucSelfPingTimer = null;
     for (final timer in _mucSelfPingTimeouts.values) {
@@ -5434,7 +5442,16 @@ class XmppService extends ChangeNotifier {
     _mamCatchUpTimers.clear();
   }
 
+  void _resumeBulkWork() {
+    _recoveryWork.resume();
+    if (_lastConnectionState == XmppConnectionState.Ready ||
+        _lastConnectionState == XmppConnectionState.Resumed) {
+      _startMucSelfPingTimer();
+    }
+  }
+
   void _tickMucSelfPing() {
+    if (_connectionHealth != ConnectionHealth.healthy) return;
     final connection = _connection;
     if (connection == null) {
       return;
@@ -5557,7 +5574,10 @@ class XmppService extends ChangeNotifier {
         )
         .toList(growable: false);
     for (final entry in previouslyJoined) {
-      joinRoom(entry.roomJid, nick: entry.nick);
+      _enqueueRecoveryLaunch(
+        RecoveryPriority.session,
+        () => joinRoom(entry.roomJid, nick: entry.nick),
+      );
     }
   }
 
@@ -7018,6 +7038,8 @@ class XmppService extends ChangeNotifier {
         _connectionHealth = health;
         if (health == ConnectionHealth.degraded) {
           _suspendBulkWork();
+        } else if (health == ConnectionHealth.healthy) {
+          _resumeBulkWork();
         } else if (health == ConnectionHealth.dead) {
           connection.requestReconnect(
             reason: ReconnectionReason.keepaliveTimeout,
@@ -9073,7 +9095,14 @@ class XmppService extends ChangeNotifier {
       if (nextLatest != null &&
           nextLatest.isNotEmpty &&
           nextLatest != requestedLatest) {
-        _runMamCatchUpStep(normalized, isRoom: isRoom, continuation: true);
+        _enqueueRecoveryLaunch(
+          RecoveryPriority.messages,
+          () => _runMamCatchUpStep(
+            normalized,
+            isRoom: isRoom,
+            continuation: true,
+          ),
+        );
       } else {
         _mamCatchUpTimers.remove(scopeKey);
         _finishMamSyncIfIdle();
@@ -9113,7 +9142,10 @@ class XmppService extends ChangeNotifier {
     // to the per-chat fan-out so each chat still gets its initial tail.
     final anchor = _lastMamIdSeen;
     if (anchor != null && anchor.isNotEmpty) {
-      _startUnifiedDmCatchUp(anchor);
+      _enqueueRecoveryLaunch(
+        RecoveryPriority.messages,
+        () => _startUnifiedDmCatchUp(anchor),
+      );
     } else {
       // Fallback: no anchor yet — fan out per-chat as before.
       for (final entry in _messages.entries) {
@@ -9133,7 +9165,10 @@ class XmppService extends ChangeNotifier {
         )) {
           continue;
         }
-        _startMamCatchUp(bareJid, isRoom: false);
+        _enqueueRecoveryLaunch(
+          RecoveryPriority.messages,
+          () => _startMamCatchUp(bareJid, isRoom: false),
+        );
       }
     }
 
@@ -9141,7 +9176,10 @@ class XmppService extends ChangeNotifier {
       final roomJid = _bareJid(bookmark.jid);
       final roomMessages = _roomMessages[roomJid];
       if (roomMessages == null || roomMessages.isEmpty) {
-        _requestRoomMam(roomJid, max: 25, before: '');
+        _enqueueRecoveryLaunch(
+          RecoveryPriority.messages,
+          () => _requestRoomMam(roomJid, max: 25, before: ''),
+        );
         continue;
       }
       // Always issue room catch-up on reconnect.
@@ -9150,9 +9188,36 @@ class XmppService extends ChangeNotifier {
       // indicator that there are no newer messages in the MUC archive.
       // Skipping MUC catch-up when marker == latest local stanza-id can miss
       // messages sent while this client was offline.
-      _startMamCatchUp(roomJid, isRoom: true);
+      _enqueueRecoveryLaunch(
+        RecoveryPriority.messages,
+        () => _startMamCatchUp(roomJid, isRoom: true),
+      );
     }
-    _finishMamSyncIfIdle();
+    _enqueueRecoveryLaunch(RecoveryPriority.messages, _finishMamSyncIfIdle);
+  }
+
+  void _scheduleMamRecovery() {
+    _primeMamSync();
+  }
+
+  void _scheduleVcardRecovery(String bareJid) {
+    _enqueueRecoveryLaunch(
+      RecoveryPriority.bulk,
+      () => _requestVcardDetails(bareJid, preferName: true),
+    );
+  }
+
+  void _enqueueRecoveryLaunch(
+    RecoveryPriority priority,
+    void Function() launch,
+  ) {
+    _recoveryWork.add(priority, () async {
+      if (_connectionHealth != ConnectionHealth.healthy) return;
+      launch();
+      // Keep recovery bursts bounded even when the underlying API reports
+      // completion by callback rather than by a Future we can await.
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
   }
 
   /// R2.1: Issue a single unified MAM catch-up query against the user's own
@@ -9234,7 +9299,10 @@ class XmppService extends ChangeNotifier {
         _bumpLastMamIdSeen(lastId);
       }
       if (!page.complete && lastId != null && lastId != after) {
-        _startUnifiedDmCatchUp(anchor, after: lastId);
+        _enqueueRecoveryLaunch(
+          RecoveryPriority.messages,
+          () => _startUnifiedDmCatchUp(anchor, after: lastId),
+        );
       }
     });
 
