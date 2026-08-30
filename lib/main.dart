@@ -155,7 +155,16 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
           final online = results.any(
             (result) => result != ConnectivityResult.none,
           );
-          _service.handleConnectivityChange(online);
+          final networkIdentity =
+              results
+                  .where((result) => result != ConnectivityResult.none)
+                  .map((result) => result.name)
+                  .toList()
+                ..sort();
+          _service.handleConnectivityChange(
+            online,
+            networkIdentity: networkIdentity.join('+'),
+          );
         });
       }
     }

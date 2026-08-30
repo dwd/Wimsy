@@ -626,82 +626,138 @@ class Connection {
         return;
       }
 
-      Object? lastError;
-      for (final endpoint in quicEndpoints) {
-        final socket = _socketFactory();
-        try {
-          Log.i(
-            TAG,
-            'QUIC endpoint attempt host=${endpoint.host} port=${endpoint.port}',
-          );
-          await socket.connect(
-            endpoint.host,
-            endpoint.port,
-            useWebSocket: false,
-            useQuic: true,
-            directTls: false,
-            tlsHost: endpoint.tlsHost ?? account.domain,
-            map: prepareStreamResponse,
-          );
-          // Supply a per-aux-stream mapper factory so each QUIC aux stream
-          // gets its own independent XML buffer. Without this, all streams
-          // share the single restOfResponse field in prepareStreamResponse,
-          // causing interleaved chunks from different streams to corrupt
-          // each other's parse state and silently drop stanzas.
-          if (socket.isQuic) {
-            (socket as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
-          }
-          _attachOpenedSocket(socket);
-          return;
-        } catch (error) {
-          lastError = error;
+      Future<xmppSocket.XmppWebSocket?> openQuic() async {
+        Object? lastError;
+        for (final endpoint in quicEndpoints) {
+          final socket = _socketFactory();
           try {
-            socket.close();
-          } catch (_) {
-            // ignore close errors while failing over endpoints
+            Log.i(
+              TAG,
+              'QUIC endpoint attempt host=${endpoint.host} port=${endpoint.port}',
+            );
+            await socket.connect(
+              endpoint.host,
+              endpoint.port,
+              useWebSocket: false,
+              useQuic: true,
+              directTls: false,
+              tlsHost: endpoint.tlsHost ?? account.domain,
+              map: prepareStreamResponse,
+            );
+            // Supply a per-aux-stream mapper factory so each QUIC aux stream
+            // gets its own independent XML buffer. Without this, all streams
+            // share the single restOfResponse field in prepareStreamResponse,
+            // causing interleaved chunks from different streams to corrupt
+            // each other's parse state and silently drop stanzas.
+            if (socket.isQuic) {
+              (socket as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
+            }
+            return socket;
+          } catch (error) {
+            lastError = error;
+            try {
+              socket.close();
+            } catch (_) {
+              // ignore close errors while failing over endpoints
+            }
+            Log.w(
+              TAG,
+              'QUIC endpoint failed host=${endpoint.host} '
+              'port=${endpoint.port} error=$error',
+            );
           }
-          Log.w(
-            TAG,
-            'QUIC endpoint failed host=${endpoint.host} '
-            'port=${endpoint.port} error=$error',
-          );
+        }
+        if (lastError != null) {
+          Log.w(TAG, 'All QUIC endpoints failed: $lastError');
+        }
+        return null;
+      }
+
+      Future<xmppSocket.XmppWebSocket?> openTcp() async {
+        Object? lastError;
+        for (final endpoint in endpoints) {
+          final socket = _socketFactory();
+          try {
+            Log.i(
+              TAG,
+              'TCP endpoint attempt host=${endpoint.host} '
+              'port=${endpoint.port} directTls=${endpoint.directTls}',
+            );
+            await socket.connect(
+              endpoint.host,
+              endpoint.port,
+              useWebSocket: false,
+              useQuic: false,
+              directTls: endpoint.directTls,
+              tlsHost: endpoint.tlsHost ?? account.domain,
+              map: prepareStreamResponse,
+            );
+            return socket;
+          } catch (error) {
+            lastError = error;
+            try {
+              socket.close();
+            } catch (_) {
+              // ignore close errors while failing over endpoints
+            }
+            Log.w(
+              TAG,
+              'TCP endpoint failed host=${endpoint.host} '
+              'port=${endpoint.port} error=$error',
+            );
+          }
+        }
+        if (lastError != null) {
+          Log.w(TAG, 'All TCP endpoints failed: $lastError');
+        }
+        return null;
+      }
+
+      final winner = Completer<xmppSocket.XmppWebSocket>();
+      final quicFinished = Completer<void>();
+      var completedTransports = 0;
+      final transportCount =
+          (quicEndpoints.isNotEmpty ? 1 : 0) + (endpoints.isNotEmpty ? 1 : 0);
+      void finish(xmppSocket.XmppWebSocket? candidate, String transport) {
+        completedTransports++;
+        if (candidate != null && !winner.isCompleted) {
+          Log.i(TAG, '$transport won delayed transport acquisition');
+          winner.complete(candidate);
+        } else if (candidate != null) {
+          candidate.close();
+        } else if (completedTransports == transportCount &&
+            !winner.isCompleted) {
+          winner.completeError(Exception('All transport endpoints failed'));
         }
       }
 
-      for (final endpoint in endpoints) {
-        final socket = _socketFactory();
-        try {
-          Log.i(
-            TAG,
-            'TCP endpoint attempt host=${endpoint.host} '
-            'port=${endpoint.port} directTls=${endpoint.directTls}',
-          );
-          await socket.connect(
-            endpoint.host,
-            endpoint.port,
-            useWebSocket: false,
-            useQuic: false,
-            directTls: endpoint.directTls,
-            tlsHost: endpoint.tlsHost ?? account.domain,
-            map: prepareStreamResponse,
-          );
-          _attachOpenedSocket(socket);
-          return;
-        } catch (error) {
-          lastError = error;
-          try {
-            socket.close();
-          } catch (_) {
-            // ignore close errors while failing over endpoints
-          }
-          Log.w(
-            TAG,
-            'TCP endpoint failed host=${endpoint.host} '
-            'port=${endpoint.port} error=$error',
-          );
-        }
+      if (quicEndpoints.isNotEmpty) {
+        unawaited(openQuic().then((socket) {
+          finish(socket, 'QUIC');
+          quicFinished.complete();
+        }));
       }
-      throw Exception('All TCP endpoints failed. lastError=$lastError');
+      if (endpoints.isNotEmpty) {
+        unawaited(Future<void>(() async {
+          if (quicEndpoints.isNotEmpty) {
+            await Future.any<void>([
+              Future<void>.delayed(account.quicExclusiveHeadStart),
+              quicFinished.future,
+            ]);
+          }
+          if (!winner.isCompleted) {
+            finish(await openTcp(), 'TCP');
+          } else {
+            completedTransports++;
+          }
+        }));
+      }
+      final opened = await winner.future;
+      if (opened.isQuic) {
+        (opened as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
+      }
+      _attachOpenedSocket(opened);
+      return;
     } catch (error) {
       Log.e(TAG, 'Socket Exception' + error.toString());
       print('XMPP socket error: $error');

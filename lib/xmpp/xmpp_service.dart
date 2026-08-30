@@ -978,7 +978,13 @@ class XmppService extends ChangeNotifier {
     Log.i('XmppService', 'Background mode change complete');
   }
 
-  void handleConnectivityChange(bool online) {
+  String _networkIdentity = 'unknown';
+  static final Map<String, TransportAcquisitionHealth> _transportHealth = {};
+
+  void handleConnectivityChange(bool online, {String? networkIdentity}) {
+    if (networkIdentity != null && networkIdentity.isNotEmpty) {
+      _networkIdentity = networkIdentity;
+    }
     _networkOnline = online;
     _connection?.setReconnectContext(
       networkOnline: online,
@@ -1295,6 +1301,9 @@ class XmppService extends ChangeNotifier {
       account.directTls = resolvedDirectTls;
       account.sasl2Software = 'Wimsy';
       account.sasl2Device = resource;
+      account.quicExclusiveHeadStart = _transportHealth
+          .putIfAbsent(_networkIdentity, TransportAcquisitionHealth.new)
+          .quicHeadStart;
       // XEP-0484: seed any FAST token persisted from a previous session so we
       // can authenticate without the password on this first connect, and keep
       // the stored copy in sync with the tokens the server issues/revokes.
@@ -1422,6 +1431,9 @@ class XmppService extends ChangeNotifier {
           return;
         }
         if (state == XmppConnectionState.Ready) {
+          _transportHealth
+              .putIfAbsent(_networkIdentity, TransportAcquisitionHealth.new)
+              .recordWinner(connection.socket?.isQuic ?? false);
           _persistIapCache(account, bareJid);
           if (!completer.isCompleted) {
             completer.complete();
@@ -9422,6 +9434,25 @@ class XmppService extends ChangeNotifier {
     }
     final iq = buildMucDefaultConfigIq(roomJid);
     connection.writeStanza(iq);
+  }
+}
+
+/// Ephemeral transport outcomes keyed by coarse connectivity type (for
+/// example `wifi` or `mobile`). No SSID, address, or location is retained.
+class TransportAcquisitionHealth {
+  int _tcpWins = 0;
+  int _quicWins = 0;
+
+  Duration get quicHeadStart => _tcpWins >= 2 && _tcpWins > _quicWins
+      ? const Duration(seconds: 15)
+      : const Duration(seconds: 12);
+
+  void recordWinner(bool quic) {
+    if (quic) {
+      _quicWins++;
+    } else {
+      _tcpWins++;
+    }
   }
 }
 

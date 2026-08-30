@@ -7,9 +7,12 @@ import 'package:xmpp_stone/src/account/XmppAccountSettings.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
 
 class _RecordingSocket extends Stream<String> implements XmppWebSocket {
-  _RecordingSocket(this.attempts);
+  _RecordingSocket(this.attempts, {this.quicDelay, this.quicSucceeds = false});
 
   final List<String> attempts;
+  final Duration? quicDelay;
+  final bool quicSucceeds;
+  bool _isQuic = false;
   final _controller = StreamController<String>.broadcast();
 
   @override
@@ -21,7 +24,7 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
-      bool useWebTransport = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
@@ -31,7 +34,9 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
         : (useQuic ? 'quic' : (directTls ? 'tcp-direct-tls' : 'tcp'));
     attempts.add('$transport:$host:$port');
     if (useQuic) {
-      throw Exception('quic failed');
+      _isQuic = true;
+      if (quicDelay != null) await Future<void>.delayed(quicDelay!);
+      if (!quicSucceeds) throw Exception('quic failed');
     }
     return this;
   }
@@ -43,10 +48,11 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   void close() {
     _controller.close();
   }
+
   @override
   Future<dynamic> getQuicStats() => Future.value(null);
   @override
-  bool get isQuic => false;
+  bool get isQuic => _isQuic;
 
   @override
   Future<SecureSocket?> secure({
@@ -95,6 +101,7 @@ void main() {
         tlsHost: 'example.com',
       ),
     ];
+    account.quicExclusiveHeadStart = const Duration(milliseconds: 10);
 
     final attempts = <String>[];
     final connection = Connection(
@@ -113,6 +120,33 @@ void main() {
     );
     expect(connection.state, XmppConnectionState.SocketOpened);
 
+    connection.dispose();
+  });
+
+  test('TCP safety net starts after the QUIC-exclusive head start', () async {
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..quicEndpoints = const <XmppQuicEndpoint>[
+        XmppQuicEndpoint(host: 'quic.example.com', port: 443),
+      ]
+      ..tcpEndpoints = const <XmppTcpEndpoint>[
+        XmppTcpEndpoint(host: 'tcp.example.com', port: 5222, directTls: false),
+      ]
+      ..quicExclusiveHeadStart = const Duration(milliseconds: 10);
+    final attempts = <String>[];
+    var socketNumber = 0;
+    final connection = Connection(
+      account,
+      socketFactory: () => _RecordingSocket(
+        attempts,
+        quicDelay:
+            socketNumber++ == 0 ? const Duration(milliseconds: 50) : null,
+      ),
+    );
+
+    await connection.openSocket();
+
+    expect(attempts, ['quic:quic.example.com:443', 'tcp:tcp.example.com:5222']);
+    expect(connection.socket!.isQuic, isFalse);
     connection.dispose();
   });
 }

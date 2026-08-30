@@ -46,6 +46,7 @@ class XmppAccountSettings {
   String? serverCertificateHash;
   List<XmppTcpEndpoint>? tcpEndpoints;
   List<XmppQuicEndpoint>? quicEndpoints;
+  Duration quicExclusiveHeadStart = const Duration(seconds: 12);
   bool preferSasl2 = true;
   bool useBind2 = true;
   bool sasl2SendUserAgent = true;
