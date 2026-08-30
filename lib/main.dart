@@ -6202,11 +6202,13 @@ class _PresenceMenu extends StatelessWidget {
     final isOnline = service.isConnected;
     final latencyMs = service.lastPingLatency?.inMilliseconds;
     final latencyLabel = latencyMs == null ? '--' : '$latencyMs ms';
-    final dotColor = _presenceDotColor(
-      theme,
-      service.selfPresence.showElement ??
-          (service.isConnected ? PresenceShowElement.CHAT : null),
-    );
+    final dotColor = service.isDegraded
+        ? const Color(0xFFF9A825)
+        : _presenceDotColor(
+            theme,
+            service.selfPresence.showElement ??
+                (service.isConnected ? PresenceShowElement.CHAT : null),
+          );
     return FutureBuilder<bool>(
       future: _getSentryOptIn(),
       builder: (context, snapshot) {
@@ -6293,7 +6295,13 @@ class _PresenceMenu extends StatelessWidget {
           itemBuilder: (context) => [
             PopupMenuItem(
               enabled: false,
-              child: Text('Session: ${isOnline ? 'online' : 'offline'}'),
+              child: Text(
+                'Session: ${service.isDegraded
+                    ? 'degraded'
+                    : isOnline
+                    ? 'online'
+                    : 'offline'}',
+              ),
             ),
             PopupMenuItem(
               enabled: false,

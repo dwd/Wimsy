@@ -10,7 +10,7 @@ void main() {
       expect(d.pingIntervalForeground, const Duration(seconds: 30));
       expect(d.pingIntervalBackground, const Duration(minutes: 5));
       expect(d.pendingAckRequestDelay, const Duration(seconds: 15));
-      expect(d.keepaliveMaxTimeout, const Duration(seconds: 30));
+      expect(d.keepaliveMaxTimeout, const Duration(seconds: 90));
       expect(d.mucSelfPingIdle, const Duration(minutes: 10));
       expect(d.mucSelfPingCheckInterval, const Duration(minutes: 1));
       expect(d.mucSelfPingTimeout, const Duration(seconds: 30));

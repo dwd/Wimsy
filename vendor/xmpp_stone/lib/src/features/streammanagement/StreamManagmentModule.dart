@@ -29,7 +29,7 @@ class StreamManagementModule extends Negotiator {
   static const Duration defaultPingIntervalForeground = Duration(seconds: 30);
   static const Duration defaultPingIntervalBackground = Duration(minutes: 5);
   static const Duration defaultPendingAckRequestDelay = Duration(seconds: 15);
-  static const Duration defaultKeepaliveMaxTimeout = Duration(seconds: 30);
+  static const Duration defaultKeepaliveMaxTimeout = Duration(seconds: 90);
 
   // Mutable copies of the above, adjustable at runtime via [configure] so a
   // control panel can tune keepalive cadence without restarting the app.
@@ -679,13 +679,6 @@ class StreamManagementModule extends Negotiator {
         occurredAt: _lastKeepaliveFailureAt!,
       ),
     );
-    if (reason == KeepaliveFailureReason.pingTimeout) {
-      _connection.requestReconnect(
-        reason: ReconnectionReason.keepaliveTimeout,
-        immediate: true,
-        shortTimeout: shortTimeout,
-      );
-    }
     _emitKeepaliveState();
   }
 
@@ -693,10 +686,11 @@ class StreamManagementModule extends Negotiator {
     final base = _lastKeepaliveLatency ?? Duration.zero;
     final multiplier = shortTimeout ? 5 : 10;
     final scaled = base * multiplier;
-    final floor = Duration(seconds: shortTimeout ? 5 : 10);
+    final floor = Duration(seconds: shortTimeout ? 5 : 45);
     final candidate = scaled > floor ? scaled : floor;
-    final result =
-        candidate > _keepaliveMaxTimeout ? _keepaliveMaxTimeout : candidate;
+    final effectiveMaximum =
+        _keepaliveMaxTimeout < floor ? floor : _keepaliveMaxTimeout;
+    final result = candidate > effectiveMaximum ? effectiveMaximum : candidate;
     // H1: log the computed timeout and the latency it was based on, so we can
     //     confirm that a zero/missing latency baseline is causing the 10 s floor
     //     to be used on the very first probe after connection.

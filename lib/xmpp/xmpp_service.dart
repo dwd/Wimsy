@@ -54,6 +54,7 @@ import 'srv_target.dart';
 import 'alt_connection.dart';
 import 'quic_endpoint_plan.dart';
 import 'quic_xmpp_socket.dart';
+import 'liveness_controller.dart';
 import 'room_nickname.dart';
 import 'tcp_endpoint_plan.dart';
 
@@ -196,13 +197,18 @@ class XmppService extends ChangeNotifier {
   final List<int> _quicSentHistory = [];
   BigInt _lastQuicLostPackets = BigInt.zero;
   BigInt _lastQuicSentPackets = BigInt.zero;
+  BigInt _lastQuicReceivedDatagrams = BigInt.zero;
   Timer? _quicStatsTimer;
+  LivenessController? _livenessController;
+  ConnectionHealth _connectionHealth = ConnectionHealth.healthy;
   static const int _maxQuicHistory = 60;
 
   List<int> get quicRttHistory => _quicRttHistory;
   List<int> get quicLossHistory => _quicLossHistory;
   double? get quicLossPercentage =>
       packetLossPercentage(_quicLossHistory, _quicSentHistory);
+  ConnectionHealth get connectionHealth => _connectionHealth;
+  bool get isDegraded => _connectionHealth == ConnectionHealth.degraded;
 
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
   void Function(String roomJid, ChatMessage message)?
@@ -1459,6 +1465,7 @@ class XmppService extends ChangeNotifier {
           _status = XmppStatus.connected;
           _errorMessage = null;
           notifyListeners();
+          _setupLiveness(connection);
           _setupKeepalive();
           _setupQuicStats();
           _setupDeliveryTracking();
@@ -1485,6 +1492,7 @@ class XmppService extends ChangeNotifier {
           _connectTransaction = null;
           _status = XmppStatus.connected;
           _errorMessage = null;
+          _setupLiveness(connection);
           notifyListeners();
           _pepVcardConversionSupported = connection.getSupportedFeatures().any(
             (feature) => feature.xmppVar == 'urn:xmpp:pep-vcard-conversion:0',
@@ -5412,6 +5420,20 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  void _suspendBulkWork() {
+    _mucSelfPingTimer?.cancel();
+    _mucSelfPingTimer = null;
+    for (final timer in _mucSelfPingTimeouts.values) {
+      timer.cancel();
+    }
+    _mucSelfPingTimeouts.clear();
+    _pendingMucSelfPings.clear();
+    for (final timer in _mamCatchUpTimers.values) {
+      timer.cancel();
+    }
+    _mamCatchUpTimers.clear();
+  }
+
   void _tickMucSelfPing() {
     final connection = _connection;
     if (connection == null) {
@@ -6820,6 +6842,7 @@ class XmppService extends ChangeNotifier {
     _quicSentHistory.clear();
     _lastQuicLostPackets = BigInt.zero;
     _lastQuicSentPackets = BigInt.zero;
+    _lastQuicReceivedDatagrams = BigInt.zero;
 
     final socket = _connection?.socket;
     if (socket == null || !socket.isQuic) return;
@@ -6894,6 +6917,19 @@ class XmppService extends ChangeNotifier {
         _quicSentHistory.removeAt(0);
       }
 
+      final receivedDatagrams = stats.udpRx.datagrams;
+      if (receivedDatagrams > _lastQuicReceivedDatagrams) {
+        _livenessController?.observeProgress();
+      }
+      _lastQuicReceivedDatagrams = receivedDatagrams;
+      final sent = deltaSent.toInt();
+      final lost = deltaLoss.toInt();
+      _livenessController?.updateMetrics(
+        smoothedRtt: Duration(milliseconds: stats.path.rttMillis.toInt()),
+        loss: sent <= 0 ? 0 : lost / sent,
+      );
+      _livenessController?.checkSilence();
+
       notifyListeners();
     });
   }
@@ -6941,6 +6977,7 @@ class XmppService extends ChangeNotifier {
       _lastPingLatency = state.lastLatency;
       if (state.lastSuccessAt != null) {
         _lastPingAt = state.lastSuccessAt;
+        _livenessController?.observeProgress(now: state.lastSuccessAt);
       }
       notifyListeners();
     });
@@ -6950,6 +6987,7 @@ class XmppService extends ChangeNotifier {
     ) {
       _lastPingLatency = null;
       _lastPingAt = failure.occurredAt;
+      _livenessController?.reportProbeFailure(now: failure.occurredAt);
       notifyListeners();
     });
     connection.setKeepaliveBackgroundMode(_backgroundMode);
@@ -6962,6 +7000,33 @@ class XmppService extends ChangeNotifier {
       connection.probeKeepalive(shortTimeout: false);
     }
     _requestCarbons();
+  }
+
+  void _setupLiveness(Connection connection) {
+    _connectionHealth = ConnectionHealth.healthy;
+    _livenessController = LivenessController(
+      onProbeRequested: () {
+        final socket = connection.socket;
+        if (socket is QuicCapableXmppSocket) {
+          unawaited(socket.sendPingProbe());
+        } else {
+          connection.probeKeepalive(shortTimeout: false);
+        }
+      },
+      onHealthChanged: (health) {
+        if (!identical(_connection, connection)) return;
+        _connectionHealth = health;
+        if (health == ConnectionHealth.degraded) {
+          _suspendBulkWork();
+        } else if (health == ConnectionHealth.dead) {
+          connection.requestReconnect(
+            reason: ReconnectionReason.keepaliveTimeout,
+            immediate: true,
+          );
+        }
+        notifyListeners();
+      },
+    );
   }
 
   /// The keepalive/ping/reconnect/call timer tuning currently in effect.

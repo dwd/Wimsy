@@ -1440,6 +1440,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _pingTimer = null;
   }
 
+  /// Sends one coordinated ack-eliciting probe for the liveness controller.
+  Future<void> sendPingProbe() async {
+    final connection = _connection;
+    final generation = _connectionGeneration;
+    if (connection == null || !_isCurrentGeneration(generation)) return;
+    await connectionSendPing(connection: connection);
+    if (_isCurrentGeneration(generation)) _lastQuicPingAt = DateTime.now();
+  }
+
   /// Starts a periodic watcher that detects when the server sends a new
   /// MAX_STREAMS(bidi) frame, clears the blocked flag, and resumes aux opens.
   void _startMaxStreamsWatcher() {
