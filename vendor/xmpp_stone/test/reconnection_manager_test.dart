@@ -182,5 +182,7 @@ void main() {
 
     final scheduled = await scheduledFuture;
     expect(scheduled.nextDelay, const Duration(milliseconds: 20));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(connection.reconnectState.attempt, greaterThanOrEqualTo(2));
   });
 }

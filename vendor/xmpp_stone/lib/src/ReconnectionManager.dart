@@ -166,6 +166,11 @@ class ReconnectionManager {
   }
 
   void connectionStateHandler(XmppConnectionState state) {
+    if (state != XmppConnectionState.Ready &&
+        state != XmppConnectionState.Resumed) {
+      _stableReadyTimer?.cancel();
+      _stableReadyTimer = null;
+    }
     if (state == XmppConnectionState.ForcefullyClosed) {
       Log.d(TAG, 'Connection forcefully closed');
       // Reset phase so the dedupe check in requestReconnect does not block
