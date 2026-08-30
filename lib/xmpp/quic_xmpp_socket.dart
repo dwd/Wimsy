@@ -943,6 +943,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     unawaited(
       Future<void>(() async {
         var recvStream = initial;
+        var streamEnd = QuicStreamEndObservation.unknown;
         try {
           while (_isCurrentGeneration(recvGeneration)) {
             final readResult = await recvStreamRead(
@@ -963,6 +964,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
             final bytes = readResult.$2;
             if (bytes == null) {
+              streamEnd = QuicStreamEndObservation.fin;
               break;
             }
             if (bytes.isEmpty) {
@@ -987,6 +989,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
           }
         } catch (error, stackTrace) {
+          streamEnd = describeQuicStreamEnd(error);
           if (!_quicStreamController.isClosed &&
               !_isQuicConnectionClosure(error)) {
             try {
@@ -996,9 +999,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
           }
         } finally {
-          if (isControl && _isCurrentGeneration(recvGeneration)) {
-            await _logQuicCloseReason(context);
-            if (!_quicStreamController.isClosed) {
+          if (isControl) {
+            if (streamEnd == QuicStreamEndObservation.unknown &&
+                !_isCurrentGeneration(recvGeneration)) {
+              streamEnd = _closed
+                  ? QuicStreamEndObservation.applicationTeardown
+                  : QuicStreamEndObservation.localCancellation;
+            }
+            await _logQuicCloseReason(context, streamEnd);
+            if (_isCurrentGeneration(recvGeneration) &&
+                !_quicStreamController.isClosed) {
               await _quicStreamController.close();
             }
           } else {
@@ -1521,7 +1531,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   ///  - `TransportError`     — QUIC transport-level protocol error
   ///  - `VersionMismatch`    — QUIC version negotiation failed
   ///  - null / unknown       — stream ended cleanly or reason unavailable
-  Future<void> _logQuicCloseReason(String attemptContext) async {
+  Future<void> _logQuicCloseReason(
+    String attemptContext,
+    QuicStreamEndObservation streamEnd,
+  ) async {
     final conn = _connection;
     if (conn == null) {
       debugPrint(
@@ -1539,7 +1552,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         // before the final statistics could be copied across FFI.
       }
       final now = DateTime.now();
-      final attribution = describeQuicCloseAttribution(reason);
+      final attribution = describeQuicCloseAttribution(
+        reason,
+        streamEnd: streamEnd,
+      );
       final idle = _quicNegotiatedIdleTimeoutMs == null
           ? 'infinite'
           : '${_quicNegotiatedIdleTimeoutMs}ms';
@@ -1549,6 +1565,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         'QuicTransport',
         'connection dropped: attribution=$attribution '
             '$attemptContext '
+            'control_stream_end=${streamEnd.name} '
             'reason=${reason ?? 'none (control stream ended without a QUIC close error)'} '
             'negotiated_idle_timeout=$idle '
             'connection_age=${_formatDiagnosticAge(now, _quicConnectedAt)} '
@@ -1584,8 +1601,24 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 /// timer expired. It cannot establish whether the server independently timed
 /// out first, because a server or the network may silently discard packets.
 @visibleForTesting
-String describeQuicCloseAttribution(String? reason) {
-  if (reason == null) return 'unknown-clean-stream-end';
+String describeQuicCloseAttribution(
+  String? reason, {
+  QuicStreamEndObservation streamEnd = QuicStreamEndObservation.unknown,
+}) {
+  if (reason == null) {
+    return switch (streamEnd) {
+      QuicStreamEndObservation.fin =>
+        'control-stream-fin-without-connection-close',
+      QuicStreamEndObservation.resetStream => 'peer-reset-control-stream',
+      QuicStreamEndObservation.localCancellation => 'local-cancellation',
+      QuicStreamEndObservation.applicationTeardown => 'application-teardown',
+      QuicStreamEndObservation.connectionLost =>
+        'connection-lost-without-close-reason',
+      QuicStreamEndObservation.closedStream => 'locally-closed-stream',
+      QuicStreamEndObservation.readError => 'control-stream-read-error',
+      QuicStreamEndObservation.unknown => 'unknown-clean-stream-end',
+    };
+  }
   if (reason.contains('LocallyClosed')) return 'client-initiated';
   if (reason.contains('ApplicationClosed')) return 'server-initiated';
   if (reason.contains('TimedOut')) return 'client-observed-idle-timeout';
@@ -1593,6 +1626,32 @@ String describeQuicCloseAttribution(String? reason) {
   if (reason.contains('TransportError')) return 'quic-transport-error';
   if (reason.contains('VersionMismatch')) return 'quic-version-mismatch';
   return 'unknown';
+}
+
+/// The immediate event that ended the control-stream receive loop. This is
+/// recorded separately from the connection close reason because a peer may
+/// FIN or reset one stream without closing the QUIC connection.
+enum QuicStreamEndObservation {
+  fin,
+  resetStream,
+  connectionLost,
+  closedStream,
+  localCancellation,
+  applicationTeardown,
+  readError,
+  unknown,
+}
+
+@visibleForTesting
+QuicStreamEndObservation describeQuicStreamEnd(Object error) {
+  return switch (error) {
+    QuicReadException_Reset() => QuicStreamEndObservation.resetStream,
+    QuicReadException_ConnectionLost() =>
+      QuicStreamEndObservation.connectionLost,
+    QuicReadException_ClosedStream() => QuicStreamEndObservation.closedStream,
+    QuicReadException() => QuicStreamEndObservation.readError,
+    _ => QuicStreamEndObservation.readError,
+  };
 }
 
 @visibleForTesting
