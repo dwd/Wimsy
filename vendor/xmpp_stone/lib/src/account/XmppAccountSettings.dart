@@ -26,6 +26,13 @@ class XmppQuicEndpoint {
   final String? tlsHost;
 }
 
+class XmppEndpointRefreshResult {
+  const XmppEndpointRefreshResult({required this.quic, required this.tcp});
+
+  final List<XmppQuicEndpoint> quic;
+  final List<XmppTcpEndpoint> tcp;
+}
+
 class XmppAccountSettings {
   String name;
   String username;
@@ -47,6 +54,7 @@ class XmppAccountSettings {
   List<XmppTcpEndpoint>? tcpEndpoints;
   List<XmppQuicEndpoint>? quicEndpoints;
   Duration quicExclusiveHeadStart = const Duration(seconds: 12);
+  Future<XmppEndpointRefreshResult> Function()? refreshEndpoints;
   bool preferSasl2 = true;
   bool useBind2 = true;
   bool sasl2SendUserAgent = true;

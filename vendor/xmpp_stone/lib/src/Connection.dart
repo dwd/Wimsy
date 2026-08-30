@@ -608,6 +608,20 @@ class Connection {
       final socketPort =
           useWebSocket ? (account.wsPort ?? account.port) : account.port;
       final wsUri = account.wsUrl != null ? Uri.tryParse(account.wsUrl!) : null;
+      if (!useWebSocket && account.refreshEndpoints != null) {
+        try {
+          final refreshed = await account.refreshEndpoints!();
+          account.quicEndpoints = refreshed.quic;
+          account.tcpEndpoints = refreshed.tcp;
+          Log.i(
+            TAG,
+            'Refreshed acquisition endpoints quic=${refreshed.quic.length} '
+            'tcp=${refreshed.tcp.length}',
+          );
+        } catch (error) {
+          Log.w(TAG, 'Endpoint refresh failed; retaining cached plan: $error');
+        }
+      }
       final quicEndpoints = useWebSocket
           ? const <XmppQuicEndpoint>[]
           : (account.quicEndpoints != null && account.quicEndpoints!.isNotEmpty

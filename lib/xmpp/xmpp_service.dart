@@ -1338,6 +1338,36 @@ class XmppService extends ChangeNotifier {
                 srvCandidates: tcpSrvCandidates,
               )
             : const [];
+        if (!hasManualHost) {
+          account.refreshEndpoints = () async {
+            final refreshed = await resolveAllSrvCandidates(
+              account.domain,
+              includeQuic: quicTransportAvailable && useQuic,
+            );
+            final tcp = filterTcpSrvCandidatesByTransport(
+              refreshed.tcp,
+              allowDirectTls: directTls,
+              allowPlainTcp: useTcp,
+            );
+            return XmppEndpointRefreshResult(
+              quic: quicTransportAvailable && useQuic
+                  ? buildQuicEndpointPlan(
+                      domain: account.domain,
+                      srvCandidates: refreshed.quic,
+                    )
+                  : const <XmppQuicEndpoint>[],
+              tcp: useTcp || directTls
+                  ? buildTcpEndpointPlan(
+                      domain: account.domain,
+                      resolvedHost: resolvedHost,
+                      resolvedPort: resolvedPort,
+                      directTls: resolvedDirectTls,
+                      srvCandidates: tcp,
+                    )
+                  : const <XmppTcpEndpoint>[],
+            );
+          };
+        }
       }
       if (wsConfig != null) {
         account.wsUrl = wsConfig.uri.toString();

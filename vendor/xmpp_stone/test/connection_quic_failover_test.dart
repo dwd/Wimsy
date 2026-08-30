@@ -174,4 +174,30 @@ void main() {
     expect(connection.state, XmppConnectionState.ForcefullyClosed);
     connection.dispose();
   });
+
+  test('each logical acquisition refreshes its endpoint plan', () async {
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..quicEndpoints = const <XmppQuicEndpoint>[]
+      ..tcpEndpoints = const <XmppTcpEndpoint>[
+        XmppTcpEndpoint(
+            host: 'stale.example.com', port: 5222, directTls: false),
+      ]
+      ..refreshEndpoints = () async => const XmppEndpointRefreshResult(
+            quic: <XmppQuicEndpoint>[],
+            tcp: <XmppTcpEndpoint>[
+              XmppTcpEndpoint(
+                  host: 'fresh.example.com', port: 5222, directTls: false),
+            ],
+          );
+    final attempts = <String>[];
+    final connection = Connection(
+      account,
+      socketFactory: () => _RecordingSocket(attempts),
+    );
+
+    await connection.openSocket();
+
+    expect(attempts, ['tcp:fresh.example.com:5222']);
+    connection.dispose();
+  });
 }
