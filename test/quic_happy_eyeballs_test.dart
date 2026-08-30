@@ -92,6 +92,10 @@ void main() {
     });
   });
 
+  test('attempt log context identifies generation and candidate attempt', () {
+    expect(quicAttemptLogContext(7, 3), 'generation=7 attempt=3');
+  });
+
   group('buildQuicHappyEyeballsPlan parallel schedule', () {
     test('single candidate repeated parallelAttempts times', () {
       // With 1 candidate and parallelAttempts=3 the schedule should be

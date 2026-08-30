@@ -71,6 +71,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   bool _useQuic = false;
   bool _closed = false;
   int _connectionGeneration = 0;
+  int? _activeAttemptId;
   bool _postBindReady = false;
   // Set to true when connectionOpenBi times out (peer has not granted bidi
   // stream credits). Cleared when we detect the server has sent a new
@@ -92,6 +93,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   DateTime? _lastQuicSendAt;
   DateTime? _lastQuicPingAt;
   Future<MigrationResult>? _migrationFuture;
+  final Set<Future<void>> _loserCleanupTasks = <Future<void>>{};
 
   /// Identifies the currently active logical connection attempt. Async work
   /// captures this value and must stop before mutating state when it changes.
@@ -100,6 +102,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
   bool _isCurrentGeneration(int generation) =>
       !_closed && generation == _connectionGeneration;
+
+  String get _activeAttemptContext =>
+      quicAttemptLogContext(_connectionGeneration, _activeAttemptId ?? 0);
 
   @visibleForTesting
   int beginConnectionGenerationForTesting() {
@@ -412,7 +417,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         .toList(growable: false);
     if (auxSlots.isNotEmpty) {
       debugPrint(
-        'QUIC closing ${auxSlots.length} aux stream(s): slots=$auxSlots',
+        'QUIC closing $_activeAttemptContext '
+        '${auxSlots.length} aux stream(s): slots=$auxSlots',
       );
     }
 
@@ -442,6 +448,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _auxStreamOpening.clear();
     _auxStreamPendingQueue.clear();
     _serverStreamPool.clear();
+    _activeAttemptId = null;
+    final loserCleanup = _loserCleanupTasks.toList(growable: false);
+    if (loserCleanup.isNotEmpty) {
+      unawaited(Future.wait(loserCleanup));
+    }
 
     if (controlStream != null) {
       unawaited(
@@ -539,7 +550,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         );
       }
       debugPrint(
-        'QUIC connect round $attempt/$maxAttempts: '
+        'QUIC connect round $attempt/$maxAttempts: generation=$generation '
         'racing ${candidates.length} candidate(s) '
         'host=$host port=$port '
         'stagger=${happyEyeballsDelay.inMilliseconds}ms '
@@ -559,13 +570,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         }
         final winnerAddress = connected.address;
         debugPrint(
-          'QUIC connect winner: '
+          'QUIC connect winner: generation=${connected.generation} '
+          'attempt=${connected.attemptId} '
           '${winnerAddress?.address ?? '?'}:$port '
           'type=${winnerAddress?.type ?? '?'} '
           '(round $attempt/$maxAttempts)',
         );
         _endpoint = connected.endpoint;
         _connection = connected.connection;
+        _activeAttemptId = connected.attemptId;
         _sendStream = connected.sendStream;
         _recvStream = connected.recvStream;
         // Log initial connection stats so we can see the server's stream-credit
@@ -583,7 +596,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         return;
       } catch (error) {
         lastError = error;
-        debugPrint('QUIC connect round $attempt/$maxAttempts failed: $error');
+        debugPrint(
+          'QUIC connect round $attempt/$maxAttempts failed: '
+          'generation=$generation error=$error',
+        );
       }
     }
     throw Exception(
@@ -618,6 +634,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     final errors = <String>[];
     var pending = candidates.length;
     final timers = <Timer>[];
+    var nextAttemptId = 0;
 
     void recordFailure(InternetAddress address, Object error) {
       errors.add('${address.address}/${address.type.name}: $error');
@@ -638,8 +655,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         pending--;
         return;
       }
+      final attemptId = ++nextAttemptId;
+      final context = quicAttemptLogContext(generation, attemptId);
       debugPrint(
-        'QUIC connect attempt: ${address.address}:$port '
+        'QUIC connect attempt: $context ${address.address}:$port '
         'type=${address.type} timeout=${quicConnectTimeout.inMilliseconds}ms',
       );
       unawaited(
@@ -648,20 +667,24 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               port,
               serverName,
               timeout: quicConnectTimeout,
+              generation: generation,
+              attemptId: attemptId,
             )
-            .then((result) {
+            .then((result) async {
               if (completer.isCompleted || !_isCurrentGeneration(generation)) {
-                // We lost the race: discard this connection. Best-effort; we
-                // don't have a clean cancel path through the FFI, so just let
-                // the Rust side drop it when the arc goes out of scope.
-                debugPrint(
-                  'QUIC connect discard (lost race): '
-                  '${address.address}:$port type=${address.type}',
+                await _trackLoserCleanup(
+                  result,
+                  address: address,
+                  port: port,
+                  generation: generation,
+                  attemptId: attemptId,
                 );
                 return;
               }
               completer.complete(
                 _QuicConnectResult(
+                  generation: generation,
+                  attemptId: attemptId,
                   address: address,
                   endpoint: result.endpoint,
                   connection: result.connection,
@@ -672,7 +695,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             })
             .catchError((Object error) {
               debugPrint(
-                'QUIC connect failed: ${address.address}:$port '
+                'QUIC connect failed: $context ${address.address}:$port '
                 'type=${address.type} error=$error',
               );
               if (!completer.isCompleted && _isCurrentGeneration(generation)) {
@@ -731,14 +754,19 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     int port,
     String serverName, {
     required Duration timeout,
+    required int generation,
+    required int attemptId,
   }) async {
     final endpoint = await createClientEndpoint();
     // Build a per-connection qlog path so each QUIC session gets its own
     // trace file.  The file is written by Quinn in qlog JSON-SEQ format and
     // can be analysed with qvis (https://qvis.quictools.info/) or Wireshark.
     final qlogPath =
-        '/tmp/wimsy_quic_${DateTime.now().millisecondsSinceEpoch}.qlog';
-    debugPrint('QUIC qlog: writing trace to $qlogPath');
+        '/tmp/wimsy_quic_g${generation}_a${attemptId}_${DateTime.now().millisecondsSinceEpoch}.qlog';
+    debugPrint(
+      'QUIC qlog: ${quicAttemptLogContext(generation, attemptId)} '
+      'writing trace to $qlogPath',
+    );
     final connect = endpointConnect(
       endpoint: endpoint,
       addr: _formatSocketAddress(address, port),
@@ -750,11 +778,54 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       connection: connected.$2,
     );
     return _QuicConnectResult(
+      generation: generation,
+      attemptId: attemptId,
       endpoint: connected.$1,
       connection: connected.$2,
       sendStream: sendStream,
       recvStream: recvStream,
     );
+  }
+
+  Future<void> _trackLoserCleanup(
+    _QuicConnectResult result, {
+    required InternetAddress address,
+    required int port,
+    required int generation,
+    required int attemptId,
+  }) {
+    final cleanup = _discardQuicResult(
+      result,
+      address: address,
+      port: port,
+      generation: generation,
+      attemptId: attemptId,
+    );
+    _loserCleanupTasks.add(cleanup);
+    cleanup.whenComplete(() => _loserCleanupTasks.remove(cleanup));
+    return cleanup;
+  }
+
+  Future<void> _discardQuicResult(
+    _QuicConnectResult result, {
+    required InternetAddress address,
+    required int port,
+    required int generation,
+    required int attemptId,
+  }) async {
+    final context = quicAttemptLogContext(generation, attemptId);
+    try {
+      await sendStreamFinish(stream: result.sendStream);
+      debugPrint(
+        'QUIC connect discard complete: $context ${address.address}:$port '
+        'type=${address.type}',
+      );
+    } catch (error) {
+      debugPrint(
+        'QUIC connect discard failed: $context ${address.address}:$port '
+        'type=${address.type} error=$error',
+      );
+    }
   }
 
   /// Accepts server-initiated bidirectional QUIC streams and routes their
@@ -770,6 +841,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     final conn = _connection;
     if (conn == null) return;
     var streamIndex = 0;
+    final context = _activeAttemptContext;
     unawaited(
       Future<void>(() async {
         while (_isCurrentGeneration(generation)) {
@@ -784,13 +856,15 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             final recvStream = result.$2;
             if (recvStream == null) {
               // Connection closed — exit the accept loop.
-              debugPrint('QUIC server-stream accept loop: connection closed');
+              debugPrint(
+                'QUIC server-stream accept loop: $context connection closed',
+              );
               break;
             }
             final sendStream = result.$1;
             final label = 'quic-server-${streamIndex++}';
             debugPrint(
-              'QUIC accepted server-initiated stream: $label '
+              'QUIC accepted server-initiated stream: $context $label '
               '(recv loop started immediately; send stream pooled for reuse)',
             );
             // Start the recv loop immediately so inbound stanzas pushed by
@@ -817,7 +891,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
           } catch (error) {
             if (_isCurrentGeneration(generation)) {
-              debugPrint('QUIC server-stream accept loop error: $error');
+              debugPrint(
+                'QUIC server-stream accept loop error: $context $error',
+              );
             }
             break;
           }
@@ -848,6 +924,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     int? generation,
   }) {
     final recvGeneration = generation ?? _connectionGeneration;
+    final context = _activeAttemptContext;
     unawaited(
       Future<void>(() async {
         var recvStream = initial;
@@ -905,14 +982,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           }
         } finally {
           if (isControl && _isCurrentGeneration(recvGeneration)) {
-            await _logQuicCloseReason();
+            await _logQuicCloseReason(context);
             if (!_quicStreamController.isClosed) {
               await _quicStreamController.close();
             }
           } else {
             final endLabel =
                 label ?? (slot != null ? 'quic-aux-$slot' : 'quic-aux-?');
-            debugPrint('QUIC aux stream recv loop ended label=$endLabel');
+            debugPrint(
+              'QUIC aux stream recv loop ended $context label=$endLabel',
+            );
           }
         }
       }),
@@ -1233,7 +1312,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       final txStream = stats.frameTx.stream;
       final rxStream = stats.frameRx.stream;
       debugPrint(
-        'QUIC connection stats [$context]: '
+        'QUIC connection stats [$_activeAttemptContext $context]: '
         'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
         'MAX_STREAMS(uni) frames received=$rxMaxUni '
         'STREAMS_BLOCKED(bidi) sent by us=$txBlockedBidi '
@@ -1242,7 +1321,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       );
       _lastMaxStreamsBidiFrameCount = rxMaxBidi;
     } catch (error) {
-      debugPrint('QUIC connection stats error [$context]: $error');
+      debugPrint(
+        'QUIC connection stats error [$_activeAttemptContext $context]: $error',
+      );
     }
   }
 
@@ -1274,7 +1355,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           ? '${(idleMs.toInt() / 1000).toStringAsFixed(1)}s'
           : 'infinite';
       debugPrint(
-        'QUIC peer transport params [$context]: '
+        'QUIC peer transport params [$_activeAttemptContext $context]: '
         'initial_max_streams_bidi=$bidi '
         'initial_max_streams_uni=$uni '
         'initial_max_data=$data '
@@ -1285,7 +1366,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       if (bidi <= BigInt.one) {
         _auxStreamsBlocked = true;
         debugPrint(
-          'QUIC peer transport params [$context]: '
+          'QUIC peer transport params [$_activeAttemptContext $context]: '
           'peer advertised initial_max_streams_bidi=$bidi (<= 1); '
           'aux stream opens are pre-flagged as blocked, '
           'waiting for server MAX_STREAMS(bidi) frame before attempting',
@@ -1293,7 +1374,10 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         _startMaxStreamsWatcher();
       }
     } catch (error) {
-      debugPrint('QUIC peer transport params error [$context]: $error');
+      debugPrint(
+        'QUIC peer transport params error '
+        '[$_activeAttemptContext $context]: $error',
+      );
     }
   }
 
@@ -1311,7 +1395,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return;
     }
     debugPrint(
-      'QUIC PING timer started: interval=${interval.inSeconds}s '
+      'QUIC PING timer started: $_activeAttemptContext '
+      'interval=${interval.inSeconds}s '
       '(quic_idle_timeout=${_quicNegotiatedIdleTimeoutMs != null ? '${(_quicNegotiatedIdleTimeoutMs! / 1000).toStringAsFixed(1)}s' : 'infinite'})',
     );
     _pingTimer = Timer.periodic(interval, (_) async {
@@ -1325,9 +1410,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         await connectionSendPing(connection: conn);
         if (!_isCurrentGeneration(generation)) return;
         _lastQuicPingAt = DateTime.now();
-        debugPrint('QUIC PING sent (keeping connection alive)');
+        debugPrint(
+          'QUIC PING sent $_activeAttemptContext (keeping connection alive)',
+        );
       } catch (e) {
-        debugPrint('QUIC PING error: $e');
+        debugPrint('QUIC PING error: $_activeAttemptContext $e');
       }
     });
   }
@@ -1345,7 +1432,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       return; // Already watching.
     }
     debugPrint(
-      'QUIC aux stream watcher started: '
+      'QUIC aux stream watcher started: $_activeAttemptContext '
       'waiting for server MAX_STREAMS(bidi) frame',
     );
     final generation = _connectionGeneration;
@@ -1361,7 +1448,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           if (!_isCurrentGeneration(generation)) return;
           final rxMaxBidi = _lastMaxStreamsBidiFrameCount;
           debugPrint(
-            'QUIC aux stream watcher: '
+            'QUIC aux stream watcher: $_activeAttemptContext '
             'server MAX_STREAMS(bidi) frames received=$rxMaxBidi '
             '(was $prevCount)',
           );
@@ -1370,7 +1457,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             _maxStreamsWatchTimer?.cancel();
             _maxStreamsWatchTimer = null;
             debugPrint(
-              'QUIC aux stream watcher: server granted more bidi stream credits '
+              'QUIC aux stream watcher: $_activeAttemptContext '
+              'server granted more bidi stream credits '
               '(MAX_STREAMS frame count increased to $rxMaxBidi); '
               'lazy aux stream opens via _selectSendTarget will now succeed',
             );
@@ -1409,7 +1497,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   ///  - `TransportError`     — QUIC transport-level protocol error
   ///  - `VersionMismatch`    — QUIC version negotiation failed
   ///  - null / unknown       — stream ended cleanly or reason unavailable
-  Future<void> _logQuicCloseReason() async {
+  Future<void> _logQuicCloseReason(String attemptContext) async {
     final conn = _connection;
     if (conn == null) {
       debugPrint(
@@ -1436,6 +1524,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       Log.w(
         'QuicTransport',
         'connection dropped: attribution=$attribution '
+            '$attemptContext '
             'reason=${reason ?? 'none (control stream ended without a QUIC close error)'} '
             'negotiated_idle_timeout=$idle '
             'connection_age=${_formatDiagnosticAge(now, _quicConnectedAt)} '
@@ -1481,6 +1570,10 @@ String describeQuicCloseAttribution(String? reason) {
   if (reason.contains('VersionMismatch')) return 'quic-version-mismatch';
   return 'unknown';
 }
+
+@visibleForTesting
+String quicAttemptLogContext(int generation, int attemptId) =>
+    'generation=$generation attempt=$attemptId';
 
 String _formatDiagnosticAge(DateTime now, DateTime? then) {
   if (then == null) return 'never';
@@ -1532,6 +1625,8 @@ int quicAuxSlotForBareJid(String bareJid, int slotCount) {
 class _QuicConnectResult {
   const _QuicConnectResult({
     this.address,
+    required this.generation,
+    required this.attemptId,
     required this.endpoint,
     required this.connection,
     required this.sendStream,
@@ -1541,6 +1636,8 @@ class _QuicConnectResult {
   /// Remote address that won the race. May be null for intermediate results
   /// produced by [_connectQuicAddress] before the racer wraps them.
   final InternetAddress? address;
+  final int generation;
+  final int attemptId;
   final QuicEndpoint endpoint;
   final QuicConnection connection;
   final QuicSendStream sendStream;
