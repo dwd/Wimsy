@@ -90,6 +90,7 @@ void main() {
     StreamManagementModule.getInstance(connection);
     final socket = _FakeSocket();
     connection.socket = socket;
+    connection.setState(XmppConnectionState.SessionInitialized);
     return _ConnectionSetup(connection: connection, socket: socket);
   }
 
@@ -107,6 +108,7 @@ void main() {
     final fakeSocket = setup.socket;
     final states = <KeepaliveState>[];
     final sub = connection.keepaliveStateStream.listen(states.add);
+    await Future<void>.delayed(Duration.zero);
 
     connection.probeKeepalive(shortTimeout: true);
 
@@ -129,6 +131,7 @@ void main() {
     final setup = _newConnection();
     final connection = setup.connection;
     final failureFuture = connection.keepaliveFailureStream.first;
+    await Future<void>.delayed(Duration.zero);
 
     connection.probeKeepalive(shortTimeout: true);
     final failure = await failureFuture.timeout(const Duration(seconds: 8));
@@ -157,6 +160,7 @@ void main() {
     final subscription = setup.connection.keepaliveStateStream.listen(
       states.add,
     );
+    await Future<void>.delayed(Duration.zero);
 
     setup.connection.probeKeepalive(shortTimeout: true);
     await Future<void>.delayed(Duration.zero);
@@ -167,6 +171,33 @@ void main() {
 
     expect(states.last.awaitingPing, isFalse);
     await subscription.cancel();
+  });
+
+  test('pre-bind write gate rejects ordinary stanzas', () {
+    final setup = _newConnection();
+    setup.connection.setState(XmppConnectionState.Authenticating);
+
+    setup.connection.write(
+      '<iq id="stale"><ping xmlns="urn:xmpp:ping"/></iq>',
+    );
+    setup.connection.write('<active xmlns="urn:xmpp:csi:0"/>');
+
+    expect(setup.socket.writes, isEmpty);
+  });
+
+  test('pre-bind write gate permits negotiation and post-bind traffic', () {
+    final setup = _newConnection();
+    setup.connection.setState(XmppConnectionState.Authenticating);
+
+    setup.connection.write(
+      "<?xml version='1.0'?><stream:stream to='example.com'>"
+      '<authenticate xmlns="urn:xmpp:sasl:2" mechanism="PLAIN"/>',
+    );
+    expect(setup.socket.writes, hasLength(1));
+
+    setup.connection.setState(XmppConnectionState.SessionInitialized);
+    setup.connection.write('<presence/>');
+    expect(setup.socket.writes, hasLength(2));
   });
 
   test('StreamManagementModule.configure overrides start out at defaults', () {

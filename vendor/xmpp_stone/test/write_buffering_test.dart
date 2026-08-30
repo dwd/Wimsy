@@ -14,7 +14,7 @@ void main() {
       final connection = Connection(account);
       final socket = _RecordingSocket();
       connection.socket = socket;
-      connection.setState(XmppConnectionState.SocketOpened);
+      connection.setState(XmppConnectionState.SessionInitialized);
 
       connection.write('<iq id="1"/>');
       connection.write('<iq id="2"/>');
@@ -31,7 +31,7 @@ void main() {
       final connection = Connection(account);
       final socket = _RecordingSocket();
       connection.socket = socket;
-      connection.setState(XmppConnectionState.SocketOpened);
+      connection.setState(XmppConnectionState.SessionInitialized);
 
       connection.write('<iq id="1"/>');
       connection.write('<iq id="2"/>');
@@ -48,7 +48,7 @@ void main() {
       final connection = Connection(account);
       final socket = _ThrowingSocket();
       connection.socket = socket;
-      connection.setState(XmppConnectionState.SocketOpened);
+      connection.setState(XmppConnectionState.SessionInitialized);
 
       connection.write('<iq id="1"/>');
       await Future<void>.delayed(Duration.zero);

@@ -965,6 +965,15 @@ class Connection {
     if (socket == null) {
       return;
     }
+    final serialized = payload?.toString() ?? '';
+    if (!_isWriteAllowedInCurrentPhase(serialized)) {
+      Log.w(
+        TAG,
+        'Dropping application write before resource binding '
+        'state=$state element=${_topLevelElementName(serialized) ?? 'unknown'}',
+      );
+      return;
+    }
     try {
       socket.write(payload);
     } catch (error, stackTrace) {
@@ -972,6 +981,28 @@ class Connection {
       Log.e(TAG, 'Socket write failed: $error');
       handleConnectionError(error.toString());
     }
+  }
+
+  bool _isWriteAllowedInCurrentPhase(String payload) {
+    if (state == XmppConnectionState.SessionInitialized ||
+        state == XmppConnectionState.Ready ||
+        state == XmppConnectionState.Resumed) {
+      return true;
+    }
+    const guardedPreBindStates = <XmppConnectionState>{
+      XmppConnectionState.SocketOpened,
+      XmppConnectionState.DoneParsingFeatures,
+      XmppConnectionState.PlainAuthentication,
+      XmppConnectionState.Authenticating,
+      XmppConnectionState.Authenticated,
+      XmppConnectionState.AuthenticatedSasl2AwaitingFeatures,
+      XmppConnectionState.AuthenticationFailure,
+      XmppConnectionState.AuthenticationNotSupported,
+      XmppConnectionState.Reconnecting,
+      XmppConnectionState.WouldLikeToOpen,
+    };
+    return !guardedPreBindStates.contains(state) ||
+        isXmppNegotiationPayload(payload);
   }
 
   void _tryStartSasl2IapPipeline() {
@@ -1331,6 +1362,62 @@ class Connection {
     return state == XmppConnectionState.SocketOpening ||
         state == XmppConnectionState.Closing;
   }
+}
+
+/// Returns whether [payload] is valid client negotiation traffic before the
+/// XMPP resource is bound. Ordinary stanzas and post-bind nonzas deliberately
+/// return false so stale session work cannot escape onto a replacement stream.
+bool isXmppNegotiationPayload(String payload) {
+  var remaining = payload.trim();
+  if (remaining.isEmpty) {
+    return false;
+  }
+  if (remaining.startsWith('<?xml')) {
+    final declarationEnd = remaining.indexOf('?>');
+    if (declarationEnd < 0) {
+      return false;
+    }
+    remaining = remaining.substring(declarationEnd + 2).trimLeft();
+    if (remaining.isEmpty) {
+      return true;
+    }
+  }
+  if (remaining.startsWith('</stream:stream')) {
+    return remaining.endsWith('>');
+  }
+  if (remaining.startsWith('<stream:stream')) {
+    final openerEnd = remaining.indexOf('>');
+    if (openerEnd < 0) {
+      return false;
+    }
+    final afterOpener = remaining.substring(openerEnd + 1).trimLeft();
+    return afterOpener.isEmpty || isXmppNegotiationPayload(afterOpener);
+  }
+
+  final elementName = _topLevelElementName(remaining);
+  const negotiationElements = <String>{
+    'starttls',
+    'auth',
+    'authenticate',
+    'response',
+    'abort',
+    'compress',
+    'resume',
+  };
+  if (elementName != null && negotiationElements.contains(elementName)) {
+    return true;
+  }
+  if (elementName == 'iq') {
+    return remaining.contains('urn:ietf:params:xml:ns:xmpp-bind') ||
+        remaining.contains('urn:ietf:params:xml:ns:xmpp-session');
+  }
+  return false;
+}
+
+String? _topLevelElementName(String payload) {
+  return RegExp(r'^<\s*(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)')
+      .firstMatch(payload.trimLeft())
+      ?.group(1);
 }
 
 /// Result type for [Connection._extractCompleteElements].
