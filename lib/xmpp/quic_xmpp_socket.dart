@@ -536,18 +536,25 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     String serverName,
     int generation,
   ) async {
-    final addresses = await resolveHostCached(host);
+    final refreshedAddresses = <InternetAddress>[];
+    final addresses = await resolveHostCached(
+      host,
+      onRefresh: (fresh) => refreshedAddresses.addAll(fresh),
+    );
     if (addresses.isEmpty) {
       throw SocketException('No addresses found for QUIC host $host');
     }
-    final candidates = buildQuicHappyEyeballsPlan(
-      addresses,
-      health: _addressHealth,
-    );
-
     final maxAttempts = quicConnectMaxAttempts < 1 ? 1 : quicConnectMaxAttempts;
     Object? lastError;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      final uniqueAddresses = <String, InternetAddress>{
+        for (final address in [...addresses, ...refreshedAddresses])
+          address.address: address,
+      }.values.toList();
+      final candidates = buildQuicHappyEyeballsPlan(
+        uniqueAddresses,
+        health: _addressHealth,
+      );
       if (!_isCurrentGeneration(generation)) {
         throw StateError(
           'QUIC connection generation $generation was superseded',

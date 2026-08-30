@@ -174,6 +174,38 @@ void main() {
       expect(result.first.address, '10.0.0.3');
     });
 
+    test(
+      'returns stale after freshness budget and reports later refresh',
+      () async {
+        final testCache = DnsCache(
+          ttl: const Duration(milliseconds: 1),
+          maxStaleness: const Duration(hours: 1),
+        );
+        testCache.store('example.com', [_addr('10.0.0.3')]);
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        final refreshed = <InternetAddress>[];
+
+        final result = await resolveHostCachedWith(
+          'example.com',
+          (host, {type = InternetAddressType.any}) async {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            return [_addr('10.0.0.9')];
+          },
+          cache: testCache,
+          freshnessBudget: const Duration(milliseconds: 1),
+          onRefresh: refreshed.addAll,
+        );
+
+        expect(result.single.address, '10.0.0.3');
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(refreshed.single.address, '10.0.0.9');
+        final cached =
+            testCache.getFresh('example.com') ??
+            testCache.getStale('example.com');
+        expect(cached!.single.address, '10.0.0.9');
+      },
+    );
+
     test('throws when all retries fail and no stale cache exists', () async {
       Future<List<InternetAddress>> failingLookup(
         String host, {

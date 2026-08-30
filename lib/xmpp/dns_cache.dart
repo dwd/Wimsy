@@ -66,6 +66,7 @@ class DnsCache {
 
 /// The process-wide hostname DNS cache shared by all lookups.
 final dnsCache = DnsCache();
+final Map<String, Timer> _dnsRefreshTimers = <String, Timer>{};
 
 /// Signature for a hostname-to-address lookup function.
 typedef HostLookupFn =
@@ -73,6 +74,7 @@ typedef HostLookupFn =
       String host, {
       InternetAddressType type,
     });
+typedef HostRefreshFn = void Function(List<InternetAddress> addresses);
 
 /// How many times to retry a failed hostname lookup before giving up.
 const _dnsRetryCount = 3;
@@ -94,7 +96,14 @@ const _dnsRetryDelay = Duration(seconds: 2);
 Future<List<InternetAddress>> resolveHostCached(
   String host, {
   InternetAddressType type = InternetAddressType.any,
-}) => resolveHostCachedWith(host, _defaultLookup, type: type);
+  HostRefreshFn? onRefresh,
+}) => resolveHostCachedWith(
+  host,
+  _defaultLookup,
+  type: type,
+  onRefresh: onRefresh,
+  scheduleRefresh: true,
+);
 
 Future<List<InternetAddress>> _defaultLookup(
   String host, {
@@ -112,6 +121,10 @@ Future<List<InternetAddress>> resolveHostCachedWith(
   DnsCache? cache,
   int retryCount = _dnsRetryCount,
   Duration retryDelay = _dnsRetryDelay,
+  Duration freshnessBudget = const Duration(seconds: 1),
+  HostRefreshFn? onRefresh,
+  bool forceRefresh = false,
+  bool scheduleRefresh = false,
 }) async {
   final unwrappedHost = host.startsWith('[') && host.endsWith(']')
       ? host.substring(1, host.length - 1)
@@ -124,46 +137,76 @@ Future<List<InternetAddress>> resolveHostCachedWith(
   final effectiveCache = cache ?? dnsCache;
 
   // Return fresh cached result immediately.
-  final fresh = effectiveCache.getFresh(host);
+  final fresh = forceRefresh ? null : effectiveCache.getFresh(host);
   if (fresh != null) {
     debugPrint('DNS cache: fresh hit for $host (${fresh.length} address(es))');
     return fresh;
   }
 
-  Object? lastError;
-  for (var attempt = 1; attempt <= retryCount; attempt++) {
-    try {
-      debugPrint('DNS lookup: host=$host attempt=$attempt/$retryCount');
-      final addresses = await lookup(host, type: type);
-      if (addresses.isNotEmpty) {
-        effectiveCache.store(host, addresses);
-        debugPrint(
-          'DNS lookup: host=$host resolved ${addresses.length} address(es) '
-          'on attempt $attempt',
-        );
-        return addresses;
+  Future<List<InternetAddress>> liveLookup() async {
+    Object? lastError;
+    for (var attempt = 1; attempt <= retryCount; attempt++) {
+      try {
+        debugPrint('DNS lookup: host=$host attempt=$attempt/$retryCount');
+        final addresses = await lookup(host, type: type);
+        if (addresses.isNotEmpty) {
+          effectiveCache.store(host, addresses);
+          onRefresh?.call(addresses);
+          if (scheduleRefresh) {
+            _scheduleDnsRefresh(host, type);
+          }
+          debugPrint(
+            'DNS lookup: host=$host resolved ${addresses.length} address(es) '
+            'on attempt $attempt',
+          );
+          return addresses;
+        }
+        lastError = const SocketException('DNS lookup returned no addresses');
+      } catch (e) {
+        lastError = e;
+        debugPrint('DNS lookup: host=$host attempt=$attempt failed: $e');
       }
-      // Empty result — treat as a soft failure and retry.
-      lastError = const SocketException('DNS lookup returned no addresses');
-    } catch (e) {
-      lastError = e;
-      debugPrint('DNS lookup: host=$host attempt=$attempt failed: $e');
+      if (attempt < retryCount) {
+        await Future<void>.delayed(retryDelay);
+      }
     }
-
-    if (attempt < retryCount) {
-      await Future<void>.delayed(retryDelay);
-    }
+    throw lastError ?? SocketException('DNS lookup failed for $host');
   }
 
-  // All live attempts failed — try stale cache as fallback.
   final stale = effectiveCache.getStale(host);
   if (stale != null && stale.isNotEmpty) {
+    final refresh = liveLookup();
+    try {
+      return await refresh.timeout(freshnessBudget);
+    } on TimeoutException {
+      unawaited(refresh.catchError((Object _) => stale));
+    } catch (_) {
+      // Use stale data immediately after a quick live failure too.
+    }
     debugPrint(
-      'DNS cache: all live lookups failed for $host, '
-      'using stale records (${stale.length} address(es))',
+      'DNS cache: using stale records for $host '
+      '(${stale.length} address(es)) while refresh continues',
     );
     return stale;
   }
+  return liveLookup();
+}
 
-  throw lastError ?? SocketException('DNS lookup failed for $host');
+void _scheduleDnsRefresh(String host, InternetAddressType type) {
+  _dnsRefreshTimers.remove(host)?.cancel();
+  _dnsRefreshTimers[host] = Timer(const Duration(minutes: 4), () {
+    _dnsRefreshTimers.remove(host);
+    unawaited(
+      resolveHostCachedWith(
+        host,
+        _defaultLookup,
+        type: type,
+        forceRefresh: true,
+        scheduleRefresh: true,
+      ).catchError((Object error) {
+        debugPrint('DNS proactive refresh failed for $host: $error');
+        return dnsCache.getFresh(host) ?? dnsCache.getStale(host) ?? const [];
+      }),
+    );
+  });
 }
