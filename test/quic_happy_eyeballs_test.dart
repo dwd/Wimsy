@@ -76,6 +76,22 @@ void main() {
     });
   });
 
+  group('QUIC connection generations', () {
+    test('new generations supersede all earlier async work', () {
+      final socket = QuicCapableXmppSocket();
+
+      final first = socket.beginConnectionGenerationForTesting();
+      final second = socket.beginConnectionGenerationForTesting();
+
+      expect(second, first + 1);
+      expect(socket.isConnectionGenerationCurrentForTesting(first), isFalse);
+      expect(socket.isConnectionGenerationCurrentForTesting(second), isTrue);
+
+      socket.close();
+      expect(socket.isConnectionGenerationCurrentForTesting(second), isFalse);
+    });
+  });
+
   group('buildQuicHappyEyeballsPlan parallel schedule', () {
     test('single candidate repeated parallelAttempts times', () {
       // With 1 candidate and parallelAttempts=3 the schedule should be

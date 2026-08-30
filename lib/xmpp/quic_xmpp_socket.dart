@@ -70,6 +70,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
   bool _useQuic = false;
   bool _closed = false;
+  int _connectionGeneration = 0;
   bool _postBindReady = false;
   // Set to true when connectionOpenBi times out (peer has not granted bidi
   // stream credits). Cleared when we detect the server has sent a new
@@ -91,6 +92,24 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   DateTime? _lastQuicSendAt;
   DateTime? _lastQuicPingAt;
   Future<MigrationResult>? _migrationFuture;
+
+  /// Identifies the currently active logical connection attempt. Async work
+  /// captures this value and must stop before mutating state when it changes.
+  @visibleForTesting
+  int get connectionGeneration => _connectionGeneration;
+
+  bool _isCurrentGeneration(int generation) =>
+      !_closed && generation == _connectionGeneration;
+
+  @visibleForTesting
+  int beginConnectionGenerationForTesting() {
+    _closed = false;
+    return ++_connectionGeneration;
+  }
+
+  @visibleForTesting
+  bool isConnectionGenerationCurrentForTesting(int generation) =>
+      _isCurrentGeneration(generation);
 
   /// The negotiated QUIC idle timeout in milliseconds, or null if no timeout
   /// was negotiated (i.e. the connection may remain idle indefinitely).
@@ -185,6 +204,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     bool directTls = false,
     String? tlsHost,
   }) async {
+    final generation = ++_connectionGeneration;
     _map = map ?? (element) => element;
     // If the caller supplied a map factory (Connection.makeStreamResponseMapper),
     // store it so aux recv loops can each get their own independent buffer.
@@ -209,9 +229,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
 
     _useQuic = true;
     await _ensureRustInitialized();
-    await _connectQuic(host, port, tlsHost ?? host);
-    _startControlRecvLoop();
-    _startServerStreamAcceptLoop();
+    await _connectQuic(host, port, tlsHost ?? host, generation);
+    if (!_isCurrentGeneration(generation)) {
+      throw StateError('QUIC connection generation $generation was superseded');
+    }
+    _startControlRecvLoop(generation);
+    _startServerStreamAcceptLoop(generation);
     return this;
   }
 
@@ -258,9 +281,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   }
 
   Future<MigrationResult> _attemptMigration() async {
+    final generation = _connectionGeneration;
     final endpoint = _endpoint;
     final connection = _connection;
-    if (!_useQuic || endpoint == null || connection == null) {
+    if (!_useQuic ||
+        endpoint == null ||
+        connection == null ||
+        !_isCurrentGeneration(generation)) {
       return MigrationResult.failed;
     }
     // Snapshot the current path_challenge RX counter before rebinding.
@@ -282,6 +309,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       } else {
         await endpointRebindToCurrentAddress(endpoint: endpoint);
       }
+      if (!_isCurrentGeneration(generation)) {
+        return MigrationResult.failed;
+      }
     } catch (e) {
       debugPrint('QUIC migration: rebind failed: $e');
       return MigrationResult.failed;
@@ -291,7 +321,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     // mobile path several independent chances to carry traffic.
     final deadline = DateTime.now().add(migrationProbeTimeout);
     var nextProbeAt = DateTime.now();
-    while (DateTime.now().isBefore(deadline)) {
+    while (_isCurrentGeneration(generation) &&
+        DateTime.now().isBefore(deadline)) {
       final now = DateTime.now();
       if (!now.isBefore(nextProbeAt)) {
         try {
@@ -334,12 +365,16 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (payload.isEmpty) {
       return;
     }
+    final generation = _connectionGeneration;
     _writeQueue = _writeQueue.then((_) async {
-      if (_closed) {
+      if (!_isCurrentGeneration(generation)) {
         return;
       }
       try {
         final target = await _selectSendTarget(payload);
+        if (!_isCurrentGeneration(generation)) {
+          return;
+        }
         if (target == null) {
           // Payload has been enqueued for the aux stream; nothing to send now.
           return;
@@ -350,7 +385,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           stream: target.stream,
           data: utf8.encode(payload),
         );
-        target.update(updated);
+        if (_isCurrentGeneration(generation)) {
+          target.update(updated);
+        }
       } catch (error, stackTrace) {
         if (!_quicStreamController.isClosed) {
           _quicStreamController.addError(error, stackTrace);
@@ -362,6 +399,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   @override
   void close() {
     _closed = true;
+    _connectionGeneration++;
     if (!_useQuic) {
       _fallbackSocket.close();
       return;
@@ -480,7 +518,12 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
-  Future<void> _connectQuic(String host, int port, String serverName) async {
+  Future<void> _connectQuic(
+    String host,
+    int port,
+    String serverName,
+    int generation,
+  ) async {
     final addresses = await resolveHostCached(host);
     if (addresses.isEmpty) {
       throw SocketException('No addresses found for QUIC host $host');
@@ -490,6 +533,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     final maxAttempts = quicConnectMaxAttempts < 1 ? 1 : quicConnectMaxAttempts;
     Object? lastError;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (!_isCurrentGeneration(generation)) {
+        throw StateError(
+          'QUIC connection generation $generation was superseded',
+        );
+      }
       debugPrint(
         'QUIC connect round $attempt/$maxAttempts: '
         'racing ${candidates.length} candidate(s) '
@@ -502,7 +550,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
           candidates,
           port,
           serverName,
+          generation,
         );
+        if (!_isCurrentGeneration(generation)) {
+          throw StateError(
+            'QUIC connection generation $generation was superseded',
+          );
+        }
         final winnerAddress = connected.address;
         debugPrint(
           'QUIC connect winner: '
@@ -555,6 +609,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     List<InternetAddress> candidates,
     int port,
     String serverName,
+    int generation,
   ) async {
     if (candidates.isEmpty) {
       throw SocketException('No QUIC candidates to attempt');
@@ -578,7 +633,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     }
 
     void launch(InternetAddress address) {
-      if (completer.isCompleted) {
+      if (completer.isCompleted || !_isCurrentGeneration(generation)) {
         // Another candidate already won; do not start more attempts.
         pending--;
         return;
@@ -595,7 +650,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               timeout: quicConnectTimeout,
             )
             .then((result) {
-              if (completer.isCompleted) {
+              if (completer.isCompleted || !_isCurrentGeneration(generation)) {
                 // We lost the race: discard this connection. Best-effort; we
                 // don't have a clean cancel path through the FFI, so just let
                 // the Rust side drop it when the arc goes out of scope.
@@ -620,7 +675,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
                 'QUIC connect failed: ${address.address}:$port '
                 'type=${address.type} error=$error',
               );
-              if (!completer.isCompleted) {
+              if (!completer.isCompleted && _isCurrentGeneration(generation)) {
                 recordFailure(address, error);
               }
             }),
@@ -711,18 +766,21 @@ class QuicCapableXmppSocket extends XmppWebSocket {
   ///
   /// Each `connectionAcceptBi` call uses a shared reference to `_connection`
   /// so it can run concurrently with `connectionOpenBi` calls.
-  void _startServerStreamAcceptLoop() {
+  void _startServerStreamAcceptLoop(int generation) {
     final conn = _connection;
     if (conn == null) return;
     var streamIndex = 0;
     unawaited(
       Future<void>(() async {
-        while (!_closed) {
+        while (_isCurrentGeneration(generation)) {
           final connection = _connection;
           if (connection == null) break;
           try {
             // connectionAcceptBi takes &QuicConnection (shared ref).
             final result = await connectionAcceptBi(connection: connection);
+            if (!_isCurrentGeneration(generation)) {
+              break;
+            }
             final recvStream = result.$2;
             if (recvStream == null) {
               // Connection closed — exit the accept loop.
@@ -744,6 +802,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               isControl: false,
               mapper: mapper,
               label: label,
+              generation: generation,
             );
             if (sendStream != null) {
               // Pool the send stream (with its already-running recv loop) so
@@ -757,7 +816,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
               );
             }
           } catch (error) {
-            if (!_closed) {
+            if (_isCurrentGeneration(generation)) {
               debugPrint('QUIC server-stream accept loop error: $error');
             }
             break;
@@ -767,12 +826,17 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
   }
 
-  void _startControlRecvLoop() {
+  void _startControlRecvLoop(int generation) {
     final recvStream = _recvStream;
     if (recvStream == null) {
       return;
     }
-    _startRecvLoop(recvStream, isControl: true, mapper: _map);
+    _startRecvLoop(
+      recvStream,
+      isControl: true,
+      mapper: _map,
+      generation: generation,
+    );
   }
 
   void _startRecvLoop(
@@ -781,17 +845,22 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     int? slot,
     String? label,
     String Function(String)? mapper,
+    int? generation,
   }) {
+    final recvGeneration = generation ?? _connectionGeneration;
     unawaited(
       Future<void>(() async {
         var recvStream = initial;
         try {
-          while (!_closed) {
+          while (_isCurrentGeneration(recvGeneration)) {
             final readResult = await recvStreamRead(
               stream: recvStream,
               maxLength: BigInt.from(16 * 1024),
             );
             recvStream = readResult.$1;
+            if (!_isCurrentGeneration(recvGeneration)) {
+              break;
+            }
             if (isControl) {
               _recvStream = recvStream;
             } else if (slot != null) {
@@ -821,7 +890,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             // QUIC stream's partial XML fragments are buffered independently
             // and do not corrupt each other's parse state.
             final mapped = (mapper ?? _map)(chunk);
-            _quicStreamController.add(mapped);
+            if (_isCurrentGeneration(recvGeneration)) {
+              _quicStreamController.add(mapped);
+            }
           }
         } catch (error, stackTrace) {
           if (!_quicStreamController.isClosed &&
@@ -833,7 +904,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
             }
           }
         } finally {
-          if (isControl) {
+          if (isControl && _isCurrentGeneration(recvGeneration)) {
             await _logQuicCloseReason();
             if (!_quicStreamController.isClosed) {
               await _quicStreamController.close();
@@ -1235,6 +1306,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     _pingTimer?.cancel();
     _pingTimer = null;
     final connection = _connection;
+    final generation = _connectionGeneration;
     if (connection == null || _closed) {
       return;
     }
@@ -1244,13 +1316,14 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     );
     _pingTimer = Timer.periodic(interval, (_) async {
       final conn = _connection;
-      if (conn == null || _closed) {
+      if (conn == null || !_isCurrentGeneration(generation)) {
         _pingTimer?.cancel();
         _pingTimer = null;
         return;
       }
       try {
         await connectionSendPing(connection: conn);
+        if (!_isCurrentGeneration(generation)) return;
         _lastQuicPingAt = DateTime.now();
         debugPrint('QUIC PING sent (keeping connection alive)');
       } catch (e) {
@@ -1275,8 +1348,9 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       'QUIC aux stream watcher started: '
       'waiting for server MAX_STREAMS(bidi) frame',
     );
+    final generation = _connectionGeneration;
     _maxStreamsWatchTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (_closed || _connection == null) {
+      if (!_isCurrentGeneration(generation) || _connection == null) {
         _maxStreamsWatchTimer?.cancel();
         _maxStreamsWatchTimer = null;
         return;
@@ -1284,6 +1358,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       final prevCount = _lastMaxStreamsBidiFrameCount;
       unawaited(
         _logConnectionStats('max-streams-watcher').then((_) {
+          if (!_isCurrentGeneration(generation)) return;
           final rxMaxBidi = _lastMaxStreamsBidiFrameCount;
           debugPrint(
             'QUIC aux stream watcher: '
