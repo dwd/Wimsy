@@ -182,6 +182,7 @@ class XmppService extends ChangeNotifier {
   String? _errorMessage;
   String? _currentUserBareJid;
   XmppConnectionState? _lastConnectionState;
+  bool _hasConnectedSession = false;
   bool _backgroundMode = false;
   bool _networkOnline = true;
   Timer? _connectivityDebounceTimer;
@@ -189,6 +190,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, List<ChatMessage>> _roomMessages = {};
   final UnackedMessageRecovery _unackedMessageRecovery =
       UnackedMessageRecovery();
+  final List<MessageStanza> _pendingMessages = [];
   final Set<String> _seededMessageJids = {};
   final Set<String> _seededRoomMessageJids = {};
   final List<ContactEntry> _contacts = [];
@@ -401,6 +403,7 @@ class XmppService extends ChangeNotifier {
   List<String> get recentReactionEmojis =>
       List.unmodifiable(_recentReactionEmojis);
   XmppConnectionState? get lastConnectionState => _lastConnectionState;
+  bool get hasConnectedSession => _hasConnectedSession;
   List<ContactEntry> get contacts {
     final combined = <ContactEntry>[..._bookmarks, ..._contacts];
     combined.sort(_contactSort);
@@ -1500,7 +1503,9 @@ class XmppService extends ChangeNotifier {
           _carbonsEnabled = false;
           _csiInactive = false;
           _status = XmppStatus.connected;
+          _hasConnectedSession = true;
           _errorMessage = null;
+          _flushPendingMessages(connection);
           notifyListeners();
           _setupLiveness(connection);
           _recoveryWork.reset();
@@ -1530,7 +1535,9 @@ class XmppService extends ChangeNotifier {
           _finishSpan(_connectTransaction);
           _connectTransaction = null;
           _status = XmppStatus.connected;
+          _hasConnectedSession = true;
           _errorMessage = null;
+          _flushPendingMessages(connection);
           _setupLiveness(connection);
           _recoveryWork.reset();
           _recoveryWork.resume();
@@ -2012,14 +2019,8 @@ class XmppService extends ChangeNotifier {
     if (trimmed.isEmpty) {
       return;
     }
-    final chatManager = _chatManager;
-    if (chatManager == null) {
-      _setError('Not connected.');
-      return;
-    }
-
     final connection = _connection;
-    if (connection == null) {
+    if (connection == null && _currentUserBareJid == null) {
       _setError('Not connected.');
       return;
     }
@@ -2030,8 +2031,9 @@ class XmppService extends ChangeNotifier {
       body: trimmed,
       reply: reply,
     );
-    connection.writeStanza(stanza);
-    final sender = _currentUserBareJid ?? connection.fullJid.userAtDomain;
+    _writeOrQueueMessage(stanza);
+    final sender =
+        _currentUserBareJid ?? connection?.fullJid.userAtDomain ?? '';
     if (sender.isNotEmpty) {
       _addMessage(
         bareJid: toBareJid,
@@ -2047,10 +2049,37 @@ class XmppService extends ChangeNotifier {
         replyFallback: reply?.fallback,
       );
     }
-    final jid = Jid.fromFullJid(toBareJid);
-    final chat = chatManager.getChat(jid);
-    _ensureChatSubscription(chat);
-    chat.myState = ChatState.ACTIVE;
+    final chatManager = _chatManager;
+    if (chatManager != null) {
+      final jid = Jid.fromFullJid(toBareJid);
+      final chat = chatManager.getChat(jid);
+      _ensureChatSubscription(chat);
+      chat.myState = ChatState.ACTIVE;
+    }
+  }
+
+  void _writeOrQueueMessage(MessageStanza stanza) {
+    final connection = _connection;
+    if (isConnected && connection != null) {
+      connection.writeStanza(stanza);
+      return;
+    }
+    _pendingMessages.add(stanza);
+    Log.i('XmppService', 'Queued message while reconnecting id=${stanza.id}');
+  }
+
+  void _flushPendingMessages(Connection connection) {
+    if (_pendingMessages.isEmpty) return;
+    final pending = List<MessageStanza>.of(_pendingMessages);
+    _pendingMessages.clear();
+    for (final stanza in pending) {
+      stanza.fromJid ??= connection.fullJid;
+      connection.writeStanza(stanza);
+    }
+    Log.i(
+      'XmppService',
+      'Sent ${pending.length} message(s) queued during reconnection',
+    );
   }
 
   void editMessage({
@@ -2379,8 +2408,7 @@ class XmppService extends ChangeNotifier {
   }
 
   void sendRoomMessage(String roomJid, String text, {ReplyReference? reply}) {
-    final muc = _mucManager;
-    if (muc == null) {
+    if (_mucManager == null && _currentUserBareJid == null) {
       _setError('Not connected.');
       return;
     }
@@ -2404,7 +2432,7 @@ class XmppService extends ChangeNotifier {
         ),
       );
     }
-    _connection?.writeStanza(stanza);
+    _writeOrQueueMessage(stanza);
     final rawXml = _serializeStanza(stanza);
     final nick = _roomNickFor(normalized);
     final now = DateTime.now();
@@ -5260,6 +5288,7 @@ class XmppService extends ChangeNotifier {
     List<int> quicSent = const [],
   }) {
     _status = XmppStatus.connected;
+    _hasConnectedSession = true;
     _currentUserBareJid = 'tester@example.com';
     _rooms[_bareJid(room.roomJid)] = room;
     _quicRttHistory
@@ -5281,6 +5310,16 @@ class XmppService extends ChangeNotifier {
     ]);
     selectChat(room.roomJid);
   }
+
+  @visibleForTesting
+  void simulateReconnectForTesting() {
+    _status = XmppStatus.connecting;
+    _lastConnectionState = XmppConnectionState.Reconnecting;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  int get pendingMessageCountForTesting => _pendingMessages.length;
 
   @visibleForTesting
   List<MessageIntent> buildMessageIntentsForTesting(MessageStanza stanza) {
@@ -8752,6 +8791,8 @@ class XmppService extends ChangeNotifier {
     _activeChatBareJid = null;
     _currentUserBareJid = null;
     _lastConnectionState = null;
+    _hasConnectedSession = false;
+    _pendingMessages.clear();
     _chatManager = null;
     if (!preserveCache) {
       _contacts.clear();

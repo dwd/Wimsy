@@ -809,7 +809,7 @@ class _WimsyHomeState extends State<WimsyHome> {
       animation: widget.service,
       builder: (context, _) {
         final service = widget.service;
-        if (!service.isConnected) {
+        if (!service.isConnected && !service.hasConnectedSession) {
           return LoginScreen(
             service: service,
             storage: widget.storage,
@@ -6315,6 +6315,7 @@ class _PresenceMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final connectionLogStore = _connectionLogStore;
     final isOnline = service.isConnected;
     final latencyMs = service.lastPingLatency?.inMilliseconds;
     final latencyLabel = latencyMs == null ? '--' : '$latencyMs ms';
@@ -6331,7 +6332,13 @@ class _PresenceMenu extends StatelessWidget {
         final sentryEnabled = snapshot.data ?? false;
         return PopupMenuButton<_PresenceAction>(
           tooltip: 'Set presence',
-          icon: Icon(Icons.circle, color: dotColor),
+          icon: service.isConnecting
+              ? const SizedBox.square(
+                  key: Key('reconnection-indicator'),
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                )
+              : Icon(Icons.circle, color: dotColor),
           onSelected: (action) async {
             switch (action) {
               case _PresenceAction.online:
@@ -6394,6 +6401,13 @@ class _PresenceMenu extends StatelessWidget {
                   ),
                 );
                 break;
+              case _PresenceAction.connectionLog:
+                await showDialog<void>(
+                  context: context,
+                  builder: (context) =>
+                      _ConnectionLogDialog(store: connectionLogStore),
+                );
+                break;
               case _PresenceAction.csiAuto:
                 service.setCsiOverrideMode(CsiOverrideMode.auto);
                 break;
@@ -6431,6 +6445,10 @@ class _PresenceMenu extends StatelessWidget {
               child: Text(
                 'CSI: ${service.isCsiInactive ? 'inactive' : 'active'}',
               ),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.connectionLog,
+              child: Text('Connection log...'),
             ),
             const PopupMenuDivider(),
             const PopupMenuItem(
@@ -6518,6 +6536,73 @@ class _PresenceMenu extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _ConnectionLogStore extends ChangeNotifier {
+  _ConnectionLogStore() {
+    Log.messages.listen((entry) {
+      _entries.add(entry);
+      if (_entries.length > 200) {
+        _entries.removeRange(0, _entries.length - 200);
+      }
+      notifyListeners();
+    });
+  }
+
+  final List<String> _entries = [];
+
+  List<String> get entries => List.unmodifiable(_entries);
+
+  void clear() {
+    _entries.clear();
+    notifyListeners();
+  }
+}
+
+final _connectionLogStore = _ConnectionLogStore();
+
+class _ConnectionLogDialog extends StatelessWidget {
+  const _ConnectionLogDialog({required this.store});
+
+  final _ConnectionLogStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const Key('connection-log-dialog'),
+      title: const Text('Connection log'),
+      content: SizedBox(
+        width: 720,
+        height: math.min(420, MediaQuery.sizeOf(context).height * 0.55),
+        child: AnimatedBuilder(
+          animation: store,
+          builder: (context, _) {
+            final entries = store.entries;
+            if (entries.isEmpty) {
+              return const Center(child: Text('No connection details yet.'));
+            }
+            return ListView.builder(
+              itemCount: entries.length,
+              itemBuilder: (context, index) => SelectableText(
+                entries[index],
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: store.entries.isEmpty ? null : store.clear,
+          child: const Text('Clear'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
     );
   }
 }
@@ -6850,6 +6935,7 @@ enum _PresenceAction {
   toggleSentry,
   simulateDisconnect,
   keepaliveSettings,
+  connectionLog,
   clearCacheExit,
   exit,
 }

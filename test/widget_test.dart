@@ -340,6 +340,56 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('reconnecting keeps chat open and queues composed messages', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final room = RoomEntry(
+      roomJid: 'lounge@conference.example.com',
+      nick: 'tester',
+      joined: true,
+    );
+    final service = XmppService()
+      ..seedConnectedRoomForTesting(room, name: 'The Lounge');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    service.seedConnectedRoomForTesting(room, name: 'The Lounge');
+    service.simulateReconnectForTesting();
+    await tester.pump();
+
+    expect(find.text('The Lounge'), findsOneWidget);
+    expect(find.byType(LoginScreen), findsNothing);
+    expect(find.byKey(const Key('reconnection-indicator')), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Queued while offline');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+
+    expect(find.text('Queued while offline'), findsOneWidget);
+    expect(service.pendingMessageCountForTesting, 1);
+
+    Log.i('WidgetTest', 'Reconnect attempt scheduled');
+    await tester.tap(find.byTooltip('Set presence'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Connection log...'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('landscape phone keeps the compact room chat layout', (
     WidgetTester tester,
   ) async {
