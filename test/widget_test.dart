@@ -246,6 +246,18 @@ void main() {
       tester.getSize(find.byKey(const Key('add-by-jid-fullscreen-dialog'))),
       const Size(915, 412),
     );
+    expect(
+      find.byKey(const Key('add-by-jid-landscape-columns')),
+      findsOneWidget,
+    );
+    final addressTopLeft = tester.getTopLeft(
+      find.byKey(const Key('add-by-jid-address-fields')),
+    );
+    final detailTopLeft = tester.getTopLeft(
+      find.byKey(const Key('add-by-jid-detail-fields')),
+    );
+    expect(addressTopLeft.dx, lessThan(detailTopLeft.dx));
+    expect(addressTopLeft.dy, detailTopLeft.dy);
     expect(tester.takeException(), isNull);
   });
 

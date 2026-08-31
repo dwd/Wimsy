@@ -5658,6 +5658,160 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
             ? _discoveredName!
             : (serviceName != normalized ? serviceName : '');
         final isRoom = _selectedType == _AddTargetType.room;
+        final addressFields = Column(
+          key: const Key('add-by-jid-address-fields'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _jidController,
+              decoration: InputDecoration(
+                labelText: 'JID',
+                hintText: 'user@example.com',
+                errorText: _jidError,
+              ),
+              autofocus: true,
+            ),
+            if (_suggestions.isNotEmpty)
+              ..._suggestions.map(
+                (suggestion) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    suggestion.isUnverified
+                        ? Icons.help_outline
+                        : switch (suggestion.kind) {
+                            DiscoveredJidKind.room =>
+                              Icons.meeting_room_outlined,
+                            DiscoveredJidKind.person => Icons.person_outline,
+                            DiscoveredJidKind.unknown => Icons.help_outline,
+                          },
+                  ),
+                  title: Text(suggestion.name ?? suggestion.jid),
+                  subtitle: suggestion.name == null
+                      ? null
+                      : Text(suggestion.jid),
+                  onTap: () {
+                    _jidController.text = suggestion.jid;
+                    _jidController.selection = TextSelection.collapsed(
+                      offset: suggestion.jid.length,
+                    );
+                    setState(() {
+                      _selectedType =
+                          suggestion.kind == DiscoveredJidKind.room
+                          ? _AddTargetType.room
+                          : _AddTargetType.person;
+                      if (suggestion.kind == DiscoveredJidKind.room &&
+                          suggestion.name?.trim().isNotEmpty == true) {
+                        _roomNameController.text = suggestion.name!.trim();
+                        _discoveredRoomNamePrefill = suggestion.name!.trim();
+                      }
+                    });
+                  },
+                ),
+              ),
+            const SizedBox(height: 12),
+            SegmentedButton<_AddTargetType>(
+              segments: const [
+                ButtonSegment<_AddTargetType>(
+                  value: _AddTargetType.person,
+                  label: Text('Person'),
+                  icon: Icon(Icons.person_outline),
+                ),
+                ButtonSegment<_AddTargetType>(
+                  value: _AddTargetType.room,
+                  label: Text('Room'),
+                  icon: Icon(Icons.meeting_room_outlined),
+                ),
+              ],
+              selected: <_AddTargetType>{_selectedType},
+              onSelectionChanged: (selection) {
+                if (selection.isEmpty) {
+                  return;
+                }
+                setState(() {
+                  _manualTypeOverride = true;
+                  _selectedType = selection.first;
+                });
+              },
+            ),
+          ],
+        );
+        final detailFields = Column(
+          key: const Key('add-by-jid-detail-fields'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                _AvatarPlaceholder(label: previewLabel, bytes: avatarBytes),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name.isNotEmpty ? name : 'Name not available yet',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                      if (previewLabel.isNotEmpty)
+                        Text(
+                          previewLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _discovering
+                    ? 'Checking...'
+                    : (_discoveryMessage ?? 'Type a JID to detect type.'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            if (isRoom) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _nickController,
+                decoration: InputDecoration(
+                  labelText: 'Nickname',
+                  errorText: _nickError,
+                ),
+                onChanged: (_) {
+                  if (_nickError != null) {
+                    setState(() => _nickError = null);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _passwordController,
+                decoration: const InputDecoration(
+                  labelText: 'Password (optional)',
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _roomNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Room name (optional)',
+                ),
+              ),
+            ],
+          ],
+        );
         return AlertDialog(
           key: Key(
             isCompact
@@ -5674,158 +5828,26 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
               ? const RoundedRectangleBorder(borderRadius: BorderRadius.zero)
               : null,
           title: const Text('New Chat'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _jidController,
-                  decoration: InputDecoration(
-                    labelText: 'JID',
-                    hintText: 'user@example.com',
-                    errorText: _jidError,
-                  ),
-                  autofocus: true,
-                ),
-                if (_suggestions.isNotEmpty)
-                  ..._suggestions.map(
-                    (suggestion) => ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(
-                        suggestion.isUnverified
-                            ? Icons.help_outline
-                            : switch (suggestion.kind) {
-                                DiscoveredJidKind.room =>
-                                  Icons.meeting_room_outlined,
-                                DiscoveredJidKind.person =>
-                                  Icons.person_outline,
-                                DiscoveredJidKind.unknown => Icons.help_outline,
-                              },
-                      ),
-                      title: Text(suggestion.name ?? suggestion.jid),
-                      subtitle: suggestion.name == null
-                          ? null
-                          : Text(suggestion.jid),
-                      onTap: () {
-                        _jidController.text = suggestion.jid;
-                        _jidController.selection = TextSelection.collapsed(
-                          offset: suggestion.jid.length,
-                        );
-                        setState(() {
-                          _selectedType =
-                              suggestion.kind == DiscoveredJidKind.room
-                              ? _AddTargetType.room
-                              : _AddTargetType.person;
-                          if (suggestion.kind == DiscoveredJidKind.room &&
-                              suggestion.name?.trim().isNotEmpty == true) {
-                            _roomNameController.text = suggestion.name!.trim();
-                            _discoveredRoomNamePrefill = suggestion.name!
-                                .trim();
-                          }
-                        });
-                      },
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                SegmentedButton<_AddTargetType>(
-                  segments: const [
-                    ButtonSegment<_AddTargetType>(
-                      value: _AddTargetType.person,
-                      label: Text('Person'),
-                      icon: Icon(Icons.person_outline),
-                    ),
-                    ButtonSegment<_AddTargetType>(
-                      value: _AddTargetType.room,
-                      label: Text('Room'),
-                      icon: Icon(Icons.meeting_room_outlined),
-                    ),
-                  ],
-                  selected: <_AddTargetType>{_selectedType},
-                  onSelectionChanged: (selection) {
-                    if (selection.isEmpty) {
-                      return;
-                    }
-                    setState(() {
-                      _manualTypeOverride = true;
-                      _selectedType = selection.first;
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-                Row(
+          content: isLandscapePhone
+              ? Row(
+                  key: const Key('add-by-jid-landscape-columns'),
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _AvatarPlaceholder(label: previewLabel, bytes: avatarBytes),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            name.isNotEmpty ? name : 'Name not available yet',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                          if (previewLabel.isNotEmpty)
-                            Text(
-                              previewLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
+                    Expanded(child: SingleChildScrollView(child: addressFields)),
+                    const VerticalDivider(width: 32),
+                    Expanded(child: SingleChildScrollView(child: detailFields)),
                   ],
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    _discovering
-                        ? 'Checking...'
-                        : (_discoveryMessage ?? 'Type a JID to detect type.'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                )
+              : SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      addressFields,
+                      const SizedBox(height: 12),
+                      detailFields,
+                    ],
                   ),
                 ),
-                if (isRoom) ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _nickController,
-                    decoration: InputDecoration(
-                      labelText: 'Nickname',
-                      errorText: _nickError,
-                    ),
-                    onChanged: (_) {
-                      if (_nickError != null) {
-                        setState(() => _nickError = null);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _passwordController,
-                    decoration: const InputDecoration(
-                      labelText: 'Password (optional)',
-                    ),
-                    obscureText: true,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _roomNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Room name (optional)',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
