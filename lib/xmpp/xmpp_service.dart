@@ -9282,9 +9282,9 @@ class XmppService extends ChangeNotifier {
       return;
     }
 
-    // Build the MAM IQ: <iq type="set"><query xmlns="urn:xmpp:mam:2">
-    //   <x type="submit"><field var="FORM_TYPE"…/><field var="after-id"…/>
-    //   </x><set xmlns="…rsm"><max>50</max></set></query></iq>
+    // Build a core MAM + RSM query. XEP-0313 defines MAM archive IDs as RSM
+    // IDs, so the mandatory RSM `after` cursor avoids requiring the optional
+    // `urn:xmpp:mam:2#extended` feature for `after-id`.
     final id = AbstractStanza.getRandomId();
     final iq = IqStanza(id, IqStanzaType.SET);
     // No toJid — queries the user's own server archive.
@@ -9293,29 +9293,6 @@ class XmppService extends ChangeNotifier {
     query.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:mam:2'));
     query.addAttribute(XmppAttribute('queryid', AbstractStanza.getRandomId()));
 
-    final x = XmppElement()..name = 'x';
-    x.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
-    x.addAttribute(XmppAttribute('type', 'submit'));
-
-    final formType = XmppElement()..name = 'field';
-    formType.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
-    formType.addAttribute(XmppAttribute('type', 'hidden'));
-    final formTypeValue = XmppElement()
-      ..name = 'value'
-      ..textValue = 'urn:xmpp:mam:2';
-    formType.addChild(formTypeValue);
-    x.addChild(formType);
-
-    final afterIdField = XmppElement()..name = 'field';
-    afterIdField.addAttribute(XmppAttribute('var', 'after-id'));
-    final afterIdValue = XmppElement()
-      ..name = 'value'
-      ..textValue = anchor;
-    afterIdField.addChild(afterIdValue);
-    x.addChild(afterIdField);
-
-    query.addChild(x);
-
     // RSM: request up to 50 messages per page.
     final set = XmppElement()..name = 'set';
     set.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/rsm'));
@@ -9323,12 +9300,10 @@ class XmppService extends ChangeNotifier {
       ..name = 'max'
       ..textValue = '50';
     set.addChild(max);
-    if (after != null && after.isNotEmpty) {
-      final afterElement = XmppElement()
-        ..name = 'after'
-        ..textValue = after;
-      set.addChild(afterElement);
-    }
+    final afterElement = XmppElement()
+      ..name = 'after'
+      ..textValue = after ?? anchor;
+    set.addChild(afterElement);
     query.addChild(set);
 
     iq.addChild(query);

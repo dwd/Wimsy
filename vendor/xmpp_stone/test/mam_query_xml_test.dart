@@ -79,19 +79,14 @@ void main() {
   });
 
   // R2.1: unified server-archive catch-up query shape.
-  test('R2.1: unified server-archive query has after-id field and no toJid',
+  test('R2.1: unified server-archive query uses core RSM and no toJid',
       () async {
     final connection = _buildConnection();
     final manager = MessageArchiveManager.getInstance(connection);
     final sent = _waitForOutgoingIq(connection);
 
-    // Simulate what _startUnifiedDmCatchUp does: queryById with afterId only,
-    // no toJid and no jid — targets the user's own server archive.
-    manager.queryById(
-      afterId: 'anchor-mam-id-99',
-      max: 50,
-      after: 'previous-page-last-id',
-    );
+    // Simulate the core MAM + RSM shape used by _startUnifiedDmCatchUp.
+    manager.queryAll(max: 50, after: 'anchor-mam-id-99');
 
     final iq = await sent;
     final xml = iq.buildXmlString();
@@ -100,13 +95,13 @@ void main() {
     expect(iq.toJid, isNull,
         reason: 'unified query must not target a specific JID');
 
-    // Must carry the after-id field.
-    expect(xml, contains('var="after-id"'));
-    expect(xml, contains('<value>anchor-mam-id-99</value>'));
+    // Must not require the extended MAM form fields.
+    expect(xml, isNot(contains('var="after-id"')));
+    expect(xml, isNot(contains('jabber:x:data')));
 
     // Must carry RSM max.
     expect(xml, contains('<max>50</max>'));
-    expect(xml, contains('<after>previous-page-last-id</after>'));
+    expect(xml, contains('<after>anchor-mam-id-99</after>'));
 
     // Must use MAM:2 namespace.
     expect(xml, contains('urn:xmpp:mam:2'));
