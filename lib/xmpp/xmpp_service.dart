@@ -59,6 +59,7 @@ import 'liveness_controller.dart';
 import 'recovery_work_queue.dart';
 import 'room_nickname.dart';
 import 'tcp_endpoint_plan.dart';
+import 'unacked_message_recovery.dart';
 
 class ReplyReference {
   const ReplyReference({
@@ -179,6 +180,8 @@ class XmppService extends ChangeNotifier {
   Timer? _connectivityDebounceTimer;
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<ChatMessage>> _roomMessages = {};
+  final UnackedMessageRecovery _unackedMessageRecovery =
+      UnackedMessageRecovery();
   final Set<String> _seededMessageJids = {};
   final Set<String> _seededRoomMessageJids = {};
   final List<ContactEntry> _contacts = [];
@@ -1456,6 +1459,7 @@ class XmppService extends ChangeNotifier {
         }
         if (state == XmppConnectionState.Reconnecting ||
             state == XmppConnectionState.ForcefullyClosed) {
+          _unackedMessageRecovery.capture(_messages, _roomMessages);
           // Any in-flight carbons enable request is tied to the old stream.
           _carbonsRequestId = null;
           _carbonsEnabled = false;
@@ -9152,6 +9156,7 @@ class XmppService extends ChangeNotifier {
         );
       } else {
         _mamCatchUpTimers.remove(scopeKey);
+        _recoverUnacknowledgedMessages(onlyJid: normalized, onlyRooms: isRoom);
         _finishMamSyncIfIdle();
       }
     });
@@ -9325,10 +9330,86 @@ class XmppService extends ChangeNotifier {
           RecoveryPriority.messages,
           () => _startUnifiedDmCatchUp(anchor, after: lastId),
         );
+      } else if (page.complete) {
+        _recoverUnacknowledgedMessages(onlyRooms: false);
       }
     });
 
     connection.writeStanza(iq);
+  }
+
+  void _recoverUnacknowledgedMessages({String? onlyJid, bool? onlyRooms}) {
+    final connection = _connection;
+    if (connection == null) return;
+    final resends = _unackedMessageRecovery.reconcile(
+      directMessages: _messages,
+      roomMessages: _roomMessages,
+      now: DateTime.now,
+      onlyJid: onlyJid,
+      onlyRooms: onlyRooms,
+    );
+    if (resends.isEmpty) return;
+
+    for (final resend in resends) {
+      final message = resend.message;
+      final id = message.messageId!;
+      final reply = message.replyToId == null
+          ? null
+          : ReplyReference(
+              id: message.replyToId!,
+              toJid: message.replyToJid ?? '',
+              fallback: message.replyFallback ?? '',
+            );
+      final MessageStanza stanza;
+      if (message.oobUrl != null && message.oobUrl!.isNotEmpty) {
+        stanza = _buildOobMessageStanza(
+          targetJid: resend.jid,
+          messageId: id,
+          url: message.oobUrl!,
+          description: message.oobDescription,
+          isRoom: resend.isRoom,
+          body: message.body,
+        );
+      } else if (resend.isRoom) {
+        stanza = MessageStanza(id, MessageStanzaType.GROUPCHAT)
+          ..toJid = Jid.fromFullJid(resend.jid)
+          ..body = _buildReplyBody(reply, message.body);
+        if (reply != null) {
+          stanza.addChild(_buildReplyElement(reply));
+          stanza.addChild(
+            _buildFallbackElement(
+              start: 0,
+              end: reply.fallback.runes.length,
+              forNamespace: _replyNamespace,
+            ),
+          );
+        }
+      } else {
+        stanza = _buildChatMessageStanza(
+          toBareJid: resend.jid,
+          messageId: id,
+          body: message.body,
+          reply: reply,
+        );
+      }
+      if (resend.isRoom) {
+        _roomMessagePersistor?.call(
+          resend.jid,
+          List.unmodifiable(_roomMessages[resend.jid]!),
+        );
+      } else {
+        _messagePersistor?.call(
+          resend.jid,
+          List.unmodifiable(_messages[resend.jid]!),
+        );
+      }
+      connection.writeStanza(stanza);
+      Log.i(
+        'XmppService',
+        'Resent message absent from MAM: chat=${resend.jid} id=$id',
+      );
+    }
+    notifyListeners();
   }
 
   /// Returns the stanza-id of the message in [bareJid]'s message list whose
