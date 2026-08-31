@@ -48,6 +48,18 @@ Builds, but untested on:
 - macOS builds that use `flutter_secure_storage` require the `keychain-access-groups`
   entitlement (not `com.apple.security.keychain-access-groups`) to avoid `-34018`.
 
+## Android test login links
+
+Android builds accept login links in either of these forms:
+
+```text
+wimsy://login?jid=user%40example.com&password=test123&display_name=Test%20User
+https://wimsy.im/login?jid=user%40example.com&password=test123&display_name=Test%20User
+```
+
+The link opens Wimsy and fills the JID, password, and display-name fields. The
+user must still tap **Connect**. Query parameter values must be URL-encoded.
+
 ## Web deployment defaults
 
 A deployment can pre-fill and enforce its WebTransport endpoint at compile

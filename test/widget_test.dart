@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/login_screen.dart';
+import 'package:wimsy/login_link.dart';
 import 'package:wimsy/main.dart';
 import 'package:wimsy/models/chat_message.dart';
 import 'package:wimsy/models/room_entry.dart';
@@ -425,6 +426,55 @@ void main() {
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Login link prefills account fields', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final loginLink = ValueNotifier<LoginLinkValues?>(
+      const LoginLinkValues(
+        jid: 'tester@example.org',
+        password: 'test-password',
+        displayName: 'Test Person',
+      ),
+    );
+    addTearDown(loginLink.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(
+          service: XmppService(),
+          storage: StorageService(),
+          preferences: prefs,
+          loginLink: loginLink,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, 'JID'))
+          .controller
+          ?.text,
+      'tester@example.org',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, 'Password'))
+          .controller
+          ?.text,
+      'test-password',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, 'Display name'))
+          .controller
+          ?.text,
+      'Test Person',
+    );
   });
 
   testWidgets('Message composer requests normal sentence text input', (
@@ -881,6 +931,7 @@ void main() {
       isFalse,
     );
 
+    await tester.ensureVisible(find.byKey(const Key('stop-connecting-button')));
     await tester.tap(find.byKey(const Key('stop-connecting-button')));
     await tester.pump();
 
@@ -912,6 +963,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('manual-transport-selector')), findsOneWidget);
 
+    await tester.ensureVisible(
+      find.byKey(const Key('manual-transport-selector')),
+    );
     await tester.tap(find.byKey(const Key('manual-transport-selector')));
     await tester.pumpAndSettle();
     expect(find.text('StartTLS'), findsWidgets);

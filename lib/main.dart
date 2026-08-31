@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'av/call_session.dart';
 import 'keepalive_settings_screen.dart';
 import 'login_screen.dart';
+import 'login_link.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
 import 'models/muc_notify_settings.dart';
@@ -133,6 +134,8 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   late final Future<void> _initFuture;
   String? _titleBareJid;
   WebUpdateMonitor? _webUpdateMonitor;
+  final ValueNotifier<LoginLinkValues?> _loginLink = ValueNotifier(null);
+  AndroidLoginLinkReceiver? _loginLinkReceiver;
 
   @override
   void initState() {
@@ -149,6 +152,12 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       _service.setCallSessionEndedHandler(_handleCallSessionEnded);
       if (!kIsWeb && Platform.isAndroid) {
         _startAndroidForegroundService();
+        _loginLinkReceiver = AndroidLoginLinkReceiver();
+        unawaited(
+          _loginLinkReceiver!.start((values) {
+            _loginLink.value = values;
+          }),
+        );
       }
       // Subscribe to connectivity changes on all non-web IO platforms so that
       // iOS (Wi-Fi ↔ cellular) also triggers QUIC migration / reconnect.
@@ -202,6 +211,8 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     _webUpdateMonitor?.dispose();
+    _loginLinkReceiver?.dispose();
+    _loginLink.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _service.removeListener(_updateWindowTitle);
     _connectivitySubscription?.cancel();
@@ -486,6 +497,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
                 storage: _storage,
                 notifications: _notifications,
                 preferences: _preferences,
+                loginLink: _loginLink,
               );
             },
           ),
@@ -501,12 +513,14 @@ class _Gatekeeper extends StatefulWidget {
     required this.storage,
     required this.notifications,
     required this.preferences,
+    required this.loginLink,
   });
 
   final XmppService service;
   final StorageService storage;
   final NotificationService notifications;
   final PreferencesService preferences;
+  final ValueListenable<LoginLinkValues?> loginLink;
 
   @override
   State<_Gatekeeper> createState() => _GatekeeperState();
@@ -586,6 +600,7 @@ class _GatekeeperState extends State<_Gatekeeper> {
       storage: widget.storage,
       notifications: widget.notifications,
       preferences: widget.preferences,
+      loginLink: widget.loginLink,
     );
   }
 }
@@ -597,12 +612,14 @@ class WimsyHome extends StatefulWidget {
     required this.storage,
     required this.notifications,
     required this.preferences,
+    this.loginLink,
   });
 
   final XmppService service;
   final StorageService storage;
   final NotificationService notifications;
   final PreferencesService preferences;
+  final ValueListenable<LoginLinkValues?>? loginLink;
 
   @override
   State<WimsyHome> createState() => _WimsyHomeState();
@@ -795,6 +812,7 @@ class _WimsyHomeState extends State<WimsyHome> {
             service: service,
             storage: widget.storage,
             preferences: widget.preferences,
+            loginLink: widget.loginLink,
           );
         }
         return _buildClient(context, service);

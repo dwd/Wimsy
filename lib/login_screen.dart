@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'deployment_defaults.dart';
+import 'login_link.dart';
 import 'storage/account_record.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
@@ -24,11 +25,13 @@ class LoginScreen extends StatefulWidget {
     required this.service,
     required this.storage,
     required this.preferences,
+    this.loginLink,
   });
 
   final XmppService service;
   final StorageService storage;
   final PreferencesService preferences;
+  final ValueListenable<LoginLinkValues?>? loginLink;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -61,6 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final TextEditingController _jidController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _hostController = TextEditingController();
   final TextEditingController _portController = TextEditingController(
     text: '5222',
@@ -100,6 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     _connectionLogSubscription = Log.messages.listen(_appendConnectionLog);
     _loadAccount();
+    widget.loginLink?.addListener(_applyLoginLink);
   }
 
   void _appendConnectionLog(String entry) {
@@ -128,6 +133,8 @@ class _LoginScreenState extends State<LoginScreen> {
     _connectionLogScrollController.dispose();
     _jidController.dispose();
     _passwordController.dispose();
+    _displayNameController.dispose();
+    widget.loginLink?.removeListener(_applyLoginLink);
     _hostController.dispose();
     _portController.dispose();
     _resourceController.dispose();
@@ -183,6 +190,18 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       _loadedAccount = true;
     });
+    _applyLoginLink();
+  }
+
+  void _applyLoginLink() {
+    final values = widget.loginLink?.value;
+    if (!_loadedAccount || values == null || !mounted) return;
+    setState(() {
+      _jidController.text = values.jid;
+      _passwordController.text = values.password;
+      _displayNameController.text = values.displayName;
+    });
+    _scheduleEndpointDiscovery(values.jid, immediate: true);
   }
 
   void _handleConnect() {
@@ -225,6 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
     widget.service.connect(
       jid: account.jid,
       password: _passwordController.text,
+      displayName: _displayNameController.text,
       resource: account.resource,
       host: account.host,
       port: port,
@@ -667,6 +687,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           obscureText: true,
                           decoration: const InputDecoration(
                             labelText: 'Password',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _displayNameController,
+                          enabled: !service.isConnecting,
+                          decoration: const InputDecoration(
+                            labelText: 'Display name',
                           ),
                         ),
                         const SizedBox(height: 12),

@@ -84,6 +84,7 @@ class _ConnectArgs {
   const _ConnectArgs({
     required this.jid,
     required this.password,
+    required this.displayName,
     required this.resource,
     this.host,
     required this.port,
@@ -97,6 +98,7 @@ class _ConnectArgs {
 
   final String jid;
   final String password;
+  final String displayName;
   final String resource;
   final String? host;
   final int port;
@@ -1094,6 +1096,7 @@ class XmppService extends ChangeNotifier {
   Future<void> connect({
     required String jid,
     required String password,
+    String displayName = '',
     required String resource,
     String? host,
     required int port,
@@ -1123,6 +1126,7 @@ class XmppService extends ChangeNotifier {
     _lastConnectArgs = _ConnectArgs(
       jid: normalizedJid,
       password: password,
+      displayName: displayName,
       resource: resource,
       host: host,
       port: port,
@@ -1453,6 +1457,7 @@ class XmppService extends ChangeNotifier {
       });
 
       final completer = Completer<void>();
+      var displayNamePublished = false;
       _connectionStateSubscription = connection.connectionStateStream.listen((
         state,
       ) {
@@ -1572,6 +1577,10 @@ class XmppService extends ChangeNotifier {
           _scheduleVcardRecovery(_currentUserBareJid!);
           _sendInitialPresence();
           _applyClientState();
+          if (!displayNamePublished && displayName.trim().isNotEmpty) {
+            displayNamePublished = true;
+            unawaited(updateSelfVcard(displayName: displayName));
+          }
         } else if (_isTerminalError(state)) {
           final message = _connectionErrorMessage(state);
           debugPrint('XMPP error: $message');
@@ -1640,6 +1649,7 @@ class XmppService extends ChangeNotifier {
       connect(
         jid: args.jid,
         password: args.password,
+        displayName: args.displayName,
         resource: args.resource,
         host: args.host,
         port: args.port,

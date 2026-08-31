@@ -1,6 +1,7 @@
 package im.cridland.wimsy
 
 import android.net.DnsResolver
+import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -13,9 +14,26 @@ import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
     private val channelName = "wimsy/dns"
+    private val loginLinkChannelName = "wimsy/login_link"
+    private var loginLinkChannel: MethodChannel? = null
+    private var pendingLoginLink: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        pendingLoginLink = intent?.dataString
+        loginLinkChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            loginLinkChannelName
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "getInitialLink") {
+                    result.success(pendingLoginLink)
+                    pendingLoginLink = null
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         channel.setMethodCallHandler { call, result ->
             if (call.method != "resolveSrv") {
@@ -33,6 +51,13 @@ class MainActivity : FlutterActivity() {
             }
             querySrv(name, result)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val link = intent.dataString ?: return
+        loginLinkChannel?.invokeMethod("onLoginLink", link)
     }
 
     private fun querySrv(name: String, result: MethodChannel.Result) {
