@@ -5589,7 +5589,9 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isCompact = MediaQuery.sizeOf(context).width <= 600;
+    final size = MediaQuery.sizeOf(context);
+    final isLandscapePhone = size.width > size.height && size.height < 600;
+    final isCompact = size.width <= 600 || isLandscapePhone;
 
     return AnimatedBuilder(
       animation: widget.service,

@@ -168,6 +168,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('New Chat uses a full-screen dialog on landscape phones', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(915, 412);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(home: addByJidDialogForTesting(XmppService())),
+    );
+
+    expect(
+      find.byKey(const Key('add-by-jid-fullscreen-dialog')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('add-by-jid-fullscreen-dialog'))),
+      const Size(915, 412),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('room invitation offers person search suggestions', (
     WidgetTester tester,
   ) async {
