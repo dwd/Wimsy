@@ -33,6 +33,8 @@ import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
 import 'utils/graph_statistics.dart';
 import 'utils/xep0392_color.dart';
+import 'browser_reload.dart';
+import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 const List<String> _defaultReactionOptions = [
@@ -120,6 +122,7 @@ String windowTitleFor(String? bareJid) {
 }
 
 class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final XmppService _service = XmppService();
   final StorageService _storage = StorageService();
   final NotificationService _notifications = NotificationService();
@@ -129,6 +132,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   bool _appIsForeground = true;
   late final Future<void> _initFuture;
   String? _titleBareJid;
+  WebUpdateMonitor? _webUpdateMonitor;
 
   @override
   void initState() {
@@ -169,10 +173,35 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       }
     }
     _initFuture = _storage.initialize();
+    if (kIsWeb && !_isFlutterTest) {
+      _webUpdateMonitor = WebUpdateMonitor(
+        onUpdateAvailable: _showWebUpdateDialog,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _webUpdateMonitor?.start();
+      });
+    }
+  }
+
+  void _showWebUpdateDialog() {
+    final context = _navigatorKey.currentContext;
+    if (context == null || !mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Update available'),
+        content: const Text('A new version of Wimsy is ready.'),
+        actions: [
+          FilledButton(onPressed: reloadBrowser, child: const Text('Reload')),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _webUpdateMonitor?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _service.removeListener(_updateWindowTitle);
     _connectivitySubscription?.cancel();
@@ -196,6 +225,9 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appIsForeground = state == AppLifecycleState.resumed;
+    if (kIsWeb && state == AppLifecycleState.resumed) {
+      unawaited(_webUpdateMonitor?.check());
+    }
     if (!kIsWeb && Platform.isAndroid) {
       _service.setBackgroundMode(state != AppLifecycleState.resumed);
     }
@@ -414,6 +446,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
         onPointerDown: (_) => _service.noteUserActivity(),
         onPointerSignal: (_) => _service.noteUserActivity(),
         child: MaterialApp(
+          navigatorKey: _navigatorKey,
           title: windowTitleFor(_titleBareJid),
           theme: ThemeData(
             colorScheme: colorScheme,

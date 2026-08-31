@@ -65,6 +65,12 @@ This packages the Flutter renderer assets with the application instead of
 loading them from `www.gstatic.com`, so the deployed application is fully
 self-hosted.
 
+For local web deployments, use `tool/build_web.sh` rather than invoking
+`flutter build web` directly. It assigns a build ID and creates `update.json`,
+which lets already-running and installed clients offer a reload when a newer
+build is deployed. An nginx configuration with appropriate cache headers and
+SPA routing is provided in `deploy/nginx-wimsy.conf`.
+
 The certificate hash is the base64 encoding of the certificate's raw SHA-256
 digest. When `WIMSY_DEFAULT_WEBTRANSPORT_URL` is non-empty, it overrides saved
 connection URLs and disables host-meta endpoint discovery for that web build.

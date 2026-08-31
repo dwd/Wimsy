@@ -248,7 +248,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Build Web
-        run: flutter build web --release --no-web-resources-cdn
+        run: tool/build_web.sh
       - name: Package Web
         run: |
           tar -C build -czf wimsy-web.tar.gz web
