@@ -8,6 +8,7 @@ import 'package:xmpp_stone/src/elements/stanzas/AbstractStanza.dart';
 import 'package:xmpp_stone/src/elements/stanzas/IqStanza.dart';
 
 import '../../Connection.dart';
+import '../../logger/Log.dart';
 import '../Negotiator.dart';
 import 'Feature.dart';
 
@@ -27,14 +28,17 @@ class MAMNegotiator extends Negotiator {
 
   static void removeInstance(Connection connection) {
     _instances[connection]?._subscription?.cancel();
+    _instances[connection]?._responseTimer?.cancel();
     _instances.remove(connection);
   }
 
   late IqStanza _myUnrespondedIqStanza;
 
   StreamSubscription<AbstractStanza?>? _subscription;
+  Timer? _responseTimer;
 
   final Connection _connection;
+  final Duration responseTimeout;
 
   final List<MamQueryParameters> _supportedParameters = [];
 
@@ -42,7 +46,10 @@ class MAMNegotiator extends Negotiator {
 
   bool? hasExtended;
 
-  MAMNegotiator(this._connection) {
+  MAMNegotiator(
+    this._connection, {
+    this.responseTimeout = const Duration(seconds: 15),
+  }) {
     expectedName = 'urn:xmpp:mam';
   }
 
@@ -72,9 +79,28 @@ class MAMNegotiator extends Negotiator {
     if (match(nonzas).isNotEmpty) {
       enabled = true;
       state = NegotiatorState.NEGOTIATING;
-      sendRequest();
       _subscription = _connection.inStanzasStream.listen(checkStanzas);
+      _responseTimer = Timer(responseTimeout, _handleResponseTimeout);
+      sendRequest();
     }
+  }
+
+  @override
+  void backToIdle() {
+    _responseTimer?.cancel();
+    _responseTimer = null;
+    _subscription?.cancel();
+    _subscription = null;
+    super.backToIdle();
+  }
+
+  void _handleResponseTimeout() {
+    if (state != NegotiatorState.NEGOTIATING) return;
+    Log.w(TAG, 'MAM capability query timed out; continuing connection setup');
+    _responseTimer = null;
+    _subscription?.cancel();
+    _subscription = null;
+    state = NegotiatorState.DONE;
   }
 
   void sendRequest() {
@@ -88,6 +114,8 @@ class MAMNegotiator extends Negotiator {
 
   void checkStanzas(AbstractStanza? stanza) {
     if (stanza is IqStanza && stanza.id == _myUnrespondedIqStanza.id) {
+      _responseTimer?.cancel();
+      _responseTimer = null;
       var x = stanza.getChild('query')?.getChild('x');
       if (x != null) {
         x.children.forEach((element) {
@@ -117,6 +145,7 @@ class MAMNegotiator extends Negotiator {
       }
       state = NegotiatorState.DONE;
       _subscription?.cancel();
+      _subscription = null;
     }
   }
 
