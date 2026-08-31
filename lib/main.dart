@@ -12,6 +12,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +21,7 @@ import 'av/call_session.dart';
 import 'keepalive_settings_screen.dart';
 import 'login_screen.dart';
 import 'login_link.dart';
+import 'login_export.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
 import 'models/muc_notify_settings.dart';
@@ -6059,6 +6061,49 @@ class _PresenceMenu extends StatelessWidget {
 
   Future<bool> _getSentryOptIn() async => preferences.sentryOptIn;
 
+  Future<void> _showAndroidExport(BuildContext context) async {
+    final jid = service.currentUserBareJid;
+    if (jid == null || jid.isEmpty) return;
+    final exportUri = buildAndroidLoginExportUri(
+      webAppUri: Uri.base,
+      jid: jid,
+      password: service.activeLoginPassword,
+      displayName: service.activeProfileDisplayName,
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export login to Android'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              QrImageView(
+                data: exportUri.toString(),
+                size: 260,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(color: Colors.black),
+                dataModuleStyle: const QrDataModuleStyle(color: Colors.black),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Scan this code on the Android device to fill Wimsy’s login '
+                'fields. You will still need to tap Connect.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _editProfile(BuildContext context) async {
     final selfJid = service.currentUserBareJid;
     if (selfJid == null || selfJid.isEmpty) {
@@ -6328,6 +6373,9 @@ class _PresenceMenu extends StatelessWidget {
               case _PresenceAction.editProfile:
                 await _editProfile(context);
                 break;
+              case _PresenceAction.exportAndroidLogin:
+                await _showAndroidExport(context);
+                break;
               case _PresenceAction.clearCacheExit:
                 onClearCacheExit?.call();
                 break;
@@ -6408,6 +6456,11 @@ class _PresenceMenu extends StatelessWidget {
               value: _PresenceAction.editProfile,
               child: Text('Edit profile...'),
             ),
+            if (kIsWeb)
+              const PopupMenuItem(
+                value: _PresenceAction.exportAndroidLogin,
+                child: Text('Export login to Android...'),
+              ),
             const PopupMenuDivider(),
             PopupMenuItem(
               value: _PresenceAction.csiAuto,
@@ -6788,6 +6841,7 @@ enum _PresenceAction {
   xa,
   setStatus,
   editProfile,
+  exportAndroidLogin,
   csiAuto,
   csiForceActive,
   csiForceInactive,

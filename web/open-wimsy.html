@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Open Wimsy</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body {
+      align-items: center; background: #f1eadf; color: #1b1a17; display: flex;
+      justify-content: center; margin: 0; min-height: 100vh; padding: 24px;
+      box-sizing: border-box;
+    }
+    main {
+      background: #fdfbf6; border-radius: 16px; box-shadow: 0 8px 32px #0002;
+      box-sizing: border-box; max-width: 440px; padding: 32px; text-align: center;
+      width: 100%;
+    }
+    p { line-height: 1.5; margin: 12px 0 24px; }
+    a {
+      background: #1f6f8b; border-radius: 10px; color: white; display: block;
+      font-weight: 600; padding: 14px 20px; text-decoration: none;
+    }
+    a:focus-visible { outline: 3px solid #ee6c4d; outline-offset: 3px; }
+    #error { color: #b00020; }
+    [hidden] { display: none; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #171717; color: #f5f5f5; }
+      main { background: #242424; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Open Wimsy</h1>
+    <p id="message">Wimsy should open automatically. If it does not, tap below.</p>
+    <a id="open-wimsy" href="wimsy://login">Open Wimsy</a>
+    <p id="error" hidden>This login link is missing its JID.</p>
+  </main>
+  <script>
+    (() => {
+      const source = new URLSearchParams(location.search);
+      const jid = source.get("jid");
+      const button = document.getElementById("open-wimsy");
+      if (!jid || !jid.trim()) {
+        document.getElementById("message").hidden = true;
+        button.hidden = true;
+        document.getElementById("error").hidden = false;
+        return;
+      }
+      const targetParameters = new URLSearchParams({jid});
+      for (const name of ["password", "display_name"]) {
+        if (source.has(name)) targetParameters.set(name, source.get(name));
+      }
+      const target = `wimsy://login?${targetParameters}`;
+      button.href = target;
+      location.replace(target);
+    })();
+  </script>
+</body>
+</html>

@@ -386,6 +386,18 @@ class XmppService extends ChangeNotifier {
   XmppStatus get status => _status;
   String? get errorMessage => _errorMessage;
   String? get currentUserBareJid => _currentUserBareJid;
+
+  /// Password used by the active session, exposed for the explicit web-to-APK
+  /// test-account export flow. It is never persisted by this getter.
+  String get activeLoginPassword => _lastConnectArgs?.password ?? '';
+
+  /// The explicitly configured profile name, without the JID fallback used by
+  /// contact labels.
+  String get activeProfileDisplayName {
+    final jid = _currentUserBareJid;
+    return jid == null ? '' : (_vcardDisplayNames[_bareJid(jid)] ?? '').trim();
+  }
+
   List<String> get recentReactionEmojis =>
       List.unmodifiable(_recentReactionEmojis);
   XmppConnectionState? get lastConnectionState => _lastConnectionState;

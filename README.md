@@ -59,6 +59,10 @@ https://wimsy.im/login?jid=user%40example.com&password=test123&display_name=Test
 
 The link opens Wimsy and fills the JID, password, and display-name fields. The
 user must still tap **Connect**. Query parameter values must be URL-encoded.
+The web build includes `/open-wimsy.html`, which performs this custom-scheme
+handoff from a normal HTTPS URL. A connected web client can generate a
+same-origin handoff QR code from **Export login to Android...** in the presence
+menu.
 
 ## Web deployment defaults
 
