@@ -237,5 +237,26 @@ void main() {
       expect(storage.loadAccount(), {'jid': 'alice@example.com'});
       expect(storage.loadMessages()['bob@example.com']!.single.messageId, 'm1');
     });
+
+    test('control-message outbox survives a lock/unlock cycle', () async {
+      await storage.storeControlMessageOutbox([
+        {
+          'kind': 'receipt',
+          'toJid': 'bob@example.com',
+          'referencedId': 'message-1',
+        },
+      ]);
+
+      await storage.lock();
+      await storage.unlock('1234');
+
+      expect(storage.loadControlMessageOutbox(), [
+        {
+          'kind': 'receipt',
+          'toJid': 'bob@example.com',
+          'referencedId': 'message-1',
+        },
+      ]);
+    });
   });
 }

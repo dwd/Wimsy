@@ -42,6 +42,7 @@ class StorageService {
   // lazily as messages with the matching stanza-id arrive (live or via
   // MAM) and are removed from disk once resolved.
   static const _displayedSyncPendingKey = 'displayed_sync_pending';
+  static const _controlMessageOutboxKey = 'control_message_outbox';
   // R5: persisted Entity Capabilities (XEP-0115) cache, keyed by
   // `node#ver`. Values are the disco#info feature lists.
   static const _entityCapsKey = 'entity_caps';
@@ -100,6 +101,7 @@ class StorageService {
     _displayedSyncKey,
     _displayedSyncTimestampsKey,
     _displayedSyncPendingKey,
+    _controlMessageOutboxKey,
     _avatarMetadataKey,
     _vcardAvatarStateKey,
     _lastMamIdSeenKey,
@@ -765,6 +767,23 @@ class StorageService {
       return;
     }
     await box.put(_displayedSyncPendingKey, Map<String, String>.from(pending));
+  }
+
+  List<Map<String, dynamic>> loadControlMessageOutbox() {
+    final data = _box?.get(_controlMessageOutboxKey, defaultValue: const []);
+    if (data is! List) return const [];
+    return data
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: false);
+  }
+
+  Future<void> storeControlMessageOutbox(
+    List<Map<String, dynamic>> entries,
+  ) async {
+    final box = _box;
+    if (box == null) return;
+    await box.put(_controlMessageOutboxKey, entries);
   }
 
   /// R5: load the persisted Entity Capabilities (XEP-0115) cache. The

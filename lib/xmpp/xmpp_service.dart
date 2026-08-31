@@ -30,6 +30,7 @@ import 'call_ice.dart';
 import 'extdisco.dart';
 import 'jmi.dart';
 import 'blocking.dart';
+import 'control_message_outbox.dart';
 import 'http_upload.dart';
 import 'jingle_grouping.dart';
 import 'mam_cursor.dart';
@@ -111,6 +112,9 @@ class XmppService extends ChangeNotifier {
   final MessageStanzaParser _messageStanzaParser = const MessageStanzaParser();
 
   XmppService() {
+    _controlMessageOutbox = ControlMessageOutbox(
+      onChanged: (entries) => _storage?.storeControlMessageOutbox(entries),
+    );
     _messageIntentBuilder = MessageIntentBuilder(
       currentUserBareJid: () => _currentUserBareJid,
       activeChatBareJid: () => _activeChatBareJid,
@@ -136,6 +140,7 @@ class XmppService extends ChangeNotifier {
 
   late final MessageIntentBuilder _messageIntentBuilder;
   late final MamCoordinator _mamCoordinator;
+  late final ControlMessageOutbox _controlMessageOutbox;
   Connection? _connection;
   ChatManager? _chatManager;
   StreamSubscription<XmppConnectionState>? _connectionStateSubscription;
@@ -546,6 +551,7 @@ class XmppService extends ChangeNotifier {
     _displayedSyncPending
       ..clear()
       ..addAll(storage.loadDisplayedSyncPending());
+    _controlMessageOutbox.restore(storage.loadControlMessageOutbox());
     // R2.1: seed the globally-newest MAM id anchor.
     _lastMamIdSeen = storage.loadLastMamIdSeen();
   }
@@ -1556,6 +1562,7 @@ class XmppService extends ChangeNotifier {
           _setupKeepalive();
           _setupQuicStats();
           _setupDeliveryTracking();
+          _replayControlMessageOutbox();
           _setupPep();
           _setupBookmarks();
           _setupBlocking();
@@ -1789,6 +1796,7 @@ class XmppService extends ChangeNotifier {
     _displayedStanzaIdByChat.clear();
     _displayedSyncPending.clear();
     _displayedAtByChat.clear();
+    _controlMessageOutbox.clear();
     _storage?.clearDisplayedSync();
     notifyListeners();
   }
@@ -3213,6 +3221,7 @@ class XmppService extends ChangeNotifier {
         }
         if (event.phase == QuicWritePhase.transportDelivered &&
             event.messageId != null) {
+          _controlMessageOutbox.acknowledgeStanza(event.messageId!);
           _applyAckByMessageId(event.messageId!);
           _applyRoomAckByMessageId(event.messageId!);
         }
@@ -3224,6 +3233,10 @@ class XmppService extends ChangeNotifier {
     _smDeliveredSubscription = streamManagement.deliveredStanzasStream.listen((
       stanza,
     ) {
+      final stanzaId = stanza.id;
+      if (stanzaId != null && stanzaId.isNotEmpty) {
+        _controlMessageOutbox.acknowledgeStanza(stanzaId);
+      }
       if (stanza is! MessageStanza) {
         return;
       }
@@ -6120,39 +6133,69 @@ class XmppService extends ChangeNotifier {
   }
 
   void _sendReceipt(String toBareJid, String messageId) {
-    final connection = _connection;
-    if (connection == null) {
-      return;
-    }
-    final stanza = MessageStanza(
-      AbstractStanza.getRandomId(),
-      MessageStanzaType.CHAT,
+    final operation = ControlMessageOperation(
+      kind: ControlMessageKind.receipt,
+      toJid: toBareJid,
+      referencedId: messageId,
     );
-    stanza.toJid = Jid.fromFullJid(toBareJid);
+    _controlMessageOutbox.put(operation);
+    _writeControlMessage(operation);
+  }
+
+  void _writeControlMessage(ControlMessageOperation operation) {
+    final connection = _connection;
+    if (connection == null || operation.kind == ControlMessageKind.mds) return;
+    final stanzaId = AbstractStanza.getRandomId();
+    final stanza = MessageStanza(stanzaId, MessageStanzaType.CHAT);
+    stanza.toJid = Jid.fromFullJid(operation.toJid);
     stanza.fromJid = connection.fullJid;
-    final receipt = XmppElement()..name = 'received';
-    receipt.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
-    receipt.addAttribute(XmppAttribute('id', messageId));
-    stanza.addChild(receipt);
+    final element = XmppElement()
+      ..name = operation.kind == ControlMessageKind.receipt
+          ? 'received'
+          : operation.markerName!;
+    element.addAttribute(
+      XmppAttribute(
+        'xmlns',
+        operation.kind == ControlMessageKind.receipt
+            ? 'urn:xmpp:receipts'
+            : 'urn:xmpp:chat-markers:0',
+      ),
+    );
+    element.addAttribute(XmppAttribute('id', operation.referencedId));
+    stanza.addChild(element);
+    _controlMessageOutbox.correlate(stanzaId, operation);
     connection.writeStanza(stanza);
   }
 
   void _sendMarker(String toBareJid, String messageId, String name) {
-    final connection = _connection;
-    if (connection == null) {
-      return;
-    }
-    final stanza = MessageStanza(
-      AbstractStanza.getRandomId(),
-      MessageStanzaType.CHAT,
+    final operation = ControlMessageOperation(
+      kind: ControlMessageKind.marker,
+      toJid: toBareJid,
+      referencedId: messageId,
+      markerName: name,
     );
-    stanza.toJid = Jid.fromFullJid(toBareJid);
-    stanza.fromJid = connection.fullJid;
-    final marker = XmppElement()..name = name;
-    marker.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
-    marker.addAttribute(XmppAttribute('id', messageId));
-    stanza.addChild(marker);
-    connection.writeStanza(stanza);
+    _controlMessageOutbox.put(operation);
+    _writeControlMessage(operation);
+  }
+
+  void _replayControlMessageOutbox() {
+    for (final operation in _controlMessageOutbox.pending) {
+      if (operation.kind == ControlMessageKind.mds) {
+        final selfBareJid = _currentUserBareJid;
+        if (selfBareJid != null && selfBareJid.isNotEmpty) {
+          unawaited(
+            _doPublishMdsDisplayed(
+              chatJid: operation.toJid,
+              stanzaId: operation.referencedId,
+              byValue: operation.byValue ?? '',
+              selfBareJid: selfBareJid,
+            ),
+          );
+        }
+      } else {
+        _writeControlMessage(operation);
+      }
+    }
   }
 
   void _setupPresence() {
@@ -8172,14 +8215,15 @@ class XmppService extends ChangeNotifier {
   ///
   /// [publishIqBuilder] is called twice (initial attempt + retry) so it must
   /// produce a fresh IQ each time (with a new stanza id).
-  Future<void> _doPrivatePepPublish({
+  Future<bool> _doPrivatePepPublish({
     required IqStanza Function() publishIqBuilder,
     required String node,
     required String selfBareJid,
   }) async {
     final result = await _sendIqAndAwait(publishIqBuilder());
-    if (result == null || result.type != IqStanzaType.ERROR) {
-      return;
+    if (result == null) return false;
+    if (result.type != IqStanzaType.ERROR) {
+      return true;
     }
     final condition = _iqErrorCondition(result);
     final pubsubError = _iqPubsubErrorCondition(result);
@@ -8188,7 +8232,7 @@ class XmppService extends ChangeNotifier {
         'XmppService',
         'PEP publish to $node failed: $condition / $pubsubError',
       );
-      return;
+      return false;
     }
     // The node exists but its configuration does not match our publish-options.
     // Reconfigure the node to the required settings, then retry once.
@@ -8208,7 +8252,9 @@ class XmppService extends ChangeNotifier {
         'PEP publish to $node still failed after reconfiguring: '
             '$retryCondition / $retryPubsubError',
       );
+      return false;
     }
+    return retryResult != null;
   }
 
   /// Publishes an MDS displayed marker for [chatJid] via [_doPrivatePepPublish].
@@ -8218,16 +8264,37 @@ class XmppService extends ChangeNotifier {
     required String byValue,
     required String selfBareJid,
   }) async {
-    await _doPrivatePepPublish(
-      publishIqBuilder: () => buildMdsPublishIq(
-        chatJid: chatJid,
-        stanzaId: stanzaId,
-        byValue: byValue,
-        selfBareJid: selfBareJid,
-      ),
+    final operation = ControlMessageOperation(
+      kind: ControlMessageKind.mds,
+      toJid: chatJid,
+      referencedId: stanzaId,
+      byValue: byValue,
+    );
+    _controlMessageOutbox.put(operation);
+    final succeeded = await _doPrivatePepPublish(
+      publishIqBuilder: () {
+        final iq = buildMdsPublishIq(
+          chatJid: chatJid,
+          stanzaId: stanzaId,
+          byValue: byValue,
+          selfBareJid: selfBareJid,
+        );
+        final id = iq.id;
+        if (id != null && id.isNotEmpty) {
+          _controlMessageOutbox.correlate(id, operation);
+        }
+        return iq;
+      },
       node: mdsNodeName,
       selfBareJid: selfBareJid,
     );
+    if (succeeded) {
+      _controlMessageOutbox.complete(operation);
+    } else {
+      // A transport acknowledgement may have optimistically removed it.
+      // Restore it when the application-level IQ operation failed.
+      _controlMessageOutbox.put(operation);
+    }
   }
 
   void _publishDisplayedState(String bareJid) {
