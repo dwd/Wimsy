@@ -108,7 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _appendConnectionLog(String entry) {
-    if (!mounted) return;
+    if (!mounted || !widget.service.isConnecting) return;
     setState(() {
       _connectionLogEntries.add(entry);
       if (_connectionLogEntries.length > _maximumVisibleLogEntries) {

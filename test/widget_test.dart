@@ -1011,22 +1011,34 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final prefs = await PreferencesService.load();
 
+    final service = XmppService();
     await tester.pumpWidget(
       MaterialApp(
         home: LoginScreen(
-          service: XmppService(),
+          service: service,
           storage: StorageService(),
           preferences: prefs,
         ),
       ),
     );
 
+    service.simulateInitialConnectForTesting();
     Log.i('LoginTest', 'Negotiating secure connection');
     await tester.pump();
 
     expect(
       find.textContaining('Negotiating secure connection'),
       findsOneWidget,
+    );
+
+    service.seedConnectedRoomForTesting(
+      RoomEntry(roomJid: 'room@example.com', joined: true),
+    );
+    Log.i('LoginTest', 'Runtime traffic is not retained');
+    await tester.pump();
+    expect(
+      find.textContaining('Runtime traffic is not retained'),
+      findsNothing,
     );
 
     await tester.ensureVisible(find.text('Clear'));

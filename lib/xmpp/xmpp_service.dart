@@ -5345,6 +5345,12 @@ class XmppService extends ChangeNotifier {
   }
 
   @visibleForTesting
+  void simulateInitialConnectForTesting() {
+    _status = XmppStatus.connecting;
+    notifyListeners();
+  }
+
+  @visibleForTesting
   int get pendingMessageCountForTesting => _pendingMessages.length;
 
   @visibleForTesting

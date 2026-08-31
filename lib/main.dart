@@ -142,6 +142,8 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _service.addListener(_syncConnectionLogCapture);
+    _syncConnectionLogCapture();
     WidgetsBinding.instance.addObserver(this);
     _service.addListener(_updateWindowTitle);
     if (!_isFlutterTest) {
@@ -194,6 +196,15 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     }
   }
 
+  void _syncConnectionLogCapture() {
+    final service = _service;
+    if (service.isConnecting && !service.hasConnectedSession) {
+      _connectionLogStore.startCapture();
+    } else {
+      _connectionLogStore.stopCapture();
+    }
+  }
+
   void _showWebUpdateDialog() {
     final context = _navigatorKey.currentContext;
     if (context == null || !mounted) return;
@@ -217,6 +228,8 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     _loginLink.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _service.removeListener(_updateWindowTitle);
+    _service.removeListener(_syncConnectionLogCapture);
+    _connectionLogStore.stopCapture();
     _connectivitySubscription?.cancel();
     _service.setIncomingMessageHandler(null);
     _service.setIncomingRoomMessageHandler(null);
@@ -6594,14 +6607,23 @@ class _PresenceMenu extends StatelessWidget {
 }
 
 class _ConnectionLogStore extends ChangeNotifier {
-  _ConnectionLogStore() {
-    Log.messages.listen((entry) {
+  StreamSubscription<String>? _subscription;
+
+  void startCapture() {
+    if (_subscription != null) return;
+    _entries.clear();
+    _subscription = Log.messages.listen((entry) {
       _entries.add(entry);
       if (_entries.length > 200) {
         _entries.removeRange(0, _entries.length - 200);
       }
       notifyListeners();
     });
+  }
+
+  void stopCapture() {
+    _subscription?.cancel();
+    _subscription = null;
   }
 
   final List<String> _entries = [];
