@@ -25,6 +25,7 @@ class PreferencesService {
   static const _lastJidKey = 'wimsy_last_jid';
   static const _audioInputKey = 'wimsy_audio_input';
   static const _videoInputKey = 'wimsy_video_input';
+  static const _lowBandwidthModeKey = 'wimsy_low_bandwidth_mode';
 
   // ── Sentry opt-in ──────────────────────────────────────────────────────────
 
@@ -57,6 +58,11 @@ class PreferencesService {
 
   Future<void> setVideoInputId(String deviceId) =>
       _prefs.setString(_videoInputKey, deviceId);
+
+  bool get lowBandwidthMode => _prefs.getBool(_lowBandwidthModeKey) ?? false;
+
+  Future<void> setLowBandwidthMode(bool value) =>
+      _prefs.setBool(_lowBandwidthModeKey, value);
 
   // ── Keepalive/ping/reconnect timer tuning ─────────────────────────────────
   //

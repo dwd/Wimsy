@@ -690,6 +690,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     _seedRoomMessages();
     _loadMediaPreferences();
     widget.service.applyKeepaliveTuning(widget.preferences.keepaliveTuning);
+    widget.service.setLowBandwidthMode(widget.preferences.lowBandwidthMode);
   }
 
   Future<void> _seedRoster() async {
@@ -1734,6 +1735,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                             senderName: senderName,
                             timestamp: timestamp,
                             avatarBytes: avatarBytes,
+                            deferOobImages: service.lowBandwidthMode,
                             replySenderName: replySenderName,
                             replyBody: replyBody,
                             onReplyTargetTap: (message.replyToId ?? '').isEmpty
@@ -4146,6 +4148,7 @@ class MessageBubble extends StatelessWidget {
     required this.senderName,
     required this.timestamp,
     required this.avatarBytes,
+    this.deferOobImages = false,
     required this.replySenderName,
     required this.replyBody,
     required this.onReplyTargetTap,
@@ -4169,6 +4172,7 @@ class MessageBubble extends StatelessWidget {
   final String senderName;
   final String timestamp;
   final Uint8List? avatarBytes;
+  final bool deferOobImages;
   final String? replySenderName;
   final String? replyBody;
   final VoidCallback? onReplyTargetTap;
@@ -4668,6 +4672,14 @@ class MessageBubble extends StatelessWidget {
     if (url == null) {
       return null;
     }
+    return _DeferredOobImage(
+      deferred: deferOobImages,
+      imageBuilder: () =>
+          _buildNetworkOobImage(url, () => _showExpandedImage(context, url)),
+    );
+  }
+
+  Widget _buildNetworkOobImage(String url, VoidCallback onTap) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth.isFinite
@@ -4681,7 +4693,7 @@ class MessageBubble extends StatelessWidget {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () => _showExpandedImage(context, url),
+                onTap: onTap,
                 child: Image.network(
                   url,
                   fit: BoxFit.contain,
@@ -4911,6 +4923,31 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _DeferredOobImage extends StatefulWidget {
+  const _DeferredOobImage({required this.deferred, required this.imageBuilder});
+
+  final bool deferred;
+  final Widget Function() imageBuilder;
+
+  @override
+  State<_DeferredOobImage> createState() => _DeferredOobImageState();
+}
+
+class _DeferredOobImageState extends State<_DeferredOobImage> {
+  late bool _revealed = !widget.deferred;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_revealed) return widget.imageBuilder();
+    return OutlinedButton.icon(
+      key: const Key('view-oob-image'),
+      onPressed: () => setState(() => _revealed = true),
+      icon: const Icon(Icons.image),
+      label: const Text('View photo'),
     );
   }
 }
@@ -6410,12 +6447,20 @@ class _PresenceMenu extends StatelessWidget {
                 break;
               case _PresenceAction.csiAuto:
                 service.setCsiOverrideMode(CsiOverrideMode.auto);
+                await preferences.setLowBandwidthMode(false);
                 break;
               case _PresenceAction.csiForceActive:
                 service.setCsiOverrideMode(CsiOverrideMode.active);
+                await preferences.setLowBandwidthMode(false);
                 break;
               case _PresenceAction.csiForceInactive:
                 service.setCsiOverrideMode(CsiOverrideMode.inactive);
+                await preferences.setLowBandwidthMode(true);
+                break;
+              case _PresenceAction.toggleLowBandwidth:
+                final enabled = !service.lowBandwidthMode;
+                service.setLowBandwidthMode(enabled);
+                await preferences.setLowBandwidthMode(enabled);
                 break;
               case _PresenceAction.toggleSentry:
                 await _setSentryOptIn(context, !sentryEnabled);
@@ -6482,6 +6527,14 @@ class _PresenceMenu extends StatelessWidget {
                 child: Text('Export login to Android...'),
               ),
             const PopupMenuDivider(),
+            PopupMenuItem(
+              value: _PresenceAction.toggleLowBandwidth,
+              child: Text(
+                service.lowBandwidthMode
+                    ? 'Disable low bandwidth mode'
+                    : 'Enable low bandwidth mode',
+              ),
+            ),
             PopupMenuItem(
               value: _PresenceAction.csiAuto,
               child: Text(
@@ -6932,6 +6985,7 @@ enum _PresenceAction {
   csiAuto,
   csiForceActive,
   csiForceInactive,
+  toggleLowBandwidth,
   toggleSentry,
   simulateDisconnect,
   keepaliveSettings,

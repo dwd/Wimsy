@@ -85,6 +85,64 @@ class _ConnectingXmppService extends XmppService {
 }
 
 void main() {
+  test('low bandwidth mode and CSI override remain synchronized', () {
+    final service = XmppService();
+
+    service.setLowBandwidthMode(true);
+    expect(service.lowBandwidthMode, isTrue);
+    expect(service.csiOverrideMode, CsiOverrideMode.inactive);
+
+    service.setCsiOverrideMode(CsiOverrideMode.active);
+    expect(service.lowBandwidthMode, isFalse);
+  });
+
+  testWidgets('low bandwidth mode defers OOB photos behind a button', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'bob@example.com',
+      to: 'alice@example.com',
+      body: 'https://example.com/photo.jpg',
+      timestamp: DateTime.utc(2026),
+      outgoing: false,
+      messageId: 'deferred-photo-test',
+      oobUrl: 'https://example.com/photo.jpg',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'Bob',
+            timestamp: '12:00',
+            avatarBytes: null,
+            deferOobImages: true,
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'alice@example.com',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('View photo'), findsOneWidget);
+    expect(find.byType(Image), findsNothing);
+  });
+
   test('window title includes the active bare JID', () {
     expect(windowTitleFor(null), 'Wimsy');
     expect(windowTitleFor(''), 'Wimsy');

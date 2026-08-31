@@ -14,6 +14,7 @@ class PepManager {
     required this.storage,
     required this.selfBareJid,
     required PepUpdateCallback onUpdate,
+    this.allowAvatarFetch = _alwaysAllowAvatarFetch,
   }) : _onUpdate = onUpdate {
     _metadataByJid.addAll(storage.loadAvatarMetadata());
     _avatarBlobs.addAll(storage.loadAvatarBlobs());
@@ -28,6 +29,9 @@ class PepManager {
   final StorageService storage;
   final String selfBareJid;
   final PepUpdateCallback _onUpdate;
+  final bool Function() allowAvatarFetch;
+
+  static bool _alwaysAllowAvatarFetch() => true;
 
   final Map<String, AvatarMetadata> _metadataByJid = {};
   final Map<String, String> _avatarBlobs = {};
@@ -78,13 +82,19 @@ class PepManager {
   }
 
   void requestMetadataIfMissing(String bareJid) {
-    if (_metadataByJid.containsKey(bareJid)) {
+    if (!allowAvatarFetch()) return;
+    final metadata = _metadataByJid[bareJid];
+    if (metadata != null) {
+      if (!metadata.isNoPepAvatar) {
+        requestAvatarData(bareJid, metadata.hash);
+      }
       return;
     }
     _requestMetadata(bareJid);
   }
 
   String? requestAvatarData(String bareJid, String hash) {
+    if (!allowAvatarFetch()) return null;
     if (_avatarBlobs.containsKey(hash)) {
       return null;
     }

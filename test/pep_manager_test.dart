@@ -18,7 +18,10 @@ class FakeStorageService extends StorageService {
   Map<String, String> loadAvatarBlobs() => Map.from(blobs);
 
   @override
-  Future<void> storeAvatarMetadata(String bareJid, AvatarMetadata metadata) async {
+  Future<void> storeAvatarMetadata(
+    String bareJid,
+    AvatarMetadata metadata,
+  ) async {
     this.metadata[bareJid] = metadata;
   }
 
@@ -52,11 +55,16 @@ class TestConnection extends Connection {
   void write(Object? message) {}
 }
 
-MessageStanza _buildMetadataEvent({required String fromJid, required String hash}) {
+MessageStanza _buildMetadataEvent({
+  required String fromJid,
+  required String hash,
+}) {
   final stanza = MessageStanza('msg1', MessageStanzaType.CHAT);
   stanza.fromJid = Jid.fromFullJid(fromJid);
   final event = XmppElement()..name = 'event';
-  event.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub#event'));
+  event.addAttribute(
+    XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub#event'),
+  );
   final items = XmppElement()..name = 'items';
   items.addAttribute(XmppAttribute('node', 'urn:xmpp:avatar:metadata'));
   final item = XmppElement()..name = 'item';
@@ -75,10 +83,16 @@ MessageStanza _buildMetadataEvent({required String fromJid, required String hash
   return stanza;
 }
 
-IqStanza _buildAvatarDataResult({required String id, required String hash, required String base64Data}) {
+IqStanza _buildAvatarDataResult({
+  required String id,
+  required String hash,
+  required String base64Data,
+}) {
   final stanza = IqStanza(id, IqStanzaType.RESULT);
   final pubsub = XmppElement()..name = 'pubsub';
-  pubsub.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'));
+  pubsub.addAttribute(
+    XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+  );
   final items = XmppElement()..name = 'items';
   items.addAttribute(XmppAttribute('node', 'urn:xmpp:avatar:data'));
   final item = XmppElement()..name = 'item';
@@ -93,9 +107,42 @@ IqStanza _buildAvatarDataResult({required String id, required String hash, requi
 }
 
 void main() {
+  test('low bandwidth policy suppresses PEP avatar requests', () {
+    final storage = FakeStorageService();
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
+    final connection = TestConnection(account);
+    final pep = PepManager(
+      connection: connection,
+      storage: storage,
+      selfBareJid: 'user@example.com',
+      onUpdate: () {},
+      allowAvatarFetch: () => false,
+    );
+
+    pep.requestMetadataIfMissing('alice@example.com');
+    pep.handleStanza(
+      _buildMetadataEvent(fromJid: 'alice@example.com', hash: 'abc123'),
+    );
+
+    expect(connection.lastWrittenStanza, isNull);
+    expect(storage.metadata['alice@example.com']?.hash, 'abc123');
+  });
+
   test('PEP avatar metadata event stores metadata and requests data', () {
     final storage = FakeStorageService();
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     var updates = 0;
     final pep = PepManager(
@@ -105,7 +152,10 @@ void main() {
       onUpdate: () => updates++,
     );
 
-    final event = _buildMetadataEvent(fromJid: 'alice@example.com', hash: 'abc123');
+    final event = _buildMetadataEvent(
+      fromJid: 'alice@example.com',
+      hash: 'abc123',
+    );
     pep.handleStanza(event);
 
     expect(storage.metadata.containsKey('alice@example.com'), true);
@@ -122,7 +172,13 @@ void main() {
         bytes: 4,
         updatedAt: DateTime.utc(2024, 1, 1),
       );
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     final pep = PepManager(
       connection: connection,
@@ -133,7 +189,11 @@ void main() {
 
     final data = base64Encode([1, 2, 3, 4]);
     final requestId = pep.requestAvatarData('alice@example.com', 'abc123');
-    final stanza = _buildAvatarDataResult(id: requestId!, hash: 'abc123', base64Data: data);
+    final stanza = _buildAvatarDataResult(
+      id: requestId!,
+      hash: 'abc123',
+      base64Data: data,
+    );
     pep.handleStanza(stanza);
 
     final bytes = pep.avatarBytesFor('alice@example.com');
@@ -143,7 +203,13 @@ void main() {
 
   test('PEP exposes avatar hash for known metadata', () {
     final storage = FakeStorageService();
-    final account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
     final connection = TestConnection(account);
     final pep = PepManager(
       connection: connection,
@@ -152,7 +218,10 @@ void main() {
       onUpdate: () {},
     );
 
-    final event = _buildMetadataEvent(fromJid: 'alice@example.com', hash: 'hash123');
+    final event = _buildMetadataEvent(
+      fromJid: 'alice@example.com',
+      hash: 'hash123',
+    );
     pep.handleStanza(event);
 
     expect(pep.avatarHashFor('alice@example.com'), 'hash123');
@@ -230,38 +299,35 @@ void main() {
       },
     );
 
-    test(
-      'real metadata event clears the sentinel on next pubsub update',
-      () {
-        final storage = FakeStorageService();
-        // Pre-seed the sentinel.
-        storage.metadata['test1@example.com'] = AvatarMetadata.noPepAvatar();
-        final account = XmppAccountSettings(
-          'test',
-          'user',
-          'example.com',
-          'pass',
-          5222,
-        );
-        final connection = TestConnection(account);
-        final pep = PepManager(
-          connection: connection,
-          storage: storage,
-          selfBareJid: 'user@example.com',
-          onUpdate: () {},
-        );
+    test('real metadata event clears the sentinel on next pubsub update', () {
+      final storage = FakeStorageService();
+      // Pre-seed the sentinel.
+      storage.metadata['test1@example.com'] = AvatarMetadata.noPepAvatar();
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final pep = PepManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: 'user@example.com',
+        onUpdate: () {},
+      );
 
-        // Now an event arrives advertising a real avatar.
-        final event = _buildMetadataEvent(
-          fromJid: 'test1@example.com',
-          hash: 'real-hash',
-        );
-        pep.handleStanza(event);
+      // Now an event arrives advertising a real avatar.
+      final event = _buildMetadataEvent(
+        fromJid: 'test1@example.com',
+        hash: 'real-hash',
+      );
+      pep.handleStanza(event);
 
-        expect(pep.isKnownToHaveNoPepAvatar('test1@example.com'), isFalse);
-        expect(pep.avatarHashFor('test1@example.com'), 'real-hash');
-      },
-    );
+      expect(pep.isKnownToHaveNoPepAvatar('test1@example.com'), isFalse);
+      expect(pep.avatarHashFor('test1@example.com'), 'real-hash');
+    });
 
     test('AvatarMetadata.noPepAvatar round-trips through fromMap', () {
       final original = AvatarMetadata.noPepAvatar(

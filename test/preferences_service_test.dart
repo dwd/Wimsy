@@ -4,6 +4,16 @@ import 'package:wimsy/models/keepalive_tuning.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 
 void main() {
+  test('low bandwidth mode persists and defaults off', () async {
+    SharedPreferences.setMockInitialValues({});
+    var preferences = await PreferencesService.load();
+    expect(preferences.lowBandwidthMode, isFalse);
+
+    await preferences.setLowBandwidthMode(true);
+    preferences = await PreferencesService.load();
+    expect(preferences.lowBandwidthMode, isTrue);
+  });
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -83,11 +93,13 @@ void main() {
   });
 
   group('keepaliveTuning', () {
-    test('defaults to KeepaliveTuning.defaults when nothing is stored',
-        () async {
-      final prefs = await load();
-      expect(prefs.keepaliveTuning, KeepaliveTuning.defaults);
-    });
+    test(
+      'defaults to KeepaliveTuning.defaults when nothing is stored',
+      () async {
+        final prefs = await load();
+        expect(prefs.keepaliveTuning, KeepaliveTuning.defaults);
+      },
+    );
 
     test('round-trips a fully customized tuning', () async {
       final prefs = await load();

@@ -184,6 +184,7 @@ class XmppService extends ChangeNotifier {
   XmppConnectionState? _lastConnectionState;
   bool _hasConnectedSession = false;
   bool _backgroundMode = false;
+  bool _lowBandwidthMode = false;
   bool _networkOnline = true;
   Timer? _connectivityDebounceTimer;
   final Map<String, List<ChatMessage>> _messages = {};
@@ -996,12 +997,35 @@ class XmppService extends ChangeNotifier {
   bool get isBackgroundMode => _backgroundMode;
   bool get isCsiInactive => _csiInactive;
   CsiOverrideMode get csiOverrideMode => _csiOverrideMode;
+  bool get lowBandwidthMode => _lowBandwidthMode;
+
+  /// Keeps CSI inactive and suppresses avatar lookups while retaining cached
+  /// avatar bytes for display.
+  void setLowBandwidthMode(bool enabled) {
+    final target = enabled ? CsiOverrideMode.inactive : CsiOverrideMode.auto;
+    if (_lowBandwidthMode == enabled && _csiOverrideMode == target) return;
+    _lowBandwidthMode = enabled;
+    _csiOverrideMode = target;
+    _applyClientState();
+    if (!enabled) {
+      final pepManager = _pepManager;
+      final selfJid = _currentUserBareJid;
+      if (pepManager != null && selfJid != null) {
+        pepManager.requestMetadataIfMissing(selfJid);
+        for (final contact in _contacts) {
+          pepManager.requestMetadataIfMissing(contact.jid);
+        }
+      }
+    }
+    notifyListeners();
+  }
 
   void setCsiOverrideMode(CsiOverrideMode mode) {
     if (_csiOverrideMode == mode) {
       return;
     }
     _csiOverrideMode = mode;
+    _lowBandwidthMode = mode == CsiOverrideMode.inactive;
     _applyClientState();
     notifyListeners();
   }
@@ -1985,6 +2009,7 @@ class XmppService extends ChangeNotifier {
       if (occupantState == _vcardNoAvatar) {
         return null;
       }
+      if (_lowBandwidthMode) return null;
       // Don't fall through to the bare-JID path — for MUC occupants the
       // bare JID is the room JID, not the occupant's identity.
       if (!_vcardRequests.contains(bareJid)) {
@@ -2000,6 +2025,7 @@ class XmppService extends ChangeNotifier {
     if (state == _vcardNoAvatar) {
       return null;
     }
+    if (_lowBandwidthMode) return null;
     if (!_vcardRequests.contains(normalized)) {
       _requestVcardAvatar(normalized);
     }
@@ -6325,6 +6351,7 @@ class XmppService extends ChangeNotifier {
         _handlePepAvatarUpdate();
         notifyListeners();
       },
+      allowAvatarFetch: () => !_lowBandwidthMode,
     );
     _pepCapsManager = PepCapsManager(
       connection: connection,
@@ -9591,6 +9618,7 @@ class XmppService extends ChangeNotifier {
   }
 
   void _requestVcardAvatar(String bareJid) {
+    if (_lowBandwidthMode) return;
     _requestVcardDetails(bareJid, preferName: false);
   }
 
@@ -9599,6 +9627,7 @@ class XmppService extends ChangeNotifier {
     required bool preferName,
     String? advertisedHash,
   }) {
+    if (_lowBandwidthMode && !preferName) return;
     final connection = _connection;
     final storage = _storage;
     if (connection == null || storage == null) {
