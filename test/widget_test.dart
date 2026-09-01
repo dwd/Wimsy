@@ -597,6 +597,79 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('message viewport stays pinned by its lower edge', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final service = XmppService();
+    const jid = 'reader@conference.example.com';
+    final room = RoomEntry(roomJid: jid, nick: 'tester', joined: true);
+    final messages = List.generate(
+      40,
+      (index) => ChatMessage(
+        from: jid,
+        to: 'tester@example.com',
+        body: 'Message $index with enough text to occupy a visible row',
+        timestamp: DateTime.utc(2026, 1, 1, 0, index),
+        outgoing: false,
+        messageId: 'message-$index',
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    service.seedConnectedRoomForTesting(room, name: 'Reader Room');
+    service.seedRoomMessages({jid: messages});
+    await tester.pumpAndSettle();
+
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const Key('message-list')),
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    final position = scrollable.position;
+    position.jumpTo(position.maxScrollExtent - 160);
+    final distanceFromBottom = position.maxScrollExtent - position.pixels;
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pump();
+    expect(
+      position.maxScrollExtent - position.pixels,
+      closeTo(distanceFromBottom, 0.01),
+    );
+
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pump();
+    expect(
+      position.maxScrollExtent - position.pixels,
+      closeTo(distanceFromBottom, 0.01),
+    );
+
+    tester.view.physicalSize = const Size(1000, 800);
+    await tester.pump();
+    expect(
+      position.maxScrollExtent - position.pixels,
+      closeTo(distanceFromBottom, 0.01),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Login form builds without framework exceptions', (
     WidgetTester tester,
   ) async {

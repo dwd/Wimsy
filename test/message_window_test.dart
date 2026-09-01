@@ -97,4 +97,46 @@ void main() {
       expect(offset, 50);
     });
   });
+
+  group('scrollOffsetForPinnedLowerEdge', () {
+    test('keeps the same distance from the bottom when viewport shrinks', () {
+      final offset = scrollOffsetForPinnedLowerEdge(
+        previousDistanceFromBottom: 180,
+        newMinScrollExtent: 0,
+        newMaxScrollExtent: 1400,
+      );
+
+      expect(offset, 1220);
+    });
+
+    test('keeps the same distance from the bottom when viewport expands', () {
+      final offset = scrollOffsetForPinnedLowerEdge(
+        previousDistanceFromBottom: 180,
+        newMinScrollExtent: 0,
+        newMaxScrollExtent: 900,
+      );
+
+      expect(offset, 720);
+    });
+
+    test('keeps a view at the latest message pinned to the bottom', () {
+      final offset = scrollOffsetForPinnedLowerEdge(
+        previousDistanceFromBottom: 0,
+        newMinScrollExtent: 0,
+        newMaxScrollExtent: 1400,
+      );
+
+      expect(offset, 1400);
+    });
+
+    test('clamps when the restored viewport has too little history', () {
+      final offset = scrollOffsetForPinnedLowerEdge(
+        previousDistanceFromBottom: 1200,
+        newMinScrollExtent: 0,
+        newMaxScrollExtent: 900,
+      );
+
+      expect(offset, 0);
+    });
+  });
 }

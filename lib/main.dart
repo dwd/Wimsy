@@ -644,7 +644,7 @@ class WimsyHome extends StatefulWidget {
   State<WimsyHome> createState() => _WimsyHomeState();
 }
 
-class _WimsyHomeState extends State<WimsyHome> {
+class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final GlobalKey _messageInputKey = GlobalKey();
@@ -681,10 +681,14 @@ class _WimsyHomeState extends State<WimsyHome> {
   bool _activeChatIsBookmark = false;
   bool _activeChatRoomJoined = false;
   double? _physicalDisplayHeightInches;
+  double? _pendingMessageDistanceFromBottom;
+  bool _restoringMessageViewport = false;
+  int _messageViewportChangeGeneration = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _physicalDisplayHeightInches = widget.physicalDisplayHeightInches;
     if (_physicalDisplayHeightInches == null) {
       loadPhysicalDisplayHeightInches().then((height) {
@@ -793,6 +797,7 @@ class _WimsyHomeState extends State<WimsyHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
     _idleTimer?.cancel();
     _messageScrollController.removeListener(_handleScrollPosition);
@@ -801,6 +806,52 @@ class _WimsyHomeState extends State<WimsyHome> {
     _messageScrollController.dispose();
     _messageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // Keyboard, window, and orientation changes alter the list's viewport.
+    // Capture its distance from the lower edge before the new constraints are
+    // laid out, then restore that same lower-edge anchor afterward.
+    if (_messageScrollController.hasClients) {
+      final position = _messageScrollController.position;
+      _pendingMessageDistanceFromBottom = math.max(
+        0.0,
+        position.maxScrollExtent - position.pixels,
+      );
+    }
+    if (_pendingMessageDistanceFromBottom == null) {
+      return;
+    }
+    _restoringMessageViewport = true;
+    final generation = ++_messageViewportChangeGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreMessageLowerEdge(generation);
+    });
+  }
+
+  void _restoreMessageLowerEdge(int generation) {
+    if (!mounted || generation != _messageViewportChangeGeneration) {
+      return;
+    }
+    final distanceFromBottom = _pendingMessageDistanceFromBottom;
+    if (distanceFromBottom == null || !_messageScrollController.hasClients) {
+      // A landscape-phone full-screen composer temporarily removes the list.
+      // Retain the anchor until the keyboard closes and the list reattaches.
+      return;
+    }
+    final position = _messageScrollController.position;
+    final target = scrollOffsetForPinnedLowerEdge(
+      previousDistanceFromBottom: distanceFromBottom,
+      newMinScrollExtent: position.minScrollExtent,
+      newMaxScrollExtent: position.maxScrollExtent,
+    );
+    if (position.pixels != target) {
+      _messageScrollController.jumpTo(target);
+    }
+    _pendingMessageDistanceFromBottom = null;
+    _restoringMessageViewport = false;
+    _handleScrollPosition();
   }
 
   bool _handleHardwareKey(KeyEvent event) {
@@ -1353,6 +1404,8 @@ class _WimsyHomeState extends State<WimsyHome> {
       // two, rather than carrying over a window grown from a previous
       // visit or previous chat.
       _messageWindowByChat[activeChat] = _initialMessageWindowSize;
+      _pendingMessageDistanceFromBottom = null;
+      _restoringMessageViewport = false;
     }
     final allMessages = activeChat == null
         ? const <ChatMessage>[]
@@ -1693,6 +1746,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                 : Stack(
                     children: [
                       ListView.builder(
+                        key: const Key('message-list'),
                         controller: _messageScrollController,
                         padding: const EdgeInsets.all(16),
                         itemCount: messages.length,
@@ -3773,6 +3827,9 @@ class _WimsyHomeState extends State<WimsyHome> {
   }
 
   void _handleScrollPosition() {
+    if (_restoringMessageViewport) {
+      return;
+    }
     if (!_messageScrollController.hasClients) {
       _wasAtBottom = true;
       _updateScrollToBottomButton(false);
@@ -3935,6 +3992,19 @@ double scrollOffsetAfterPrepend({
     return previousPixels;
   }
   return previousPixels + delta;
+}
+
+/// Returns the offset that preserves the viewport's distance from the lower
+/// edge after its dimensions change.
+double scrollOffsetForPinnedLowerEdge({
+  required double previousDistanceFromBottom,
+  required double newMinScrollExtent,
+  required double newMaxScrollExtent,
+}) {
+  return (newMaxScrollExtent - previousDistanceFromBottom).clamp(
+    newMinScrollExtent,
+    newMaxScrollExtent,
+  );
 }
 
 /// Returns a human-readable label for a MUC join error to show in the
