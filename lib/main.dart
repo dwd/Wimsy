@@ -684,6 +684,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   double? _pendingMessageDistanceFromBottom;
   bool _restoringMessageViewport = false;
   int _messageViewportChangeGeneration = 0;
+  int _displayMetricsLoadGeneration = 0;
 
   @override
   void initState() {
@@ -691,11 +692,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _physicalDisplayHeightInches = widget.physicalDisplayHeightInches;
     if (_physicalDisplayHeightInches == null) {
-      loadPhysicalDisplayHeightInches().then((height) {
-        if (mounted && height != null) {
-          setState(() => _physicalDisplayHeightInches = height);
-        }
-      });
+      unawaited(_refreshPhysicalDisplayHeight());
     }
     _messageScrollController.addListener(_handleScrollPosition);
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
@@ -810,6 +807,9 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
 
   @override
   void didChangeMetrics() {
+    if (widget.physicalDisplayHeightInches == null) {
+      unawaited(_refreshPhysicalDisplayHeight());
+    }
     // Keyboard, window, and orientation changes alter the list's viewport.
     // Capture its distance from the lower edge before the new constraints are
     // laid out, then restore that same lower-edge anchor afterward.
@@ -828,6 +828,17 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreMessageLowerEdge(generation);
     });
+  }
+
+  Future<void> _refreshPhysicalDisplayHeight() async {
+    final generation = ++_displayMetricsLoadGeneration;
+    final height = await loadPhysicalDisplayHeightInches();
+    if (!mounted ||
+        generation != _displayMetricsLoadGeneration ||
+        height == null) {
+      return;
+    }
+    setState(() => _physicalDisplayHeightInches = height);
   }
 
   void _restoreMessageLowerEdge(int generation) {

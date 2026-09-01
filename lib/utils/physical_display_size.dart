@@ -4,8 +4,12 @@ const MethodChannel _displayMetricsChannel = MethodChannel(
   'wimsy/display_metrics',
 );
 
-/// Returns the current display height in inches when the platform can report
-/// its physical pixel density.
+/// Returns the display's physical short edge in inches when the platform can
+/// report its physical pixel density.
+///
+/// The short edge is the vertical edge in landscape and remains stable across
+/// rotation. Call again after display metrics change to account for foldable
+/// posture changes and switching between displays.
 Future<double?> loadPhysicalDisplayHeightInches() async {
   try {
     return await _displayMetricsChannel.invokeMethod<double>(

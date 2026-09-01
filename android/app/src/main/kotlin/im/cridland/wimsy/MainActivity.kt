@@ -44,10 +44,12 @@ class MainActivity : FlutterActivity() {
                 return@setMethodCallHandler
             }
             val metrics = resources.displayMetrics
-            if (metrics.ydpi <= 0f) {
+            if (metrics.xdpi <= 0f || metrics.ydpi <= 0f) {
                 result.success(null)
             } else {
-                result.success(metrics.heightPixels.toDouble() / metrics.ydpi.toDouble())
+                val physicalWidthInches = metrics.widthPixels.toDouble() / metrics.xdpi.toDouble()
+                val physicalHeightInches = metrics.heightPixels.toDouble() / metrics.ydpi.toDouble()
+                result.success(min(physicalWidthInches, physicalHeightInches))
             }
         }
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)

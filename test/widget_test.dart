@@ -7,6 +7,7 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
@@ -660,6 +661,56 @@ void main() {
     );
     expect(find.text('Tablet Room'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('display metric changes refresh the physical layout size', (
+    WidgetTester tester,
+  ) async {
+    const displayMetricsChannel = MethodChannel('wimsy/display_metrics');
+    var physicalHeightInches = 7.0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      displayMetricsChannel,
+      (call) async => physicalHeightInches,
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        displayMetricsChannel,
+        null,
+      ),
+    );
+    tester.view.physicalSize = const Size(2560, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final service = XmppService();
+    const roomJid = 'foldable@conference.example.com';
+    final room = RoomEntry(roomJid: roomJid, nick: 'tester', joined: true);
+    service.seedConnectedRoomForTesting(room, name: 'Foldable Room');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('Signed in as'), findsOneWidget);
+
+    physicalHeightInches = 4.0;
+    tester.view.physicalSize = const Size(2558, 1600);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('Signed in as'), findsNothing);
+    expect(find.byKey(const Key('chat-header-details-button')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
