@@ -30,4 +30,26 @@ void main() {
       isTrue,
     );
   });
+
+  test('small tablet keeps the regular composer when keyboard opens', () {
+    expect(
+      usesFullscreenLandscapeComposer(
+        logicalWidth: 1280,
+        logicalHeight: 800,
+        physicalHeightInches: 4.0,
+      ),
+      isFalse,
+    );
+  });
+
+  test('physical phone height uses the full-screen composer', () {
+    expect(
+      usesFullscreenLandscapeComposer(
+        logicalWidth: 915,
+        logicalHeight: 412,
+        physicalHeightInches: 2.8,
+      ),
+      isTrue,
+    );
+  });
 }

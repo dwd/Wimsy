@@ -553,6 +553,7 @@ void main() {
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
     SharedPreferences.setMockInitialValues({});
     final prefs = await PreferencesService.load();
     final room = RoomEntry(
@@ -582,6 +583,17 @@ void main() {
     expect(find.textContaining('Signed in as'), findsNothing);
     expect(find.byTooltip('Set presence'), findsOneWidget);
     expect(find.byKey(const Key('chat-header-details-button')), findsOneWidget);
+
+    await tester.tap(find.byType(TextField));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 600);
+    await tester.pump();
+
+    expect(
+      find.byKey(const Key('landscape-fullscreen-composer')),
+      findsNothing,
+    );
+    expect(find.text('Tablet Room'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

@@ -862,6 +862,11 @@ class _WimsyHomeState extends State<WimsyHome> {
           physicalHeightInches: _physicalDisplayHeightInches,
         );
         final isWide = constraints.maxWidth > 900 && !isLandscapePhone;
+        final fullscreenComposerOnKeyboard = usesFullscreenLandscapeComposer(
+          logicalWidth: constraints.maxWidth,
+          logicalHeight: constraints.maxHeight,
+          physicalHeightInches: _physicalDisplayHeightInches,
+        );
         _noteActiveChatRead(service, activeChat);
 
         return Scaffold(
@@ -932,6 +937,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                           activeChat,
                           showBack: false,
                           showPresenceMenu: false,
+                          fullscreenComposerOnKeyboard: false,
                         ),
                       ),
                     ],
@@ -944,6 +950,7 @@ class _WimsyHomeState extends State<WimsyHome> {
                     activeChat,
                     showBack: true,
                     showPresenceMenu: isLandscapePhone,
+                    fullscreenComposerOnKeyboard: fullscreenComposerOnKeyboard,
                   ),
           ),
         );
@@ -1335,6 +1342,7 @@ class _WimsyHomeState extends State<WimsyHome> {
     String? activeChat, {
     required bool showBack,
     required bool showPresenceMenu,
+    required bool fullscreenComposerOnKeyboard,
   }) {
     final theme = Theme.of(context);
     final isBookmark = activeChat != null && service.isBookmark(activeChat);
@@ -1416,7 +1424,8 @@ class _WimsyHomeState extends State<WimsyHome> {
     }
 
     final keyboardFullscreen =
-        showPresenceMenu && MediaQuery.viewInsetsOf(context).bottom > 0;
+        fullscreenComposerOnKeyboard &&
+        MediaQuery.viewInsetsOf(context).bottom > 0;
     if (keyboardFullscreen) {
       final canSend =
           activeChat != null && (!isBookmark || (roomEntry?.joined ?? false));

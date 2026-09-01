@@ -1,4 +1,5 @@
 const double compactLandscapePhysicalHeightInches = 5.0;
+const double fullscreenComposerPhysicalHeightInches = 3.5;
 
 /// Whether a landscape display should use the phone-style, single-pane UI.
 ///
@@ -16,5 +17,23 @@ bool usesLandscapePhoneLayout({
   }
   return physicalHeightInches != null
       ? physicalHeightInches < compactLandscapePhysicalHeightInches
+      : logicalHeight < 600;
+}
+
+/// Whether the keyboard should replace the chat with a full-screen composer.
+///
+/// The larger compact-layout threshold includes small tablets. Those have
+/// enough usable height for the normal bottom composer, so reserve the more
+/// aggressive full-screen editor for phone-sized displays.
+bool usesFullscreenLandscapeComposer({
+  required double logicalWidth,
+  required double logicalHeight,
+  double? physicalHeightInches,
+}) {
+  if (logicalWidth <= logicalHeight) {
+    return false;
+  }
+  return physicalHeightInches != null
+      ? physicalHeightInches < fullscreenComposerPhysicalHeightInches
       : logicalHeight < 600;
 }
