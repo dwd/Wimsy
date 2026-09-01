@@ -35,6 +35,8 @@ import 'xmpp/vcard_utils.dart';
 import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
 import 'utils/graph_statistics.dart';
+import 'utils/display_layout.dart';
+import 'utils/physical_display_size.dart';
 import 'utils/xep0392_color.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
@@ -628,6 +630,7 @@ class WimsyHome extends StatefulWidget {
     required this.notifications,
     required this.preferences,
     this.loginLink,
+    this.physicalDisplayHeightInches,
   });
 
   final XmppService service;
@@ -635,6 +638,7 @@ class WimsyHome extends StatefulWidget {
   final NotificationService notifications;
   final PreferencesService preferences;
   final ValueListenable<LoginLinkValues?>? loginLink;
+  final double? physicalDisplayHeightInches;
 
   @override
   State<WimsyHome> createState() => _WimsyHomeState();
@@ -676,10 +680,19 @@ class _WimsyHomeState extends State<WimsyHome> {
   String? _activeChatForKeyHandler;
   bool _activeChatIsBookmark = false;
   bool _activeChatRoomJoined = false;
+  double? _physicalDisplayHeightInches;
 
   @override
   void initState() {
     super.initState();
+    _physicalDisplayHeightInches = widget.physicalDisplayHeightInches;
+    if (_physicalDisplayHeightInches == null) {
+      loadPhysicalDisplayHeightInches().then((height) {
+        if (mounted && height != null) {
+          setState(() => _physicalDisplayHeightInches = height);
+        }
+      });
+    }
     _messageScrollController.addListener(_handleScrollPosition);
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     widget.service.attachStorage(widget.storage);
@@ -842,12 +855,13 @@ class _WimsyHomeState extends State<WimsyHome> {
         // A phone can exceed the width breakpoint in landscape while still
         // having very little vertical room. Keep those displays in the
         // compact, single-pane layout regardless of orientation.
-        final isWide =
-            constraints.maxWidth > 900 && constraints.maxHeight >= 600;
         final activeChat = service.activeChatBareJid;
-        final isLandscapePhone =
-            constraints.maxWidth > constraints.maxHeight &&
-            constraints.maxHeight < 600;
+        final isLandscapePhone = usesLandscapePhoneLayout(
+          logicalWidth: constraints.maxWidth,
+          logicalHeight: constraints.maxHeight,
+          physicalHeightInches: _physicalDisplayHeightInches,
+        );
+        final isWide = constraints.maxWidth > 900 && !isLandscapePhone;
         _noteActiveChatRead(service, activeChat);
 
         return Scaffold(

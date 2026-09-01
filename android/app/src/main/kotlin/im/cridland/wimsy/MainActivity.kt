@@ -15,6 +15,7 @@ import kotlin.math.min
 class MainActivity : FlutterActivity() {
     private val channelName = "wimsy/dns"
     private val loginLinkChannelName = "wimsy/login_link"
+    private val displayMetricsChannelName = "wimsy/display_metrics"
     private var loginLinkChannel: MethodChannel? = null
     private var pendingLoginLink: String? = null
 
@@ -32,6 +33,21 @@ class MainActivity : FlutterActivity() {
                 } else {
                     result.notImplemented()
                 }
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            displayMetricsChannelName
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "getPhysicalHeightInches") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val metrics = resources.displayMetrics
+            if (metrics.ydpi <= 0f) {
+                result.success(null)
+            } else {
+                result.success(metrics.heightPixels.toDouble() / metrics.ydpi.toDouble())
             }
         }
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)

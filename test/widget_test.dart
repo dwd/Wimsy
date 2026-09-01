@@ -546,6 +546,45 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('physically short tablet uses the landscape-phone layout', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(2560, 1600);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final room = RoomEntry(
+      roomJid: 'tablet@conference.example.com',
+      nick: 'tester',
+      joined: true,
+    );
+    final service = XmppService()
+      ..seedConnectedRoomForTesting(room, name: 'Tablet Room');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+          physicalDisplayHeightInches: 4.0,
+        ),
+      ),
+    );
+    await tester.pump();
+    service.seedConnectedRoomForTesting(room, name: 'Tablet Room');
+    await tester.pump();
+
+    expect(find.text('Tablet Room'), findsOneWidget);
+    expect(find.textContaining('Signed in as'), findsNothing);
+    expect(find.byTooltip('Set presence'), findsOneWidget);
+    expect(find.byKey(const Key('chat-header-details-button')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Login form builds without framework exceptions', (
     WidgetTester tester,
   ) async {
