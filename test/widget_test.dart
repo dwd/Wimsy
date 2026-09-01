@@ -670,6 +670,63 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('selecting a chat does not focus the composer on mobile', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final service = XmppService();
+    const jid = 'mobile@example.com';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.android),
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    service.seedConnectedRoomForTesting(
+      RoomEntry(
+        roomJid: 'connected@conference.example.com',
+        nick: 'tester',
+        joined: true,
+      ),
+    );
+    service.selectChat(null);
+    service.seedMessages({
+      jid: [
+        ChatMessage(
+          from: jid,
+          to: 'tester@example.com',
+          body: 'Most recent message',
+          timestamp: DateTime.utc(2026),
+          outgoing: false,
+          messageId: 'latest',
+        ),
+      ],
+    });
+    await tester.pump();
+
+    await tester.tap(find.text(jid));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.autofocus, isFalse);
+    expect(field.focusNode?.hasFocus, isFalse);
+    expect(tester.view.viewInsets.bottom, 0);
+    expect(find.text('Most recent message'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Login form builds without framework exceptions', (
     WidgetTester tester,
   ) async {

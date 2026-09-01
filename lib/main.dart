@@ -1396,6 +1396,10 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     required bool fullscreenComposerOnKeyboard,
   }) {
     final theme = Theme.of(context);
+    final autofocusMessageComposer = shouldAutofocusMessageComposer(
+      isWeb: kIsWeb,
+      platform: theme.platform,
+    );
     final isBookmark = activeChat != null && service.isBookmark(activeChat);
     final isNewlyOpenedChat =
         activeChat != null && activeChat != _lastFocusedChat;
@@ -1464,8 +1468,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           // Only focus the message input on non-mobile platforms: popping
           // up the on-screen keyboard automatically on phones/tablets when
           // a chat is opened (e.g. from a notification tap) is unwanted.
-          final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-          if (!isBookmark && !isMobile) {
+          if (!isBookmark && autofocusMessageComposer) {
             _messageFocusNode.requestFocus();
           }
           // Always jump straight to the latest message when a chat is
@@ -2037,7 +2040,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             fieldKey: _messageInputKey,
                             controller: _messageController,
                             focusNode: _messageFocusNode,
-                            autofocus: canSend,
+                            autofocus: canSend && autofocusMessageComposer,
                             enabled: canSend,
                             // Allow the field to grow (up to a limit) and
                             // wrap the text instead of scrolling
@@ -3937,6 +3940,18 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     }
     return true;
   }
+}
+
+/// Whether opening a chat should immediately focus its message composer.
+///
+/// Touch-first mobile platforms should wait for an explicit tap so selecting
+/// a chat does not also summon the software keyboard and obscure messages.
+bool shouldAutofocusMessageComposer({
+  required bool isWeb,
+  required TargetPlatform platform,
+}) {
+  return isWeb ||
+      (platform != TargetPlatform.android && platform != TargetPlatform.iOS);
 }
 
 /// Decides whether the floating "scroll to latest message" button should be
