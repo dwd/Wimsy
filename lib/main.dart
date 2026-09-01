@@ -939,6 +939,13 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     'Signed in as ${service.currentUserBareJid ?? ''}',
                   ),
                   actions: [
+                    if (isLandscapePhone && activeChat == null)
+                      IconButton(
+                        key: const Key('landscape-new-chat-button'),
+                        onPressed: _showAddByJidDialog,
+                        icon: const Icon(Icons.person_search),
+                        tooltip: 'New Chat',
+                      ),
                     if (service.quicRttHistory.isNotEmpty) ...[
                       _QuicStatsGraph(
                         label: 'RTT',
@@ -989,7 +996,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     children: [
                       SizedBox(
                         width: 320,
-                        child: _buildRosterPane(context, service, isWide: true),
+                        child: _buildRosterPane(
+                          context,
+                          service,
+                          isWide: true,
+                          showNewChatButton: true,
+                        ),
                       ),
                       const VerticalDivider(width: 1),
                       Expanded(
@@ -1005,7 +1017,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     ],
                   )
                 : activeChat == null
-                ? _buildRosterPane(context, service, isWide: false)
+                ? _buildRosterPane(
+                    context,
+                    service,
+                    isWide: false,
+                    showNewChatButton: !isLandscapePhone,
+                  )
                 : _buildChatPane(
                     context,
                     service,
@@ -1024,6 +1041,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     BuildContext context,
     XmppService service, {
     required bool isWide,
+    required bool showNewChatButton,
   }) {
     final theme = Theme.of(context);
     final contacts = service.contacts;
@@ -1034,18 +1052,20 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _showAddByJidDialog,
-                    icon: const Icon(Icons.person_search),
-                    label: const Text('New Chat'),
+            if (showNewChatButton) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _showAddByJidDialog,
+                      icon: const Icon(Icons.person_search),
+                      label: const Text('New Chat'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
             Expanded(
               child: contacts.isEmpty
                   ? Center(

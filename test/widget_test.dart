@@ -613,6 +613,60 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('landscape phone puts New Chat before banner graphs', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(915, 412);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final room = RoomEntry(
+      roomJid: 'lounge@conference.example.com',
+      nick: 'tester',
+      joined: true,
+    );
+    final service = XmppService()
+      ..seedConnectedRoomForTesting(
+        room,
+        name: 'The Lounge',
+        quicRtt: const [35, 42],
+        quicLoss: const [0, 2],
+      )
+      ..selectChat(null);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final newChat = find.byKey(const Key('landscape-new-chat-button'));
+    final rttGraph = find.byTooltip('RTT: 42ms');
+    expect(newChat, findsOneWidget);
+    expect(rttGraph, findsOneWidget);
+    expect(
+      tester.getCenter(newChat).dx,
+      lessThan(tester.getCenter(rttGraph).dx),
+    );
+    expect(find.widgetWithText(FilledButton, 'New Chat'), findsNothing);
+
+    await tester.tap(newChat);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('add-by-jid-fullscreen-dialog')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('physically short tablet uses the landscape-phone layout', (
     WidgetTester tester,
   ) async {
