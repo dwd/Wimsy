@@ -23,9 +23,10 @@ import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 
 class _SuggestionXmppService extends XmppService {
-  _SuggestionXmppService({this.unknownFallback = false});
+  _SuggestionXmppService({this.unknownFallback = false, this.suggestions});
 
   final bool unknownFallback;
+  final List<JidSuggestion>? suggestions;
   bool? lastExcludeRosterContacts;
   int suggestionCalls = 0;
   int discoveryCalls = 0;
@@ -41,6 +42,9 @@ class _SuggestionXmppService extends XmppService {
   }) async {
     suggestionCalls++;
     lastExcludeRosterContacts = excludeRosterContacts;
+    if (suggestions != null) {
+      return suggestions!;
+    }
     if (unknownFallback) {
       return const [
         JidSuggestion(
@@ -291,6 +295,68 @@ void main() {
     await tester.pump();
 
     expect(service.lastExcludeRosterContacts, isTrue);
+  });
+
+  testWidgets('New Chat type filter starts empty and prioritizes matches', (
+    WidgetTester tester,
+  ) async {
+    final service = _SuggestionXmppService(
+      suggestions: const [
+        JidSuggestion(
+          jid: 'unknown@example.com',
+          kind: DiscoveredJidKind.unknown,
+          name: 'Unknown Result',
+        ),
+        JidSuggestion(
+          jid: 'room@example.com',
+          kind: DiscoveredJidKind.room,
+          name: 'Room Result',
+        ),
+        JidSuggestion(
+          jid: 'person@example.com',
+          kind: DiscoveredJidKind.person,
+          name: 'Person Result',
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: addByJidDialogForTesting(service)),
+    );
+
+    final dynamic toggle = tester.widget(
+      find.byKey(const Key('add-by-jid-type-toggle')),
+    );
+    expect(toggle.selected, isEmpty);
+
+    await tester.enterText(find.byType(TextField).first, 'result');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump();
+
+    expect(find.text('Unknown Result'), findsOneWidget);
+    expect(find.text('Room Result'), findsOneWidget);
+    expect(find.text('Person Result'), findsOneWidget);
+
+    await tester.tap(find.text('Room'));
+    await tester.pump();
+
+    expect(find.text('Person Result'), findsNothing);
+    expect(find.text('Room Result'), findsOneWidget);
+    expect(find.text('Unknown Result'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Room Result')).dy,
+      lessThan(tester.getTopLeft(find.text('Unknown Result')).dy),
+    );
+
+    await tester.tap(find.text('Person'));
+    await tester.pump();
+
+    expect(find.text('Room Result'), findsNothing);
+    expect(find.text('Person Result'), findsOneWidget);
+    expect(find.text('Unknown Result'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Person Result')).dy,
+      lessThan(tester.getTopLeft(find.text('Unknown Result')).dy),
+    );
   });
 
   testWidgets('full addresses are probed without running a search', (

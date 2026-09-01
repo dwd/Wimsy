@@ -5553,7 +5553,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   String? _discoveredName;
   String? _discoveredRoomNamePrefill;
   List<JidSuggestion> _suggestions = const [];
-  _AddTargetType _selectedType = _AddTargetType.person;
+  _AddTargetType? _selectedType;
 
   @override
   void initState() {
@@ -5586,7 +5586,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
         _discoveredName = null;
         _jidError = null;
         _suggestions = const [];
-        _selectedType = _AddTargetType.person;
+        _selectedType = null;
       });
       return;
     }
@@ -5697,10 +5697,14 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
   }
 
   void _submit() {
+    final selectedType = _selectedType;
+    if (selectedType == null) {
+      return;
+    }
     var normalized = _normalizeJid(_jidController.text);
     if (normalized == null && !_jidController.text.trim().contains('@')) {
       final localPart = _jidController.text.trim();
-      final wantedKind = _selectedType == _AddTargetType.room
+      final wantedKind = selectedType == _AddTargetType.room
           ? DiscoveredJidKind.room
           : DiscoveredJidKind.person;
       normalized = _suggestions
@@ -5721,7 +5725,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
       });
       return;
     }
-    final isRoom = _selectedType == _AddTargetType.room;
+    final isRoom = selectedType == _AddTargetType.room;
     final nick = _nickController.text.trim();
     if (isRoom && nick.isEmpty) {
       setState(() {
@@ -5764,6 +5768,21 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
             ? _discoveredName!
             : (serviceName != normalized ? serviceName : '');
         final isRoom = _selectedType == _AddTargetType.room;
+        final visibleSuggestions = switch (_selectedType) {
+          null => _suggestions,
+          final selectedType => [
+            ..._suggestions.where(
+              (suggestion) =>
+                  suggestion.kind ==
+                  (selectedType == _AddTargetType.room
+                      ? DiscoveredJidKind.room
+                      : DiscoveredJidKind.person),
+            ),
+            ..._suggestions.where(
+              (suggestion) => suggestion.kind == DiscoveredJidKind.unknown,
+            ),
+          ],
+        };
         final addressFields = Column(
           key: const Key('add-by-jid-address-fields'),
           mainAxisSize: MainAxisSize.min,
@@ -5777,8 +5796,8 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
               ),
               autofocus: true,
             ),
-            if (_suggestions.isNotEmpty)
-              ..._suggestions.map(
+            if (visibleSuggestions.isNotEmpty)
+              ...visibleSuggestions.map(
                 (suggestion) => ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
@@ -5802,10 +5821,11 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                       offset: suggestion.jid.length,
                     );
                     setState(() {
-                      _selectedType =
-                          suggestion.kind == DiscoveredJidKind.room
-                          ? _AddTargetType.room
-                          : _AddTargetType.person;
+                      _selectedType = switch (suggestion.kind) {
+                        DiscoveredJidKind.room => _AddTargetType.room,
+                        DiscoveredJidKind.person => _AddTargetType.person,
+                        DiscoveredJidKind.unknown => _selectedType,
+                      };
                       if (suggestion.kind == DiscoveredJidKind.room &&
                           suggestion.name?.trim().isNotEmpty == true) {
                         _roomNameController.text = suggestion.name!.trim();
@@ -5817,6 +5837,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
               ),
             const SizedBox(height: 12),
             SegmentedButton<_AddTargetType>(
+              key: const Key('add-by-jid-type-toggle'),
               segments: const [
                 ButtonSegment<_AddTargetType>(
                   value: _AddTargetType.person,
@@ -5829,14 +5850,14 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                   icon: Icon(Icons.meeting_room_outlined),
                 ),
               ],
-              selected: <_AddTargetType>{_selectedType},
+              selected: _selectedType == null
+                  ? const <_AddTargetType>{}
+                  : <_AddTargetType>{_selectedType!},
+              emptySelectionAllowed: true,
               onSelectionChanged: (selection) {
-                if (selection.isEmpty) {
-                  return;
-                }
                 setState(() {
-                  _manualTypeOverride = true;
-                  _selectedType = selection.first;
+                  _manualTypeOverride = selection.isNotEmpty;
+                  _selectedType = selection.firstOrNull;
                 });
               },
             ),
@@ -5960,8 +5981,14 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: _submit,
-              child: Text(isRoom ? 'Join room' : 'Add contact'),
+              onPressed: _selectedType == null ? null : _submit,
+              child: Text(
+                _selectedType == null
+                    ? 'Select a type'
+                    : isRoom
+                    ? 'Join room'
+                    : 'Add contact',
+              ),
             ),
           ],
         );
