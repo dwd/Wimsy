@@ -1023,8 +1023,6 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Chats', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
