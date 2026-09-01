@@ -15,9 +15,9 @@ bool usesLandscapePhoneLayout({
   if (logicalWidth <= logicalHeight) {
     return false;
   }
-  return physicalHeightInches != null
-      ? physicalHeightInches < compactLandscapePhysicalHeightInches
-      : logicalHeight < 600;
+  return logicalHeight < 600 ||
+      (physicalHeightInches != null &&
+          physicalHeightInches < compactLandscapePhysicalHeightInches);
 }
 
 /// Whether the keyboard should replace the chat with a full-screen composer.
@@ -33,7 +33,7 @@ bool usesFullscreenLandscapeComposer({
   if (logicalWidth <= logicalHeight) {
     return false;
   }
-  return physicalHeightInches != null
-      ? physicalHeightInches < fullscreenComposerPhysicalHeightInches
-      : logicalHeight < 600;
+  return logicalHeight < 600 ||
+      (physicalHeightInches != null &&
+          physicalHeightInches < fullscreenComposerPhysicalHeightInches);
 }

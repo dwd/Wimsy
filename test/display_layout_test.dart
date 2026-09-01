@@ -31,6 +31,17 @@ void main() {
     );
   });
 
+  test('logical phone height wins over stale portrait physical height', () {
+    expect(
+      usesLandscapePhoneLayout(
+        logicalWidth: 915,
+        logicalHeight: 412,
+        physicalHeightInches: 6.0,
+      ),
+      isTrue,
+    );
+  });
+
   test('small tablet keeps the regular composer when keyboard opens', () {
     expect(
       usesFullscreenLandscapeComposer(
@@ -48,6 +59,17 @@ void main() {
         logicalWidth: 915,
         logicalHeight: 412,
         physicalHeightInches: 2.8,
+      ),
+      isTrue,
+    );
+  });
+
+  test('logical phone height keeps composer compact after rotation', () {
+    expect(
+      usesFullscreenLandscapeComposer(
+        logicalWidth: 915,
+        logicalHeight: 412,
+        physicalHeightInches: 6.0,
       ),
       isTrue,
     );
