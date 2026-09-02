@@ -4594,10 +4594,10 @@ class XmppService extends ChangeNotifier {
         if (propose == null) {
           return;
         }
-        if (_currentUserBareJid != null &&
-            _bareJid(fromBare) == _currentUserBareJid) {
-          return;
-        }
+        // A proposal from our own bare JID can originate on another logged-in
+        // resource. That is a valid call target (for example, phone to
+        // desktop). The SID check below suppresses the originating resource's
+        // own carbon/echo without rejecting the proposal on sibling devices.
         if (_callSessions.containsKey(propose.sid)) {
           return;
         }
@@ -5207,7 +5207,16 @@ class XmppService extends ChangeNotifier {
   }
 
   String? _selectJinglePeerFullJid(String bareJid) {
-    final candidates = _onlineFullJidsForBare(bareJid);
+    final currentFullJid = _connection?.fullJid.fullJid;
+    final selectingSiblingResource =
+        _currentUserBareJid != null &&
+        _bareJid(bareJid) == _currentUserBareJid;
+    final candidates = _onlineFullJidsForBare(bareJid)
+        .where(
+          (fullJid) =>
+              !selectingSiblingResource || fullJid != currentFullJid,
+        )
+        .toList(growable: false);
     if (candidates.isEmpty) {
       return null;
     }
