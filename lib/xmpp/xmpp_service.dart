@@ -3590,6 +3590,13 @@ class XmppService extends ChangeNotifier {
     final callSession = _callSessions[event.sid];
     if (callSession != null &&
         callSession.direction == CallDirection.outgoing) {
+      if (_callAcceptedBySid.contains(event.sid)) {
+        Log.d(
+          'XmppService',
+          'Call ${event.sid} ignoring duplicate Jingle session-accept.',
+        );
+        return;
+      }
       final bundleGroup = extractBundleGroupNames(
         event.stanza,
         groupingNamespace: _jingleGroupingNamespace,
@@ -4243,6 +4250,16 @@ class XmppService extends ChangeNotifier {
       jitterMs: jitterMs,
       targetVideoBitrateBps: tracker.videoBitrateTargetBps,
     );
+    if (outboundBytes != null || inboundBytes != null) {
+      Log.d(
+        'XmppService',
+        'Call $sid video media: sent=${outboundBytes ?? 0} bytes '
+            '(${outboundKbps?.toStringAsFixed(1) ?? '-'} kbps), '
+            'received=${inboundBytes ?? 0} bytes '
+            '(${inboundKbps?.toStringAsFixed(1) ?? '-'} kbps), '
+            'packets=${packetsReceived ?? 0}, lost=${packetsLost ?? 0}.',
+      );
+    }
     _callQualityBySid[sid] = sample;
     _callStatsBySid[sid] = tracker
       ..lastSampleAt = now
@@ -4660,6 +4677,17 @@ class XmppService extends ChangeNotifier {
         }
         return;
       case JmiAction.ringing:
+        final sid = parseJmiSid(stanza);
+        if (sid == null) {
+          return;
+        }
+        Log.d(
+          'XmppService',
+          'Call $sid received JMI ringing from '
+              '${fromJid.fullJid ?? fromJid.userAtDomain}; '
+              'cancelling IQ fallback.',
+        );
+        _jmiFallbackTimers.remove(sid)?.cancel();
         return;
     }
   }
@@ -4857,6 +4885,13 @@ class XmppService extends ChangeNotifier {
           : 'returned ${result.type.name}'
                 '${result.type == IqStanzaType.ERROR ? ' (${_iqErrorCondition(result) ?? 'unknown error'})' : ''}';
       Log.w('XmppService', 'Call $sid Jingle session-initiate $outcome.');
+      if (_callSessions[sid]?.state == CallState.active) {
+        Log.d(
+          'XmppService',
+          'Call $sid is already active; ignoring the late initiate failure.',
+        );
+        return;
+      }
       _failCallSession(sid, CallState.failed);
       return;
     }
@@ -4958,8 +4993,20 @@ class XmppService extends ChangeNotifier {
       }
     }
     pc.onTrack = (event) {
+      Log.d(
+        'XmppService',
+        'Call $sid received remote ${event.track.kind} track '
+            'with ${event.streams.length} stream(s).',
+      );
       if (event.streams.isNotEmpty) {
-        _callRemoteStreamBySid[sid] = event.streams.first;
+        final incomingStream = event.streams.first;
+        final currentStream = _callRemoteStreamBySid[sid];
+        // Audio and video can arrive in separate onTrack callbacks. Keep the
+        // stream containing video once it arrives so a later audio callback
+        // cannot leave the video renderer attached to an audio-only stream.
+        if (event.track.kind == 'video' || currentStream == null) {
+          _callRemoteStreamBySid[sid] = incomingStream;
+        }
         notifyListeners();
       }
     };
