@@ -215,7 +215,7 @@ class NotificationService {
       await initialize();
     }
     try {
-      await _plugin.cancel(id: _callNotificationIdForSid(sid));
+      await _plugin.cancel(id: _callNotificationIdForSid(sid), tag: sid);
     } catch (_) {
       // Ignore cancellation errors.
     }

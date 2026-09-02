@@ -7,12 +7,13 @@ abstract class MediaStreamHandle {
   Future<void> dispose();
 }
 
-typedef MediaStreamFactory = Future<MediaStreamHandle> Function({
-  required bool audio,
-  required bool video,
-  String? audioDeviceId,
-  String? videoDeviceId,
-});
+typedef MediaStreamFactory =
+    Future<MediaStreamHandle> Function({
+      required bool audio,
+      required bool video,
+      String? audioDeviceId,
+      String? videoDeviceId,
+    });
 
 class WebRtcMediaStreamHandle implements MediaStreamHandle {
   WebRtcMediaStreamHandle(this._stream);
@@ -32,7 +33,7 @@ class WebRtcMediaStreamHandle implements MediaStreamHandle {
 
 class WebRtcMediaSession {
   WebRtcMediaSession({MediaStreamFactory? createStream})
-      : _createStream = createStream ?? _defaultCreateStream;
+    : _createStream = createStream ?? _defaultCreateStream;
 
   final MediaStreamFactory _createStream;
   MediaStreamHandle? _activeStream;
@@ -68,6 +69,22 @@ class WebRtcMediaSession {
     await stream.dispose();
   }
 
+  /// Captures a stream without replacing the session's primary stream.
+  ///
+  /// This is used to acquire a new camera track during an active call; the
+  /// caller owns and must dispose the returned handle.
+  Future<MediaStreamHandle> createAdditionalStream({
+    required bool audio,
+    required bool video,
+    String? audioDeviceId,
+    String? videoDeviceId,
+  }) => _createStream(
+    audio: audio,
+    video: video,
+    audioDeviceId: audioDeviceId,
+    videoDeviceId: videoDeviceId,
+  );
+
   static Future<MediaStreamHandle> _defaultCreateStream({
     required bool audio,
     required bool video,
@@ -79,7 +96,7 @@ class WebRtcMediaSession {
         ? _buildDeviceConstraint(audioDeviceId)
         : false;
     final videoConstraints = video
-        ? _buildDeviceConstraint(videoDeviceId)
+        ? _buildVideoConstraint(videoDeviceId)
         : false;
     final stream = await navigator.mediaDevices.getUserMedia({
       'audio': audioConstraints,
@@ -96,7 +113,8 @@ class WebRtcMediaSession {
       return;
     }
     final platform = defaultTargetPlatform;
-    final supportsPermissions = platform == TargetPlatform.android ||
+    final supportsPermissions =
+        platform == TargetPlatform.android ||
         platform == TargetPlatform.iOS ||
         platform == TargetPlatform.macOS;
     if (!supportsPermissions) {
@@ -123,8 +141,23 @@ class WebRtcMediaSession {
     if (deviceId == null || deviceId.isEmpty) {
       return true;
     }
-    return {
-      'deviceId': deviceId,
-    };
+    return {'deviceId': deviceId};
+  }
+
+  static dynamic _buildVideoConstraint(String? deviceId) {
+    final constraint = <String, dynamic>{};
+    if (deviceId != null && deviceId.isNotEmpty) {
+      constraint['deviceId'] = deviceId;
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+      // Most UVC cameras expose this mode natively. Avoiding an unconstrained
+      // high-resolution capture substantially reduces Linux startup time and
+      // encoder pressure while retaining a useful call resolution.
+      constraint
+        ..['width'] = {'ideal': 640}
+        ..['height'] = {'ideal': 480}
+        ..['frameRate'] = {'ideal': 24, 'max': 30};
+    }
+    return constraint.isEmpty ? true : constraint;
   }
 }

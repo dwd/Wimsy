@@ -19,10 +19,16 @@ void main() {
   test('WebRtcMediaSession starts once and reuses active stream', () async {
     var createCount = 0;
     final session = WebRtcMediaSession(
-      createStream: ({required bool audio, required bool video, String? audioDeviceId, String? videoDeviceId}) async {
-        createCount += 1;
-        return _FakeStreamHandle('stream-$createCount');
-      },
+      createStream:
+          ({
+            required bool audio,
+            required bool video,
+            String? audioDeviceId,
+            String? videoDeviceId,
+          }) async {
+            createCount += 1;
+            return _FakeStreamHandle('stream-$createCount');
+          },
     );
 
     final first = await session.start(audio: true, video: false);
@@ -37,7 +43,13 @@ void main() {
   test('WebRtcMediaSession stops and disposes stream', () async {
     final handle = _FakeStreamHandle('stream-1');
     final session = WebRtcMediaSession(
-      createStream: ({required bool audio, required bool video, String? audioDeviceId, String? videoDeviceId}) async => handle,
+      createStream:
+          ({
+            required bool audio,
+            required bool video,
+            String? audioDeviceId,
+            String? videoDeviceId,
+          }) async => handle,
     );
 
     await session.start(audio: true, video: false);
@@ -46,5 +58,29 @@ void main() {
     expect(handle.disposed, isTrue);
     expect(session.isActive, isFalse);
     expect(session.activeStream, isNull);
+  });
+
+  test('additional stream does not replace the active stream', () async {
+    var createCount = 0;
+    final session = WebRtcMediaSession(
+      createStream:
+          ({
+            required bool audio,
+            required bool video,
+            String? audioDeviceId,
+            String? videoDeviceId,
+          }) async => _FakeStreamHandle('stream-${++createCount}'),
+    );
+
+    final active = await session.start(audio: true, video: true);
+    final additional = await session.createAdditionalStream(
+      audio: false,
+      video: true,
+      videoDeviceId: 'rear-camera',
+    );
+
+    expect(active.id, 'stream-1');
+    expect(additional.id, 'stream-2');
+    expect(identical(session.activeStream, active), isTrue);
   });
 }

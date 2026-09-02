@@ -18,6 +18,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'av/call_session.dart';
+import 'av/camera_device.dart';
 import 'keepalive_settings_screen.dart';
 import 'login_screen.dart';
 import 'login_link.dart';
@@ -424,13 +425,17 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
 
     if (type == 'call') {
       if (actionId == 'call_decline') {
-        unawaited(_service.declineCallBySid(sid));
-        unawaited(_notifications.cancelIncomingCall(sid));
+        unawaited(() async {
+          await _notifications.cancelIncomingCall(sid);
+          await _service.declineCallBySid(sid);
+        }());
         return;
       }
       if (actionId == 'call_answer') {
-        unawaited(_service.acceptCallBySid(sid));
-        unawaited(_notifications.cancelIncomingCall(sid));
+        unawaited(() async {
+          await _notifications.cancelIncomingCall(sid);
+          await _service.acceptCallBySid(sid);
+        }());
       }
     }
     if (chatJid.isNotEmpty) {
@@ -714,6 +719,10 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   bool _restoringMessageViewport = false;
   int _messageViewportChangeGeneration = 0;
   int _displayMetricsLoadGeneration = 0;
+  String? _callControlsVisibleSid;
+  final Map<String, double> _remoteVideoAspectBySid = {};
+  final Map<String, double> _localVideoAspectBySid = {};
+  bool _localVideoMirrored = true;
 
   @override
   void initState() {
@@ -817,8 +826,22 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
       widget.service.selectAudioInput(audioInput);
     }
     if (videoInput != null && videoInput.isNotEmpty) {
-      widget.service.selectVideoInput(videoInput);
+      unawaited(widget.service.selectVideoInput(videoInput));
+      unawaited(_resetPreviewMirrorForCamera(videoInput));
     }
+  }
+
+  Future<void> _resetPreviewMirrorForCamera(String deviceId) async {
+    final inputs = await widget.service.listVideoInputs();
+    final selected = inputs
+        .where((device) => device.deviceId == deviceId)
+        .firstOrNull;
+    if (!mounted || selected == null) {
+      return;
+    }
+    setState(() {
+      _localVideoMirrored = defaultCameraPreviewMirrored(selected);
+    });
   }
 
   @override
@@ -959,6 +982,25 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           physicalHeightInches: _physicalDisplayHeightInches,
         );
         _noteActiveChatRead(service, activeChat);
+
+        final activeCall = activeChat == null
+            ? null
+            : service.callSessionFor(activeChat);
+        final hasVisibleVideoCall =
+            activeCall?.video == true &&
+            (activeCall?.state == CallState.ringing ||
+                activeCall?.state == CallState.active);
+        if (activeChat != null &&
+            activeCall != null &&
+            usesFullscreenLandscapeCall(
+              isLandscapePhone: isLandscapePhone,
+              hasVideoCall: hasVisibleVideoCall,
+            )) {
+          return Scaffold(
+            backgroundColor: Colors.black,
+            body: _buildLandscapePhoneCall(service, activeChat, activeCall),
+          );
+        }
 
         return Scaffold(
           appBar: activeChat != null && isLandscapePhone
@@ -2374,13 +2416,13 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   }
 
   Future<void> _acceptCall(CallSession session) async {
-    await widget.service.acceptCall(session);
     await widget.notifications.cancelIncomingCall(session.sid);
+    await widget.service.acceptCall(session);
   }
 
   Future<void> _declineCall(CallSession session) async {
-    await widget.service.declineCall(session);
     await widget.notifications.cancelIncomingCall(session.sid);
+    await widget.service.declineCall(session);
   }
 
   Future<void> _endCall(CallSession session) async {
@@ -2469,6 +2511,10 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
 
   Future<void> _showVideoInputPicker() async {
     final inputs = await widget.service.listVideoInputs();
+    final labels = cameraDeviceLabels(
+      inputs,
+      useFacingLabels: !kIsWeb && Platform.isAndroid,
+    );
     if (!mounted) {
       return;
     }
@@ -2488,18 +2534,35 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
               const ListTile(title: Text('Select camera')),
               for (var i = 0; i < inputs.length; i++)
                 ListTile(
-                  title: Text(_deviceLabel(inputs[i], i, 'Camera')),
+                  title: Text(labels[i]),
                   subtitle:
                       inputs[i].deviceId == widget.service.preferredVideoInputId
                       ? const Text('Selected')
                       : null,
                   onTap: () async {
-                    widget.service.selectVideoInput(inputs[i].deviceId);
+                    final messenger = ScaffoldMessenger.of(this.context);
+                    setState(() {
+                      _localVideoMirrored = defaultCameraPreviewMirrored(
+                        inputs[i],
+                      );
+                    });
+                    final switched = await widget.service.selectVideoInput(
+                      inputs[i].deviceId,
+                    );
                     await widget.preferences.setVideoInputId(
                       inputs[i].deviceId,
                     );
                     if (context.mounted) {
                       Navigator.of(context).pop();
+                      if (!switched) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Could not switch camera during this call.',
+                            ),
+                          ),
+                        );
+                      }
                     }
                   },
                 ),
@@ -2770,8 +2833,15 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
         : 'Calling...';
     final localStream = service.callLocalStreamFor(bareJid);
     final remoteStream = service.callRemoteStreamFor(bareJid);
+    final remoteVideoEnabled = service.isCallRemoteVideoEnabled(bareJid);
+    final localVideoRevision = service.callLocalVideoRevisionFor(bareJid);
+    final mainVideoStream = remoteVideoEnabled
+        ? (remoteStream ?? localStream)
+        : localStream;
+    final pipVideoStream = remoteVideoEnabled ? localStream : null;
     final localSpeaking = service.isCallLocalSpeaking(bareJid);
     final remoteSpeaking = service.isCallRemoteSpeaking(bareJid);
+    final remoteDisrupted = service.isCallRemoteAudioDisrupted(bareJid);
     return Card(
       color: theme.colorScheme.surface,
       elevation: 0,
@@ -2810,108 +2880,493 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
             ),
             if (session.video) ...[
               const SizedBox(height: 12),
-              SizedBox(
-                height: 180,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _SpeakingFrame(
-                        active: remoteSpeaking,
-                        color: theme.colorScheme.primary,
-                        child: _CallVideoView(
-                          stream: remoteStream ?? localStream,
-                          mirrored: false,
-                          placeholder: 'Remote video',
-                        ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final screenHeight = MediaQuery.sizeOf(context).height;
+                  final stageHeight = callVideoStageHeight(
+                    availableWidth: constraints.maxWidth,
+                    screenHeight: screenHeight,
+                    videoAspectRatio: remoteVideoEnabled
+                        ? _remoteVideoAspectBySid[session.sid]
+                        : _localVideoAspectBySid[session.sid],
+                  );
+                  final localExtent = (stageHeight * 0.32).clamp(64.0, 140.0);
+                  final pipAspect = remoteVideoEnabled
+                      ? (_localVideoAspectBySid[session.sid] ?? 1.0)
+                      : (_remoteVideoAspectBySid[session.sid] ?? 1.0);
+                  final localWidth = pipAspect >= 1
+                      ? localExtent
+                      : localExtent * pipAspect;
+                  final localHeight = pipAspect >= 1
+                      ? localExtent / pipAspect
+                      : localExtent;
+                  final controlsVisible =
+                      _callControlsVisibleSid == session.sid;
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() {
+                      _callControlsVisibleSid = controlsVisible
+                          ? null
+                          : session.sid;
+                    }),
+                    onDoubleTap: mainVideoStream == null
+                        ? null
+                        : () => _showFullscreenCallVideo(mainVideoStream),
+                    child: SizedBox(
+                      height: stageHeight,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _SpeakingFrame(
+                            active: remoteVideoEnabled
+                                ? remoteSpeaking || remoteDisrupted
+                                : localSpeaking,
+                            color: remoteVideoEnabled && remoteDisrupted
+                                ? theme.colorScheme.error
+                                : Colors.greenAccent.shade400,
+                            child: _CallVideoView(
+                              key: ValueKey(
+                                'main-video-${session.sid}-$remoteVideoEnabled-${remoteVideoEnabled ? 0 : localVideoRevision}',
+                              ),
+                              stream: mainVideoStream,
+                              mirrored:
+                                  !remoteVideoEnabled && _localVideoMirrored,
+                              placeholder: remoteVideoEnabled
+                                  ? 'Remote video'
+                                  : 'Local preview',
+                              onAspectRatio: (aspectRatio) => setState(() {
+                                if (remoteVideoEnabled) {
+                                  _remoteVideoAspectBySid[session.sid] =
+                                      aspectRatio;
+                                } else {
+                                  _localVideoAspectBySid[session.sid] =
+                                      aspectRatio;
+                                }
+                              }),
+                            ),
+                          ),
+                          Positioned(
+                            left: 8,
+                            top: 8,
+                            child: _AudioWaveform(
+                              active: remoteVideoEnabled
+                                  ? remoteSpeaking
+                                  : localSpeaking,
+                              disrupted: remoteVideoEnabled && remoteDisrupted,
+                              semanticLabel: remoteVideoEnabled
+                                  ? 'Remote audio activity'
+                                  : 'Your audio activity',
+                            ),
+                          ),
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            width: localWidth,
+                            height: localHeight,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                _SpeakingFrame(
+                                  active: remoteVideoEnabled
+                                      ? localSpeaking
+                                      : remoteSpeaking || remoteDisrupted,
+                                  color: !remoteVideoEnabled && remoteDisrupted
+                                      ? theme.colorScheme.error
+                                      : Colors.greenAccent.shade400,
+                                  child: _CallVideoView(
+                                    key: ValueKey(
+                                      'pip-video-${session.sid}-$remoteVideoEnabled-${remoteVideoEnabled ? localVideoRevision : 0}',
+                                    ),
+                                    stream: pipVideoStream,
+                                    mirrored:
+                                        remoteVideoEnabled &&
+                                        _localVideoMirrored,
+                                    placeholder: remoteVideoEnabled
+                                        ? 'Local preview'
+                                        : 'Remote video paused',
+                                    onAspectRatio: (aspectRatio) => setState(
+                                      () {
+                                        if (remoteVideoEnabled) {
+                                          _localVideoAspectBySid[session.sid] =
+                                              aspectRatio;
+                                        } else {
+                                          _remoteVideoAspectBySid[session.sid] =
+                                              aspectRatio;
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  left: 4,
+                                  top: 4,
+                                  child: _AudioWaveform(
+                                    active: remoteVideoEnabled
+                                        ? localSpeaking
+                                        : remoteSpeaking,
+                                    disrupted:
+                                        !remoteVideoEnabled && remoteDisrupted,
+                                    semanticLabel: remoteVideoEnabled
+                                        ? 'Your audio activity'
+                                        : 'Remote audio activity',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (isActive && controlsVisible)
+                            Positioned(
+                              left: 8,
+                              right: 8,
+                              bottom: 8,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surface.withValues(
+                                    alpha: 0.88,
+                                  ),
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: _buildCallControls(
+                                  service,
+                                  bareJid,
+                                  session,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _SpeakingFrame(
-                        active: localSpeaking,
-                        color: theme.colorScheme.tertiary,
+                  );
+                },
+              ),
+            ],
+            if (isActive && !session.video) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _AudioWaveform(
+                      active: localSpeaking,
+                      semanticLabel: 'Your audio activity',
+                      large: true,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _AudioWaveform(
+                      active: remoteSpeaking,
+                      disrupted: remoteDisrupted,
+                      semanticLabel: 'Remote audio activity',
+                      large: true,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _buildCallControls(service, bareJid, session),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCallControls(
+    XmppService service,
+    String bareJid,
+    CallSession session,
+  ) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      children: [
+        IconButton(
+          onPressed: () => service.toggleCallMute(bareJid),
+          icon: Icon(service.isCallMuted(bareJid) ? Icons.mic_off : Icons.mic),
+          tooltip: service.isCallMuted(bareJid) ? 'Unmute' : 'Mute',
+        ),
+        IconButton(
+          onPressed: _showAudioInputPicker,
+          icon: const Icon(Icons.settings_voice),
+          tooltip: 'Select microphone',
+        ),
+        IconButton(
+          onPressed: () => service.toggleSpeakerphone(),
+          icon: Icon(
+            service.isSpeakerphoneOn ? Icons.volume_up : Icons.volume_down,
+          ),
+          tooltip: service.isSpeakerphoneOn ? 'Speaker on' : 'Speaker off',
+        ),
+        IconButton(
+          onPressed: _showAudioOutputPicker,
+          icon: const Icon(Icons.headphones),
+          tooltip: 'Select audio output',
+        ),
+        if (session.video)
+          IconButton(
+            onPressed: () => service.toggleCallVideo(bareJid),
+            icon: Icon(
+              service.isCallVideoEnabled(bareJid)
+                  ? Icons.videocam
+                  : Icons.videocam_off,
+            ),
+            tooltip: service.isCallVideoEnabled(bareJid)
+                ? 'Disable camera'
+                : 'Enable camera',
+          ),
+        if (session.video)
+          IconButton(
+            onPressed: _showVideoInputPicker,
+            icon: const Icon(Icons.switch_camera),
+            tooltip: 'Select camera',
+          ),
+        if (session.video)
+          IconButton(
+            onPressed: () => setState(() {
+              _localVideoMirrored = !_localVideoMirrored;
+            }),
+            icon: Icon(
+              _localVideoMirrored ? Icons.flip : Icons.flip_camera_android,
+            ),
+            tooltip: _localVideoMirrored
+                ? 'Unmirror preview'
+                : 'Mirror preview',
+          ),
+        if (session.video)
+          IconButton(
+            onPressed: () => service.toggleCallRemoteVideo(bareJid),
+            icon: Icon(
+              service.isCallRemoteVideoEnabled(bareJid)
+                  ? Icons.visibility
+                  : Icons.visibility_off,
+            ),
+            tooltip: service.isCallRemoteVideoEnabled(bareJid)
+                ? 'Pause incoming video'
+                : 'Resume incoming video',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLandscapePhoneCall(
+    XmppService service,
+    String bareJid,
+    CallSession session,
+  ) {
+    final localStream = service.callLocalStreamFor(bareJid);
+    final remoteStream = service.callRemoteStreamFor(bareJid);
+    final remoteVideoEnabled = service.isCallRemoteVideoEnabled(bareJid);
+    final localVideoRevision = service.callLocalVideoRevisionFor(bareJid);
+    final mainVideoStream = remoteVideoEnabled
+        ? (remoteStream ?? localStream)
+        : localStream;
+    final pipVideoStream = remoteVideoEnabled ? localStream : null;
+    final localSpeaking = service.isCallLocalSpeaking(bareJid);
+    final remoteSpeaking = service.isCallRemoteSpeaking(bareJid);
+    final remoteDisrupted = service.isCallRemoteAudioDisrupted(bareJid);
+    final isActive = session.state == CallState.active;
+    final isIncoming = session.direction == CallDirection.incoming;
+    final controlsVisible = _callControlsVisibleSid == session.sid;
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final localExtent = (constraints.maxHeight * 0.28).clamp(64.0, 140.0);
+          final pipAspect = remoteVideoEnabled
+              ? (_localVideoAspectBySid[session.sid] ?? 1.0)
+              : (_remoteVideoAspectBySid[session.sid] ?? 1.0);
+          final localWidth = pipAspect >= 1
+              ? localExtent
+              : localExtent * pipAspect;
+          final localHeight = pipAspect >= 1
+              ? localExtent / pipAspect
+              : localExtent;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() {
+              _callControlsVisibleSid = controlsVisible ? null : session.sid;
+            }),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _SpeakingFrame(
+                  active: remoteVideoEnabled
+                      ? remoteSpeaking || remoteDisrupted
+                      : localSpeaking,
+                  color: remoteVideoEnabled && remoteDisrupted
+                      ? Theme.of(context).colorScheme.error
+                      : Colors.greenAccent.shade400,
+                  child: _CallVideoView(
+                    key: ValueKey(
+                      'landscape-main-video-${session.sid}-$remoteVideoEnabled-${remoteVideoEnabled ? 0 : localVideoRevision}',
+                    ),
+                    stream: mainVideoStream,
+                    mirrored: !remoteVideoEnabled && _localVideoMirrored,
+                    placeholder: remoteVideoEnabled
+                        ? 'Remote video'
+                        : 'Local preview',
+                    onAspectRatio: (aspectRatio) => setState(() {
+                      if (remoteVideoEnabled) {
+                        _remoteVideoAspectBySid[session.sid] = aspectRatio;
+                      } else {
+                        _localVideoAspectBySid[session.sid] = aspectRatio;
+                      }
+                    }),
+                  ),
+                ),
+                Positioned(
+                  left: 12,
+                  top: 12,
+                  child: _AudioWaveform(
+                    active: remoteVideoEnabled ? remoteSpeaking : localSpeaking,
+                    disrupted: remoteVideoEnabled && remoteDisrupted,
+                    semanticLabel: remoteVideoEnabled
+                        ? 'Remote audio activity'
+                        : 'Your audio activity',
+                  ),
+                ),
+                Positioned(
+                  right: 12,
+                  top: 12,
+                  width: localWidth,
+                  height: localHeight,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _SpeakingFrame(
+                        active: remoteVideoEnabled
+                            ? localSpeaking
+                            : remoteSpeaking || remoteDisrupted,
+                        color: !remoteVideoEnabled && remoteDisrupted
+                            ? Theme.of(context).colorScheme.error
+                            : Colors.greenAccent.shade400,
                         child: _CallVideoView(
-                          stream: localStream,
-                          mirrored: true,
-                          placeholder: 'Local preview',
+                          key: ValueKey(
+                            'landscape-pip-video-${session.sid}-$remoteVideoEnabled-${remoteVideoEnabled ? localVideoRevision : 0}',
+                          ),
+                          stream: pipVideoStream,
+                          mirrored: remoteVideoEnabled && _localVideoMirrored,
+                          placeholder: remoteVideoEnabled
+                              ? 'Local preview'
+                              : 'Remote video paused',
+                          onAspectRatio: (aspectRatio) => setState(() {
+                            if (remoteVideoEnabled) {
+                              _localVideoAspectBySid[session.sid] = aspectRatio;
+                            } else {
+                              _remoteVideoAspectBySid[session.sid] =
+                                  aspectRatio;
+                            }
+                          }),
                         ),
                       ),
+                      Positioned(
+                        left: 4,
+                        top: 4,
+                        child: _AudioWaveform(
+                          active: remoteVideoEnabled
+                              ? localSpeaking
+                              : remoteSpeaking,
+                          disrupted: !remoteVideoEnabled && remoteDisrupted,
+                          semanticLabel: remoteVideoEnabled
+                              ? 'Your audio activity'
+                              : 'Remote audio activity',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isActive && isIncoming)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 16,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        FilledButton.tonal(
+                          onPressed: () => _declineCall(session),
+                          child: const Text('Decline'),
+                        ),
+                        const SizedBox(width: 16),
+                        FilledButton(
+                          onPressed: () => _acceptCall(session),
+                          child: const Text('Accept'),
+                        ),
+                      ],
                     ),
-                  ],
+                  )
+                else if (controlsVisible)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surface.withValues(alpha: 0.88),
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _buildCallControls(service, bareJid, session),
+                          IconButton.filled(
+                            onPressed: () => _endCall(session),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Theme.of(
+                                context,
+                              ).colorScheme.error,
+                              foregroundColor: Theme.of(
+                                context,
+                              ).colorScheme.onError,
+                            ),
+                            icon: const Icon(Icons.call_end),
+                            tooltip: 'Hang up',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showFullscreenCallVideo(MediaStream stream) async {
+    await showDialog<void>(
+      context: context,
+      useSafeArea: false,
+      barrierColor: Colors.black,
+      builder: (dialogContext) => Material(
+        color: Colors.black,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTap: () => Navigator.of(dialogContext).pop(),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _CallVideoView(
+                key: const ValueKey('fullscreen-remote-video'),
+                stream: stream,
+                mirrored: false,
+                placeholder: 'Remote video',
+              ),
+              Positioned(
+                right: 16,
+                top: 16,
+                child: SafeArea(
+                  child: IconButton.filledTonal(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    icon: const Icon(Icons.fullscreen_exit),
+                    tooltip: 'Exit full screen',
+                  ),
                 ),
               ),
             ],
-            if (isActive) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _SpeakingPill(
-                    label: 'You',
-                    active: localSpeaking,
-                    color: theme.colorScheme.tertiary,
-                  ),
-                  const SizedBox(width: 8),
-                  _SpeakingPill(
-                    label: 'Them',
-                    active: remoteSpeaking,
-                    color: theme.colorScheme.primary,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    onPressed: () => service.toggleCallMute(bareJid),
-                    icon: Icon(
-                      service.isCallMuted(bareJid) ? Icons.mic_off : Icons.mic,
-                    ),
-                    tooltip: service.isCallMuted(bareJid) ? 'Unmute' : 'Mute',
-                  ),
-                  IconButton(
-                    onPressed: _showAudioInputPicker,
-                    icon: const Icon(Icons.settings_voice),
-                    tooltip: 'Select microphone',
-                  ),
-                  IconButton(
-                    onPressed: () => service.toggleSpeakerphone(),
-                    icon: Icon(
-                      service.isSpeakerphoneOn
-                          ? Icons.volume_up
-                          : Icons.volume_down,
-                    ),
-                    tooltip: service.isSpeakerphoneOn
-                        ? 'Speaker on'
-                        : 'Speaker off',
-                  ),
-                  IconButton(
-                    onPressed: _showAudioOutputPicker,
-                    icon: const Icon(Icons.headphones),
-                    tooltip: 'Select audio output',
-                  ),
-                  if (session.video)
-                    IconButton(
-                      onPressed: () => service.toggleCallVideo(bareJid),
-                      icon: Icon(
-                        service.isCallVideoEnabled(bareJid)
-                            ? Icons.videocam
-                            : Icons.videocam_off,
-                      ),
-                      tooltip: service.isCallVideoEnabled(bareJid)
-                          ? 'Disable camera'
-                          : 'Enable camera',
-                    ),
-                  if (session.video)
-                    IconButton(
-                      onPressed: _showVideoInputPicker,
-                      icon: const Icon(Icons.switch_camera),
-                      tooltip: 'Select camera',
-                    ),
-                ],
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -4383,6 +4838,9 @@ class MessageBubble extends StatelessWidget {
     final oobFileCard = _buildOobFileCard(context);
     final fileTransferCard = _buildFileTransferCard(context);
     final inviteCard = _buildInviteCard(context);
+    final callCard = message.callSid == null
+        ? null
+        : _CallMessageCard(message: message);
     final reactions = message.reactions ?? const {};
     final ownReactions = _ownReactions(reactions);
 
@@ -4462,6 +4920,10 @@ class MessageBubble extends StatelessWidget {
                     inviteCard,
                     const SizedBox(height: 8),
                   ],
+                  if (callCard != null) ...[
+                    callCard,
+                    const SizedBox(height: 8),
+                  ],
                   if (oobImage != null) ...[
                     oobImage,
                     const SizedBox(height: 8),
@@ -4470,7 +4932,9 @@ class MessageBubble extends StatelessWidget {
                     oobFileCard,
                     const SizedBox(height: 8),
                   ],
-                  if (_meCommandAction(message.body) != null)
+                  if (message.callSid != null)
+                    const SizedBox.shrink()
+                  else if (_meCommandAction(message.body) != null)
                     SelectableText(
                       _formatMeCommand(
                         senderName,
@@ -5102,6 +5566,98 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _CallMessageCard extends StatefulWidget {
+  const _CallMessageCard({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  State<_CallMessageCard> createState() => _CallMessageCardState();
+}
+
+class _CallMessageCardState extends State<_CallMessageCard> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CallMessageCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncTimer();
+  }
+
+  void _syncTimer() {
+    final active = widget.message.callStatus == 'active';
+    if (active && _timer == null) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    } else if (!active) {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    final theme = Theme.of(context);
+    final media = message.callVideo == true ? 'Video call' : 'Voice call';
+    final startedAt = message.callStartedAt;
+    final endedAt = message.callEndedAt;
+    final status = switch (message.callStatus) {
+      'active' when startedAt != null =>
+        'In progress for ${formatCallDuration(DateTime.now().difference(startedAt))}',
+      'finished' when startedAt != null && endedAt != null =>
+        'Finished, lasted ${formatCallDuration(endedAt.difference(startedAt))}',
+      'missed' => 'Missed',
+      'declined' => 'Declined',
+      'failed' => 'Failed',
+      'cancelled' => 'Cancelled',
+      _ => message.outgoing ? 'Calling…' : 'Incoming…',
+    };
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(message.callVideo == true ? Icons.videocam : Icons.call),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(media, style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(status, style: theme.textTheme.bodySmall),
+              ],
+            ),
+          ),
+          Icon(
+            message.outgoing ? Icons.call_made : Icons.call_received,
+            size: 18,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -6020,7 +6576,9 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
                   key: const Key('add-by-jid-landscape-columns'),
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: SingleChildScrollView(child: addressFields)),
+                    Expanded(
+                      child: SingleChildScrollView(child: addressFields),
+                    ),
                     const VerticalDivider(width: 32),
                     Expanded(child: SingleChildScrollView(child: detailFields)),
                   ],
@@ -7610,14 +8168,17 @@ class _PinUnlockScreenState extends State<_PinUnlockScreen> {
 
 class _CallVideoView extends StatefulWidget {
   const _CallVideoView({
+    super.key,
     required this.stream,
     required this.mirrored,
     required this.placeholder,
+    this.onAspectRatio,
   });
 
   final MediaStream? stream;
   final bool mirrored;
   final String placeholder;
+  final ValueChanged<double>? onAspectRatio;
 
   @override
   State<_CallVideoView> createState() => _CallVideoViewState();
@@ -7639,21 +8200,32 @@ class _CallVideoViewState extends State<_CallVideoView> {
       return;
     }
     _renderer.srcObject = widget.stream;
+    _renderer.onResize = _handleResize;
     setState(() {
       _initialized = true;
     });
   }
 
+  void _handleResize() {
+    final width = _renderer.videoWidth;
+    final height = _renderer.videoHeight;
+    if (!mounted || width <= 0 || height <= 0) {
+      return;
+    }
+    widget.onAspectRatio?.call(width / height);
+  }
+
   @override
   void didUpdateWidget(covariant _CallVideoView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_renderer.srcObject != widget.stream) {
+    if (_initialized && _renderer.srcObject != widget.stream) {
       _renderer.srcObject = widget.stream;
     }
   }
 
   @override
   void dispose() {
+    _renderer.onResize = null;
     _renderer.dispose();
     super.dispose();
   }
@@ -7681,7 +8253,7 @@ class _CallVideoViewState extends State<_CallVideoView> {
       child: RTCVideoView(
         _renderer,
         mirror: widget.mirrored,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
       ),
     );
   }
@@ -7715,49 +8287,122 @@ class _SpeakingFrame extends StatelessWidget {
   }
 }
 
-class _SpeakingPill extends StatelessWidget {
-  const _SpeakingPill({
-    required this.label,
+class _AudioWaveform extends StatefulWidget {
+  const _AudioWaveform({
     required this.active,
-    required this.color,
+    required this.semanticLabel,
+    this.disrupted = false,
+    this.large = false,
   });
 
-  final String label;
   final bool active;
-  final Color color;
+  final bool disrupted;
+  final bool large;
+  final String semanticLabel;
+
+  @override
+  State<_AudioWaveform> createState() => _AudioWaveformState();
+}
+
+class _AudioWaveformState extends State<_AudioWaveform>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: active
-            ? color.withAlpha(31)
-            : theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: active ? color : theme.colorScheme.outlineVariant,
+    final height = widget.large ? 42.0 : 20.0;
+    return Semantics(
+      label: widget.semanticLabel,
+      value: widget.disrupted
+          ? 'disrupted'
+          : widget.active
+          ? 'audio received'
+          : 'quiet',
+      child: Container(
+        height: height,
+        constraints: BoxConstraints(
+          minWidth: widget.large ? 96 : 44,
+          maxWidth: widget.large ? double.infinity : 44,
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: active ? color : theme.colorScheme.outlineVariant,
-              shape: BoxShape.circle,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: AnimatedBuilder(
+          animation: _animation,
+          builder: (context, _) => CustomPaint(
+            painter: _AudioWaveformPainter(
+              phase: _animation.value,
+              active: widget.active,
+              disrupted: widget.disrupted,
             ),
           ),
-          const SizedBox(width: 6),
-          Text(label, style: theme.textTheme.labelSmall),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _AudioWaveformPainter extends CustomPainter {
+  const _AudioWaveformPainter({
+    required this.phase,
+    required this.active,
+    required this.disrupted,
+  });
+
+  final double phase;
+  final bool active;
+  final bool disrupted;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final color = disrupted
+        ? Colors.red
+        : active
+        ? Colors.greenAccent.shade700
+        : Colors.black;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = active || disrupted ? 2 : 1.5
+      ..strokeCap = StrokeCap.round;
+    final centerY = size.height / 2;
+    if (!active && !disrupted) {
+      canvas.drawLine(Offset(0, centerY), Offset(size.width, centerY), paint);
+      return;
+    }
+    final barCount = math.max(7, (size.width / 5).floor());
+    for (var index = 0; index < barCount; index++) {
+      final progress = index / math.max(1, barCount - 1);
+      final envelope = math.sin(progress * math.pi);
+      final carrier = math.sin((progress * 5 + phase * 2) * math.pi).abs();
+      final height = math.max(
+        2.0,
+        size.height * envelope * (0.3 + carrier * 0.65),
+      );
+      final x = progress * size.width;
+      canvas.drawLine(
+        Offset(x, centerY - height / 2),
+        Offset(x, centerY + height / 2),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AudioWaveformPainter oldDelegate) =>
+      oldDelegate.phase != phase ||
+      oldDelegate.active != active ||
+      oldDelegate.disrupted != disrupted;
 }
 
 class _QuicStatsGraph extends StatelessWidget {

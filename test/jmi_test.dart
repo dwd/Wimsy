@@ -19,16 +19,14 @@ void main() {
     final video = const JingleRtpDescription(
       media: 'video',
       payloadTypes: [
-        JingleRtpPayloadType(
-          id: 96,
-          name: 'VP8',
-          clockRate: 90000,
-        ),
+        JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
       ],
     );
 
-    final propose =
-        buildJmiProposeElement(sid: 'sid1', descriptions: [audio, video]);
+    final propose = buildJmiProposeElement(
+      sid: 'sid1',
+      descriptions: [audio, video],
+    );
     final message = XmppElement()..name = 'message';
     message.addChild(propose);
 
@@ -54,5 +52,16 @@ void main() {
 
     expect(parseJmiAction(message), JmiAction.proceed);
     expect(parseJmiSid(message), 'sid2');
+  });
+
+  test('JMI fallback removes the complete generic body', () {
+    const body = 'Incoming video call';
+    final fallback = buildJmiFallbackElement(body);
+
+    expect(fallback.getAttribute('xmlns')?.value, fallbackNamespace);
+    expect(fallback.getAttribute('for')?.value, jmiNamespace);
+    final range = fallback.getChild('body');
+    expect(range?.getAttribute('start')?.value, '0');
+    expect(range?.getAttribute('end')?.value, '${body.runes.length}');
   });
 }

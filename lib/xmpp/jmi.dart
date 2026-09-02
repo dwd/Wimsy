@@ -1,23 +1,26 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 const String jmiNamespace = 'urn:xmpp:jingle-message:0';
+const String fallbackNamespace = 'urn:xmpp:fallback:0';
 const String rtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
 const String rtcpFbNamespace = 'urn:xmpp:jingle:apps:rtp:rtcp-fb:0';
 const String rtpHdrextNamespace = 'urn:xmpp:jingle:apps:rtp:rtp-hdrext:0';
 
-enum JmiAction {
-  propose,
-  proceed,
-  reject,
-  ringing,
-  retract,
+enum JmiAction { propose, proceed, reject, ringing, retract }
+
+XmppElement buildJmiFallbackElement(String body) {
+  final fallback = XmppElement()..name = 'fallback';
+  fallback.addAttribute(XmppAttribute('xmlns', fallbackNamespace));
+  fallback.addAttribute(XmppAttribute('for', jmiNamespace));
+  final bodyRange = XmppElement()..name = 'body';
+  bodyRange.addAttribute(XmppAttribute('start', '0'));
+  bodyRange.addAttribute(XmppAttribute('end', body.runes.length.toString()));
+  fallback.addChild(bodyRange);
+  return fallback;
 }
 
 class JmiPropose {
-  const JmiPropose({
-    required this.sid,
-    required this.descriptions,
-  });
+  const JmiPropose({required this.sid, required this.descriptions});
 
   final String sid;
   final List<JingleRtpDescription> descriptions;
@@ -140,11 +143,15 @@ XmppElement _buildRtpDescription(JingleRtpDescription description) {
     }
     final clockRate = payload.clockRate;
     if (clockRate != null) {
-      payloadElement.addAttribute(XmppAttribute('clockrate', clockRate.toString()));
+      payloadElement.addAttribute(
+        XmppAttribute('clockrate', clockRate.toString()),
+      );
     }
     final channels = payload.channels;
     if (channels != null) {
-      payloadElement.addAttribute(XmppAttribute('channels', channels.toString()));
+      payloadElement.addAttribute(
+        XmppAttribute('channels', channels.toString()),
+      );
     }
     for (final entry in payload.parameters.entries) {
       final param = XmppElement()..name = 'parameter';
@@ -199,11 +206,13 @@ JingleRtpDescription? _parseRtpDescription(XmppElement? description) {
       }
       final name = child.getAttribute('name')?.value;
       final clockRateValue = child.getAttribute('clockrate')?.value;
-      final clockRate =
-          clockRateValue == null ? null : int.tryParse(clockRateValue);
+      final clockRate = clockRateValue == null
+          ? null
+          : int.tryParse(clockRateValue);
       final channelsValue = child.getAttribute('channels')?.value;
-      final channels =
-          channelsValue == null ? null : int.tryParse(channelsValue);
+      final channels = channelsValue == null
+          ? null
+          : int.tryParse(channelsValue);
       final parameters = <String, String>{};
       for (final param in child.children) {
         if (param.name != 'parameter') {
@@ -216,13 +225,15 @@ JingleRtpDescription? _parseRtpDescription(XmppElement? description) {
         }
         parameters[nameAttr] = valueAttr;
       }
-      payloadTypes.add(JingleRtpPayloadType(
-        id: id,
-        name: (name == null || name.isEmpty) ? null : name,
-        clockRate: clockRate,
-        channels: channels,
-        parameters: parameters,
-      ));
+      payloadTypes.add(
+        JingleRtpPayloadType(
+          id: id,
+          name: (name == null || name.isEmpty) ? null : name,
+          clockRate: clockRate,
+          channels: channels,
+          parameters: parameters,
+        ),
+      );
       continue;
     }
     if (child.name == 'rtcp-fb' &&
@@ -232,10 +243,12 @@ JingleRtpDescription? _parseRtpDescription(XmppElement? description) {
         continue;
       }
       final subtype = child.getAttribute('subtype')?.value;
-      feedback.add(JingleRtpFeedback(
-        type: type,
-        subtype: (subtype == null || subtype.isEmpty) ? null : subtype,
-      ));
+      feedback.add(
+        JingleRtpFeedback(
+          type: type,
+          subtype: (subtype == null || subtype.isEmpty) ? null : subtype,
+        ),
+      );
       continue;
     }
     if (child.name == 'rtp-hdrext' &&
@@ -247,11 +260,13 @@ JingleRtpDescription? _parseRtpDescription(XmppElement? description) {
         continue;
       }
       final senders = child.getAttribute('senders')?.value;
-      headerExtensions.add(JingleRtpHeaderExtension(
-        id: id,
-        uri: uri,
-        senders: (senders == null || senders.isEmpty) ? null : senders,
-      ));
+      headerExtensions.add(
+        JingleRtpHeaderExtension(
+          id: id,
+          uri: uri,
+          senders: (senders == null || senders.isEmpty) ? null : senders,
+        ),
+      );
     }
   }
   return JingleRtpDescription(

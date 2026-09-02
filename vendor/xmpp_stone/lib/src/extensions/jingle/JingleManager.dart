@@ -12,6 +12,7 @@ enum JingleAction {
   sessionInitiate,
   sessionAccept,
   sessionTerminate,
+  contentModify,
   transportInfo,
   unknown,
 }
@@ -174,6 +175,7 @@ class JingleContent {
     this.ibbTransport,
     this.rtpDescription,
     this.iceTransport,
+    this.senders,
   });
 
   final String name;
@@ -182,6 +184,7 @@ class JingleContent {
   final JingleIbbTransport? ibbTransport;
   final JingleRtpDescription? rtpDescription;
   final JingleIceTransport? iceTransport;
+  final String? senders;
 }
 
 class JingleSessionEvent {
@@ -208,9 +211,11 @@ class JingleSessionEvent {
 
 class JingleManager {
   static const String jingleNamespace = 'urn:xmpp:jingle:1';
-  static const String fileTransferNamespace = 'urn:xmpp:jingle:apps:file-transfer:5';
+  static const String fileTransferNamespace =
+      'urn:xmpp:jingle:apps:file-transfer:5';
   static const String fileMetadataNamespace = 'urn:xmpp:file:metadata:0';
-  static const String ibbTransportNamespace = 'urn:xmpp:jingle:transports:ibb:1';
+  static const String ibbTransportNamespace =
+      'urn:xmpp:jingle:transports:ibb:1';
   static const String rtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
   static const String iceUdpNamespace = 'urn:xmpp:jingle:transports:ice-udp:1';
   static const String dtlsNamespace = 'urn:xmpp:jingle:apps:dtls:0';
@@ -235,11 +240,13 @@ class JingleManager {
     if (instance == null) {
       return;
     }
-    IqRouter.getInstance(connection).unregisterNamespaceHandler(jingleNamespace);
+    IqRouter.getInstance(connection)
+        .unregisterNamespaceHandler(jingleNamespace);
   }
 
   final Connection _connection;
-  final StreamController<JingleSessionEvent> _sessionController = StreamController.broadcast();
+  final StreamController<JingleSessionEvent> _sessionController =
+      StreamController.broadcast();
 
   Stream<JingleSessionEvent> get sessionStream => _sessionController.stream;
 
@@ -308,6 +315,7 @@ class JingleManager {
   JingleContent? _parseContentElement(XmppElement child) {
     final creator = child.getAttribute('creator')?.value ?? '';
     final name = child.getAttribute('name')?.value ?? '';
+    final senders = child.getAttribute('senders')?.value;
     final description = child.getChild('description');
     final offer = _parseFileOffer(description);
     final rtpDescription = _parseRtpDescription(description);
@@ -327,6 +335,7 @@ class JingleManager {
       ibbTransport: transport,
       rtpDescription: rtpDescription,
       iceTransport: iceTransport,
+      senders: (senders == null || senders.isEmpty) ? null : senders,
     );
   }
 
@@ -487,28 +496,28 @@ class JingleManager {
         final clockRateValue = child.getAttribute('clockrate')?.value;
         final clockRate =
             clockRateValue == null ? null : int.tryParse(clockRateValue);
-      final channelsValue = child.getAttribute('channels')?.value;
-      final channels =
-          channelsValue == null ? null : int.tryParse(channelsValue);
-      final parameters = <String, String>{};
-      for (final param in child.children) {
-        if (param.name != 'parameter') {
-          continue;
+        final channelsValue = child.getAttribute('channels')?.value;
+        final channels =
+            channelsValue == null ? null : int.tryParse(channelsValue);
+        final parameters = <String, String>{};
+        for (final param in child.children) {
+          if (param.name != 'parameter') {
+            continue;
+          }
+          final nameAttr = param.getAttribute('name')?.value ?? '';
+          final valueAttr = param.getAttribute('value')?.value ?? '';
+          if (nameAttr.isEmpty) {
+            continue;
+          }
+          parameters[nameAttr] = valueAttr;
         }
-        final nameAttr = param.getAttribute('name')?.value ?? '';
-        final valueAttr = param.getAttribute('value')?.value ?? '';
-        if (nameAttr.isEmpty) {
-          continue;
-        }
-        parameters[nameAttr] = valueAttr;
-      }
-      payloadTypes.add(JingleRtpPayloadType(
-        id: id,
-        name: (name == null || name.isEmpty) ? null : name,
-        clockRate: clockRate,
-        channels: channels,
-        parameters: parameters,
-      ));
+        payloadTypes.add(JingleRtpPayloadType(
+          id: id,
+          name: (name == null || name.isEmpty) ? null : name,
+          clockRate: clockRate,
+          channels: channels,
+          parameters: parameters,
+        ));
         continue;
       }
       if (child.name == 'rtcp-fb' &&
@@ -620,6 +629,8 @@ class JingleManager {
         return JingleAction.sessionAccept;
       case 'session-terminate':
         return JingleAction.sessionTerminate;
+      case 'content-modify':
+        return JingleAction.contentModify;
       case 'transport-info':
         return JingleAction.transportInfo;
       default:
@@ -786,6 +797,22 @@ class JingleManager {
     return stanza;
   }
 
+  IqStanza buildContentModify({
+    required Jid to,
+    required String sid,
+    required JingleContent content,
+  }) {
+    final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+    stanza.toJid = to;
+    stanza.fromJid = _connection.fullJid;
+    stanza.addChild(_buildRtpJinglePayloadMulti(
+      action: 'content-modify',
+      sid: sid,
+      contents: [content],
+    ));
+    return stanza;
+  }
+
   XmppElement _buildJinglePayload({
     required String action,
     required String sid,
@@ -851,6 +878,10 @@ class JingleManager {
       if (content.name.isNotEmpty) {
         contentElement.addAttribute(XmppAttribute('name', content.name));
       }
+      final senders = content.senders;
+      if (senders != null && senders.isNotEmpty) {
+        contentElement.addAttribute(XmppAttribute('senders', senders));
+      }
       final description = content.rtpDescription;
       if (description != null) {
         contentElement.addChild(_buildRtpDescription(description));
@@ -877,11 +908,13 @@ class JingleManager {
       }
       final clockRate = payload.clockRate;
       if (clockRate != null) {
-        payloadElement.addAttribute(XmppAttribute('clockrate', clockRate.toString()));
+        payloadElement
+            .addAttribute(XmppAttribute('clockrate', clockRate.toString()));
       }
       final channels = payload.channels;
       if (channels != null) {
-        payloadElement.addAttribute(XmppAttribute('channels', channels.toString()));
+        payloadElement
+            .addAttribute(XmppAttribute('channels', channels.toString()));
       }
       for (final entry in payload.parameters.entries) {
         final paramElement = XmppElement()..name = 'parameter';
@@ -963,21 +996,21 @@ class JingleManager {
       final candidateElement = XmppElement()..name = 'candidate';
       final candidateId = candidate.id ?? AbstractStanza.getRandomId();
       candidateElement.addAttribute(XmppAttribute('id', candidateId));
-      candidateElement.addAttribute(
-          XmppAttribute('foundation', candidate.foundation));
+      candidateElement
+          .addAttribute(XmppAttribute('foundation', candidate.foundation));
       candidateElement.addAttribute(
           XmppAttribute('component', candidate.component.toString()));
-      candidateElement.addAttribute(
-          XmppAttribute('protocol', candidate.protocol));
+      candidateElement
+          .addAttribute(XmppAttribute('protocol', candidate.protocol));
       candidateElement.addAttribute(
           XmppAttribute('priority', candidate.priority.toString()));
       candidateElement.addAttribute(XmppAttribute('ip', candidate.ip));
-      candidateElement.addAttribute(
-          XmppAttribute('port', candidate.port.toString()));
+      candidateElement
+          .addAttribute(XmppAttribute('port', candidate.port.toString()));
       candidateElement.addAttribute(XmppAttribute('type', candidate.type));
       final generation = candidate.generation ?? 0;
-      candidateElement.addAttribute(
-          XmppAttribute('generation', generation.toString()));
+      candidateElement
+          .addAttribute(XmppAttribute('generation', generation.toString()));
       element.addChild(candidateElement);
     }
     return element;

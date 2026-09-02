@@ -310,6 +310,7 @@ class XmppService extends ChangeNotifier {
   bool _selfVcardPhotoKnown = false;
   final Map<String, _FileTransferSession> _fileTransfers = {};
   final Map<String, CallSession> _callSessions = {};
+  final Map<String, DateTime> _callStartedAtBySid = {};
   final Map<String, String> _callSessionByPeerKey = {};
   final Map<String, Map<String, JingleRtpDescription>>
   _callLocalDescriptionsBySid = {};
@@ -319,7 +320,9 @@ class XmppService extends ChangeNotifier {
   final Map<String, RTCPeerConnection> _callPeerConnections = {};
   final Map<String, CallMediaKind> _callMediaKindBySid = {};
   final Map<String, MediaStream> _callLocalStreamBySid = {};
+  final Map<String, MediaStream> _callLocalPreviewStreamBySid = {};
   final Map<String, MediaStream> _callRemoteStreamBySid = {};
+  final Map<String, MediaStreamHandle> _replacementVideoCaptureBySid = {};
   final Map<String, Map<String, JingleIceTransport>> _callLocalTransportsBySid =
       {};
   final Map<String, Map<String, JingleIceTransport>>
@@ -330,9 +333,13 @@ class XmppService extends ChangeNotifier {
   final Map<String, String> _callBundleTransportNameBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
+  final Map<String, bool> _callRemoteVideoEnabledBySid = {};
+  final Map<String, bool> _callRemoteAllowsVideoBySid = {};
+  final Map<String, int> _callLocalVideoRevisionBySid = {};
   final Map<String, bool> _callLocalSpeakingBySid = {};
   final Map<String, bool> _callRemoteSpeakingBySid = {};
   final Set<String> _callAcceptedBySid = {};
+  final Set<String> _callAcceptingBySid = {};
   final Set<String> _callLoggedIceQueueBySid = {};
   final Map<String, String> _callSelectedCandidateSummaryBySid = {};
   final Map<String, String> _callPeerFullJidBySid = {};
@@ -444,7 +451,7 @@ class XmppService extends ChangeNotifier {
     if (key == null) {
       return null;
     }
-    return _callLocalStreamBySid[key];
+    return _callLocalPreviewStreamBySid[key] ?? _callLocalStreamBySid[key];
   }
 
   MediaStream? callRemoteStreamFor(String bareJid) {
@@ -479,6 +486,19 @@ class XmppService extends ChangeNotifier {
     return _callVideoEnabledBySid[key] ?? true;
   }
 
+  bool isCallRemoteVideoEnabled(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    if (key == null) {
+      return true;
+    }
+    return _callRemoteVideoEnabledBySid[key] ?? true;
+  }
+
+  int callLocalVideoRevisionFor(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    return key == null ? 0 : (_callLocalVideoRevisionBySid[key] ?? 0);
+  }
+
   bool isCallLocalSpeaking(String bareJid) {
     final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
     if (key == null) {
@@ -493,6 +513,11 @@ class XmppService extends ChangeNotifier {
       return false;
     }
     return _callRemoteSpeakingBySid[key] ?? false;
+  }
+
+  bool isCallRemoteAudioDisrupted(String bareJid) {
+    final sample = callQualityFor(bareJid);
+    return (sample?.packetLoss ?? 0) >= 0.08 || (sample?.rttMs ?? 0) >= 400;
   }
 
   bool get isSpeakerphoneOn => _speakerphoneOn;
@@ -535,9 +560,72 @@ class XmppService extends ChangeNotifier {
     _preferredAudioInputId = trimmed.isEmpty ? null : trimmed;
   }
 
-  void selectVideoInput(String deviceId) {
+  Future<bool> selectVideoInput(String deviceId) async {
     final trimmed = deviceId.trim();
     _preferredVideoInputId = trimmed.isEmpty ? null : trimmed;
+    final activeVideoSessions = _callSessions.values.where(
+      (session) => session.video && session.state == CallState.active,
+    );
+    if (activeVideoSessions.isEmpty) {
+      return true;
+    }
+    try {
+      for (final session in activeVideoSessions) {
+        await _replaceCallVideoInput(session.sid);
+      }
+      return true;
+    } catch (error) {
+      Log.w('XmppService', 'Unable to change camera during call: $error');
+      return false;
+    }
+  }
+
+  Future<void> _replaceCallVideoInput(String sid) async {
+    final pc = _callPeerConnections[sid];
+    final localStream = _callLocalStreamBySid[sid];
+    if (pc == null || localStream == null) {
+      return;
+    }
+    final capture = await _mediaSession.createAdditionalStream(
+      audio: false,
+      video: true,
+      videoDeviceId: _preferredVideoInputId,
+    );
+    if (capture is! WebRtcMediaStreamHandle ||
+        capture.stream.getVideoTracks().isEmpty) {
+      await capture.dispose();
+      throw StateError('Selected camera produced no video track.');
+    }
+    final newTrack = capture.stream.getVideoTracks().first;
+    final senders = await pc.getSenders();
+    final videoSender = senders
+        .where((sender) => sender.track?.kind == 'video')
+        .firstOrNull;
+    if (videoSender == null) {
+      await capture.dispose();
+      throw StateError('Active call has no video sender.');
+    }
+    newTrack.enabled =
+        (_callVideoEnabledBySid[sid] ?? true) &&
+        (_callRemoteAllowsVideoBySid[sid] ?? true);
+    await videoSender.replaceTrack(newTrack);
+    final oldTracks = localStream.getVideoTracks().toList(growable: false);
+    for (final oldTrack in oldTracks) {
+      await localStream.removeTrack(oldTrack);
+      await oldTrack.stop();
+    }
+    // Render the stream that owns the replacement track. Re-parenting it into
+    // the original stream works on Android but can leave Linux video textures
+    // permanently black after a camera switch.
+    _callLocalPreviewStreamBySid[sid] = capture.stream;
+    _callLocalVideoRevisionBySid[sid] =
+        (_callLocalVideoRevisionBySid[sid] ?? 0) + 1;
+    final previousCapture = _replacementVideoCaptureBySid[sid];
+    _replacementVideoCaptureBySid[sid] = capture;
+    if (previousCapture != null) {
+      await previousCapture.dispose();
+    }
+    notifyListeners();
   }
 
   String? get preferredAudioInputId => _preferredAudioInputId;
@@ -3508,6 +3596,9 @@ class XmppService extends ChangeNotifier {
       case JingleAction.sessionTerminate:
         _handleJingleSessionTerminate(event);
         return;
+      case JingleAction.contentModify:
+        _handleJingleContentModify(event);
+        return;
       case JingleAction.transportInfo:
         _handleJingleTransportInfo(event);
         return;
@@ -3591,6 +3682,30 @@ class XmppService extends ChangeNotifier {
     );
   }
 
+  void _handleJingleContentModify(JingleSessionEvent event) {
+    final session = _callSessions[event.sid];
+    if (session == null) {
+      return;
+    }
+    final videoNames = _callLocalDescriptionsBySid[event.sid]?.entries
+        .where((entry) => entry.value.media.toLowerCase() == 'video')
+        .map((entry) => entry.key)
+        .toSet();
+    for (final content in event.contents) {
+      if (videoNames == null || !videoNames.contains(content.name)) {
+        continue;
+      }
+      final localRole = session.direction == CallDirection.outgoing
+          ? 'initiator'
+          : 'responder';
+      final senders = content.senders ?? 'both';
+      _callRemoteAllowsVideoBySid[event.sid] =
+          senders == 'both' || senders == localRole;
+      _applyLocalVideoTrackEnabled(event.sid);
+    }
+    notifyListeners();
+  }
+
   void _handleJingleSessionAccept(JingleSessionEvent event) {
     final callSession = _callSessions[event.sid];
     if (callSession != null &&
@@ -3619,6 +3734,7 @@ class XmppService extends ChangeNotifier {
       _callAcceptedBySid.add(event.sid);
       _flushPendingIceCandidates(event.sid);
       callSession.state = CallState.active;
+      _markCallActive(callSession);
       _cancelCallTimeout(callSession.sid);
       _startCallStatsTimer(callSession.sid);
       _finishSpan(_jingleSetupTransactions.remove(event.sid));
@@ -3709,9 +3825,12 @@ class XmppService extends ChangeNotifier {
     );
     _callSessions[event.sid] = session;
     _callSessionByPeerKey[_callPeerKeyForJid(peerJid)] = event.sid;
+    _upsertCallMessage(session);
     _callContentNamesBySid[event.sid] = contentNamesFor(contents);
     _callMutedBySid[event.sid] = false;
     _callVideoEnabledBySid[event.sid] = session.video;
+    _callRemoteVideoEnabledBySid[event.sid] = session.video;
+    _callRemoteAllowsVideoBySid[event.sid] = true;
     _incomingCallHandler?.call(session);
     _startCallTimeout(
       sid: event.sid,
@@ -3744,6 +3863,8 @@ class XmppService extends ChangeNotifier {
         ? CallMediaKind.video
         : CallMediaKind.audio;
     _callVideoEnabledBySid[sid] = nextVideo;
+    _callRemoteVideoEnabledBySid[sid] = nextVideo;
+    _callRemoteAllowsVideoBySid[sid] = true;
     _callContentNamesBySid[sid] = contentNamesFor(contents);
     notifyListeners();
   }
@@ -3876,8 +3997,11 @@ class XmppService extends ChangeNotifier {
     );
     _callSessions[sid] = session;
     _callSessionByPeerKey[peerKey] = sid;
+    _upsertCallMessage(session);
     _callMutedBySid[sid] = false;
     _callVideoEnabledBySid[sid] = video;
+    _callRemoteVideoEnabledBySid[sid] = video;
+    _callRemoteAllowsVideoBySid[sid] = true;
     _startCallTimeout(
       sid: sid,
       duration: _keepaliveTuning.outgoingCallTimeout,
@@ -3911,12 +4035,19 @@ class XmppService extends ChangeNotifier {
 
   Future<void> acceptCall(CallSession session) async {
     if (_jmiIncomingPending.contains(session.sid)) {
+      if (_jmiAutoAcceptBySid.contains(session.sid)) {
+        return;
+      }
       final target = _jmiProceedTargetBySid[session.sid];
       if (target != null) {
         _sendJmiProceed(target, session.sid);
         _jmiAutoAcceptBySid.add(session.sid);
         return;
       }
+    }
+    if (session.state != CallState.ringing ||
+        !_callAcceptingBySid.add(session.sid)) {
+      return;
     }
     if (!_jingleSetupTransactions.containsKey(session.sid)) {
       final jingleSpan = _startLinkedTransaction(
@@ -4011,6 +4142,8 @@ class XmppService extends ChangeNotifier {
       return;
     }
     session.state = CallState.active;
+    _callAcceptingBySid.remove(session.sid);
+    _markCallActive(session);
     _cancelCallTimeout(session.sid);
     _startCallStatsTimer(session.sid);
     _finishSpan(_jingleSetupTransactions.remove(session.sid));
@@ -4167,19 +4300,24 @@ class XmppService extends ChangeNotifier {
         }
       }
       if (type == 'inbound-rtp') {
-        if (_statString(values, 'kind') == 'video' ||
-            _statString(values, 'mediaType') == 'video') {
-          inboundBytes =
-              (inboundBytes ?? 0) + (_statInt(values, 'bytesReceived') ?? 0);
+        final mediaType =
+            _statString(values, 'kind') ?? _statString(values, 'mediaType');
+        if (mediaType == 'audio' || mediaType == 'video') {
           packetsLost =
               (packetsLost ?? 0) + (_statInt(values, 'packetsLost') ?? 0);
           packetsReceived =
               (packetsReceived ?? 0) +
               (_statInt(values, 'packetsReceived') ?? 0);
           final jitter = _statDouble(values, 'jitter');
-          if (jitter != null) {
+          if (jitter != null &&
+              (jitterMs == null || jitter * 1000 > jitterMs)) {
             jitterMs = jitter * 1000;
           }
+        }
+        if (_statString(values, 'kind') == 'video' ||
+            _statString(values, 'mediaType') == 'video') {
+          inboundBytes =
+              (inboundBytes ?? 0) + (_statInt(values, 'bytesReceived') ?? 0);
         }
         if (_statString(values, 'kind') == 'audio' ||
             _statString(values, 'mediaType') == 'audio') {
@@ -4526,16 +4664,58 @@ class XmppService extends ChangeNotifier {
     }
     final enabled = !(_callVideoEnabledBySid[key] ?? true);
     _callVideoEnabledBySid[key] = enabled;
-    final stream = _callLocalStreamBySid[key];
+    _applyLocalVideoTrackEnabled(key);
+    notifyListeners();
+  }
+
+  void _applyLocalVideoTrackEnabled(String sid) {
+    final enabled =
+        (_callVideoEnabledBySid[sid] ?? true) &&
+        (_callRemoteAllowsVideoBySid[sid] ?? true);
+    final stream =
+        _callLocalPreviewStreamBySid[sid] ?? _callLocalStreamBySid[sid];
     if (stream != null) {
       for (final track in stream.getVideoTracks()) {
         track.enabled = enabled;
       }
     }
+  }
+
+  Future<void> toggleCallRemoteVideo(String bareJid) async {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    final session = key == null ? null : _callSessions[key];
+    if (key == null || session == null || !session.video) {
+      return;
+    }
+    final enabled = !(_callRemoteVideoEnabledBySid[key] ?? true);
+    _callRemoteVideoEnabledBySid[key] = enabled;
     notifyListeners();
+    final descriptions = _callRemoteDescriptionsBySid[key];
+    final videoEntry = descriptions?.entries
+        .where((entry) => entry.value.media.toLowerCase() == 'video')
+        .firstOrNull;
+    final target = _callPeerJidForSid(key, session.peerBareJid);
+    final jingle = _jingleManager;
+    if (videoEntry == null || target == null || jingle == null) {
+      return;
+    }
+    final localRole = session.direction == CallDirection.outgoing
+        ? 'initiator'
+        : 'responder';
+    final iq = jingle.buildContentModify(
+      to: target,
+      sid: key,
+      content: JingleContent(
+        name: videoEntry.key,
+        creator: 'initiator',
+        senders: enabled ? 'both' : localRole,
+      ),
+    );
+    await _sendIqAndAwait(iq);
   }
 
   void _removeCallSession(CallSession session) {
+    _finishCallMessage(session);
     _jmiFallbackTimers.remove(session.sid)?.cancel();
     _callTimeoutTimers.remove(session.sid)?.cancel();
     _callStatsTimers.remove(session.sid)?.cancel();
@@ -4543,6 +4723,7 @@ class XmppService extends ChangeNotifier {
     _callQualityBySid.remove(session.sid);
     _callPeerFullJidBySid.remove(session.sid);
     _callAcceptedBySid.remove(session.sid);
+    _callAcceptingBySid.remove(session.sid);
     _callLoggedIceQueueBySid.remove(session.sid);
     _callSelectedCandidateSummaryBySid.remove(session.sid);
     final jingleSpan = _jingleSetupTransactions.remove(session.sid);
@@ -4563,7 +4744,12 @@ class XmppService extends ChangeNotifier {
     final pc = _callPeerConnections.remove(session.sid);
     pc?.close();
     _callLocalStreamBySid.remove(session.sid);
+    _callLocalPreviewStreamBySid.remove(session.sid);
     _callRemoteStreamBySid.remove(session.sid);
+    final replacementCapture = _replacementVideoCaptureBySid.remove(
+      session.sid,
+    );
+    unawaited(replacementCapture?.dispose());
     _callMediaKindBySid.remove(session.sid);
     _callLocalDescriptionsBySid.remove(session.sid);
     _callRemoteDescriptionsBySid.remove(session.sid);
@@ -4575,13 +4761,96 @@ class XmppService extends ChangeNotifier {
     _callBundleTransportNameBySid.remove(session.sid);
     _callMutedBySid.remove(session.sid);
     _callVideoEnabledBySid.remove(session.sid);
+    _callRemoteVideoEnabledBySid.remove(session.sid);
+    _callRemoteAllowsVideoBySid.remove(session.sid);
+    _callLocalVideoRevisionBySid.remove(session.sid);
     _callLocalSpeakingBySid.remove(session.sid);
     _callRemoteSpeakingBySid.remove(session.sid);
+    _callStartedAtBySid.remove(session.sid);
     _callSessionEndedHandler?.call(session);
     _callSessions.remove(session.sid);
     _callSessionByPeerKey.remove(_callPeerKeyForJid(session.peerBareJid));
     unawaited(_mediaSession.stop());
     notifyListeners();
+  }
+
+  void _upsertCallMessage(CallSession session) {
+    final bareJid = _bareJid(session.peerBareJid);
+    _ensureContact(bareJid);
+    final list = _messages.putIfAbsent(bareJid, () => <ChatMessage>[]);
+    if (list.any((message) => message.callSid == session.sid)) {
+      return;
+    }
+    final self = _currentUserBareJid ?? _connection?.fullJid.userAtDomain ?? '';
+    final outgoing = session.direction == CallDirection.outgoing;
+    _insertMessageOrdered(
+      list,
+      ChatMessage(
+        from: outgoing ? self : bareJid,
+        to: outgoing ? bareJid : self,
+        body: session.video ? 'Video call' : 'Voice call',
+        timestamp: DateTime.now(),
+        outgoing: outgoing,
+        messageId: 'call-${session.sid}',
+        rawXml: '<jmi sid="${session.sid}"/>',
+        callSid: session.sid,
+        callVideo: session.video,
+        callStatus: 'ringing',
+        reactions: const {},
+      ),
+    );
+    _messagePersistor?.call(bareJid, List.unmodifiable(list));
+  }
+
+  void _markCallActive(CallSession session) {
+    final startedAt = _callStartedAtBySid.putIfAbsent(
+      session.sid,
+      DateTime.now,
+    );
+    _updateCallMessage(session, status: 'active', startedAt: startedAt);
+  }
+
+  void _finishCallMessage(CallSession session) {
+    final startedAt = _callStartedAtBySid[session.sid];
+    final status = startedAt != null
+        ? 'finished'
+        : switch (session.direction) {
+            CallDirection.incoming => 'missed',
+            CallDirection.outgoing => switch (session.state) {
+              CallState.declined => 'declined',
+              CallState.failed => 'failed',
+              _ => 'cancelled',
+            },
+          };
+    _updateCallMessage(
+      session,
+      status: status,
+      startedAt: startedAt,
+      endedAt: DateTime.now(),
+    );
+  }
+
+  void _updateCallMessage(
+    CallSession session, {
+    required String status,
+    DateTime? startedAt,
+    DateTime? endedAt,
+  }) {
+    final bareJid = _bareJid(session.peerBareJid);
+    final list = _messages[bareJid];
+    if (list == null) {
+      return;
+    }
+    final index = list.indexWhere((message) => message.callSid == session.sid);
+    if (index == -1) {
+      return;
+    }
+    list[index] = list[index].copyWith(
+      callStatus: status,
+      callStartedAt: startedAt,
+      callEndedAt: endedAt,
+    );
+    _messagePersistor?.call(bareJid, List.unmodifiable(list));
   }
 
   CallSession? callSessionBySid(String sid) {
@@ -4697,13 +4966,17 @@ class XmppService extends ChangeNotifier {
     }
   }
 
-  void _sendJmiMessage(Jid to, XmppElement child) {
+  void _sendJmiMessage(Jid to, XmppElement child, {String? fallbackBody}) {
     final message = MessageStanza(
       AbstractStanza.getRandomId(),
       MessageStanzaType.CHAT,
     );
     message.toJid = to;
     message.fromJid = _connection?.fullJid;
+    if (fallbackBody != null && fallbackBody.isNotEmpty) {
+      message.body = fallbackBody;
+      message.addChild(buildJmiFallbackElement(fallbackBody));
+    }
     message.addChild(child);
     _connection?.writeStanza(message);
   }
@@ -4720,6 +4993,10 @@ class XmppService extends ChangeNotifier {
     _sendJmiMessage(
       to,
       buildJmiProposeElement(sid: sid, descriptions: descriptions),
+      fallbackBody:
+          descriptions.any((description) => description.media == 'video')
+          ? 'Incoming video call'
+          : 'Incoming voice call',
     );
   }
 
@@ -5013,6 +5290,11 @@ class XmppService extends ChangeNotifier {
           _callRemoteStreamBySid[sid] = incomingStream;
         }
         notifyListeners();
+      } else {
+        // Unified Plan peers are allowed to deliver a track without an
+        // associated MediaStream. Linux does this for some negotiated calls,
+        // so assemble a renderer-compatible stream instead of dropping it.
+        unawaited(_attachStreamlessRemoteTrack(sid, event.track));
       }
     };
     pc.onSignalingState = (state) {
@@ -5052,6 +5334,25 @@ class XmppService extends ChangeNotifier {
       );
     };
     return pc;
+  }
+
+  Future<void> _attachStreamlessRemoteTrack(
+    String sid,
+    MediaStreamTrack track,
+  ) async {
+    var stream = _callRemoteStreamBySid[sid];
+    if (stream == null) {
+      stream = await createLocalMediaStream('remote-$sid');
+      if (!_callPeerConnections.containsKey(sid)) {
+        await stream.dispose();
+        return;
+      }
+      _callRemoteStreamBySid[sid] = stream;
+    }
+    if (!stream.getTracks().any((existing) => existing.id == track.id)) {
+      await stream.addTrack(track);
+    }
+    notifyListeners();
   }
 
   void _queueIceCandidate(String sid, RTCIceCandidate candidate) {
@@ -5261,12 +5562,10 @@ class XmppService extends ChangeNotifier {
   String? _selectJinglePeerFullJid(String bareJid) {
     final currentFullJid = _connection?.fullJid.fullJid;
     final selectingSiblingResource =
-        _currentUserBareJid != null &&
-        _bareJid(bareJid) == _currentUserBareJid;
+        _currentUserBareJid != null && _bareJid(bareJid) == _currentUserBareJid;
     final candidates = _onlineFullJidsForBare(bareJid)
         .where(
-          (fullJid) =>
-              !selectingSiblingResource || fullJid != currentFullJid,
+          (fullJid) => !selectingSiblingResource || fullJid != currentFullJid,
         )
         .toList(growable: false);
     if (candidates.isEmpty) {
@@ -5422,7 +5721,9 @@ class XmppService extends ChangeNotifier {
   void _applyMessageIntents(MessageStanza stanza, List<MessageIntent> intents) {
     for (final intent in intents) {
       if (intent is HandleJmiIntent) {
-        _handleJmiMessage(stanza, intent.action);
+        if (!intent.archived) {
+          _handleJmiMessage(stanza, intent.action);
+        }
       } else if (intent is ApplyReceiptIntent) {
         _applyReceipt(intent.scopedId.scopeJid, intent.scopedId.id);
       } else if (intent is ApplyDisplayedIntent) {

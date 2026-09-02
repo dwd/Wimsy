@@ -26,6 +26,11 @@ class ChatMessage {
     this.replyToId,
     this.replyToJid,
     this.replyFallback,
+    this.callSid,
+    this.callVideo = false,
+    this.callStatus,
+    this.callStartedAt,
+    this.callEndedAt,
     this.acked = false,
     this.receiptReceived = false,
     this.displayed = false,
@@ -60,6 +65,11 @@ class ChatMessage {
   final String? replyToId;
   final String? replyToJid;
   final String? replyFallback;
+  final String? callSid;
+  final bool? callVideo;
+  final String? callStatus;
+  final DateTime? callStartedAt;
+  final DateTime? callEndedAt;
   final bool acked;
   final bool receiptReceived;
   final bool displayed;
@@ -101,6 +111,11 @@ class ChatMessage {
     Object? replyToId = _absent,
     Object? replyToJid = _absent,
     Object? replyFallback = _absent,
+    Object? callSid = _absent,
+    Object? callVideo = _absent,
+    Object? callStatus = _absent,
+    Object? callStartedAt = _absent,
+    Object? callEndedAt = _absent,
     bool? acked,
     bool? receiptReceived,
     bool? displayed,
@@ -141,9 +156,7 @@ class ChatMessage {
       fileName: identical(fileName, _absent)
           ? this.fileName
           : fileName as String?,
-      fileSize: identical(fileSize, _absent)
-          ? this.fileSize
-          : fileSize as int?,
+      fileSize: identical(fileSize, _absent) ? this.fileSize : fileSize as int?,
       fileMime: identical(fileMime, _absent)
           ? this.fileMime
           : fileMime as String?,
@@ -169,6 +182,19 @@ class ChatMessage {
       replyFallback: identical(replyFallback, _absent)
           ? this.replyFallback
           : replyFallback as String?,
+      callSid: identical(callSid, _absent) ? this.callSid : callSid as String?,
+      callVideo: identical(callVideo, _absent)
+          ? this.callVideo
+          : callVideo as bool?,
+      callStatus: identical(callStatus, _absent)
+          ? this.callStatus
+          : callStatus as String?,
+      callStartedAt: identical(callStartedAt, _absent)
+          ? this.callStartedAt
+          : callStartedAt as DateTime?,
+      callEndedAt: identical(callEndedAt, _absent)
+          ? this.callEndedAt
+          : callEndedAt as DateTime?,
       acked: acked ?? this.acked,
       receiptReceived: receiptReceived ?? this.receiptReceived,
       displayed: displayed ?? this.displayed,
@@ -206,6 +232,11 @@ class ChatMessage {
       'replyToId': replyToId,
       'replyToJid': replyToJid,
       'replyFallback': replyFallback,
+      'callSid': callSid,
+      'callVideo': callVideo ?? false,
+      'callStatus': callStatus,
+      'callStartedAt': callStartedAt?.toIso8601String(),
+      'callEndedAt': callEndedAt?.toIso8601String(),
       'acked': acked,
       'receiptReceived': receiptReceived,
       'displayed': displayed,
@@ -245,6 +276,13 @@ class ChatMessage {
     final replyToId = map['replyToId']?.toString();
     final replyToJid = map['replyToJid']?.toString();
     final replyFallback = map['replyFallback']?.toString();
+    final callSid = map['callSid']?.toString();
+    final callVideo = map['callVideo'] == true;
+    final callStatus = map['callStatus']?.toString();
+    final callStartedAt = DateTime.tryParse(
+      map['callStartedAt']?.toString() ?? '',
+    );
+    final callEndedAt = DateTime.tryParse(map['callEndedAt']?.toString() ?? '');
     final acked = map['acked'] == true;
     // Older cache records predate persisted tick state. An outgoing message
     // restored without that state is necessarily historical, so treat it as
@@ -308,6 +346,11 @@ class ChatMessage {
       replyToId: replyToId,
       replyToJid: replyToJid,
       replyFallback: replyFallback,
+      callSid: callSid,
+      callVideo: callVideo,
+      callStatus: callStatus,
+      callStartedAt: callStartedAt,
+      callEndedAt: callEndedAt,
       acked: acked,
       receiptReceived: receiptReceived,
       displayed: displayed,

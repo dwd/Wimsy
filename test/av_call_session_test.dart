@@ -17,4 +17,13 @@ void main() {
     expect(session.video, isFalse);
     expect(session.state, CallState.ringing);
   });
+
+  test('formatCallDuration uses compact clock notation', () {
+    expect(formatCallDuration(const Duration(seconds: 9)), '0:09');
+    expect(formatCallDuration(const Duration(minutes: 2, seconds: 3)), '2:03');
+    expect(
+      formatCallDuration(const Duration(hours: 1, minutes: 2, seconds: 3)),
+      '1:02:03',
+    );
+  });
 }

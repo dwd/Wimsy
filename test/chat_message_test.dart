@@ -26,6 +26,11 @@ void main() {
       replyToId: 'orig-1',
       replyToJid: 'alice@example.com',
       replyFallback: '> hello',
+      callSid: 'call-1',
+      callVideo: true,
+      callStatus: 'finished',
+      callStartedAt: DateTime.parse('2024-08-09T10:11:30Z'),
+      callEndedAt: DateTime.parse('2024-08-09T10:12:30Z'),
     );
 
     final roundtrip = ChatMessage.fromMap(message.toMap());
@@ -48,6 +53,11 @@ void main() {
     expect(roundtrip.replyToId, 'orig-1');
     expect(roundtrip.replyToJid, 'alice@example.com');
     expect(roundtrip.replyFallback, '> hello');
+    expect(roundtrip.callSid, 'call-1');
+    expect(roundtrip.callVideo, isTrue);
+    expect(roundtrip.callStatus, 'finished');
+    expect(roundtrip.callStartedAt, DateTime.parse('2024-08-09T10:11:30Z'));
+    expect(roundtrip.callEndedAt, DateTime.parse('2024-08-09T10:12:30Z'));
   });
 
   test('ChatMessage persists outgoing tick state', () {
@@ -127,7 +137,9 @@ void main() {
       fileState: 'in_progress',
       edited: false,
       editedAt: null,
-      reactions: const {'👍': ['alice@example.com']},
+      reactions: const {
+        '👍': ['alice@example.com'],
+      },
       replyToId: 'orig-1',
       replyToJid: 'alice@example.com',
       replyFallback: '> hello',
@@ -230,54 +242,56 @@ void main() {
       expect(copy.fileBytes, 1024);
     });
 
-    test('clears nullable fields to null via explicit null (sentinel pattern)',
-        () {
-      final copy = base.copyWith(
-        messageId: null,
-        mamId: null,
-        stanzaId: null,
-        oobUrl: null,
-        oobDescription: null,
-        rawXml: null,
-        inviteRoomJid: null,
-        inviteReason: null,
-        invitePassword: null,
-        fileTransferId: null,
-        fileName: null,
-        fileSize: null,
-        fileMime: null,
-        fileBytes: null,
-        fileState: null,
-        editedAt: null,
-        reactions: null,
-        replyToId: null,
-        replyToJid: null,
-        replyFallback: null,
-      );
-      expect(copy.messageId, isNull);
-      expect(copy.mamId, isNull);
-      expect(copy.stanzaId, isNull);
-      expect(copy.oobUrl, isNull);
-      expect(copy.oobDescription, isNull);
-      expect(copy.rawXml, isNull);
-      expect(copy.inviteRoomJid, isNull);
-      expect(copy.inviteReason, isNull);
-      expect(copy.invitePassword, isNull);
-      expect(copy.fileTransferId, isNull);
-      expect(copy.fileName, isNull);
-      expect(copy.fileSize, isNull);
-      expect(copy.fileMime, isNull);
-      expect(copy.fileBytes, isNull);
-      expect(copy.fileState, isNull);
-      expect(copy.editedAt, isNull);
-      expect(copy.reactions, isNull);
-      expect(copy.replyToId, isNull);
-      expect(copy.replyToJid, isNull);
-      expect(copy.replyFallback, isNull);
-      // Non-nullable fields must be unchanged.
-      expect(copy.from, base.from);
-      expect(copy.body, base.body);
-    });
+    test(
+      'clears nullable fields to null via explicit null (sentinel pattern)',
+      () {
+        final copy = base.copyWith(
+          messageId: null,
+          mamId: null,
+          stanzaId: null,
+          oobUrl: null,
+          oobDescription: null,
+          rawXml: null,
+          inviteRoomJid: null,
+          inviteReason: null,
+          invitePassword: null,
+          fileTransferId: null,
+          fileName: null,
+          fileSize: null,
+          fileMime: null,
+          fileBytes: null,
+          fileState: null,
+          editedAt: null,
+          reactions: null,
+          replyToId: null,
+          replyToJid: null,
+          replyFallback: null,
+        );
+        expect(copy.messageId, isNull);
+        expect(copy.mamId, isNull);
+        expect(copy.stanzaId, isNull);
+        expect(copy.oobUrl, isNull);
+        expect(copy.oobDescription, isNull);
+        expect(copy.rawXml, isNull);
+        expect(copy.inviteRoomJid, isNull);
+        expect(copy.inviteReason, isNull);
+        expect(copy.invitePassword, isNull);
+        expect(copy.fileTransferId, isNull);
+        expect(copy.fileName, isNull);
+        expect(copy.fileSize, isNull);
+        expect(copy.fileMime, isNull);
+        expect(copy.fileBytes, isNull);
+        expect(copy.fileState, isNull);
+        expect(copy.editedAt, isNull);
+        expect(copy.reactions, isNull);
+        expect(copy.replyToId, isNull);
+        expect(copy.replyToJid, isNull);
+        expect(copy.replyFallback, isNull);
+        // Non-nullable fields must be unchanged.
+        expect(copy.from, base.from);
+        expect(copy.body, base.body);
+      },
+    );
 
     test('updates reactions map independently', () {
       final newReactions = {
@@ -287,7 +301,9 @@ void main() {
       final copy = base.copyWith(reactions: newReactions);
       expect(copy.reactions, newReactions);
       // Original must be unaffected.
-      expect(base.reactions, const {'👍': ['alice@example.com']});
+      expect(base.reactions, const {
+        '👍': ['alice@example.com'],
+      });
     });
 
     test('sets editedAt when marking a message as edited', () {
@@ -327,8 +343,11 @@ void main() {
         'room@conference.example.com',
         'a@b',
       ]) {
-        expect(notifId(jid), isNonNegative,
-            reason: 'ID for $jid must be non-negative');
+        expect(
+          notifId(jid),
+          isNonNegative,
+          reason: 'ID for $jid must be non-negative',
+        );
       }
     });
 
@@ -338,8 +357,11 @@ void main() {
         'bob@xmpp.org',
         'room@conference.example.com',
       ]) {
-        expect(notifId(jid), lessThan(1 << 31),
-            reason: 'ID for $jid must be < 2^31');
+        expect(
+          notifId(jid),
+          lessThan(1 << 31),
+          reason: 'ID for $jid must be < 2^31',
+        );
       }
     });
 

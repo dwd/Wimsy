@@ -74,6 +74,44 @@ void main() {
     expect(responses.first.type, IqStanzaType.RESULT);
   });
 
+  test('Jingle content-modify parses changed senders', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account)..socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+    final completer = Completer<JingleSessionEvent>();
+    manager.sessionStream.listen(completer.complete);
+
+    final iq = '<iq type="set" id="modify1" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="content-modify" sid="sidModify">'
+        '<content creator="initiator" name="video" senders="responder"/>'
+        '</jingle></iq>';
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final event = await completer.future.timeout(const Duration(seconds: 1));
+    expect(event.action, JingleAction.contentModify);
+    expect(event.content?.name, 'video');
+    expect(event.content?.senders, 'responder');
+  });
+
+  test('Jingle manager builds content-modify senders', () {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account)..socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+
+    final stanza = manager.buildContentModify(
+      to: account.fullJid,
+      sid: 'sidModify',
+      content: const JingleContent(
+        name: 'video',
+        creator: 'initiator',
+        senders: 'initiator',
+      ),
+    );
+
+    final content = stanza.getChild('jingle')?.getChild('content');
+    expect(content?.getAttribute('senders')?.value, 'initiator');
+  });
+
   test('Jingle session-initiate parses RTP description', () async {
     final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
     final connection = Connection(account);

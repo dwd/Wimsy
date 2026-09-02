@@ -45,9 +45,10 @@ abstract class MessageIntent {
 }
 
 class HandleJmiIntent extends MessageIntent {
-  const HandleJmiIntent({required this.action});
+  const HandleJmiIntent({required this.action, required this.archived});
 
   final JmiAction action;
+  final bool archived;
 }
 
 class ApplyReceiptIntent extends MessageIntent {
@@ -171,7 +172,9 @@ class MessageIntentBuilder {
     }
     final jmiAction = parseJmiAction(stanza);
     if (jmiAction != null) {
-      return [HandleJmiIntent(action: jmiAction)];
+      return [
+        HandleJmiIntent(action: jmiAction, archived: isArchivedStanza(stanza)),
+      ];
     }
     final receiptId = extractReceiptsId(stanza);
     if (receiptId != null) {

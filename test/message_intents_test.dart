@@ -119,6 +119,7 @@ void main() {
     expect(intents.first, isA<HandleJmiIntent>());
     final intent = intents.first as HandleJmiIntent;
     expect(intent.action, JmiAction.proceed);
+    expect(intent.archived, isFalse);
   });
 
   test('buildMessageIntents applies displayed marker intent', () {
