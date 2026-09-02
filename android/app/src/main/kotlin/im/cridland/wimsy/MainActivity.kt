@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -16,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private val channelName = "wimsy/dns"
     private val loginLinkChannelName = "wimsy/login_link"
     private val displayMetricsChannelName = "wimsy/display_metrics"
+    private val callWindowChannelName = "wimsy/call_window"
     private var loginLinkChannel: MethodChannel? = null
     private var pendingLoginLink: String? = null
 
@@ -50,6 +52,40 @@ class MainActivity : FlutterActivity() {
                 val physicalWidthInches = metrics.widthPixels.toDouble() / metrics.xdpi.toDouble()
                 val physicalHeightInches = metrics.heightPixels.toDouble() / metrics.ydpi.toDouble()
                 result.success(min(physicalWidthInches, physicalHeightInches))
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            callWindowChannelName
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "setCallActive") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val active = call.argument<Boolean>("active") == true
+            runOnUiThread {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    setShowWhenLocked(active)
+                    setTurnScreenOn(active)
+                } else if (active) {
+                    @Suppress("DEPRECATION")
+                    window.addFlags(
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    window.clearFlags(
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    )
+                }
+                if (active) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                result.success(null)
             }
         }
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)

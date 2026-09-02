@@ -434,6 +434,11 @@ class XmppService extends ChangeNotifier {
     return _callSessions[key];
   }
 
+  bool get hasOngoingCall => _callSessions.values.any(
+    (session) =>
+        session.state == CallState.ringing || session.state == CallState.active,
+  );
+
   MediaStream? callLocalStreamFor(String bareJid) {
     final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
     if (key == null) {

@@ -127,6 +127,9 @@ String windowTitleFor(String? bareJid) {
 }
 
 class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
+  static const MethodChannel _callWindowChannel = MethodChannel(
+    'wimsy/call_window',
+  );
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final XmppService _service = XmppService();
   final StorageService _storage = StorageService();
@@ -140,6 +143,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   WebUpdateMonitor? _webUpdateMonitor;
   final ValueNotifier<LoginLinkValues?> _loginLink = ValueNotifier(null);
   AndroidLoginLinkReceiver? _loginLinkReceiver;
+  bool _androidCallWindowActive = false;
 
   @override
   void initState() {
@@ -148,6 +152,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     _syncConnectionLogCapture();
     WidgetsBinding.instance.addObserver(this);
     _service.addListener(_updateWindowTitle);
+    _service.addListener(_syncAndroidCallWindow);
     if (!_isFlutterTest) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _notifications.initialize(onEvent: _handleNotificationEvent);
@@ -231,6 +236,14 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _service.removeListener(_updateWindowTitle);
     _service.removeListener(_syncConnectionLogCapture);
+    _service.removeListener(_syncAndroidCallWindow);
+    if (_androidCallWindowActive && !kIsWeb && Platform.isAndroid) {
+      unawaited(
+        _callWindowChannel.invokeMethod<void>('setCallActive', {
+          'active': false,
+        }),
+      );
+    }
     _connectionLogStore.stopCapture();
     _connectivitySubscription?.cancel();
     _service.setIncomingMessageHandler(null);
@@ -248,6 +261,22 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       return;
     }
     setState(() => _titleBareJid = bareJid);
+  }
+
+  void _syncAndroidCallWindow() {
+    if (kIsWeb || !Platform.isAndroid) {
+      return;
+    }
+    final active = _service.hasOngoingCall;
+    if (active == _androidCallWindowActive) {
+      return;
+    }
+    _androidCallWindowActive = active;
+    unawaited(
+      _callWindowChannel.invokeMethod<void>('setCallActive', {
+        'active': active,
+      }),
+    );
   }
 
   @override
