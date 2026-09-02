@@ -21,12 +21,11 @@ JingleSdpMapping mapSdpToJingle({
   final desiredMedia = mediaKind == CallMediaKind.video ? 'video' : 'audio';
   final selected = parsed.sections.firstWhere(
     (section) => section.media == desiredMedia,
-    orElse: () => parsed.sections.isNotEmpty ? parsed.sections.first : _SdpSection.empty(),
+    orElse: () => parsed.sections.isNotEmpty
+        ? parsed.sections.first
+        : _SdpSection.empty(),
   );
-  final targetLines = <String>[
-    ...parsed.sessionLines,
-    ...selected.lines,
-  ];
+  final targetLines = <String>[...parsed.sessionLines, ...selected.lines];
 
   String? ufrag;
   String? pwd;
@@ -88,8 +87,12 @@ JingleSdpMapping mapSdpToJingle({
         continue;
       }
       final name = codecParts[0];
-      final clockRate = codecParts.length > 1 ? int.tryParse(codecParts[1]) : null;
-      final channels = codecParts.length > 2 ? int.tryParse(codecParts[2]) : null;
+      final clockRate = codecParts.length > 1
+          ? int.tryParse(codecParts[1])
+          : null;
+      final channels = codecParts.length > 2
+          ? int.tryParse(codecParts[2])
+          : null;
       payloadTypes[id] = JingleRtpPayloadType(
         id: id,
         name: name,
@@ -113,9 +116,7 @@ JingleSdpMapping mapSdpToJingle({
       final params = rest.substring(spaceIndex + 1);
       final pairs = params.split(';');
       final current = payloadTypes[id];
-      final parameters = <String, String>{
-        ...?current?.parameters,
-      };
+      final parameters = <String, String>{...?current?.parameters};
       for (final pair in pairs) {
         final trimmed = pair.trim();
         if (trimmed.isEmpty) {
@@ -142,10 +143,7 @@ JingleSdpMapping mapSdpToJingle({
           parameters: parameters,
         );
       } else {
-        payloadTypes[id] = JingleRtpPayloadType(
-          id: id,
-          parameters: parameters,
-        );
+        payloadTypes[id] = JingleRtpPayloadType(id: id, parameters: parameters);
       }
       continue;
     }
@@ -155,10 +153,7 @@ JingleSdpMapping mapSdpToJingle({
       if (parts.length >= 2) {
         final type = parts[1];
         final subtype = parts.length > 2 ? parts[2] : null;
-        feedback.add(JingleRtpFeedback(
-          type: type,
-          subtype: subtype,
-        ));
+        feedback.add(JingleRtpFeedback(type: type, subtype: subtype));
       }
       continue;
     }
@@ -193,9 +188,7 @@ JingleSdpMapping mapSdpToJingle({
       final name = parts.first.trim();
       final value = parts.length > 1 ? parts.sublist(1).join(':').trim() : '';
       final existing = sources[ssrc];
-      final parameters = <String, String>{
-        ...?existing?.parameters,
-      };
+      final parameters = <String, String>{...?existing?.parameters};
       if (name.isNotEmpty) {
         parameters[name] = value;
       }
@@ -217,10 +210,9 @@ JingleSdpMapping mapSdpToJingle({
         }
       }
       if (semantics.isNotEmpty && ssrcs.isNotEmpty) {
-        sourceGroups.add(JingleRtpSourceGroup(
-          semantics: semantics,
-          sources: ssrcs,
-        ));
+        sourceGroups.add(
+          JingleRtpSourceGroup(semantics: semantics, sources: ssrcs),
+        );
       }
     }
   }
@@ -249,13 +241,15 @@ JingleSdpMapping mapSdpToJingle({
     sourceGroups: sourceGroups,
   );
   final fingerprint =
-      (fingerprintHash != null && fingerprintValue != null && fingerprintValue.isNotEmpty)
-          ? JingleDtlsFingerprint(
-              hash: fingerprintHash,
-              fingerprint: fingerprintValue,
-              setup: setup,
-            )
-          : null;
+      (fingerprintHash != null &&
+          fingerprintValue != null &&
+          fingerprintValue.isNotEmpty)
+      ? JingleDtlsFingerprint(
+          hash: fingerprintHash,
+          fingerprint: fingerprintValue,
+          setup: setup,
+        )
+      : null;
   final transport = JingleIceTransport(
     ufrag: ufrag ?? '',
     password: pwd ?? '',
@@ -279,14 +273,8 @@ List<JingleSdpMapping> mapSdpToJingleContents({required String sdp}) {
     if (section.media != 'audio' && section.media != 'video') {
       continue;
     }
-    final targetLines = <String>[
-      ...parsed.sessionLines,
-      ...section.lines,
-    ];
-    final mapping = _mapLinesToJingle(
-      lines: targetLines,
-      media: section.media,
-    );
+    final targetLines = <String>[...parsed.sessionLines, ...section.lines];
+    final mapping = _mapLinesToJingle(lines: targetLines, media: section.media);
     if (mapping != null) {
       mappings.add(mapping);
     }
@@ -304,11 +292,13 @@ String buildMinimalSdpFromJingle({
   buffer.writeln('o=- 0 0 IN IP4 127.0.0.1');
   buffer.writeln('s=-');
   buffer.writeln('t=0 0');
-  buffer.write(_buildSdpSection(
-    description: description,
-    transport: transport,
-    contentName: contentName ?? description.media,
-  ));
+  buffer.write(
+    _buildSdpSection(
+      description: description,
+      transport: transport,
+      contentName: contentName ?? description.media,
+    ),
+  );
   return buffer.toString();
 }
 
@@ -321,10 +311,13 @@ String buildMinimalSdpFromJingleContents({
   buffer.writeln('o=- 0 0 IN IP4 127.0.0.1');
   buffer.writeln('s=-');
   buffer.writeln('t=0 0');
-  if (bundle && contents.length > 1) {
+  if (bundle) {
     final bundle = contents
-        .map((content) =>
-            content.name.isEmpty ? content.rtpDescription?.media ?? '' : content.name)
+        .map(
+          (content) => content.name.isEmpty
+              ? content.rtpDescription?.media ?? ''
+              : content.name,
+        )
         .where((name) => name.isNotEmpty)
         .join(' ');
     if (bundle.isNotEmpty) {
@@ -337,11 +330,13 @@ String buildMinimalSdpFromJingleContents({
     if (description == null || transport == null) {
       continue;
     }
-    buffer.write(_buildSdpSection(
-      description: description,
-      transport: transport,
-      contentName: content.name.isEmpty ? description.media : content.name,
-    ));
+    buffer.write(
+      _buildSdpSection(
+        description: description,
+        transport: transport,
+        contentName: content.name.isEmpty ? description.media : content.name,
+      ),
+    );
   }
   return buffer.toString();
 }
@@ -352,8 +347,10 @@ String _buildSdpSection({
   required String contentName,
 }) {
   final buffer = StringBuffer();
-  buffer.writeln('m=${description.media} 9 UDP/TLS/RTP/SAVPF '
-      '${description.payloadTypes.map((p) => p.id).join(' ')}');
+  buffer.writeln(
+    'm=${description.media} 9 UDP/TLS/RTP/SAVPF '
+    '${description.payloadTypes.map((p) => p.id).join(' ')}',
+  );
   buffer.writeln('c=IN IP4 0.0.0.0');
   if (transport.ufrag.isNotEmpty) {
     buffer.writeln('a=ice-ufrag:${transport.ufrag}');
@@ -390,7 +387,10 @@ String _buildSdpSection({
     buffer.writeln('a=rtpmap:${payload.id} $name/$clock$channelSuffix');
     if (payload.parameters.isNotEmpty) {
       final params = payload.parameters.entries
-          .map((entry) => entry.value.isEmpty ? entry.key : '${entry.key}=${entry.value}')
+          .map(
+            (entry) =>
+                entry.value.isEmpty ? entry.key : '${entry.key}=${entry.value}',
+          )
           .join(';');
       buffer.writeln('a=fmtp:${payload.id} $params');
     }
@@ -398,7 +398,8 @@ String _buildSdpSection({
   for (final fb in description.rtcpFeedback) {
     final subtype = fb.subtype;
     buffer.writeln(
-        'a=rtcp-fb:* ${fb.type}${subtype == null || subtype.isEmpty ? '' : ' $subtype'}');
+      'a=rtcp-fb:* ${fb.type}${subtype == null || subtype.isEmpty ? '' : ' $subtype'}',
+    );
   }
   for (final ext in description.headerExtensions) {
     buffer.writeln('a=extmap:${ext.id} ${ext.uri}');
@@ -409,7 +410,9 @@ String _buildSdpSection({
     }
   }
   for (final group in description.sourceGroups) {
-    buffer.writeln('a=ssrc-group:${group.semantics} ${group.sources.join(' ')}');
+    buffer.writeln(
+      'a=ssrc-group:${group.semantics} ${group.sources.join(' ')}',
+    );
   }
   return buffer.toString();
 }
@@ -515,8 +518,12 @@ JingleSdpMapping? _mapLinesToJingle({
         continue;
       }
       final name = codecParts[0];
-      final clockRate = codecParts.length > 1 ? int.tryParse(codecParts[1]) : null;
-      final channels = codecParts.length > 2 ? int.tryParse(codecParts[2]) : null;
+      final clockRate = codecParts.length > 1
+          ? int.tryParse(codecParts[1])
+          : null;
+      final channels = codecParts.length > 2
+          ? int.tryParse(codecParts[2])
+          : null;
       payloadTypes[id] = JingleRtpPayloadType(
         id: id,
         name: name,
@@ -540,9 +547,7 @@ JingleSdpMapping? _mapLinesToJingle({
       final params = rest.substring(spaceIndex + 1);
       final pairs = params.split(';');
       final current = payloadTypes[id];
-      final parameters = <String, String>{
-        ...?current?.parameters,
-      };
+      final parameters = <String, String>{...?current?.parameters};
       for (final pair in pairs) {
         final trimmed = pair.trim();
         if (trimmed.isEmpty) {
@@ -569,10 +574,7 @@ JingleSdpMapping? _mapLinesToJingle({
           parameters: parameters,
         );
       } else {
-        payloadTypes[id] = JingleRtpPayloadType(
-          id: id,
-          parameters: parameters,
-        );
+        payloadTypes[id] = JingleRtpPayloadType(id: id, parameters: parameters);
       }
       continue;
     }
@@ -582,10 +584,7 @@ JingleSdpMapping? _mapLinesToJingle({
       if (parts.length >= 2) {
         final type = parts[1];
         final subtype = parts.length > 2 ? parts[2] : null;
-        feedback.add(JingleRtpFeedback(
-          type: type,
-          subtype: subtype,
-        ));
+        feedback.add(JingleRtpFeedback(type: type, subtype: subtype));
       }
       continue;
     }
@@ -620,9 +619,7 @@ JingleSdpMapping? _mapLinesToJingle({
       final name = parts.first.trim();
       final value = parts.length > 1 ? parts.sublist(1).join(':').trim() : '';
       final existing = sources[ssrc];
-      final parameters = <String, String>{
-        ...?existing?.parameters,
-      };
+      final parameters = <String, String>{...?existing?.parameters};
       if (name.isNotEmpty) {
         parameters[name] = value;
       }
@@ -644,10 +641,9 @@ JingleSdpMapping? _mapLinesToJingle({
         }
       }
       if (semantics.isNotEmpty && ssrcs.isNotEmpty) {
-        sourceGroups.add(JingleRtpSourceGroup(
-          semantics: semantics,
-          sources: ssrcs,
-        ));
+        sourceGroups.add(
+          JingleRtpSourceGroup(semantics: semantics, sources: ssrcs),
+        );
       }
     }
   }
@@ -680,13 +676,15 @@ JingleSdpMapping? _mapLinesToJingle({
     sourceGroups: sourceGroups,
   );
   final fingerprint =
-      (fingerprintHash != null && fingerprintValue != null && fingerprintValue.isNotEmpty)
-          ? JingleDtlsFingerprint(
-              hash: fingerprintHash,
-              fingerprint: fingerprintValue,
-              setup: setup,
-            )
-          : null;
+      (fingerprintHash != null &&
+          fingerprintValue != null &&
+          fingerprintValue.isNotEmpty)
+      ? JingleDtlsFingerprint(
+          hash: fingerprintHash,
+          fingerprint: fingerprintValue,
+          setup: setup,
+        )
+      : null;
   final transport = JingleIceTransport(
     ufrag: ufrag ?? '',
     password: pwd ?? '',

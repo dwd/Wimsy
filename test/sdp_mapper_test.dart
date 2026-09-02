@@ -5,7 +5,8 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 void main() {
   test('mapSdpToJingle extracts ICE and payloads', () {
-    const sdp = 'v=0\n'
+    const sdp =
+        'v=0\n'
         'o=- 0 0 IN IP4 127.0.0.1\n'
         's=-\n'
         't=0 0\n'
@@ -21,10 +22,7 @@ void main() {
         'a=ssrc:1234 cname:abcd\n'
         'a=ssrc-group:FID 1234 5678\n';
 
-    final mapping = mapSdpToJingle(
-      sdp: sdp,
-      mediaKind: CallMediaKind.audio,
-    );
+    final mapping = mapSdpToJingle(sdp: sdp, mediaKind: CallMediaKind.audio);
 
     expect(mapping.transport.ufrag, 'ufrag');
     expect(mapping.transport.password, 'pwd');
@@ -52,9 +50,7 @@ void main() {
             parameters: {'minptime': '10'},
           ),
         ],
-        rtcpFeedback: [
-          JingleRtpFeedback(type: 'nack', subtype: 'pli'),
-        ],
+        rtcpFeedback: [JingleRtpFeedback(type: 'nack', subtype: 'pli')],
         headerExtensions: [
           JingleRtpHeaderExtension(
             id: 1,
@@ -80,13 +76,17 @@ void main() {
     expect(sdp, contains('a=fmtp:111 minptime=10'));
     expect(sdp, contains('a=rtcp-fb:* nack pli'));
     expect(sdp, contains('a=rtcp-mux'));
-    expect(sdp, contains('a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level'));
+    expect(
+      sdp,
+      contains('a=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level'),
+    );
     expect(sdp, contains('a=ssrc:1234 cname:abcd'));
     expect(sdp, contains('a=ssrc-group:FID 1234 5678'));
   });
 
   test('mapSdpToJingle selects media section and preserves msid', () {
-    const sdp = 'v=0\n'
+    const sdp =
+        'v=0\n'
         'o=- 0 0 IN IP4 127.0.0.1\n'
         's=-\n'
         't=0 0\n'
@@ -109,7 +109,10 @@ void main() {
     );
     expect(audioMapping.contentName, 'audio0');
     expect(audioMapping.description.payloadTypes.first.name, 'opus');
-    expect(audioMapping.description.sources.first.parameters['msid'], 'stream1 track1');
+    expect(
+      audioMapping.description.sources.first.parameters['msid'],
+      'stream1 track1',
+    );
 
     final videoMapping = mapSdpToJingle(
       sdp: sdp,
@@ -120,7 +123,8 @@ void main() {
   });
 
   test('mapSdpToJingle captures DTLS setup attribute', () {
-    const sdp = 'v=0\n'
+    const sdp =
+        'v=0\n'
         'o=- 0 0 IN IP4 127.0.0.1\n'
         's=-\n'
         't=0 0\n'
@@ -129,10 +133,7 @@ void main() {
         'm=audio 9 UDP/TLS/RTP/SAVPF 111\n'
         'a=rtpmap:111 opus/48000/2\n';
 
-    final mapping = mapSdpToJingle(
-      sdp: sdp,
-      mediaKind: CallMediaKind.audio,
-    );
+    final mapping = mapSdpToJingle(sdp: sdp, mediaKind: CallMediaKind.audio);
 
     expect(mapping.transport.fingerprint?.setup, 'actpass');
   });
@@ -142,7 +143,12 @@ void main() {
       description: const JingleRtpDescription(
         media: 'audio',
         payloadTypes: [
-          JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
+          JingleRtpPayloadType(
+            id: 111,
+            name: 'opus',
+            clockRate: 48000,
+            channels: 2,
+          ),
         ],
       ),
       transport: const JingleIceTransport(
@@ -162,38 +168,46 @@ void main() {
   });
 
   test('buildMinimalSdpFromJingleContents includes bundle and mids', () {
-    final sdp = buildMinimalSdpFromJingleContents(contents: const [
-      JingleContent(
-        name: 'audio0',
-        creator: 'initiator',
-        rtpDescription: JingleRtpDescription(
-          media: 'audio',
-          payloadTypes: [
-            JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
-          ],
+    final sdp = buildMinimalSdpFromJingleContents(
+      contents: const [
+        JingleContent(
+          name: 'audio0',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'audio',
+            payloadTypes: [
+              JingleRtpPayloadType(
+                id: 111,
+                name: 'opus',
+                clockRate: 48000,
+                channels: 2,
+              ),
+            ],
+          ),
+          iceTransport: JingleIceTransport(
+            ufrag: 'uf',
+            password: 'pw',
+            candidates: [],
+          ),
         ),
-        iceTransport: JingleIceTransport(
-          ufrag: 'uf',
-          password: 'pw',
-          candidates: [],
+        JingleContent(
+          name: 'video0',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'video',
+            payloadTypes: [
+              JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
+            ],
+          ),
+          iceTransport: JingleIceTransport(
+            ufrag: 'uf',
+            password: 'pw',
+            candidates: [],
+          ),
         ),
-      ),
-      JingleContent(
-        name: 'video0',
-        creator: 'initiator',
-        rtpDescription: JingleRtpDescription(
-          media: 'video',
-          payloadTypes: [
-            JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
-          ],
-        ),
-        iceTransport: JingleIceTransport(
-          ufrag: 'uf',
-          password: 'pw',
-          candidates: [],
-        ),
-      ),
-    ], bundle: true);
+      ],
+      bundle: true,
+    );
 
     expect(sdp, contains('a=group:BUNDLE audio0 video0'));
     expect(sdp, contains('a=mid:audio0'));
@@ -203,39 +217,73 @@ void main() {
     expect(sdp, contains('m=video 9 UDP/TLS/RTP/SAVPF 96'));
   });
 
+  test('buildMinimalSdpFromJingleContents keeps single-content bundle', () {
+    final sdp = buildMinimalSdpFromJingleContents(
+      contents: const [
+        JingleContent(
+          name: '0',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'audio',
+            payloadTypes: [
+              JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000),
+            ],
+          ),
+          iceTransport: JingleIceTransport(
+            ufrag: 'uf',
+            password: 'pw',
+            candidates: [],
+          ),
+        ),
+      ],
+      bundle: true,
+    );
+
+    expect(sdp, contains('a=group:BUNDLE 0'));
+    expect(sdp, contains('a=mid:0'));
+  });
+
   test('buildMinimalSdpFromJingleContents omits bundle when disabled', () {
-    final sdp = buildMinimalSdpFromJingleContents(contents: const [
-      JingleContent(
-        name: 'audio0',
-        creator: 'initiator',
-        rtpDescription: JingleRtpDescription(
-          media: 'audio',
-          payloadTypes: [
-            JingleRtpPayloadType(id: 111, name: 'opus', clockRate: 48000, channels: 2),
-          ],
+    final sdp = buildMinimalSdpFromJingleContents(
+      contents: const [
+        JingleContent(
+          name: 'audio0',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'audio',
+            payloadTypes: [
+              JingleRtpPayloadType(
+                id: 111,
+                name: 'opus',
+                clockRate: 48000,
+                channels: 2,
+              ),
+            ],
+          ),
+          iceTransport: JingleIceTransport(
+            ufrag: 'uf',
+            password: 'pw',
+            candidates: [],
+          ),
         ),
-        iceTransport: JingleIceTransport(
-          ufrag: 'uf',
-          password: 'pw',
-          candidates: [],
+        JingleContent(
+          name: 'video0',
+          creator: 'initiator',
+          rtpDescription: JingleRtpDescription(
+            media: 'video',
+            payloadTypes: [
+              JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
+            ],
+          ),
+          iceTransport: JingleIceTransport(
+            ufrag: 'uf',
+            password: 'pw',
+            candidates: [],
+          ),
         ),
-      ),
-      JingleContent(
-        name: 'video0',
-        creator: 'initiator',
-        rtpDescription: JingleRtpDescription(
-          media: 'video',
-          payloadTypes: [
-            JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
-          ],
-        ),
-        iceTransport: JingleIceTransport(
-          ufrag: 'uf',
-          password: 'pw',
-          candidates: [],
-        ),
-      ),
-    ], bundle: false);
+      ],
+      bundle: false,
+    );
 
     expect(sdp, isNot(contains('a=group:BUNDLE')));
   });
