@@ -64,6 +64,36 @@ IqStanza _searchResult(List<Map<String, String>> entries) {
   return iq;
 }
 
+IqStanza _searchForm({required bool dataForm}) {
+  final iq = IqStanza('id-form', IqStanzaType.RESULT);
+  final query = XmppElement()..name = 'query';
+  query.addAttribute(XmppAttribute('xmlns', jidSearchNamespace));
+  if (dataForm) {
+    final form = XmppElement()..name = 'x';
+    form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+    for (final name in const [
+      'FORM_TYPE',
+      'jid',
+      'nick',
+      'email',
+      'unsupported',
+    ]) {
+      form.addChild(
+        XmppElement()
+          ..name = 'field'
+          ..addAttribute(XmppAttribute('var', name)),
+      );
+    }
+    query.addChild(form);
+  } else {
+    for (final name in const ['first', 'last', 'email']) {
+      query.addChild(XmppElement()..name = name);
+    }
+  }
+  iq.addChild(query);
+  return iq;
+}
+
 void main() {
   test('classifies conference identity as room', () {
     final result = classifyJidFromDiscoInfo(
@@ -173,6 +203,50 @@ void main() {
     expect(results.single.jid, 'alice@example.com');
     expect(results.single.name, 'Alice Example');
     expect(results.single.kind, DiscoveredJidKind.person);
+  });
+
+  test('parses JID and display name from XEP-0055 data-form results', () {
+    final iq = IqStanza('id-data', IqStanzaType.RESULT);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', jidSearchNamespace));
+    final form = XmppElement()..name = 'x';
+    form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+    final item = XmppElement()..name = 'item';
+    for (final entry in const {
+      'jid': 'ada@example.com',
+      'fn': 'Ada Lovelace',
+    }.entries) {
+      final field = XmppElement()..name = 'field';
+      field.addAttribute(XmppAttribute('var', entry.key));
+      field.addChild(
+        XmppElement()
+          ..name = 'value'
+          ..textValue = entry.value,
+      );
+      item.addChild(field);
+    }
+    form.addChild(item);
+    query.addChild(form);
+    iq.addChild(query);
+
+    final results = parseJidSearchResults(iq);
+    expect(results.single.jid, 'ada@example.com');
+    expect(results.single.name, 'Ada Lovelace');
+  });
+
+  test('reads sensible legacy and data-form XEP-0055 search fields', () {
+    expect(parseJidSearchFields(_searchForm(dataForm: false)), {
+      'first',
+      'last',
+      'email',
+    });
+    expect(parseJidSearchFields(_searchForm(dataForm: true)), {
+      'jid',
+      'nick',
+      'email',
+    });
+    expect(hasJidSearchDataForm(_searchForm(dataForm: false)), isFalse);
+    expect(hasJidSearchDataForm(_searchForm(dataForm: true)), isTrue);
   });
 
   test('ignores duplicate and malformed XEP-0055 results', () {

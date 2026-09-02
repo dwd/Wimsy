@@ -60,6 +60,55 @@ const String _discoInfoNamespace = 'http://jabber.org/protocol/disco#info';
 const String _mucNamespace = 'http://jabber.org/protocol/muc';
 const String jidSearchNamespace = 'jabber:iq:search';
 
+/// Search fields which can reasonably identify a person in an XEP-0055
+/// directory, in order of usefulness.
+const List<String> sensibleJidSearchFields = [
+  'jid',
+  'nick',
+  'first',
+  'last',
+  'email',
+];
+
+/// Reads the fields advertised by either a legacy or data-form XEP-0055 form.
+Set<String> parseJidSearchFields(IqStanza? response) {
+  if (response == null || response.type != IqStanzaType.RESULT) return const {};
+  final query = response.getChild('query');
+  if (query?.getAttribute('xmlns')?.value != jidSearchNamespace) {
+    return const {};
+  }
+  final fields = <String>{};
+  for (final child in query!.children) {
+    final childName = child.name;
+    if (childName != null && sensibleJidSearchFields.contains(childName)) {
+      fields.add(childName);
+    }
+    if (child.name == 'x' &&
+        child.getAttribute('xmlns')?.value == 'jabber:x:data') {
+      for (final field in child.children.where(
+        (item) => item.name == 'field',
+      )) {
+        final name = field.getAttribute('var')?.value?.trim().toLowerCase();
+        if (name != null && sensibleJidSearchFields.contains(name)) {
+          fields.add(name);
+        }
+      }
+    }
+  }
+  return fields;
+}
+
+bool hasJidSearchDataForm(IqStanza? response) {
+  final query = response?.getChild('query');
+  return response?.type == IqStanzaType.RESULT &&
+      query?.getAttribute('xmlns')?.value == jidSearchNamespace &&
+      query!.children.any(
+        (child) =>
+            child.name == 'x' &&
+            child.getAttribute('xmlns')?.value == 'jabber:x:data',
+      );
+}
+
 List<JidSuggestion> parseJidSearchResults(IqStanza? response) {
   if (response == null || response.type != IqStanzaType.RESULT) {
     return const [];
@@ -70,14 +119,36 @@ List<JidSuggestion> parseJidSearchResults(IqStanza? response) {
   }
   final results = <JidSuggestion>[];
   final seen = <String>{};
-  for (final item in query!.children.where((child) => child.name == 'item')) {
-    final jid = item.getAttribute('jid')?.value?.trim() ?? '';
+  final legacyItems = query!.children.where((child) => child.name == 'item');
+  final dataFormItems = query.children
+      .where(
+        (child) =>
+            child.name == 'x' &&
+            child.getAttribute('xmlns')?.value == 'jabber:x:data',
+      )
+      .expand((form) => form.children.where((child) => child.name == 'item'));
+  for (final item in [...legacyItems, ...dataFormItems]) {
+    final values = <String, String>{};
+    for (final field in item.children.where((child) => child.name == 'field')) {
+      final key = field.getAttribute('var')?.value?.trim().toLowerCase();
+      final value = field.getChild('value')?.textValue?.trim();
+      if (key != null && value != null && value.isNotEmpty) values[key] = value;
+    }
+    final jid = (item.getAttribute('jid')?.value ?? values['jid'] ?? '').trim();
     if (jid.isEmpty || !seen.add(jid.toLowerCase())) {
       continue;
     }
     String? name;
-    for (final field in const ['nick', 'first', 'last']) {
-      final value = item.getChild(field)?.textValue?.trim();
+    for (final field in const [
+      'nick',
+      'nickname',
+      'first',
+      'given',
+      'last',
+      'family',
+      'fn',
+    ]) {
+      final value = item.getChild(field)?.textValue?.trim() ?? values[field];
       if (value != null && value.isNotEmpty) {
         name = name == null ? value : '$name $value';
       }

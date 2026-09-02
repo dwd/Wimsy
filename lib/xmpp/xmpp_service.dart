@@ -6360,14 +6360,77 @@ class XmppService extends ChangeNotifier {
     String searchService,
     String term,
   ) async {
+    final formIq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.GET)
+      ..toJid = Jid.fromFullJid(searchService);
+    formIq.addChild(
+      XmppElement()
+        ..name = 'query'
+        ..addAttribute(XmppAttribute('xmlns', jidSearchNamespace)),
+    );
+    final form = await _sendIqAndAwait(formIq);
+    final advertised = parseJidSearchFields(form);
+    final useDataForm = hasJidSearchDataForm(form);
+    // Nick is the most widely implemented legacy field, so retain it as a
+    // fallback for directories which do not return a usable search form.
+    final fields = advertised.isEmpty
+        ? const <String>['nick']
+        : sensibleJidSearchFields.where(advertised.contains).toList();
+    final resultLists = await Future.wait(
+      fields.map(
+        (field) => _requestJidSearchField(
+          searchService,
+          field,
+          term,
+          useDataForm: useDataForm,
+        ),
+      ),
+    );
+    final seen = <String>{};
+    return [
+      for (final result in resultLists.expand((items) => items))
+        if (seen.add(result.jid.toLowerCase())) result,
+    ];
+  }
+
+  Future<List<JidSuggestion>> _requestJidSearchField(
+    String searchService,
+    String field,
+    String term, {
+    required bool useDataForm,
+  }) async {
     final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET)
       ..toJid = Jid.fromFullJid(searchService);
     final query = XmppElement()..name = 'query';
     query.addAttribute(XmppAttribute('xmlns', jidSearchNamespace));
-    final nick = XmppElement()
-      ..name = 'nick'
-      ..textValue = term;
-    query.addChild(nick);
+    if (useDataForm) {
+      final form = XmppElement()..name = 'x';
+      form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+      form.addAttribute(XmppAttribute('type', 'submit'));
+      final formType = XmppElement()..name = 'field';
+      formType.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
+      formType.addAttribute(XmppAttribute('type', 'hidden'));
+      formType.addChild(
+        XmppElement()
+          ..name = 'value'
+          ..textValue = jidSearchNamespace,
+      );
+      final searchField = XmppElement()..name = 'field';
+      searchField.addAttribute(XmppAttribute('var', field));
+      searchField.addChild(
+        XmppElement()
+          ..name = 'value'
+          ..textValue = term,
+      );
+      form.addChild(formType);
+      form.addChild(searchField);
+      query.addChild(form);
+    } else {
+      query.addChild(
+        XmppElement()
+          ..name = field
+          ..textValue = term,
+      );
+    }
     iq.addChild(query);
     return parseJidSearchResults(await _sendIqAndAwait(iq));
   }
