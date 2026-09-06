@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'connection/XmppEarlyDataSocket.dart';
 import 'package:collection/collection.dart' show IterableExtension;
 import 'package:synchronized/synchronized.dart';
 import 'package:universal_io/io.dart';
@@ -674,6 +675,23 @@ class Connection {
               TAG,
               'QUIC endpoint attempt host=${endpoint.host} port=${endpoint.port}',
             );
+            if (socket is XmppEarlyDataSocket) {
+              (socket as XmppEarlyDataSocket).allowEarlyData =
+                  account.sasl2CachedFastTls0Rtt &&
+                      account.persistFastCounter != null &&
+                      account.iapEnabled &&
+                      account.iapPipeliningEnabled &&
+                      account.iapIncludeConfigVersion &&
+                      _iapConfigVersion != null &&
+                      account.fastEnabled &&
+                      account.fastToken != null &&
+                      !_fastTokenExpired() &&
+                      account.sasl2SendUserAgent &&
+                      const ['HT-SHA-256-NONE', 'HT-SHA-512-NONE']
+                          .contains(account.fastMechanism) &&
+                      (account.sasl2CachedFastMechanisms ?? [])
+                          .contains(account.fastMechanism);
+            }
             await socket.connect(
               endpoint.host,
               endpoint.port,

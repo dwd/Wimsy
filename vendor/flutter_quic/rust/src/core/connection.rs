@@ -6,18 +6,40 @@ use crate::errors::{QuicError, QuicDatagramException};
 use std::net::{SocketAddr, IpAddr};
 use std::time::Duration;
 
-#[derive(Debug)]
 #[frb(opaque)]
 pub struct QuicConnection {
     inner: quinn::Connection,
+    handshake: tokio::sync::Mutex<Option<quinn::ZeroRttAccepted>>,
+}
+
+impl std::fmt::Debug for QuicConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QuicConnection").field("inner", &self.inner).finish_non_exhaustive()
+    }
 }
 
 impl QuicConnection {
     /// Create a new QuicConnection wrapping a Quinn connection
     pub fn new(connection: quinn::Connection) -> Self {
-        Self { inner: connection }
+        Self { inner: connection, handshake: tokio::sync::Mutex::new(None) }
     }
     
+    pub(crate) fn early(connection: quinn::Connection, accepted: quinn::ZeroRttAccepted) -> Self {
+        Self { inner: connection, handshake: tokio::sync::Mutex::new(Some(accepted)) }
+    }
+
+    /// False means the caller must discard early streams and resend their data.
+    pub async fn wait_handshake(&self) -> Result<bool, QuicError> {
+        let accepted = match self.handshake.lock().await.take() {
+            Some(future) => future.await,
+            None => true,
+        };
+        if let Some(reason) = self.inner.close_reason() {
+            return Err(QuicError::Connection(reason.to_string()));
+        }
+        Ok(accepted)
+    }
+
     /// Open a bidirectional stream
     pub async fn open_bi(&self) -> Result<(QuicSendStream, QuicRecvStream), QuicError> {
         let (send_stream, recv_stream) = self.inner

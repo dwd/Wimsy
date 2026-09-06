@@ -8,11 +8,15 @@ class FastTokenRecord {
   const FastTokenRecord({
     required this.token,
     this.expiry,
+    this.count = 0,
     this.mechanism,
   });
 
   /// The base64-encoded token as issued by the server.
   final String token;
+
+  /// Last reserved authentication attempt; persisted before sending.
+  final int count;
 
   /// ISO-8601 expiry timestamp, when the server supplied one.
   final String? expiry;
@@ -37,6 +41,7 @@ class FastTokenRecord {
   Map<String, dynamic> toMap() {
     return {
       'token': token,
+      'count': count,
       'expiry': expiry,
       'mechanism': mechanism,
     };
@@ -54,6 +59,9 @@ class FastTokenRecord {
     final mechanism = map['mechanism']?.toString();
     return FastTokenRecord(
       token: token,
+      count: map['count'] is int && (map['count'] as int) >= 0
+          ? map['count'] as int
+          : 0,
       expiry: (expiry == null || expiry.isEmpty) ? null : expiry,
       mechanism: (mechanism == null || mechanism.isEmpty) ? null : mechanism,
     );

@@ -137,6 +137,23 @@ Future<(QuicEndpoint, QuicConnection)> endpointConnect({
   qlogPath: qlogPath,
 );
 
+/// Acquire a connection that may send early data. The boolean indicates a
+/// provisional handshake; await connection_wait_handshake before reading streams.
+Future<(QuicEndpoint, QuicConnection, bool)> endpointConnectEarly({
+  required String addr,
+  required String serverName,
+  String? qlogPath,
+}) => RustLib.instance.api.crateApiBridgeEndpointConnectEarly(
+  addr: addr,
+  serverName: serverName,
+  qlogPath: qlogPath,
+);
+
+Future<bool> connectionWaitHandshake({required QuicConnection connection}) =>
+    RustLib.instance.api.crateApiBridgeConnectionWaitHandshake(
+      connection: connection,
+    );
+
 /// Rebind the endpoint's UDP socket to a fresh unspecified address on the
 /// same address family, triggering a QUIC PATH_CHALLENGE on the new path.
 /// This enables connection migration (RFC 9000 §9) after a network-interface

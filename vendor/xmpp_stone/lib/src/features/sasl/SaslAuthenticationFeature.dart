@@ -385,6 +385,9 @@ class SaslAuthenticationFeature extends Negotiator {
                 .toList() ??
             <String>[];
     final fast = features[fastNamespace];
+    final earlyData = fast?.getAttribute('tls-0rtt')?.value;
+    connection.account.sasl2CachedFastTls0Rtt =
+        earlyData == 'true' || earlyData == '1';
     connection.account.sasl2CachedFastMechanisms = fast == null
         ? null
         : fast.children

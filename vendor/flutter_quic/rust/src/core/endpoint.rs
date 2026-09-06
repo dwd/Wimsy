@@ -4,7 +4,7 @@ use flutter_rust_bridge::frb;
 use crate::core::connection::QuicConnection;
 use crate::errors::QuicError;
 use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 #[frb(opaque)]
 pub struct QuicEndpoint {
@@ -28,7 +28,7 @@ impl QuicEndpoint {
         })
     }
 
-    /// Create a new client endpoint with insecure configuration (for testing)
+    /// Create a client endpoint using the Mozilla trust roots
     pub fn client() -> Result<Self, QuicError> {
         let bind_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
         Self::client_with_bind_addr(bind_addr, None)
@@ -61,19 +61,21 @@ impl QuicEndpoint {
                 .map_err(|_| QuicError::Config("Failed to install default crypto provider".to_string()))?;
         }
         
-        // Create insecure client config
-        let crypto = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(SkipServerVerification::new())
-            .with_no_client_auth();
-        let mut crypto = crypto;
-        crypto.alpn_protocols = vec![b"xmpp-client".to_vec()];
-            
-        let mut config = quinn::ClientConfig::new(Arc::new(
-            quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
-                .map_err(|e| QuicError::Config(format!("Failed to create QUIC client config: {:?}", e)))?
-        ));
-        
+        // Reuse the same verifier, credentials and session cache across endpoints.
+        // rustls requires their identity to remain stable for session resumption.
+        static CRYPTO: OnceLock<Arc<quinn::crypto::rustls::QuicClientConfig>> = OnceLock::new();
+        let crypto = CRYPTO.get_or_init(|| {
+            let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let mut crypto = rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            crypto.alpn_protocols = vec![b"xmpp-client".to_vec()];
+            crypto.enable_early_data = true;
+            Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
+                .expect("TLS 1.3 provider supports QUIC"))
+        }).clone();
+        let mut config = quinn::ClientConfig::new(crypto);
+
         // Configure transport parameters for better performance
         let mut transport = quinn::TransportConfig::default();
         // Advertise a large max_idle_timeout (2 hours) so the server knows we are
@@ -151,6 +153,21 @@ impl QuicEndpoint {
         Ok(QuicConnection::new(connection))
     }
     
+    /// Return a provisional connection only when a cached TLS ticket allows 0-RTT.
+    /// No application data is sent here: the caller must first select a winner.
+    pub async fn connect_early(&self, addr: String, server_name: String)
+        -> Result<(QuicConnection, bool), QuicError> {
+        let addr: SocketAddr = addr.parse()
+            .map_err(|e| QuicError::Config(format!("Invalid address: {e}")))?;
+        let connecting = self.inner.connect(addr, &server_name)
+            .map_err(|e| QuicError::Connection(e.to_string()))?;
+        match connecting.into_0rtt() {
+            Ok((connection, accepted)) => Ok((QuicConnection::early(connection, accepted), true)),
+            Err(connecting) => Ok((QuicConnection::new(connecting.await
+                .map_err(|e| QuicError::Connection(e.to_string()))?), false)),
+        }
+    }
+
     /// Rebind the endpoint's UDP socket to a fresh unspecified address on the
     /// same address family as the current local socket.  Quinn will then
     /// automatically send a PATH_CHALLENGE on the new path, enabling QUIC
@@ -179,61 +196,87 @@ impl QuicEndpoint {
     }
 }
 
-/// Skip server certificate verification for testing purposes
-#[derive(Debug)]
-struct SkipServerVerification;
 
-impl SkipServerVerification {
-    fn new() -> Arc<Self> {
-        Arc::new(Self)
+#[cfg(test)]
+mod early_data_tests {
+    use super::*;
+
+    async fn resumed_connection(reject: bool) {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let mut server_tls = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert.cert.der().clone()],
+                rustls_pki_types::PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into()).unwrap();
+        server_tls.max_early_data_size = u32::MAX;
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert.cert.der().clone()).unwrap();
+        let mut client_tls = rustls::ClientConfig::builder()
+            .with_root_certificates(roots).with_no_client_auth();
+        client_tls.enable_early_data = true;
+        let client_config = quinn::ClientConfig::new(Arc::new(
+            quinn::crypto::rustls::QuicClientConfig::try_from(client_tls).unwrap()));
+        let server_config = |tls| quinn::ServerConfig::with_crypto(Arc::new(
+            quinn::crypto::rustls::QuicServerConfig::try_from(tls).unwrap()));
+        let server = quinn::Endpoint::server(server_config(server_tls.clone()),
+            "127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = server.local_addr().unwrap().to_string();
+        let mut client = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        client.set_default_client_config(client_config);
+        let client = QuicEndpoint { inner: client };
+
+        // Keep both server connections alive until all client assertions finish.
+        let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel(2);
+        let task = tokio::spawn(async move {
+            let mut connections = Vec::new();
+            for round in 0..2 {
+                let conn = server.accept().await.unwrap().await.unwrap();
+                let (mut send, mut recv) = conn.accept_bi().await.unwrap();
+                let data = recv.read_to_end(1024).await.unwrap();
+                assert_eq!(data, b"authentication");
+                send.write_all(b"success").await.unwrap();
+                send.finish().unwrap();
+                connections.push(conn);
+                if round == 0 && reject {
+                    server_tls.max_early_data_size = 0;
+                    server.set_server_config(Some(server_config(server_tls.clone())));
+                }
+                ready_tx.send(()).await.unwrap();
+            }
+            std::future::pending::<()>().await;
+        });
+        let first = client.connect(addr.clone(), "localhost".into()).await.unwrap();
+        let exchange = async |conn: &quinn::Connection| {
+            let (mut send, mut recv) = conn.open_bi().await.unwrap();
+            send.write_all(b"authentication").await.unwrap();
+            send.finish().unwrap();
+            assert_eq!(recv.read_to_end(1024).await.unwrap(), b"success");
+        };
+        exchange(first.inner()).await;
+        ready_rx.recv().await.unwrap();
+        let (resumed, early) = client.connect_early(addr, "localhost".into()).await.unwrap();
+        assert!(early, "first exchange should have cached an early-data ticket");
+        let (mut send, mut recv) = resumed.inner().open_bi().await.unwrap();
+        // A fast local server may already have rejected the early stream.
+        let _ = send.write_all(b"authentication").await;
+        let _ = send.finish();
+        assert_eq!(resumed.wait_handshake().await.unwrap(), !reject);
+        if reject {
+            assert!(recv.read_to_end(1024).await.is_err());
+            exchange(resumed.inner()).await;
+        } else {
+            assert_eq!(recv.read_to_end(1024).await.unwrap(), b"success");
+        }
+        ready_rx.recv().await.unwrap();
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn accepts_resumed_early_data() {
+        tokio::time::timeout(std::time::Duration::from_secs(10), resumed_connection(false)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_early_streams_but_allows_replay_after_handshake() {
+        tokio::time::timeout(std::time::Duration::from_secs(10), resumed_connection(true)).await.unwrap();
     }
 }
-
-impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA1,
-            rustls::SignatureScheme::ECDSA_SHA1_Legacy,
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::RSA_PKCS1_SHA384,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::RSA_PKCS1_SHA512,
-            rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
-            rustls::SignatureScheme::RSA_PSS_SHA256,
-            rustls::SignatureScheme::RSA_PSS_SHA384,
-            rustls::SignatureScheme::RSA_PSS_SHA512,
-            rustls::SignatureScheme::ED25519,
-            rustls::SignatureScheme::ED448,
-        ]
-    }
-} 

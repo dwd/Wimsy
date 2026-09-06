@@ -6,12 +6,14 @@ void main() {
     test('round-trips all fields', () {
       const record = FastTokenRecord(
         token: 'dG9rZW4=',
+        count: 42,
         expiry: '2099-01-01T00:00:00Z',
         mechanism: 'HT2-SHA-256-NONE',
       );
       final restored = FastTokenRecord.fromMap(record.toMap());
+      expect(restored!.count, 42);
       expect(restored, isNotNull);
-      expect(restored!.token, equals('dG9rZW4='));
+      expect(restored.token, equals('dG9rZW4='));
       expect(restored.expiry, equals('2099-01-01T00:00:00Z'));
       expect(restored.mechanism, equals('HT2-SHA-256-NONE'));
     });
@@ -30,10 +32,7 @@ void main() {
 
     test('returns null when the token is missing or empty', () {
       expect(FastTokenRecord.fromMap(<String, dynamic>{}), isNull);
-      expect(
-        FastTokenRecord.fromMap(<String, dynamic>{'token': ''}),
-        isNull,
-      );
+      expect(FastTokenRecord.fromMap(<String, dynamic>{'token': ''}), isNull);
     });
 
     test('treats empty expiry and mechanism strings as absent', () {

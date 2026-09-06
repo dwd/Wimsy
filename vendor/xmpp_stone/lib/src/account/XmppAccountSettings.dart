@@ -70,6 +70,28 @@ class XmppAccountSettings {
   String? sasl2LastMechanism;
   List<String>? sasl2CachedBind2Features;
   List<String>? sasl2CachedFastMechanisms;
+
+  /// Whether the cached FAST advertisement explicitly permits TLS early data.
+  bool sasl2CachedFastTls0Rtt = false;
+
+  /// Durable high-water mark for authentication attempts with the current token.
+  int fastTokenCount = 0;
+  Future<void> Function(XmppAccountSettings account)? persistFastCounter;
+
+  /// Reserve before sending, including attempts whose response is lost.
+  Future<int> reserveFastCounter(String token) async {
+    final expectedToken = fastToken;
+    if (expectedToken != null && expectedToken != token)
+      throw StateError('FAST token changed before authentication');
+    if (fastTokenCount >= 2147483647)
+      throw StateError('FAST counter exhausted');
+    final count = ++fastTokenCount;
+    await persistFastCounter?.call(this);
+    if (fastToken != expectedToken)
+      throw StateError('FAST token changed while persisting counter');
+    return count;
+  }
+
   bool bufferedWritesEnabled = true;
   int totalReconnections = 3;
   int reconnectionTimeout = 1000;
@@ -122,6 +144,7 @@ class XmppAccountSettings {
   /// Stores a freshly issued FAST token together with its (optional) expiry
   /// and notifies [onFastCredentialsChanged].
   void storeFastToken(String token, String? expiry) {
+    if (fastToken != token) fastTokenCount = 0;
     fastToken = token;
     fastTokenExpiry = expiry;
     _notifyFastCredentialsChanged();
@@ -134,6 +157,7 @@ class XmppAccountSettings {
     if (fastToken == null && fastTokenExpiry == null && fastMechanism == null) {
       return;
     }
+    fastTokenCount = 0;
     fastToken = null;
     fastTokenExpiry = null;
     fastMechanism = null;

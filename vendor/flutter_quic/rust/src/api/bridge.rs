@@ -160,6 +160,24 @@ pub async fn endpoint_connect(
     Ok((endpoint, connection))
 }
 
+/// Acquire a connection that may send early data. The boolean indicates a
+/// provisional handshake; await connection_wait_handshake before reading streams.
+pub async fn endpoint_connect_early(
+    addr: String,
+    server_name: String,
+    qlog_path: Option<String>,
+) -> Result<(QuicEndpoint, QuicConnection, bool), QuicError> {
+    let remote_addr: SocketAddr = addr.parse()
+        .map_err(|e| QuicError::Config(format!("Invalid address: {e}")))?;
+    let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path)?;
+    let (connection, early) = endpoint.connect_early(addr, server_name).await?;
+    Ok((endpoint, connection, early))
+}
+
+pub async fn connection_wait_handshake(connection: &QuicConnection) -> Result<bool, QuicError> {
+    connection.wait_handshake().await
+}
+
 /// Rebind the endpoint's UDP socket to a fresh unspecified address on the
 /// same address family, triggering a QUIC PATH_CHALLENGE on the new path.
 /// This enables connection migration (RFC 9000 §9) after a network-interface

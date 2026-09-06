@@ -146,6 +146,15 @@ class FastAuthHandler implements AbstractSaslHandler {
   }
 
   void _sendAuthenticate() {
+    // Reserve durably before any authentication bytes can enter early data.
+    _connection.account.reserveFastCounter(_token).then((count) {
+      if (!_completer.isCompleted) _sendAuthenticateWithCount(count);
+    }).catchError((Object error) {
+      _fail('Unable to reserve FAST authentication counter');
+    });
+  }
+
+  void _sendAuthenticateWithCount(int count) {
     final initialResponse = _buildInitialResponse();
     if (initialResponse == null) {
       _fail('Failed to build FAST initial response');
@@ -168,7 +177,8 @@ class FastAuthHandler implements AbstractSaslHandler {
     // XEP-0484 requires this marker when authenticating with a FAST token.
     authenticate.addChild(XmppElement()
       ..name = 'fast'
-      ..addAttribute(XmppAttribute('xmlns', fastNamespace)));
+      ..addAttribute(XmppAttribute('xmlns', fastNamespace))
+      ..addAttribute(XmppAttribute('count', count.toString())));
 
     // Include Bind 2 inline element if the server advertises it.
     if (_connection.account.useBind2 &&

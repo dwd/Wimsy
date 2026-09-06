@@ -6,9 +6,11 @@ class IapCacheRecord {
     required this.lastMechanism,
     this.configVersionScheme,
     this.bind2Features = const <String>[],
+    this.fastTls0Rtt = false,
     this.fastMechanisms = const <String>[],
   });
 
+  final bool fastTls0Rtt;
   final String configVersion;
   final String? configVersionScheme;
   final List<String> sasl2Mechanisms;
@@ -17,6 +19,7 @@ class IapCacheRecord {
   final List<String> fastMechanisms;
 
   Map<String, dynamic> toMap() => {
+    'fastTls0Rtt': fastTls0Rtt,
     'configVersion': configVersion,
     'configVersionScheme': configVersionScheme,
     'sasl2Mechanisms': sasl2Mechanisms,
@@ -35,6 +38,7 @@ class IapCacheRecord {
     }
     final scheme = map['configVersionScheme']?.toString();
     return IapCacheRecord(
+      fastTls0Rtt: map['fastTls0Rtt'] == true,
       configVersion: configVersion,
       configVersionScheme: scheme == null || scheme.isEmpty ? null : scheme,
       sasl2Mechanisms: mechanisms,

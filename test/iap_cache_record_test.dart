@@ -5,6 +5,7 @@ void main() {
   test('IAP cache record round-trips pipelining state', () {
     const record = IapCacheRecord(
       configVersion: 'config-1',
+      fastTls0Rtt: true,
       sasl2Mechanisms: ['PLAIN', 'SCRAM-SHA-1'],
       lastMechanism: 'SCRAM-SHA-1',
       bind2Features: ['urn:xmpp:carbons:2'],
@@ -13,6 +14,7 @@ void main() {
 
     final restored = IapCacheRecord.fromMap(record.toMap());
 
+    expect(restored?.fastTls0Rtt, isTrue);
     expect(restored?.configVersion, 'config-1');
     expect(restored?.sasl2Mechanisms, ['PLAIN', 'SCRAM-SHA-1']);
     expect(restored?.lastMechanism, 'SCRAM-SHA-1');

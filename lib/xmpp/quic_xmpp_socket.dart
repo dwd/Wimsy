@@ -10,6 +10,8 @@ import 'package:xmpp_stone/src/connection/XmppStreamRouting.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 import 'dns_cache.dart';
 import 'quic_write_tracker.dart';
+import 'package:xmpp_stone/src/connection/XmppEarlyDataSocket.dart';
+import 'quic_early_data.dart';
 
 export 'package:xmpp_stone/src/connection/XmppStreamRouting.dart'
     show bareJidForRouting, extractToBareJidForRouting, isStanzaPayload;
@@ -17,7 +19,14 @@ export 'package:xmpp_stone/src/connection/XmppStreamRouting.dart'
 /// Result of a QUIC connection migration attempt.
 enum MigrationResult { success, failed }
 
-class QuicCapableXmppSocket extends XmppWebSocket {
+class QuicCapableXmppSocket extends XmppWebSocket
+    implements XmppEarlyDataSocket {
+  @override
+  bool allowEarlyData = false;
+  bool _earlyDataPending = false;
+  final _earlyData = QuicEarlyDataBuffer();
+  Object? _earlyWriteError;
+  bool _earlyBufferFailed = false;
   QuicCapableXmppSocket({
     this.quicConnectTimeout = const Duration(seconds: 15),
     this.happyEyeballsDelay = const Duration(milliseconds: 250),
@@ -253,8 +262,13 @@ class QuicCapableXmppSocket extends XmppWebSocket {
     if (!_isCurrentGeneration(generation)) {
       throw StateError('QUIC connection generation $generation was superseded');
     }
-    _startControlRecvLoop(generation);
-    _startServerStreamAcceptLoop(generation);
+    if (_earlyDataPending) {
+      // Schedule after socket acquisition so only the winning socket sends auth.
+      unawaited(Future<void>(() => _finishEarlyHandshake(generation)));
+    } else {
+      _startControlRecvLoop(generation);
+      _startServerStreamAcceptLoop(generation);
+    }
     return this;
   }
 
@@ -399,6 +413,14 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         return;
       }
       try {
+        if (_earlyDataPending) {
+          try {
+            _earlyData.add(payload);
+          } catch (_) {
+            _earlyBufferFailed = true;
+            rethrow;
+          }
+        }
         final target = await _selectSendTarget(queued);
         if (!_isCurrentGeneration(generation)) {
           return;
@@ -411,6 +433,11 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         _lastQuicSendAt = DateTime.now();
         await _sendPayload(target, queued, generation);
       } catch (error, stackTrace) {
+        if (_earlyDataPending) {
+          // Rejected streams can fail before the acceptance future resolves.
+          _earlyWriteError = error;
+          return;
+        }
         if (writeId != null) {
           final failed = _writeTracker.failWrite(
             writeId: writeId,
@@ -622,6 +649,8 @@ class QuicCapableXmppSocket extends XmppWebSocket {
         _activeAttemptId = connected.attemptId;
         _sendStream = connected.sendStream;
         _recvStream = connected.recvStream;
+        _earlyDataPending = connected.earlyData;
+        if (_earlyDataPending) return;
         // Log initial connection stats so we can see the server's stream-credit
         // situation immediately after the handshake. Must be awaited: the call
         // consumes _connection via Auto_Owned and stores the replacement arc
@@ -732,6 +761,7 @@ class QuicCapableXmppSocket extends XmppWebSocket {
                   connection: result.connection,
                   sendStream: result.sendStream,
                   recvStream: result.recvStream,
+                  earlyData: result.earlyData,
                 ),
               );
             })
@@ -809,13 +839,22 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       'QUIC qlog: ${quicAttemptLogContext(generation, attemptId)} '
       'writing trace to $qlogPath',
     );
-    final connect = endpointConnect(
-      endpoint: endpoint,
-      addr: _formatSocketAddress(address, port),
-      serverName: serverName,
-      qlogPath: qlogPath,
-    );
-    final connected = await connect.timeout(timeout);
+    final (QuicEndpoint, QuicConnection, bool) connected;
+    if (allowEarlyData) {
+      connected = await endpointConnectEarly(
+        addr: _formatSocketAddress(address, port),
+        serverName: serverName,
+        qlogPath: qlogPath,
+      ).timeout(timeout);
+    } else {
+      final result = await endpointConnect(
+        endpoint: endpoint,
+        addr: _formatSocketAddress(address, port),
+        serverName: serverName,
+        qlogPath: qlogPath,
+      ).timeout(timeout);
+      connected = (result.$1, result.$2, false);
+    }
     final (sendStream, recvStream) = await connectionOpenBi(
       connection: connected.$2,
     );
@@ -824,9 +863,55 @@ class QuicCapableXmppSocket extends XmppWebSocket {
       attemptId: attemptId,
       endpoint: connected.$1,
       connection: connected.$2,
+      earlyData: connected.$3,
       sendStream: sendStream,
       recvStream: recvStream,
     );
+  }
+
+  Future<void> _finishEarlyHandshake(int generation) async {
+    try {
+      final connection = _connection!;
+      final accepted = await connectionWaitHandshake(
+        connection: connection,
+      ).timeout(quicConnectTimeout);
+      if (!_isCurrentGeneration(generation)) return;
+      // Serialize replacement/replay with writes already queued on the old stream.
+      _writeQueue = _writeQueue.then((_) async {
+        if (!_isCurrentGeneration(generation)) return;
+        _earlyDataPending = false;
+        final replay = _earlyData.finish(accepted: accepted);
+        if (_earlyBufferFailed || (accepted && _earlyWriteError != null)) {
+          throw _earlyWriteError ?? StateError('Invalid early-data flight');
+        }
+        _earlyWriteError = null;
+        if (!accepted) {
+          final (send, recv) = await connectionOpenBi(connection: connection);
+          if (!_isCurrentGeneration(generation)) return;
+          _sendStream = send;
+          _recvStream = recv;
+          if (replay.isNotEmpty) {
+            _sendStream = await sendStreamWriteAll(stream: send, data: replay);
+          }
+        }
+        debugPrint(
+          'QUIC early data: ${accepted ? "accepted" : "rejected; replayed after handshake"}',
+        );
+      });
+      await _writeQueue;
+      if (!_isCurrentGeneration(generation)) return;
+      await _logConnectionStats('post-handshake');
+      await _logPeerTransportParams('post-handshake');
+      _startControlRecvLoop(generation);
+      _startServerStreamAcceptLoop(generation);
+    } catch (error) {
+      if (_isCurrentGeneration(generation)) {
+        debugPrint('QUIC early handshake failed: $error');
+        // The ordinary reconnection path handles handshake failure. No SASL
+        // failure is synthesized, so a transport error cannot discard a token.
+        close();
+      }
+    }
   }
 
   Future<void> _trackLoserCleanup(
@@ -1902,6 +1987,7 @@ class _QuicConnectResult {
     required this.attemptId,
     required this.endpoint,
     required this.connection,
+    this.earlyData = false,
     required this.sendStream,
     required this.recvStream,
   });
@@ -1913,6 +1999,7 @@ class _QuicConnectResult {
   final int attemptId;
   final QuicEndpoint endpoint;
   final QuicConnection connection;
+  final bool earlyData;
   final QuicSendStream sendStream;
   final QuicRecvStream recvStream;
 }

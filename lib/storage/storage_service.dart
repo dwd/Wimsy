@@ -222,7 +222,7 @@ class StorageService {
   Future<void> storeFastToken(String bareJid, FastTokenRecord record) async {
     final box = _box;
     if (box == null || bareJid.isEmpty) {
-      return;
+      throw StateError('FAST credential storage is unavailable');
     }
     final existing = box.get(_fastTokensKey);
     final next = <String, dynamic>{};
@@ -233,6 +233,7 @@ class StorageService {
     }
     next[bareJid] = record.toMap();
     await box.put(_fastTokensKey, next);
+    await box.flush();
   }
 
   /// Drops the stored FAST credentials for [bareJid], e.g. after the server

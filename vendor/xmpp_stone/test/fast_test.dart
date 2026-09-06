@@ -131,7 +131,45 @@ Nonza buildSasl2AuthElement(List<String> fastMechanisms) {
 // Tests.
 // ---------------------------------------------------------------------------
 
+// FAST waits for counter persistence before scheduling the buffered wire write.
+Future<void> settleAuthWrites() async {
+  await Future<void>.delayed(Duration.zero);
+  await Future<void>.delayed(Duration.zero);
+}
+
 void main() {
+  test('FAST emits count only after its durable reservation completes',
+      () async {
+    final durable = Completer<void>();
+    final account = XmppAccountSettings.fromJid('alice@example.com', '')
+      ..fastToken = 'token'
+      ..fastTokenCount = 8
+      ..persistFastCounter = (_) => durable.future;
+    final connection = Connection(account);
+    final socket = _RecordingSocket();
+    connection.socket = socket;
+    FastAuthHandler.fromMechanismName(connection, 'HT-SHA-256-NONE', 'token')!
+        .start();
+    await settleAuthWrites();
+    expect(socket.writes, isEmpty);
+    durable.complete();
+    await settleAuthWrites();
+    expect(socket.writes.single, contains('count="9"'));
+  });
+
+  test('cached early-data permission requires an explicit FAST attribute', () {
+    final connection = Connection(XmppAccountSettings.fromJid('alice@example.com', ''));
+    final fast = buildFastElement(['HT-SHA-256-NONE'])
+      ..addAttribute(XmppAttribute('tls-0rtt', 'true'));
+    SaslAuthenticationFeature.cacheInlineFeatureNames(
+        connection, {'urn:xmpp:fast:0': fast});
+    expect(connection.account.sasl2CachedFastTls0Rtt, isTrue);
+    SaslAuthenticationFeature.cacheInlineFeatureNames(connection, {
+      'urn:xmpp:fast:0': buildFastElement(['HT-SHA-256-NONE']),
+    });
+    expect(connection.account.sasl2CachedFastTls0Rtt, isFalse);
+  });
+
   // -------------------------------------------------------------------------
   group('FastAuthHandler.fromMechanismName', () {
     Connection buildConnection() =>
@@ -293,7 +331,7 @@ void main() {
       // start() subscribes to inNonzasStream and sends; we only inspect the
       // written stanza.
       handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       expect(socket.writes, isNotEmpty, reason: 'handler should have written');
       final doc = xml.XmlDocument.parse(socket.writes.first).rootElement;
@@ -334,7 +372,7 @@ void main() {
         tokenB64,
       )!
           .start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       final auth = Nonza.parse(
         xml.XmlDocument.parse(socket.writes.first).rootElement,
@@ -371,7 +409,7 @@ void main() {
         tokenB64,
       )!;
       handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       expect(socket.writes, isNotEmpty);
       final doc = xml.XmlDocument.parse(socket.writes.first).rootElement;
@@ -419,7 +457,7 @@ void main() {
         tokenB64,
       )!;
       handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       expect(socket.writes, isNotEmpty);
       final doc = xml.XmlDocument.parse(socket.writes.first).rootElement;
@@ -463,7 +501,7 @@ void main() {
         base64.encode(List.filled(32, 1)),
       )!;
       final resultFuture = handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       // Feed a success response with a new token.
       final responder = base64.encode([
@@ -504,7 +542,7 @@ void main() {
         base64.encode(List.filled(32, 1)),
       )!;
       final resultFuture = handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       connection.handleResponse(
         "<xmpp_stone>"
@@ -541,7 +579,7 @@ void main() {
       final handler =
           Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
       handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
       final auth = Nonza.parse(authXml);
@@ -574,7 +612,7 @@ void main() {
       final handler =
           Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
       handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
       final auth = Nonza.parse(authXml);
@@ -598,7 +636,7 @@ void main() {
       final handler =
           Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
       handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
       final auth = Nonza.parse(authXml);
@@ -622,7 +660,7 @@ void main() {
       final handler =
           Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
       final resultFuture = handler.start();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       const newToken = 'dGhlX3Rva2Vu';
       const expiry = '2099-06-01T00:00:00Z';
@@ -665,7 +703,7 @@ void main() {
       final authElement = buildSasl2AuthElement(['HT-SHA-256-NONE']);
       final feature = SaslAuthenticationFeature(connection, 'secret');
       feature.negotiate([authElement]);
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       expect(socket.writes, hasLength(1));
       final firstAuth =
@@ -683,7 +721,7 @@ void main() {
         "</failure>"
         "</xmpp_stone>",
       );
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       expect(cleared, isTrue, reason: 'stale token must be forgotten');
       expect(socket.writes.length, greaterThan(1),
@@ -722,7 +760,7 @@ void main() {
       final connection = Connection(account, socketFactory: () => socket);
 
       await connection.openSocket();
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
 
       final authenticateXml = socket.writes.firstWhere(
         (write) => write.contains('<authenticate'),
@@ -780,7 +818,7 @@ void main() {
       feature.negotiate([authElement]);
       // The FastAuthHandler sends via a buffered write that is flushed
       // asynchronously, so we need to yield before checking.
-      await Future<void>.delayed(Duration.zero);
+      await settleAuthWrites();
       // The handler should have written the FAST authenticate stanza.
       expect(socket.writes, isNotEmpty,
           reason: 'FAST authenticate should have been sent');

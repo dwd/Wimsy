@@ -310,7 +310,7 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0484.html"/>
         <xmpp:status>complete</xmpp:status>
-        <xmpp:note xml:lang="en">FAST token requested on initial SASL2 auth and persisted in the encrypted store, keyed by bare JID. The token is used on the first connection of a session as well as on reconnection, via HT2-* (preferred) or HT-* mechanisms instead of SCRAM. Both SHA-256 and SHA-512 variants are supported with NONE channel-binding. Token expiry is checked before use, and a rejected token is discarded while authentication silently falls back to SCRAM on the same stream.</xmpp:note>
+        <xmpp:note xml:lang="en">FAST tokens with HT-SHA-256-NONE and HT-SHA-512-NONE, token rotation, and replay-counted QUIC 0-RTT when explicitly advertised; TLS tickets currently remain in memory.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>

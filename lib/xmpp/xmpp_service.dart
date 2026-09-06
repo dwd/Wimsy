@@ -1843,6 +1843,7 @@ class XmppService extends ChangeNotifier {
     final stored = storage.loadFastToken(bareJid);
     if (stored != null && stored.mechanism != null) {
       account.fastToken = stored.token;
+      account.fastTokenCount = stored.count;
       account.fastTokenExpiry = stored.expiry;
       account.fastMechanism = stored.mechanism;
       debugPrint(
@@ -1850,6 +1851,19 @@ class XmppService extends ChangeNotifier {
         '(mechanism=${stored.mechanism} expiry=${stored.expiry})',
       );
     }
+    account.persistFastCounter = (updated) async {
+      final token = updated.fastToken;
+      if (token == null) throw StateError('No FAST token');
+      await storage.storeFastToken(
+        bareJid,
+        FastTokenRecord(
+          token: token,
+          count: updated.fastTokenCount,
+          expiry: updated.fastTokenExpiry,
+          mechanism: updated.fastMechanism,
+        ),
+      );
+    };
     account.onFastCredentialsChanged = (updated) {
       final token = updated.fastToken;
       if (token == null || token.isEmpty) {
@@ -1861,6 +1875,7 @@ class XmppService extends ChangeNotifier {
           bareJid,
           FastTokenRecord(
             token: token,
+            count: updated.fastTokenCount,
             expiry: updated.fastTokenExpiry,
             mechanism: updated.fastMechanism,
           ),
@@ -1878,7 +1893,8 @@ class XmppService extends ChangeNotifier {
       ..sasl2CachedMechanisms = cached.sasl2Mechanisms
       ..sasl2LastMechanism = cached.lastMechanism
       ..sasl2CachedBind2Features = cached.bind2Features
-      ..sasl2CachedFastMechanisms = cached.fastMechanisms;
+      ..sasl2CachedFastMechanisms = cached.fastMechanisms
+      ..sasl2CachedFastTls0Rtt = cached.fastTls0Rtt;
     debugPrint('XMPP IAP: restored cached config-version for $bareJid');
   }
 
@@ -1897,6 +1913,7 @@ class XmppService extends ChangeNotifier {
           lastMechanism: lastMechanism,
           bind2Features: account.sasl2CachedBind2Features ?? const [],
           fastMechanisms: account.sasl2CachedFastMechanisms ?? const [],
+          fastTls0Rtt: account.sasl2CachedFastTls0Rtt,
         ),
       ),
     );
