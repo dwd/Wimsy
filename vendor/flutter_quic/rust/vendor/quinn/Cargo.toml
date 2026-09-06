@@ -11,7 +11,7 @@
 
 [package]
 edition = "2021"
-rust-version = "1.74.1"
+rust-version = "1.85"
 name = "quinn"
 version = "0.11.9"
 build = "build.rs"
@@ -77,19 +77,22 @@ runtime-tokio = [
 ]
 rustls = ["rustls-ring"]
 rustls-aws-lc-rs = [
+    "dep:rustls-aws-lc-rs",
     "dep:rustls",
     "aws-lc-rs",
     "proto/rustls-aws-lc-rs",
     "proto/aws-lc-rs",
 ]
 rustls-aws-lc-rs-fips = [
+    "dep:rustls-aws-lc-rs",
     "dep:rustls",
     "aws-lc-rs-fips",
     "proto/rustls-aws-lc-rs-fips",
     "proto/aws-lc-rs-fips",
 ]
-rustls-log = ["rustls?/logging"]
+rustls-log = ["rustls?/log"]
 rustls-ring = [
+    "dep:rustls-ring",
     "dep:rustls",
     "ring",
     "proto/rustls-ring",
@@ -162,8 +165,8 @@ package = "quinn-proto"
 version = "2"
 
 [dependencies.rustls]
-version = "0.23.5"
-features = ["std"]
+version = "=0.24.0-dev.1"
+features = ["webpki"]
 optional = true
 default-features = false
 
@@ -251,3 +254,11 @@ version = "1"
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies.socket2]
 version = ">=0.5, <0.7"
+
+[dependencies.rustls-ring]
+version = "=0.1.0-dev.1"
+optional = true
+
+[dependencies.rustls-aws-lc-rs]
+version = "=0.1.0-dev.1"
+optional = true

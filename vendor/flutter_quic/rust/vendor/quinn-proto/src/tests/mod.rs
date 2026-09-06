@@ -14,11 +14,11 @@ use rand::RngCore;
 #[cfg(feature = "ring")]
 use ring::hmac;
 #[cfg(all(feature = "rustls-aws-lc-rs", not(feature = "rustls-ring")))]
-use rustls::crypto::aws_lc_rs::default_provider;
+use rustls_aws_lc_rs::DEFAULT_PROVIDER;
 #[cfg(feature = "rustls-ring")]
-use rustls::crypto::ring::default_provider;
+use rustls_ring::DEFAULT_PROVIDER;
 use rustls::{
-    AlertDescription, RootCertStore,
+    error::AlertDescription, RootCertStore,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     server::WebPkiClientVerifier,
 };
@@ -152,36 +152,11 @@ fn lifecycle() {
 }
 
 #[test]
-fn draft_version_compat() {
-    let _guard = subscribe();
-
-    let mut client_config = client_config();
-    client_config.version(0xff00_0020);
-
-    let mut pair = Pair::default();
-    let (client_ch, server_ch) = pair.connect_with(client_config);
-
-    assert_matches!(pair.client_conn_mut(client_ch).poll(), None);
-    assert!(pair.client_conn_mut(client_ch).using_ecn());
-    assert!(pair.server_conn_mut(server_ch).using_ecn());
-
-    const REASON: &[u8] = b"whee";
-    info!("closing");
-    pair.client.connections.get_mut(&client_ch).unwrap().close(
-        pair.time,
-        VarInt(42),
-        REASON.into(),
-    );
-    pair.drive();
-    assert_matches!(pair.server_conn_mut(server_ch).poll(),
-                    Some(Event::ConnectionLost { reason: ConnectionError::ApplicationClosed(
-                        ApplicationClose { error_code: VarInt(42), ref reason }
-                    )}) if reason == REASON);
-    assert_matches!(pair.client_conn_mut(client_ch).poll(), None);
-    assert_eq!(pair.client.known_connections(), 0);
-    assert_eq!(pair.client.known_cids(), 0);
-    assert_eq!(pair.server.known_connections(), 0);
-    assert_eq!(pair.server.known_cids(), 0);
+fn rejects_obsolete_draft_version() {
+    let result = client_config().crypto.clone().start_session(
+        0xff00_0020, "localhost", &TransportParameters::default());
+    assert!(matches!(result, Err(ConnectError::UnsupportedVersion)));
+    assert!(!DEFAULT_SUPPORTED_VERSIONS.contains(&0xff00_0020));
 }
 
 #[test]
@@ -439,7 +414,7 @@ fn reject_self_signed_server_cert() {
 
     assert_matches!(pair.client_conn_mut(client_ch).poll(),
                     Some(Event::ConnectionLost { reason: ConnectionError::TransportError(ref error)})
-                    if error.code == TransportErrorCode::crypto(AlertDescription::UnknownCA.into()));
+                    if error.code == TransportErrorCode::crypto(AlertDescription::UnknownCa.into()));
 }
 
 #[test]
@@ -454,16 +429,14 @@ fn reject_missing_client_cert() {
     let key = PrivatePkcs8KeyDer::from(CERTIFIED_KEY.signing_key.serialize_der());
     let cert = CERTIFIED_KEY.cert.der().clone();
 
-    let provider = Arc::new(default_provider());
-    let config = rustls::ServerConfig::builder_with_provider(provider.clone())
-        .with_protocol_versions(&[&rustls::version::TLS13])
-        .unwrap()
+    let provider = Arc::new(DEFAULT_PROVIDER);
+    let config = rustls::ServerConfig::builder(provider.clone())
         .with_client_cert_verifier(
-            WebPkiClientVerifier::builder_with_provider(Arc::new(store), provider)
+            Arc::new(WebPkiClientVerifier::builder(Arc::new(store), &provider)
                 .build()
-                .unwrap(),
+                .unwrap()),
         )
-        .with_single_cert(vec![cert], PrivateKeyDer::from(key))
+        .with_single_cert(Arc::new(rustls::crypto::Identity::from_cert_chain(vec![cert]).unwrap()), PrivateKeyDer::from(key))
         .unwrap();
     let config = QuicServerConfig::try_from(config).unwrap();
 
@@ -642,7 +615,7 @@ fn zero_rtt_rejection() {
     // the existing `ClientConfig` and change the ALPN protocols to make that happen.
     let this = Arc::get_mut(&mut client_crypto).expect("QuicClientConfig is shared");
     let inner = Arc::get_mut(&mut this.inner).expect("QuicClientConfig.inner is shared");
-    inner.alpn_protocols = vec!["bar".into()];
+    inner.alpn_protocols = vec![b"bar".into()];
 
     // Changing protocols invalidates 0-RTT
     let client_config = ClientConfig::new(client_crypto);

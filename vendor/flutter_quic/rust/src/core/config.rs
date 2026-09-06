@@ -54,12 +54,13 @@ impl QuicServerConfig {
             .map_err(|e| format!("Invalid private key: {:?}", e))?;
         
         // Create rustls config
-        let mut crypto_config = RustlsServerConfig::builder()
+        let mut crypto_config = RustlsServerConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
             .with_no_client_auth()
-            .with_single_cert(cert_chain, private_key)
+            .with_single_cert(Arc::new(rustls::crypto::Identity::from_cert_chain(cert_chain)
+                .map_err(|e| format!("Invalid certificate chain: {e}"))?), private_key)
             .map_err(|e| format!("Failed to create TLS config: {:?}", e))?;
         
-        crypto_config.alpn_protocols = alpn_protocols;
+        crypto_config.alpn_protocols = alpn_protocols.into_iter().map(Into::into).collect();
         
         let server_config = quinn::ServerConfig::with_crypto(Arc::new(
             quinn::crypto::rustls::QuicServerConfig::try_from(crypto_config)

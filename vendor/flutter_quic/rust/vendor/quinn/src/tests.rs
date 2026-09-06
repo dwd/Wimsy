@@ -1,9 +1,9 @@
 #![cfg(any(feature = "rustls-aws-lc-rs", feature = "rustls-ring"))]
 
 #[cfg(all(feature = "rustls-aws-lc-rs", not(feature = "rustls-ring")))]
-use rustls::crypto::aws_lc_rs::default_provider;
+use rustls_aws_lc_rs::DEFAULT_PROVIDER;
 #[cfg(feature = "rustls-ring")]
-use rustls::crypto::ring::default_provider;
+use rustls_ring::DEFAULT_PROVIDER;
 
 use std::{
     convert::TryInto,
@@ -511,13 +511,10 @@ fn run_echo(args: EchoArgs) {
 
         let mut roots = rustls::RootCertStore::empty();
         roots.add(cert).unwrap();
-        let mut client_crypto =
-            rustls::ClientConfig::builder_with_provider(default_provider().into())
-                .with_safe_default_protocol_versions()
-                .unwrap()
+        let client_crypto =
+            rustls::ClientConfig::builder(DEFAULT_PROVIDER.into())
                 .with_root_certificates(roots)
-                .with_no_client_auth();
-        client_crypto.key_log = Arc::new(rustls::KeyLogFile::new());
+                .with_no_client_auth().unwrap();
 
         let mut client = {
             let _guard = runtime.enter();

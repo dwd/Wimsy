@@ -941,13 +941,13 @@ mod tests {
         use crate::Side;
         use crate::crypto::rustls::{initial_keys, initial_suite_from_provider};
         #[cfg(all(feature = "rustls-aws-lc-rs", not(feature = "rustls-ring")))]
-        use rustls::crypto::aws_lc_rs::default_provider;
+        use rustls_aws_lc_rs::DEFAULT_PROVIDER;
         #[cfg(feature = "rustls-ring")]
-        use rustls::crypto::ring::default_provider;
+        use rustls_ring::DEFAULT_PROVIDER;
         use rustls::quic::Version;
 
         let dcid = ConnectionId::new(&hex!("06b858ec6f80452b"));
-        let provider = default_provider();
+        let provider = DEFAULT_PROVIDER;
 
         let suite = initial_suite_from_provider(&std::sync::Arc::new(provider)).unwrap();
         let client = initial_keys(Version::V1, dcid, Side::Client, &suite);

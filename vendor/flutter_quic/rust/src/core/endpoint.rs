@@ -54,22 +54,15 @@ impl QuicEndpoint {
     }
 
     fn client_with_bind_addr(bind_addr: SocketAddr, qlog_path: Option<String>) -> Result<Self, QuicError> {
-        // Ensure crypto provider is installed
-        if rustls::crypto::CryptoProvider::get_default().is_none() {
-            rustls::crypto::ring::default_provider()
-                .install_default()
-                .map_err(|_| QuicError::Config("Failed to install default crypto provider".to_string()))?;
-        }
-        
         // Reuse the same verifier, credentials and session cache across endpoints.
         // rustls requires their identity to remain stable for session resumption.
         static CRYPTO: OnceLock<Arc<quinn::crypto::rustls::QuicClientConfig>> = OnceLock::new();
         let crypto = CRYPTO.get_or_init(|| {
             let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let mut crypto = rustls::ClientConfig::builder()
+            let mut crypto = rustls::ClientConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
                 .with_root_certificates(roots)
-                .with_no_client_auth();
-            crypto.alpn_protocols = vec![b"xmpp-client".to_vec()];
+                .with_no_client_auth().expect("valid TLS provider");
+            crypto.alpn_protocols = vec![b"xmpp-client".as_slice().into()];
             crypto.enable_early_data = true;
             Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
                 .expect("TLS 1.3 provider supports QUIC"))
@@ -203,15 +196,15 @@ mod early_data_tests {
 
     async fn resumed_connection(reject: bool) {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-        let mut server_tls = rustls::ServerConfig::builder()
+        let mut server_tls = rustls::ServerConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
             .with_no_client_auth()
-            .with_single_cert(vec![cert.cert.der().clone()],
+            .with_single_cert(Arc::new(rustls::crypto::Identity::from_cert_chain(vec![cert.cert.der().clone()]).unwrap()),
                 rustls_pki_types::PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into()).unwrap();
         server_tls.max_early_data_size = u32::MAX;
         let mut roots = rustls::RootCertStore::empty();
         roots.add(cert.cert.der().clone()).unwrap();
-        let mut client_tls = rustls::ClientConfig::builder()
-            .with_root_certificates(roots).with_no_client_auth();
+        let mut client_tls = rustls::ClientConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
+            .with_root_certificates(roots).with_no_client_auth().expect("valid TLS provider");
         client_tls.enable_early_data = true;
         let client_config = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(client_tls).unwrap()));
