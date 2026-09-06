@@ -1472,6 +1472,7 @@ class XmppService extends ChangeNotifier {
       account.serverCertificateHash = effectiveServerCertificateHash?.trim();
       account.directTls = resolvedDirectTls;
       account.sasl2Software = 'Wimsy';
+      account.sasl2UserAgentId = await _storage?.saslUserAgentId(bareJid);
       account.sasl2Device = resource;
       account.quicExclusiveHeadStart = _transportHealth
           .putIfAbsent(_networkIdentity, TransportAcquisitionHealth.new)
@@ -1541,7 +1542,9 @@ class XmppService extends ChangeNotifier {
           quicTransportAvailable && (account.quicEndpoints?.isNotEmpty ?? false)
           ? Connection.getInstance(
               account,
-              socketFactory: () => QuicCapableXmppSocket(),
+              socketFactory: () => QuicCapableXmppSocket(
+                sessionStorageSettings: _storage?.quicSessionStorageSettings,
+              ),
             )
           : Connection.getInstance(account);
       _connection = connection;

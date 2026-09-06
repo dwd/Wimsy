@@ -15,6 +15,10 @@ rustls = { version = "=0.24.0-dev.1", default-features = false, features = ["web
 rustls-ring = "=0.1.0-dev.1"
 rustls-pki-types = "1.0"
 webpki-roots = "1"
+ring = "0.17"
+fs2 = "0.4"
+serde_json = "1"
+zeroize = "1"
 thiserror = "2.0"
 bytes = "1.8"
 futures = "0.3"
@@ -41,6 +45,7 @@ quinn-proto = { path = "vendor/quinn-proto" }
 
 [dev-dependencies]
 rcgen = "0.14"
+tempfile = "3"
 
 [workspace]
 members = ["vendor/quinn", "vendor/quinn-proto"]

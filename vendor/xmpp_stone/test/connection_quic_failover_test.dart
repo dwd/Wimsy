@@ -5,6 +5,7 @@ import 'package:universal_io/io.dart';
 import 'package:xmpp_stone/src/Connection.dart';
 import 'package:xmpp_stone/src/account/XmppAccountSettings.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
+import 'package:xmpp_stone/src/connection/XmppEarlyDataSocket.dart';
 
 class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   _RecordingSocket(this.attempts, {this.quicDelay, this.quicSucceeds = false});
@@ -85,7 +86,82 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
   }
 }
 
+class _EarlySocket extends _RecordingSocket implements XmppEarlyDataSocket {
+  _EarlySocket() : super([], quicSucceeds: true);
+  @override
+  bool allowEarlyData = false;
+  @override
+  bool get earlyDataPending => allowEarlyData;
+  final writes = <String>[];
+  void Function()? beforeAttach;
+  @override
+  void write(Object? message) => writes.add(message.toString());
+  void setAuxMapperFactory(String Function(String) Function() factory) =>
+      beforeAttach?.call();
+}
+
 void main() {
+  test(
+      'token expiry during acquisition cannot send password auth as early data',
+      () async {
+    final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+      ..quicEndpoints = [XmppQuicEndpoint(host: 'quic.example.com', port: 443)]
+      ..tcpEndpoints = []
+      ..sasl2CachedFastTls0Rtt = true
+      ..fastToken = 'token'
+      ..fastMechanism = 'HT-SHA-256-NONE'
+      ..sasl2CachedFastMechanisms = ['HT-SHA-256-NONE']
+      ..sasl2CachedMechanisms = ['PLAIN']
+      ..sasl2LastMechanism = 'PLAIN'
+      ..iapConfigVersionValue = 'v1'
+      ..sasl2UserAgentId = '12cf3230-c260-4e59-8adc-ddb96f2bef53'
+      ..persistFastCounter = (_) async {};
+    final socket = _EarlySocket()
+      ..beforeAttach = () {
+        account.fastTokenExpiry = '2000-01-01T00:00:00Z';
+      };
+    final connection = Connection(account, socketFactory: () => socket);
+    await connection.openSocket();
+    await Future<void>.delayed(Duration.zero);
+    expect(socket.allowEarlyData, isTrue);
+    expect(socket.writes.where((write) => write.contains('authenticate')),
+        isEmpty);
+    expect(connection.state, XmppConnectionState.ForcefullyClosed);
+    connection.dispose();
+  });
+
+  test(
+      'early acquisition requires FAST permission, token, identity and durable counter',
+      () async {
+    for (final missing in [
+      'none',
+      'permission',
+      'token',
+      'identity',
+      'storage'
+    ]) {
+      final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
+        ..quicEndpoints = [
+          XmppQuicEndpoint(host: 'quic.example.com', port: 443)
+        ]
+        ..tcpEndpoints = []
+        ..sasl2CachedFastTls0Rtt = missing != 'permission'
+        ..fastToken = missing == 'token' ? '' : 'token'
+        ..fastMechanism = 'HT-SHA-256-NONE'
+        ..sasl2CachedFastMechanisms = ['HT-SHA-256-NONE']
+        ..iapConfigVersionValue = 'v1'
+        ..sasl2UserAgentId = missing == 'identity'
+            ? null
+            : '12cf3230-c260-4e59-8adc-ddb96f2bef53';
+      if (missing != 'storage') account.persistFastCounter = (_) async {};
+      final socket = _EarlySocket();
+      final connection = Connection(account, socketFactory: () => socket);
+      await connection.openSocket();
+      expect(socket.allowEarlyData, missing == 'none', reason: missing);
+      connection.dispose();
+    }
+  });
+
   test('Connection falls back to TCP endpoints when QUIC endpoints fail',
       () async {
     final account = XmppAccountSettings.fromJid('alice@example.com', 'secret');

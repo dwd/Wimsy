@@ -138,6 +138,27 @@ Future<void> settleAuthWrites() async {
 }
 
 void main() {
+  test(
+      'a counter reservation cannot send authentication on a replacement socket',
+      () async {
+    final durable = Completer<void>();
+    final account = XmppAccountSettings.fromJid('alice@example.com', '')
+      ..fastToken = 'token'
+      ..persistFastCounter = (_) => durable.future;
+    final connection = Connection(account);
+    final oldSocket = _RecordingSocket();
+    final newSocket = _RecordingSocket();
+    connection.socket = oldSocket;
+    FastAuthHandler.fromMechanismName(connection, 'HT-SHA-256-NONE', 'token')!
+        .start();
+    await settleAuthWrites();
+    connection.socket = newSocket;
+    durable.complete();
+    await settleAuthWrites();
+    expect(oldSocket.writes, isEmpty);
+    expect(newSocket.writes, isEmpty);
+  });
+
   test('FAST emits count only after its durable reservation completes',
       () async {
     final durable = Completer<void>();
@@ -158,7 +179,8 @@ void main() {
   });
 
   test('cached early-data permission requires an explicit FAST attribute', () {
-    final connection = Connection(XmppAccountSettings.fromJid('alice@example.com', ''));
+    final connection =
+        Connection(XmppAccountSettings.fromJid('alice@example.com', ''));
     final fast = buildFastElement(['HT-SHA-256-NONE'])
       ..addAttribute(XmppAttribute('tls-0rtt', 'true'));
     SaslAuthenticationFeature.cacheInlineFeatureNames(

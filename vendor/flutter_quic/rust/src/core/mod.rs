@@ -7,6 +7,7 @@ pub mod endpoint;
 pub mod connection;
 pub mod stream;
 pub mod config;
+pub(crate) mod session_store;
 
 pub use endpoint::QuicEndpoint;
 pub use connection::{QuicConnection, QuicConnectionStats, QuicPathStats, QuicFrameStats, QuicUdpStats, QuicPeerTransportParams};

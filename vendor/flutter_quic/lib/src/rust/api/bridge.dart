@@ -137,6 +137,16 @@ Future<(QuicEndpoint, QuicConnection)> endpointConnect({
   qlogPath: qlogPath,
 );
 
+/// Install encrypted ticket persistence before opening the first endpoint.
+/// The key is supplied by the application's unlocked encrypted account store.
+Future<void> configureQuicSessionStorage({
+  required String path,
+  required List<int> key,
+}) => RustLib.instance.api.crateApiBridgeConfigureQuicSessionStorage(
+  path: path,
+  key: key,
+);
+
 /// Acquire a connection that may send early data. The boolean indicates a
 /// provisional handshake; await connection_wait_handshake before reading streams.
 Future<(QuicEndpoint, QuicConnection, bool)> endpointConnectEarly({
@@ -148,6 +158,10 @@ Future<(QuicEndpoint, QuicConnection, bool)> endpointConnectEarly({
   serverName: serverName,
   qlogPath: qlogPath,
 );
+
+/// Cancel acquisition/handshake work and release blocked stream operations.
+Future<void> connectionClose({required QuicConnection connection}) =>
+    RustLib.instance.api.crateApiBridgeConnectionClose(connection: connection);
 
 Future<bool> connectionWaitHandshake({required QuicConnection connection}) =>
     RustLib.instance.api.crateApiBridgeConnectionWaitHandshake(

@@ -147,9 +147,19 @@ class FastAuthHandler implements AbstractSaslHandler {
 
   void _sendAuthenticate() {
     // Reserve durably before any authentication bytes can enter early data.
+    final socket = _connection.socket;
     _connection.account.reserveFastCounter(_token).then((count) {
+      if (!identical(socket, _connection.socket)) {
+        // This authentication belongs to an abandoned transport generation.
+        _subscription.cancel();
+        return;
+      }
       if (!_completer.isCompleted) _sendAuthenticateWithCount(count);
     }).catchError((Object error) {
+      if (!identical(socket, _connection.socket)) {
+        _subscription.cancel();
+        return;
+      }
       _fail('Unable to reserve FAST authentication counter');
     });
   }
@@ -330,7 +340,9 @@ class FastAuthHandler implements AbstractSaslHandler {
     Log.e(TAG, message);
     // If FAST fails, clear the stored token so the next reconnect falls back
     // to SCRAM rather than retrying with an invalid/expired token.
-    _connection.account.clearFastToken();
+    if (_connection.account.fastToken == _token) {
+      _connection.account.clearFastToken();
+    }
 
     if (!_completer.isCompleted) {
       _subscription.cancel();

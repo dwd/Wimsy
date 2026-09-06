@@ -160,6 +160,12 @@ pub async fn endpoint_connect(
     Ok((endpoint, connection))
 }
 
+/// Install encrypted ticket persistence before opening the first endpoint.
+/// The key is supplied by the application's unlocked encrypted account store.
+pub fn configure_quic_session_storage(path: String, key: Vec<u8>) -> Result<(), QuicError> {
+    crate::core::endpoint::configure_session_storage(path, key)
+}
+
 /// Acquire a connection that may send early data. The boolean indicates a
 /// provisional handshake; await connection_wait_handshake before reading streams.
 pub async fn endpoint_connect_early(
@@ -172,6 +178,11 @@ pub async fn endpoint_connect_early(
     let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path)?;
     let (connection, early) = endpoint.connect_early(addr, server_name).await?;
     Ok((endpoint, connection, early))
+}
+
+/// Cancel acquisition/handshake work and release blocked stream operations.
+pub fn connection_close(connection: &QuicConnection) {
+    connection.inner().close(0u32.into(), b"client closed");
 }
 
 pub async fn connection_wait_handshake(connection: &QuicConnection) -> Result<bool, QuicError> {

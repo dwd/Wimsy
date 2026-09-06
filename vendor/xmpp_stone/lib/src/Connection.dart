@@ -684,9 +684,10 @@ class Connection {
                       account.iapIncludeConfigVersion &&
                       _iapConfigVersion != null &&
                       account.fastEnabled &&
-                      account.fastToken != null &&
+                      (account.fastToken?.isNotEmpty ?? false) &&
                       !_fastTokenExpired() &&
                       account.sasl2SendUserAgent &&
+                      (account.sasl2UserAgentId?.trim().isNotEmpty ?? false) &&
                       const ['HT-SHA-256-NONE', 'HT-SHA-512-NONE']
                           .contains(account.fastMechanism) &&
                       (account.sasl2CachedFastMechanisms ?? [])
@@ -1198,6 +1199,16 @@ class Connection {
         !fastMechanism.startsWith('HT2-') &&
         cachedFastMechanisms.contains(fastMechanism) &&
         !_fastTokenExpired();
+    // Eligibility may change while acquiring the transport (e.g. token expiry).
+    // Never let the ordinary password fallback enter an early-data flight.
+    final socket = _socket;
+    if (!canUseFast &&
+        socket is XmppEarlyDataSocket &&
+        (socket as XmppEarlyDataSocket).earlyDataPending) {
+      handleConnectionError(
+          'FAST credentials expired during early-data acquisition');
+      return;
+    }
     final mechanism = SaslAuthenticationFeature.mechanismFromWireName(
       account.sasl2LastMechanism,
     );

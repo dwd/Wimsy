@@ -310,7 +310,7 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0484.html"/>
         <xmpp:status>complete</xmpp:status>
-        <xmpp:note xml:lang="en">FAST tokens with HT-SHA-256-NONE and HT-SHA-512-NONE, token rotation, and replay-counted QUIC 0-RTT when explicitly advertised; TLS tickets currently remain in memory.</xmpp:note>
+        <xmpp:note xml:lang="en">FAST tokens with HT-SHA-256-NONE and HT-SHA-512-NONE, token rotation, and replay-counted QUIC 0-RTT when explicitly advertised; TLS tickets persist encrypted across restarts, with durable single-use consumption and stable client identity.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>

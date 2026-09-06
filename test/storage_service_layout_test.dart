@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -63,6 +64,48 @@ void main() {
 
   File boxFile() =>
       File('${dir.path}${Platform.pathSeparator}wimsy_secure.hive');
+
+  test(
+    'QUIC ticket key survives reopening the encrypted account store',
+    () async {
+      final first = (await storage.quicSessionStorageSettings())!;
+      expect(first.key, hasLength(32));
+      expect(first.path, endsWith('quic-sessions.bin'));
+      final simultaneous = await Future.wait([
+        storage.quicSessionStorageSettings(),
+        storage.quicSessionStorageSettings(),
+      ]);
+      expect(simultaneous[0]!.key, first.key);
+      expect(simultaneous[1]!.key, first.key);
+      await storage.lock();
+      expect(await storage.quicSessionStorageSettings(), isNull);
+      await storage.unlock('1234');
+      final reopened = (await storage.quicSessionStorageSettings())!;
+      expect(reopened.key, first.key);
+      expect(reopened.path, first.path);
+      // The plaintext key must not occur in the encrypted Hive file.
+      final bytes = boxFile().readAsBytesSync();
+      expect(
+        List.generate(
+          bytes.length - first.key.length + 1,
+          (i) => bytes.sublist(i, i + first.key.length),
+        ).any((part) => listEquals(part, first.key)),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'SASL client identity is stable across unlocks and isolated by account',
+    () async {
+      final first = await storage.saslUserAgentId('alice@example.com');
+      expect(await storage.saslUserAgentId('alice@example.com'), first);
+      expect(await storage.saslUserAgentId('bob@example.com'), isNot(first));
+      await storage.lock();
+      await storage.unlock('1234');
+      expect(await storage.saslUserAgentId('alice@example.com'), first);
+    },
+  );
 
   group('per-record storage layout', () {
     test('messages round-trip through one record per chat', () async {

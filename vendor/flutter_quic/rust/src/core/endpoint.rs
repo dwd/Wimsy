@@ -4,7 +4,50 @@ use flutter_rust_bridge::frb;
 use crate::core::connection::QuicConnection;
 use crate::errors::QuicError;
 use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use super::session_store::PersistentSessions;
+use zeroize::Zeroizing;
+
+struct ClientCrypto {
+    storage_id: Option<[u8; 32]>,
+    crypto: Arc<quinn::crypto::rustls::QuicClientConfig>,
+}
+
+fn build_client_crypto(store: Option<Arc<dyn rustls::client::ClientSessionStore>>)
+    -> Arc<quinn::crypto::rustls::QuicClientConfig> {
+    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let mut crypto = rustls::ClientConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
+        .with_root_certificates(roots).with_no_client_auth().expect("valid TLS provider");
+    crypto.alpn_protocols = vec![b"xmpp-client".as_slice().into()];
+    crypto.enable_early_data = true;
+    if let Some(store) = store { crypto.resumption = rustls::client::Resumption::store(store); }
+    Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
+        .expect("TLS 1.3 provider supports QUIC"))
+}
+
+fn client_crypto() -> &'static Mutex<ClientCrypto> {
+    static CRYPTO: OnceLock<Mutex<ClientCrypto>> = OnceLock::new();
+    CRYPTO.get_or_init(|| Mutex::new(ClientCrypto {
+        storage_id: None, crypto: build_client_crypto(None),
+    }))
+}
+
+/// Configure before endpoint creation. Repeated calls for the same encrypted
+/// store preserve both the TLS configuration and its tickets.
+pub(crate) fn configure_session_storage(path: String, key: Vec<u8>) -> Result<(), QuicError> {
+    let key = Zeroizing::new(key);
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    digest.update(path.as_bytes());
+    digest.update(&key);
+    let storage_id: [u8; 32] = digest.finish().as_ref().try_into().unwrap();
+    let mut config = client_crypto().lock().unwrap();
+    if config.storage_id == Some(storage_id) { return Ok(()); }
+    let store = PersistentSessions::new(path.into(), &key, Arc::new(rustls_ring::DEFAULT_PROVIDER))
+        .map_err(|_| QuicError::Config("Unable to open encrypted TLS ticket store".into()))?;
+    config.crypto = build_client_crypto(Some(Arc::new(store)));
+    config.storage_id = Some(storage_id);
+    Ok(())
+}
 
 #[frb(opaque)]
 pub struct QuicEndpoint {
@@ -54,19 +97,7 @@ impl QuicEndpoint {
     }
 
     fn client_with_bind_addr(bind_addr: SocketAddr, qlog_path: Option<String>) -> Result<Self, QuicError> {
-        // Reuse the same verifier, credentials and session cache across endpoints.
-        // rustls requires their identity to remain stable for session resumption.
-        static CRYPTO: OnceLock<Arc<quinn::crypto::rustls::QuicClientConfig>> = OnceLock::new();
-        let crypto = CRYPTO.get_or_init(|| {
-            let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let mut crypto = rustls::ClientConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
-                .with_root_certificates(roots)
-                .with_no_client_auth().expect("valid TLS provider");
-            crypto.alpn_protocols = vec![b"xmpp-client".as_slice().into()];
-            crypto.enable_early_data = true;
-            Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
-                .expect("TLS 1.3 provider supports QUIC"))
-        }).clone();
+        let crypto = client_crypto().lock().unwrap().crypto.clone();
         let mut config = quinn::ClientConfig::new(crypto);
 
         // Configure transport parameters for better performance

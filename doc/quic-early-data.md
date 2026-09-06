@@ -2,8 +2,8 @@
 
 Wimsy can send the XMPP stream opening and SASL2 FAST authentication before a
 resumed QUIC handshake completes. Initial connections use the normal handshake.
-TLS tickets currently live only in the Rust process. The client configuration
-and its certificate verifier are shared across endpoint creation, and server
+TLS tickets persist in an encrypted file across process restarts. The client
+configuration is shared across endpoint creation, and server
 certificates are checked against the bundled Mozilla trust roots.
 
 Early authentication requires a cached IAP configuration, a usable HT token,
@@ -43,6 +43,37 @@ explicitly rejected. The optional platform-verifier convenience constructor now
 loads native trust anchors into rustls's verifier, because the external 0.23
 platform-verifier adapter is incompatible. Wimsy uses bundled Mozilla roots.
 
-The pinned prerelease exposes `Tls13Session::encode` and `from_slice`, which are
-the foundation for the next persistence stage. Its encoding is treated as
-version-specific, never as a stable interchange format.
+The pinned prerelease exposes `Tls13Session::encode` and `from_slice`. Its
+encoding is treated as version-specific, never as a stable interchange format.
+
+## Persistence and recovery
+
+The ticket file is `quic-sessions.bin` beside the account database. Its random
+256-bit AES-GCM key is stored inside the PIN-encrypted Hive box and flushed
+before the ticket file is used. Each write uses a fresh random nonce. Neither
+the key nor session secrets are logged. FAST's stable per-account SASL user-agent
+ID is also persisted before authentication.
+
+Tickets include their resumption secret, timing metadata and remembered QUIC
+transport parameters. Entries are keyed by rustls's server name and security
+configuration hash; the application uses fixed `xmpp-client` ALPN. The cache is
+bounded to 64 security contexts, eight tickets per context and a 4 MiB file.
+
+Rust locks a separate lock file, reloads the latest cache, then writes an
+atomically replaced, synced encrypted file. A ticket is removed durably before
+it is returned to TLS. This handles concurrent clients and crashes without
+reusing a consumed ticket. If consumption cannot be committed, no ticket is
+returned. Expired tickets, corrupted ciphertext, changed keys and incompatible
+formats fall back to a full verified handshake. New tickets arrive through the
+TLS session-store callback, including tickets issued after authentication.
+
+A process-level integration test starts independent client processes against a
+live loopback server and verifies accepted 0-RTT after restart, then full-handshake
+fallback after ticket expiry, corruption, server-name changes and trust-store
+changes. Additional tests cover concurrent
+consumption, failed durable writes, encrypted Hive key recovery and stable
+client identity. Provisional connections are explicitly closed on cancellation;
+control-stream acquisition and replay have timeouts. A failed provisional
+handshake penalizes its address so the next acquisition can choose another path. Token expiry during
+acquisition closes the provisional connection instead of falling back to a
+password in early data.

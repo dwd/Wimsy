@@ -23,6 +23,8 @@ class StorageService {
   // account is never presented for another.
   static const _fastTokensKey = 'fast_tokens';
   static const _iapCachesKey = 'iap_caches';
+  static const _quicSessionKey = 'quic_session_key';
+  static const _saslUserAgentsKey = 'sasl_user_agents';
   static const _rosterKey = 'roster';
   static const _rosterVersionKey = 'roster_version';
   static const _messagesKey = 'messages';
@@ -95,6 +97,8 @@ class StorageService {
     _accountKey,
     _fastTokensKey,
     _iapCachesKey,
+    _quicSessionKey,
+    _saslUserAgentsKey,
     _rosterKey,
     _rosterVersionKey,
     _bookmarksKey,
@@ -141,6 +145,59 @@ class StorageService {
     }
   }
 
+  /// FAST tokens belong to a client identity, which must remain stable across
+  /// reconnects and application restarts (XEP-0484 section 4.1).
+  Future<String> saslUserAgentId(String bareJid) async {
+    final box = _box;
+    if (box == null) throw StateError('Account storage is locked');
+    final stored = box.get(_saslUserAgentsKey);
+    final ids = stored is Map
+        ? Map<String, dynamic>.from(stored)
+        : <String, dynamic>{};
+    final previous = ids[bareJid];
+    if (previous is String && previous.isNotEmpty) return previous;
+    final bytes = _randomBytes(16);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final id =
+        '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+    ids[bareJid] = id;
+    await box.put(_saslUserAgentsKey, ids);
+    await box.flush();
+    return id;
+  }
+
+  Future<QuicSessionStorageSettings?>? _quicSessionSettingsFuture;
+
+  /// The separate ticket file is encrypted with a random key protected by Hive.
+  /// Its key must reach durable storage before Rust can persist any tickets.
+  Future<QuicSessionStorageSettings?> quicSessionStorageSettings() {
+    if (!isUnlocked) return Future.value(null);
+    return _quicSessionSettingsFuture ??= _loadQuicSessionStorageSettings();
+  }
+
+  Future<QuicSessionStorageSettings?> _loadQuicSessionStorageSettings() async {
+    final box = _box;
+    final directory = _hivePath;
+    if (kIsWeb || box == null || directory == null) return null;
+    final saved = box.get(_quicSessionKey);
+    final List<int> key;
+    if (saved is List &&
+        saved.length == 32 &&
+        saved.every((byte) => byte is int && byte >= 0 && byte <= 255)) {
+      key = List<int>.from(saved);
+    } else {
+      key = _randomBytes(32);
+      await box.put(_quicSessionKey, key);
+      await box.flush();
+    }
+    return QuicSessionStorageSettings(
+      '${Directory(directory).absolute.path}${Platform.pathSeparator}quic-sessions.bin',
+      Uint8List.fromList(key),
+    );
+  }
+
   Future<bool> hasPin() async {
     final salt = await _secureStorage.read(key: _saltKey);
     return salt != null && salt.isNotEmpty;
@@ -164,6 +221,7 @@ class StorageService {
   }
 
   Future<void> lock() async {
+    _quicSessionSettingsFuture = null;
     await _box?.close();
     _box = null;
     _messageCache.clear();
@@ -1309,4 +1367,11 @@ class _MessageCacheKey {
 
   @override
   int get hashCode => Object.hash(jid, isRoom);
+}
+
+/// Secret configuration passed directly to the native QUIC layer, never logged.
+class QuicSessionStorageSettings {
+  const QuicSessionStorageSettings(this.path, this.key);
+  final String path;
+  final Uint8List key;
 }
