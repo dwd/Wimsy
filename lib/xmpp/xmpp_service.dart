@@ -3443,6 +3443,62 @@ class XmppService extends ChangeNotifier {
     });
   }
 
+  @visibleForTesting
+  void handleRoomMessageForTesting(MucMessage message) {
+    _handleRoomMessage(message);
+  }
+
+  void _handleRoomMessage(MucMessage message) {
+    _noteRoomTraffic(message.roomJid);
+    final mujiSession = _mujiSessions[_bareJid(message.roomJid)];
+    if (mujiSession != null && message.nick.isNotEmpty) {
+      mujiSession.setActiveSpeaker(message.nick);
+    }
+    if (message.replaceId != null && message.replaceId!.isNotEmpty) {
+      final applied = _applyRoomMessageCorrection(
+        roomJid: message.roomJid,
+        sender: message.nick,
+        replaceId: message.replaceId!,
+        newBody: message.body,
+        oobUrl: message.oobUrl,
+        rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
+        timestamp: message.timestamp,
+      );
+      if (applied) {
+        return;
+      }
+    }
+    if (message.reactionTargetId != null) {
+      _applyRoomReactionUpdate(
+        message.roomJid,
+        message.nick,
+        message.reactionTargetId!,
+        message.reactions,
+      );
+      return;
+    }
+    final isSelfReflection = _isRoomSelfReflection(
+      message.roomJid,
+      message.nick,
+    );
+    _addRoomMessage(
+      roomJid: message.roomJid,
+      from: message.nick,
+      body: message.body,
+      oobUrl: message.oobUrl,
+      rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
+      outgoing: isSelfReflection,
+      receivedFromRoom: true,
+      timestamp: message.timestamp,
+      messageId: message.messageId ?? message.stanzaId,
+      mamId: message.mamResultId,
+      stanzaId: message.stanzaId,
+      replyToId: message.replyToId,
+      replyToJid: message.replyToJid,
+      replyFallback: message.replyFallback,
+    );
+  }
+
   void _setupMuc() {
     final connection = _connection;
     if (connection == null) {
@@ -3457,70 +3513,9 @@ class XmppService extends ChangeNotifier {
       _handleMucRoomCreatedPresence(stanza);
     });
     _roomSubscriptions['message']?.cancel();
-    _roomSubscriptions['message'] = _mucManager!.roomMessageStream.listen((
-      message,
-    ) {
-      _noteRoomTraffic(message.roomJid);
-      final mujiSession = _mujiSessions[_bareJid(message.roomJid)];
-      if (mujiSession != null && message.nick.isNotEmpty) {
-        mujiSession.setActiveSpeaker(message.nick);
-      }
-      if (message.replaceId != null && message.replaceId!.isNotEmpty) {
-        final applied = _applyRoomMessageCorrection(
-          roomJid: message.roomJid,
-          sender: message.nick,
-          replaceId: message.replaceId!,
-          newBody: message.body,
-          oobUrl: message.oobUrl,
-          rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
-          timestamp: message.timestamp,
-        );
-        if (applied) {
-          return;
-        }
-      }
-      if (message.reactionTargetId != null) {
-        _applyRoomReactionUpdate(
-          message.roomJid,
-          message.nick,
-          message.reactionTargetId!,
-          message.reactions,
-        );
-        return;
-      }
-      final isSelfReflection = _isRoomSelfReflection(
-        message.roomJid,
-        message.nick,
-      );
-      _addRoomMessage(
-        roomJid: message.roomJid,
-        from: message.nick,
-        body: message.body,
-        oobUrl: message.oobUrl,
-        rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
-        outgoing: isSelfReflection,
-        timestamp: message.timestamp,
-        messageId: message.messageId ?? message.stanzaId,
-        mamId: message.mamResultId,
-        stanzaId: message.stanzaId,
-        replyToId: message.replyToId,
-        replyToJid: message.replyToJid,
-        replyFallback: message.replyFallback,
-      );
-      // When the room reflects our own message back to us, it proves the
-      // message was received by the server. Mark it with a double tick
-      // (receiptReceived) so the UI shows delivery confirmation.
-      if (isSelfReflection) {
-        final reflectedId = message.messageId ?? message.stanzaId;
-        if (reflectedId != null && reflectedId.isNotEmpty) {
-          _updateOutgoingRoomStatus(
-            message.roomJid,
-            reflectedId,
-            receiptReceived: true,
-          );
-        }
-      }
-    });
+    _roomSubscriptions['message'] = _mucManager!.roomMessageStream.listen(
+      _handleRoomMessage,
+    );
     _roomSubscriptions['presence']?.cancel();
     _roomSubscriptions['presence'] = _mucManager!.roomPresenceStream.listen((
       presence,
@@ -8146,6 +8141,7 @@ class XmppService extends ChangeNotifier {
     required String rawXml,
     required bool outgoing,
     required DateTime timestamp,
+    bool receivedFromRoom = false,
     String? messageId,
     String? mamId,
     String? stanzaId,
@@ -8171,12 +8167,14 @@ class XmppService extends ChangeNotifier {
         final nextStanzaId = (stanzaId != null && stanzaId.isNotEmpty)
             ? stanzaId
             : existing.stanzaId;
-        final nextReceiptReceived = (!outgoing && existing.outgoing)
-            ? true
-            : existing.receiptReceived;
-        final nextTimestamp = (!outgoing && existing.outgoing)
-            ? timestamp
-            : existing.timestamp;
+        // The room's first reflection replaces the optimistic send time,
+        // even though it remains an outgoing message in the UI. Replays must
+        // not move a message that has already been confirmed by the room.
+        final confirmsOutgoing = receivedFromRoom && existing.outgoing;
+        final firstReflection = confirmsOutgoing && !existing.receiptReceived;
+        final nextReceiptReceived =
+            existing.receiptReceived || confirmsOutgoing;
+        final nextTimestamp = firstReflection ? timestamp : existing.timestamp;
         final nextOobUrl = (oobUrl != null && oobUrl.isNotEmpty)
             ? oobUrl
             : existing.oobUrl;
@@ -8217,8 +8215,12 @@ class XmppService extends ChangeNotifier {
             replyFallback: nextReplyFallback,
             receiptReceived: nextReceiptReceived,
           );
-          list.removeAt(existingIndex);
-          _insertMessageOrdered(list, updated);
+          if (firstReflection) {
+            list.removeAt(existingIndex);
+            _insertMessageOrdered(list, updated);
+          } else {
+            list[existingIndex] = updated;
+          }
           notifyListeners();
           _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
         }
@@ -8285,8 +8287,9 @@ class XmppService extends ChangeNotifier {
       to: normalized,
       body: body,
       outgoing: outgoing,
-      // Outgoing messages in the MAM archive were received by the server.
-      receiptReceived: outgoing && mamId != null && mamId.isNotEmpty,
+      // Self-reflections and outgoing archive entries confirm room delivery.
+      receiptReceived:
+          outgoing && (receivedFromRoom || (mamId != null && mamId.isNotEmpty)),
       timestamp: timestamp,
       messageId: messageId,
       mamId: mamId,

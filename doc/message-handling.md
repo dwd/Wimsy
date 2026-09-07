@@ -93,6 +93,16 @@ For MUC, messages are not processed by `_handleMessageStanza`. Instead, they flo
 - Reaction updates with a `reactionTargetId` are applied via `_applyRoomReactionUpdate(...)`.
 - Otherwise, the message is added as a `ChatMessage` via `_addRoomMessage(...)`.
 
+A self-reflection keeps the message marked as outgoing, but its first receipt
+replaces the optimistic local send timestamp with the room event timestamp and
+reinserts it into the ordered message list. This puts it after messages received
+earlier with the same timestamp, confirms delivery, and persists the corrected
+order. Later duplicate reflections can merge metadata without moving the message
+again. The room event uses a server delay timestamp when provided, otherwise the
+local receive time. Regression coverage is in
+`test/room_message_reflection_test.dart` and exercises the service handler used by
+the room stream.
+
 Room presence and subject changes are handled by other MUC streams and do not create `ChatMessage` entries (they update room state and presence/occupant state).
 
 ## 4) PEP / Caps / Disco Interactions
