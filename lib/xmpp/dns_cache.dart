@@ -30,6 +30,7 @@ class DnsCache {
   final Duration _maxStaleness;
 
   final Map<String, _DnsCacheEntry> _entries = {};
+  int _generation = 0;
 
   /// Store [addresses] for [host].
   void store(String host, List<InternetAddress> addresses) {
@@ -58,7 +59,10 @@ class DnsCache {
   }
 
   /// Remove all entries from the cache.
-  void clear() => _entries.clear();
+  void clear() {
+    _generation++;
+    _entries.clear();
+  }
 
   /// Remove the entry for [host] from the cache.
   void evict(String host) => _entries.remove(host);
@@ -66,6 +70,16 @@ class DnsCache {
 
 /// The process-wide hostname DNS cache shared by all lookups.
 final dnsCache = DnsCache();
+
+/// Cancels refresh timers and prevents old lookups from repopulating the cache.
+void resetDnsCache() {
+  for (final timer in _dnsRefreshTimers.values) {
+    timer.cancel();
+  }
+  _dnsRefreshTimers.clear();
+  dnsCache.clear();
+}
+
 final Map<String, Timer> _dnsRefreshTimers = <String, Timer>{};
 
 /// Signature for a hostname-to-address lookup function.
@@ -135,6 +149,7 @@ Future<List<InternetAddress>> resolveHostCachedWith(
     return <InternetAddress>[literalAddress];
   }
   final effectiveCache = cache ?? dnsCache;
+  final generation = effectiveCache._generation;
 
   // Return fresh cached result immediately.
   final fresh = forceRefresh ? null : effectiveCache.getFresh(host);
@@ -149,6 +164,9 @@ Future<List<InternetAddress>> resolveHostCachedWith(
       try {
         debugPrint('DNS lookup: host=$host attempt=$attempt/$retryCount');
         final addresses = await lookup(host, type: type);
+        if (generation != effectiveCache._generation) {
+          throw StateError('DNS lookup superseded by reset');
+        }
         if (addresses.isNotEmpty) {
           effectiveCache.store(host, addresses);
           onRefresh?.call(addresses);
@@ -163,6 +181,7 @@ Future<List<InternetAddress>> resolveHostCachedWith(
         }
         lastError = const SocketException('DNS lookup returned no addresses');
       } catch (e) {
+        if (generation != effectiveCache._generation) rethrow;
         lastError = e;
         debugPrint('DNS lookup: host=$host attempt=$attempt failed: $e');
       }
@@ -181,7 +200,11 @@ Future<List<InternetAddress>> resolveHostCachedWith(
     } on TimeoutException {
       unawaited(refresh.catchError((Object _) => stale));
     } catch (_) {
+      if (generation != effectiveCache._generation) rethrow;
       // Use stale data immediately after a quick live failure too.
+    }
+    if (generation != effectiveCache._generation) {
+      throw StateError('DNS lookup superseded by reset');
     }
     debugPrint(
       'DNS cache: using stale records for $host '

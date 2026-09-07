@@ -320,6 +320,11 @@ class StorageService {
     await box.put(_fastTokensKey, const <String, dynamic>{});
   }
 
+  /// Forget negotiation shortcuts so a cache reset performs full discovery.
+  Future<void> clearIapCaches() async {
+    await _box?.delete(_iapCachesKey);
+  }
+
   IapCacheRecord? loadIapCache(String bareJid) {
     final data = _box?.get(_iapCachesKey);
     if (bareJid.isEmpty || data is! Map || data[bareJid] is! Map) return null;

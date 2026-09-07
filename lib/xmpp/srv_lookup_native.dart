@@ -15,6 +15,18 @@ const _srvRetryCount = 3;
 const _srvRetryDelay = Duration(seconds: 2);
 final Map<String, Timer> _srvRefreshTimers = <String, Timer>{};
 
+int _srvGeneration = 0;
+
+/// Discards network-specific answers and cancels proactive refresh work.
+void resetSrvCache() {
+  _srvGeneration++;
+  for (final timer in _srvRefreshTimers.values) {
+    timer.cancel();
+  }
+  _srvRefreshTimers.clear();
+  srvCache.clear();
+}
+
 const MethodChannel _channel = MethodChannel('wimsy/dns');
 
 Future<XmppSrvTarget?> resolveXmppSrv(String domain) async {
@@ -136,6 +148,7 @@ Future<List<XmppSrvTarget>> _lookupSrv(
   required bool directTls,
   bool forceRefresh = false,
 }) async {
+  final generation = _srvGeneration;
   // Return fresh cached records immediately.
   final fresh = forceRefresh ? null : srvCache.getFresh(name);
   if (fresh != null) {
@@ -149,6 +162,7 @@ Future<List<XmppSrvTarget>> _lookupSrv(
       var timedOut = false;
       try {
         final native = await _lookupSrvNative(name);
+        if (generation != _srvGeneration) return const [];
         if (native.isNotEmpty) {
           results = native
               .map(
@@ -166,7 +180,11 @@ Future<List<XmppSrvTarget>> _lookupSrv(
           _scheduleSrvRefresh(name, directTls);
           return results;
         }
-        results = await _lookupSrvUdp(name, directTls: directTls);
+        results = await _lookupSrvUdp(
+          name,
+          directTls: directTls,
+          generation: generation,
+        );
       } on TimeoutException {
         timedOut = true;
         results = const [];
@@ -174,6 +192,7 @@ Future<List<XmppSrvTarget>> _lookupSrv(
         results = const [];
       }
 
+      if (generation != _srvGeneration) return const [];
       if (results.isNotEmpty) {
         _scheduleSrvRefresh(name, directTls);
         return results;
@@ -199,6 +218,7 @@ Future<List<XmppSrvTarget>> _lookupSrv(
     } on TimeoutException {
       unawaited(refresh);
     }
+    if (generation != _srvGeneration) return const [];
     debugPrint(
       'SRV cache: using stale records for $name (${stale.length} records) '
       'while refresh continues',
@@ -233,10 +253,11 @@ class _NativeSrvRecord {
 Future<List<_NativeSrvRecord>> _lookupSrvNative(String name) async {
   debugPrint('SRV native: query=$name');
   try {
-    final result = await _channel.invokeMethod<List<dynamic>>(
-      'resolveSrv',
-      <String, dynamic>{'name': name},
-    );
+    final result = await _channel
+        .invokeMethod<List<dynamic>>('resolveSrv', <String, dynamic>{
+          'name': name,
+        })
+        .timeout(const Duration(seconds: 5));
     if (result == null) {
       debugPrint('SRV native: empty result');
       return const [];
@@ -286,6 +307,7 @@ int? _toInt(dynamic value) {
 Future<List<XmppSrvTarget>> _lookupSrvUdp(
   String name, {
   required bool directTls,
+  required int generation,
 }) async {
   debugPrint('SRV udp: query=$name');
   final resolvers = await _systemResolvers();
@@ -298,6 +320,7 @@ Future<List<XmppSrvTarget>> _lookupSrvUdp(
   for (final resolver in resolvers) {
     debugPrint('SRV udp: resolver=$resolver');
     final response = await _querySrv(name, resolver);
+    if (generation != _srvGeneration) return const [];
     if (response.isEmpty) {
       continue;
     }

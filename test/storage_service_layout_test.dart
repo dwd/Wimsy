@@ -7,6 +7,8 @@ import 'package:wimsy/models/chat_message.dart';
 import 'package:wimsy/models/avatar_metadata.dart';
 import 'package:wimsy/storage/secure_store.dart';
 import 'package:wimsy/storage/storage_service.dart';
+import 'package:wimsy/storage/iap_cache_record.dart';
+import 'package:wimsy/xmpp/xmpp_service.dart';
 
 /// In-memory replacement for the platform keystore so the tests can open a
 /// real (encrypted) Hive box without any plugin channels.
@@ -61,6 +63,38 @@ void main() {
       dir.deleteSync(recursive: true);
     }
   });
+
+  test(
+    'empty cache removes messages and negotiation cache but keeps account',
+    () async {
+      final service = XmppService()..attachStorage(storage);
+      await storage.storeAccount({
+        'jid': 'alice@example.com',
+        'password': 'saved',
+      });
+      await storage.storeMessagesForJid('bob@example.com', [
+        _message('direct'),
+      ]);
+      await storage.storeRoomMessagesForJid('room@example.com', [
+        _message('room'),
+      ]);
+      await storage.storeIapCache(
+        'alice@example.com',
+        const IapCacheRecord(
+          configVersion: 'old',
+          sasl2Mechanisms: ['SCRAM-SHA-256'],
+          lastMechanism: 'SCRAM-SHA-256',
+        ),
+      );
+      await service.emptyCache();
+      expect(storage.loadMessages(), isEmpty);
+      expect(storage.loadRoomMessages(), isEmpty);
+      expect(storage.loadIapCache('alice@example.com'), isNull);
+      expect(storage.loadAccount()?['jid'], 'alice@example.com');
+      expect(storage.loadAccount()?['password'], 'saved');
+      service.dispose();
+    },
+  );
 
   File boxFile() =>
       File('${dir.path}${Platform.pathSeparator}wimsy_secure.hive');

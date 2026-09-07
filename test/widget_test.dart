@@ -89,7 +89,63 @@ class _ConnectingXmppService extends XmppService {
   }
 }
 
+class _CacheRetryXmppService extends XmppService {
+  final events = <String>[];
+
+  @override
+  Future<void> emptyCache() async {
+    events.add('empty');
+  }
+
+  @override
+  Future<void> connect({
+    required String jid,
+    required String password,
+    String displayName = '',
+    required String resource,
+    String? host,
+    required int port,
+    bool useWebSocket = false,
+    bool directTls = false,
+    String? connectionUrl,
+    String? serverCertificateHash,
+    bool useQuic = true,
+    bool useTcp = true,
+  }) async {
+    events.add('connect:$jid');
+  }
+}
+
 void main() {
+  testWidgets('Empty Cache & Retry clears before connecting with form values', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final service = _CacheRetryXmppService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LoginScreen(
+          service: service,
+          storage: StorageService(),
+          preferences: prefs,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'JID'),
+      'alice@example.com',
+    );
+    await tester.ensureVisible(find.text('Connection recovery'));
+    await tester.tap(find.text('Connection recovery'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Empty Cache & Retry'));
+    await tester.tap(find.text('Empty Cache & Retry'));
+    await tester.pumpAndSettle();
+    expect(service.events, ['empty', 'connect:alice@example.com']);
+  });
+
   test('low bandwidth mode and CSI override remain synchronized', () {
     final service = XmppService();
 
@@ -809,10 +865,12 @@ void main() {
     await tester.pumpAndSettle();
 
     final scrollable = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byKey(const Key('message-list')),
-        matching: find.byType(Scrollable),
-      ).first,
+      find
+          .descendant(
+            of: find.byKey(const Key('message-list')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     final position = scrollable.position;
     position.jumpTo(position.maxScrollExtent - 160);

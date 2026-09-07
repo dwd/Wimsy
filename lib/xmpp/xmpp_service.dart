@@ -51,6 +51,7 @@ import 'startup_fetch_helpers.dart';
 import 'vcard_utils.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
+import 'dns_cache.dart';
 import 'srv_target.dart';
 import 'alt_connection.dart';
 import 'quic_endpoint_plan.dart';
@@ -111,6 +112,14 @@ class _ConnectArgs {
 }
 
 class XmppService extends ChangeNotifier {
+  /// Platform hooks: Android stops its foreground service on reset and starts
+  /// a fresh service before the next connection attempt.
+  Future<void> Function()? startBackgroundService;
+  Future<void> Function()? stopBackgroundService;
+  int _connectGeneration = 0;
+  Completer<void>? _connectCompletion;
+  Future<void>? _disconnecting;
+
   final MessageStanzaParser _messageStanzaParser = const MessageStanzaParser();
 
   XmppService() {
@@ -1142,6 +1151,8 @@ class XmppService extends ChangeNotifier {
   static final Map<String, TransportAcquisitionHealth> _transportHealth = {};
 
   void handleConnectivityChange(bool online, {String? networkIdentity}) {
+    resetDnsCache();
+    resetSrvCache();
     if (networkIdentity != null && networkIdentity.isNotEmpty) {
       _networkIdentity = networkIdentity;
     }
@@ -1239,208 +1250,219 @@ class XmppService extends ChangeNotifier {
     bool useQuic = true,
     bool useTcp = true,
   }) async {
-    final enteredJid = jid.trim();
-    final parsedEnteredJid = Jid.fromFullJid(enteredJid);
-    final normalizedJid = parsedEnteredJid.isValid()
-        ? parsedEnteredJid.fullJid!
-        : enteredJid;
-    final effectiveConnectionUrl = kIsWeb && defaultWebTransportUrl.isNotEmpty
-        ? defaultWebTransportUrl
-        : connectionUrl;
-    final effectiveServerCertificateHash =
-        kIsWeb && defaultServerCertificateHash.isNotEmpty
-        ? defaultServerCertificateHash
-        : serverCertificateHash;
-    // Cancel any pending retry so we don't double-connect.
-    _connectRetryTimer?.cancel();
-    _connectRetryTimer = null;
-    // Persist args so the retry timer can call connect() with the same params.
-    _lastConnectArgs = _ConnectArgs(
-      jid: normalizedJid,
-      password: password,
-      displayName: displayName,
-      resource: resource,
-      host: host,
-      port: port,
-      useWebSocket: useWebSocket,
-      directTls: directTls,
-      connectionUrl: effectiveConnectionUrl,
-      serverCertificateHash: effectiveServerCertificateHash,
-      useQuic: useQuic,
-      useTcp: useTcp,
-    );
-    final quicTransportAvailable =
-        !kIsWeb &&
-        (Platform.isAndroid ||
-            Platform.isIOS ||
-            Platform.isLinux ||
-            Platform.isMacOS ||
-            Platform.isWindows);
-    final shouldUseWebSocket = kIsWeb || useWebSocket;
-    WsEndpointConfig? wsConfig;
-    if (shouldUseWebSocket) {
-      wsConfig = parseWsEndpoint(effectiveConnectionUrl ?? '');
-    }
-    // Derive transport type from the URL scheme: https/http → WebTransport,
-    // wss/ws → WebSocket.  This is re-evaluated after auto-discovery below.
-    var useWebTransport = wsConfig?.isWebTransport ?? false;
-
-    final normalized = normalizedJid;
-    if (!_looksLikeJid(normalized)) {
-      _setError('Enter a full JID like user@domain.');
-      return;
-    }
-
-    final bareJid = _bareJid(normalized);
-    Log.i(
-      'XmppService',
-      'Starting connection for $bareJid; discovering available transports',
-    );
-    final fullJid = normalized.contains('/')
-        ? normalized
-        : '$bareJid/$resource';
-    final manualHost = host?.trim() ?? '';
-    final hasManualHost = manualHost.isNotEmpty;
-    var resolvedHost = hasManualHost ? manualHost : '';
-    var resolvedPort = port;
-    var resolvedDirectTls = directTls;
-    List<XmppSrvTarget> quicSrvCandidates = const [];
-    List<XmppSrvTarget> tcpSrvCandidates = const [];
-
-    _finishSpan(_connectTransaction);
-    _connectTransaction = _startTransaction(
-      name: 'xmpp.connect',
-      operation: 'xmpp.connect',
-      tags: {
-        'xmpp.domain': _domainFromBareJid(bareJid),
-        'xmpp.transport': shouldUseWebSocket ? 'websocket' : 'tcp',
-        'xmpp.direct_tls': resolvedDirectTls.toString(),
-      },
-    );
-
-    if (!kIsWeb && resolvedHost.isEmpty) {
-      final domain = _domainFromBareJid(bareJid);
-      Log.i('XmppService', 'Looking up XMPP services for $domain');
-      final srvSpan = _startSpan(
-        _connectTransaction,
-        'xmpp.srv_lookup',
-        description: domain,
+    final generation = ++_connectGeneration;
+    await _disconnecting;
+    if (generation != _connectGeneration) return;
+    try {
+      final enteredJid = jid.trim();
+      final parsedEnteredJid = Jid.fromFullJid(enteredJid);
+      final normalizedJid = parsedEnteredJid.isValid()
+          ? parsedEnteredJid.fullJid!
+          : enteredJid;
+      final effectiveConnectionUrl = kIsWeb && defaultWebTransportUrl.isNotEmpty
+          ? defaultWebTransportUrl
+          : connectionUrl;
+      final effectiveServerCertificateHash =
+          kIsWeb && defaultServerCertificateHash.isNotEmpty
+          ? defaultServerCertificateHash
+          : serverCertificateHash;
+      // Cancel any pending retry so we don't double-connect.
+      _connectRetryTimer?.cancel();
+      _connectRetryTimer = null;
+      // Persist args so the retry timer can call connect() with the same params.
+      _lastConnectArgs = _ConnectArgs(
+        jid: normalizedJid,
+        password: password,
+        displayName: displayName,
+        resource: resource,
+        host: host,
+        port: port,
+        useWebSocket: useWebSocket,
+        directTls: directTls,
+        connectionUrl: effectiveConnectionUrl,
+        serverCertificateHash: effectiveServerCertificateHash,
+        useQuic: useQuic,
+        useTcp: useTcp,
       );
-      // Fetch QUIC, Direct-TLS TCP, and StartTLS TCP SRV records in parallel.
-      final srvResults = await resolveAllSrvCandidates(
-        domain,
-        includeQuic: quicTransportAvailable && useQuic,
-      );
-      quicSrvCandidates = srvResults.quic;
-      tcpSrvCandidates = srvResults.tcp;
-      // Filter SRV candidates by the user's transport allow-flags.
-      // - When Direct TLS is off, drop _xmpps-client._tcp records.
-      // - When Plain TCP is off, drop _xmpp-client._tcp records.
-      // The two flags act as independent allow-lists; the user is only
-      // allowed to actually connect via a transport they've enabled.
-      final filteredTcpSrv = filterTcpSrvCandidatesByTransport(
-        tcpSrvCandidates,
-        allowDirectTls: directTls,
-        allowPlainTcp: useTcp,
-      );
-      if (filteredTcpSrv.length != tcpSrvCandidates.length) {
-        debugPrint(
-          'XMPP SRV: filtered TCP candidates by user flags '
-          '(directTls=$directTls useTcp=$useTcp): '
-          '${tcpSrvCandidates.length} -> ${filteredTcpSrv.length}',
-        );
+      final quicTransportAvailable =
+          !kIsWeb &&
+          (Platform.isAndroid ||
+              Platform.isIOS ||
+              Platform.isLinux ||
+              Platform.isMacOS ||
+              Platform.isWindows);
+      final shouldUseWebSocket = kIsWeb || useWebSocket;
+      WsEndpointConfig? wsConfig;
+      if (shouldUseWebSocket) {
+        wsConfig = parseWsEndpoint(effectiveConnectionUrl ?? '');
       }
-      tcpSrvCandidates = filteredTcpSrv;
-      Log.i(
-        'XmppService',
-        'Service discovery found ${quicSrvCandidates.length} QUIC and '
-            '${tcpSrvCandidates.length} TCP candidate(s)',
-      );
-      _finishSpan(srvSpan);
-      if (quicTransportAvailable && quicSrvCandidates.isNotEmpty) {
-        final first = quicSrvCandidates.first;
-        resolvedHost = first.host;
-        resolvedPort = first.port;
-        resolvedDirectTls = false;
-      } else if (tcpSrvCandidates.isNotEmpty) {
-        final first = tcpSrvCandidates.first;
-        resolvedHost = first.host;
-        resolvedPort = first.port;
-        resolvedDirectTls = first.directTls;
-      } else if (resolvedPort == 0 || resolvedPort == 5222) {
-        resolvedPort = directTls ? 5223 : 5222;
-      }
-      // If after filtering we have no usable transport at all (no QUIC,
-      // no surviving TCP SRV records, and the user has disabled the
-      // transport that the fallback port would use), bail out with a
-      // clear error rather than silently falling through.
-      final hasQuic = quicTransportAvailable && quicSrvCandidates.isNotEmpty;
-      final hasTcp = tcpSrvCandidates.isNotEmpty;
-      final fallbackAllowed = directTls || useTcp;
-      if (!hasQuic && !hasTcp && !fallbackAllowed) {
-        _setError(
-          'No transport enabled: both Direct TLS and Plain TCP are '
-          'disabled and no QUIC/WebSocket endpoint is available.',
-        );
+      // Derive transport type from the URL scheme: https/http → WebTransport,
+      // wss/ws → WebSocket.  This is re-evaluated after auto-discovery below.
+      var useWebTransport = wsConfig?.isWebTransport ?? false;
+
+      final normalized = normalizedJid;
+      if (!_looksLikeJid(normalized)) {
+        _setError('Enter a full JID like user@domain.');
         return;
       }
-    }
 
-    if (shouldUseWebSocket && wsConfig == null) {
-      final domain = _domainFromBareJid(bareJid);
+      final bareJid = _bareJid(normalized);
       Log.i(
         'XmppService',
-        'Discovering WebTransport or WebSocket endpoint for $domain',
+        'Starting connection for $bareJid; discovering available transports',
       );
-      final wsSpan = _startSpan(
-        _connectTransaction,
-        'xmpp.ws_discovery',
-        description: domain,
+      final fullJid = normalized.contains('/')
+          ? normalized
+          : '$bareJid/$resource';
+      final manualHost = host?.trim() ?? '';
+      final hasManualHost = manualHost.isNotEmpty;
+      var resolvedHost = hasManualHost ? manualHost : '';
+      var resolvedPort = port;
+      var resolvedDirectTls = directTls;
+      List<XmppSrvTarget> quicSrvCandidates = const [];
+      List<XmppSrvTarget> tcpSrvCandidates = const [];
+
+      _finishSpan(_connectTransaction);
+      _connectTransaction = _startTransaction(
+        name: 'xmpp.connect',
+        operation: 'xmpp.connect',
+        tags: {
+          'xmpp.domain': _domainFromBareJid(bareJid),
+          'xmpp.transport': shouldUseWebSocket ? 'websocket' : 'tcp',
+          'xmpp.direct_tls': resolvedDirectTls.toString(),
+        },
       );
-      // Try WebTransport first; fall back to WebSocket if not advertised.
-      final discoveredWt = await discoverWebTransportEndpoint(domain);
-      _finishSpan(wsSpan);
-      if (discoveredWt != null) {
-        // WebTransport uses https:// URIs; store the URI directly and mark
-        // the transport so Connection.dart routes through XmppWebTransportHtml.
-        final wtUri = discoveredWt.scheme == 'wss'
-            ? discoveredWt.replace(scheme: 'https')
-            : discoveredWt;
-        wsConfig = WsEndpointConfig(
-          uri: wtUri,
-          host: wtUri.host,
-          port: wtUri.hasPort ? wtUri.port : 443,
-          path: wtUri.path.isEmpty ? '/webtransport' : wtUri.path,
-          scheme: wtUri.scheme,
+
+      _status = XmppStatus.connecting;
+      _errorMessage = null;
+      notifyListeners();
+      await startBackgroundService?.call();
+      if (generation != _connectGeneration) return;
+
+      if (!kIsWeb && resolvedHost.isEmpty) {
+        final domain = _domainFromBareJid(bareJid);
+        Log.i('XmppService', 'Looking up XMPP services for $domain');
+        final srvSpan = _startSpan(
+          _connectTransaction,
+          'xmpp.srv_lookup',
+          description: domain,
         );
-        useWebTransport = true;
-      } else {
-        final discoveredWs = await discoverWebSocketEndpoint(domain);
-        if (discoveredWs != null) {
-          wsConfig = parseWsEndpoint(discoveredWs.toString());
+        // Fetch QUIC, Direct-TLS TCP, and StartTLS TCP SRV records in parallel.
+        final srvResults = await resolveAllSrvCandidates(
+          domain,
+          includeQuic: quicTransportAvailable && useQuic,
+        );
+        if (generation != _connectGeneration) return;
+        quicSrvCandidates = srvResults.quic;
+        tcpSrvCandidates = srvResults.tcp;
+        // Filter SRV candidates by the user's transport allow-flags.
+        // - When Direct TLS is off, drop _xmpps-client._tcp records.
+        // - When Plain TCP is off, drop _xmpp-client._tcp records.
+        // The two flags act as independent allow-lists; the user is only
+        // allowed to actually connect via a transport they've enabled.
+        final filteredTcpSrv = filterTcpSrvCandidatesByTransport(
+          tcpSrvCandidates,
+          allowDirectTls: directTls,
+          allowPlainTcp: useTcp,
+        );
+        if (filteredTcpSrv.length != tcpSrvCandidates.length) {
+          debugPrint(
+            'XMPP SRV: filtered TCP candidates by user flags '
+            '(directTls=$directTls useTcp=$useTcp): '
+            '${tcpSrvCandidates.length} -> ${filteredTcpSrv.length}',
+          );
+        }
+        tcpSrvCandidates = filteredTcpSrv;
+        Log.i(
+          'XmppService',
+          'Service discovery found ${quicSrvCandidates.length} QUIC and '
+              '${tcpSrvCandidates.length} TCP candidate(s)',
+        );
+        _finishSpan(srvSpan);
+        if (quicTransportAvailable && quicSrvCandidates.isNotEmpty) {
+          final first = quicSrvCandidates.first;
+          resolvedHost = first.host;
+          resolvedPort = first.port;
+          resolvedDirectTls = false;
+        } else if (tcpSrvCandidates.isNotEmpty) {
+          final first = tcpSrvCandidates.first;
+          resolvedHost = first.host;
+          resolvedPort = first.port;
+          resolvedDirectTls = first.directTls;
+        } else if (resolvedPort == 0 || resolvedPort == 5222) {
+          resolvedPort = directTls ? 5223 : 5222;
+        }
+        // If after filtering we have no usable transport at all (no QUIC,
+        // no surviving TCP SRV records, and the user has disabled the
+        // transport that the fallback port would use), bail out with a
+        // clear error rather than silently falling through.
+        final hasQuic = quicTransportAvailable && quicSrvCandidates.isNotEmpty;
+        final hasTcp = tcpSrvCandidates.isNotEmpty;
+        final fallbackAllowed = directTls || useTcp;
+        if (!hasQuic && !hasTcp && !fallbackAllowed) {
+          throw StateError(
+            'No transport enabled: both Direct TLS and Plain TCP are '
+            'disabled and no QUIC/WebSocket endpoint is available.',
+          );
         }
       }
-      if (wsConfig == null) {
-        _setError(
-          'Enter a connection URL like wss://host/path or https://host/path.',
+
+      if (shouldUseWebSocket && wsConfig == null) {
+        final domain = _domainFromBareJid(bareJid);
+        Log.i(
+          'XmppService',
+          'Discovering WebTransport or WebSocket endpoint for $domain',
         );
-        return;
+        final wsSpan = _startSpan(
+          _connectTransaction,
+          'xmpp.ws_discovery',
+          description: domain,
+        );
+        // Try WebTransport first; fall back to WebSocket if not advertised.
+        final discoveredWt = await discoverWebTransportEndpoint(domain);
+        if (generation != _connectGeneration) return;
+        _finishSpan(wsSpan);
+        if (discoveredWt != null) {
+          // WebTransport uses https:// URIs; store the URI directly and mark
+          // the transport so Connection.dart routes through XmppWebTransportHtml.
+          final wtUri = discoveredWt.scheme == 'wss'
+              ? discoveredWt.replace(scheme: 'https')
+              : discoveredWt;
+          wsConfig = WsEndpointConfig(
+            uri: wtUri,
+            host: wtUri.host,
+            port: wtUri.hasPort ? wtUri.port : 443,
+            path: wtUri.path.isEmpty ? '/webtransport' : wtUri.path,
+            scheme: wtUri.scheme,
+          );
+          useWebTransport = true;
+        } else {
+          final discoveredWs = await discoverWebSocketEndpoint(domain);
+          if (generation != _connectGeneration) return;
+          if (discoveredWs != null) {
+            wsConfig = parseWsEndpoint(discoveredWs.toString());
+          }
+        }
+        if (wsConfig == null) {
+          throw StateError(
+            'Enter a connection URL like wss://host/path or https://host/path.',
+          );
+        }
+        Log.i(
+          'XmppService',
+          'Discovered ${useWebTransport ? 'WebTransport' : 'WebSocket'} endpoint',
+        );
       }
-      Log.i(
-        'XmppService',
-        'Discovered ${useWebTransport ? 'WebTransport' : 'WebSocket'} endpoint',
-      );
-    }
 
-    await _safeClose(preserveCache: true);
+      await _safeClose(preserveCache: true);
+      if (generation != _connectGeneration) return;
 
-    _status = XmppStatus.connecting;
-    _errorMessage = null;
-    _currentUserBareJid = bareJid;
-    _primeSelfVcardHash();
-    notifyListeners();
+      _status = XmppStatus.connecting;
+      _errorMessage = null;
+      _currentUserBareJid = bareJid;
+      _primeSelfVcardHash();
+      notifyListeners();
 
-    try {
       final normalizedHost = resolvedHost.isNotEmpty ? resolvedHost : 'auto';
       debugPrint(
         'XMPP TLS: directTls=$resolvedDirectTls useWebSocket=$shouldUseWebSocket',
@@ -1473,6 +1495,7 @@ class XmppService extends ChangeNotifier {
       account.directTls = resolvedDirectTls;
       account.sasl2Software = 'Wimsy';
       account.sasl2UserAgentId = await _storage?.saslUserAgentId(bareJid);
+      if (generation != _connectGeneration) return;
       account.sasl2Device = resource;
       account.quicExclusiveHeadStart = _transportHealth
           .putIfAbsent(_networkIdentity, TransportAcquisitionHealth.new)
@@ -1592,10 +1615,13 @@ class XmppService extends ChangeNotifier {
       });
 
       final completer = Completer<void>();
+      _connectCompletion = completer;
       var displayNamePublished = false;
       _connectionStateSubscription = connection.connectionStateStream.listen((
         state,
       ) {
+        if (generation != _connectGeneration) return;
+        final previousState = _lastConnectionState;
         debugPrint('XMPP state: $state');
         Log.i('XmppService', 'Connection state: $state');
         _lastConnectionState = state;
@@ -1605,6 +1631,21 @@ class XmppService extends ChangeNotifier {
         }
         if (state == XmppConnectionState.Reconnecting ||
             state == XmppConnectionState.ForcefullyClosed) {
+          if (state == XmppConnectionState.ForcefullyClosed &&
+              previousState != null &&
+              acquisitionPhaseTimeout(previousState) != null) {
+            if (!completer.isCompleted) {
+              completer.completeError('Connection acquisition failed.');
+            } else {
+              unawaited(
+                _recoverFailedConnection(
+                  generation,
+                  'Connection acquisition failed.',
+                ),
+              );
+            }
+            return;
+          }
           _unackedMessageRecovery.capture(_messages, _roomMessages);
           // Any in-flight carbons enable request is tied to the old stream.
           _carbonsRequestId = null;
@@ -1738,7 +1779,9 @@ class XmppService extends ChangeNotifier {
           _connectTransaction = null;
           _setError(message);
           connection.setReconnectTerminal(message);
-          _scheduleConnectRetry();
+          if (_hasConnectedSession) {
+            unawaited(_recoverFailedConnection(generation, message));
+          }
         } else if (_status == XmppStatus.connecting) {
           notifyListeners();
         }
@@ -1756,6 +1799,7 @@ class XmppService extends ChangeNotifier {
       // 120 s gives a realistic budget while still bounding a truly stuck connect.
       await completer.future.timeout(const Duration(seconds: 120));
     } catch (error) {
+      if (generation != _connectGeneration) return;
       _finishSpan(
         _connectAwaitSpan,
         status: const SpanStatus.deadlineExceeded(),
@@ -1769,18 +1813,23 @@ class XmppService extends ChangeNotifier {
       if (_status != XmppStatus.error) {
         _setError('Connection failed: $error');
       }
-      _scheduleConnectRetry();
+      await _recoverFailedConnection(
+        generation,
+        _errorMessage ?? 'Connection failed: $error',
+      );
     }
   }
 
   /// Schedules an automatic reconnect attempt after
   /// [KeepaliveTuning.connectRetryDelay] if we have stored connect args and
   /// no retry is already pending.
-  void _scheduleConnectRetry() {
+  void _scheduleConnectRetry({bool immediate = false}) {
     final args = _lastConnectArgs;
     if (args == null) return;
     _connectRetryTimer?.cancel();
-    final retryDelay = _keepaliveTuning.connectRetryDelay;
+    final retryDelay = immediate
+        ? Duration.zero
+        : _keepaliveTuning.connectRetryDelay;
     debugPrint('XMPP connect: scheduling retry in $retryDelay');
     _connectRetryTimer = Timer(retryDelay, () {
       _connectRetryTimer = null;
@@ -1807,27 +1856,103 @@ class XmppService extends ChangeNotifier {
   /// slow reconnect loop. It force-closes the current connection (if any)
   /// and schedules a new attempt with no delay.
   void triggerImmediateReconnect() {
-    _connection?.requestReconnect(
-      reason: ReconnectionReason.manualRequest,
-      immediate: true,
+    unawaited(
+      _recoverFailedConnection(
+        _connectGeneration,
+        'Retrying connection',
+        immediate: true,
+      ),
     );
   }
 
-  Future<void> disconnect() async {
-    // Cancel any pending automatic retry so the user's explicit disconnect
-    // is honoured and we don't reconnect behind their back.
+  /// Rebuild the entire connection after acquisition has exhausted its
+  /// endpoints or negotiation deadline, retaining the account and chat cache.
+  Future<void> _recoverFailedConnection(
+    int generation,
+    String message, {
+    bool immediate = false,
+  }) async {
+    if (generation != _connectGeneration) return;
+    final args = _lastConnectArgs;
+    final reset = disconnect();
+    final resetGeneration = _connectGeneration;
+    try {
+      await reset;
+    } catch (error) {
+      message = '$message (connection reset failed: $error)';
+    }
+    if (_connectGeneration != resetGeneration || args == null) return;
+    try {
+      await startBackgroundService?.call();
+    } catch (error) {
+      message = '$message (background service restart failed: $error)';
+    }
+    if (_connectGeneration != resetGeneration) return;
+    _lastConnectArgs = args;
+    _setError(message);
+    _scheduleConnectRetry(immediate: immediate);
+  }
+
+  /// A hard stop invalidates asynchronous discovery before closing transports.
+  /// Saved credentials and chat history survive; network/session state does not.
+  Future<void> disconnect() {
+    _connectGeneration++;
+    _lastConnectArgs = null;
+    return _disconnecting ??= _disconnectAndReset().whenComplete(() {
+      _disconnecting = null;
+    });
+  }
+
+  Future<void> _disconnectAndReset() async {
+    final completion = _connectCompletion;
+    _connectCompletion = null;
+    if (completion != null && !completion.isCompleted) completion.complete();
+    _connectivityDebounceTimer?.cancel();
+    _connectivityDebounceTimer = null;
     _connectRetryTimer?.cancel();
     _connectRetryTimer = null;
-    _lastConnectArgs = null;
     _connection?.setReconnectContext(allowAutoReconnect: false);
+    resetDnsCache();
+    resetSrvCache();
+    QuicCapableXmppSocket.resetAddressHealth();
+    _transportHealth.clear();
     await _safeClose(preserveCache: true);
-    _finishSpan(_connectAwaitSpan, status: const SpanStatus.cancelled());
-    _connectAwaitSpan = null;
-    _finishSpan(_connectTransaction, status: const SpanStatus.cancelled());
-    _connectTransaction = null;
-    _status = XmppStatus.disconnected;
-    _errorMessage = null;
-    notifyListeners();
+    try {
+      try {
+        await _storage?.clearIapCaches();
+      } finally {
+        await stopBackgroundService?.call();
+      }
+    } finally {
+      _finishSpan(_connectAwaitSpan, status: const SpanStatus.cancelled());
+      _connectAwaitSpan = null;
+      _finishSpan(_connectTransaction, status: const SpanStatus.cancelled());
+      _connectTransaction = null;
+      _status = XmppStatus.disconnected;
+      _errorMessage = null;
+      notifyListeners();
+    }
+  }
+
+  /// Clears recoverable local data as well as connection state. Account
+  /// settings and saved passwords remain available for the next login.
+  Future<void> emptyCache() async {
+    await disconnect();
+    final storage = _storage;
+    if (storage != null) {
+      await storage.clearRoster();
+      await storage.clearBookmarks();
+      await storage.storeMessagesForJid('', const []);
+      await storage.clearRoomMessages();
+      await storage.clearAvatars();
+      await storage.clearVcardAvatars();
+      await storage.clearEntityCaps();
+      await storage.clearFastTokens();
+      await storage.clearIapCaches();
+    }
+    clearCache(persist: false);
+    await storage?.storeRosterVersion(null);
+    await storage?.clearDisplayedSync();
   }
 
   /// XEP-0484: primes [account] with the FAST credentials persisted for
@@ -1922,7 +2047,7 @@ class XmppService extends ChangeNotifier {
     );
   }
 
-  void clearCache() {
+  void clearCache({bool persist = true}) {
     _contacts.clear();
     _bookmarks.clear();
     _messages.clear();
@@ -1954,16 +2079,18 @@ class XmppService extends ChangeNotifier {
       timer.cancel();
     }
     _mamCatchUpTimers.clear();
-    _messagePersistor?.call('', const []);
-    _roomMessagePersistor?.call('', const []);
-    _rosterPersistor?.call(const []);
-    _bookmarkPersistor?.call(const []);
-    _storage?.storeRosterVersion(null);
+    if (persist) {
+      _messagePersistor?.call('', const []);
+      _roomMessagePersistor?.call('', const []);
+      _rosterPersistor?.call(const []);
+      _bookmarkPersistor?.call(const []);
+      _storage?.storeRosterVersion(null);
+    }
     _displayedStanzaIdByChat.clear();
     _displayedSyncPending.clear();
     _displayedAtByChat.clear();
     _controlMessageOutbox.clear();
-    _storage?.clearDisplayedSync();
+    if (persist) _storage?.clearDisplayedSync();
     notifyListeners();
   }
 
@@ -9339,8 +9466,11 @@ class XmppService extends ChangeNotifier {
     try {
       final connection = _connection;
       if (connection != null) {
-        connection.dispose();
-        Connection.removeInstance(connection.account);
+        try {
+          connection.dispose();
+        } finally {
+          Connection.removeInstance(connection.account);
+        }
       }
     } catch (_) {
       // Ignore close errors to keep disconnect resilient.

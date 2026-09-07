@@ -40,3 +40,26 @@ Terminal stop triggers:
 - duplicate reconnect triggers must deduplicate while a reconnect is already scheduled
 - explicit user disconnect must prevent auto-reconnect
 - reconnect reason and delay should be observable via reconnect state reporting
+
+## Hard reset after failed acquisition
+
+Ordinary transport loss still uses the library's resume-first reconnect path.
+When all endpoints fail, negotiation fails, or the login deadline expires,
+`XmppService` disposes the connection and schedules a new login using the saved
+attempt parameters. This recovery boundary discards DNS/SRV answers, refresh
+work, endpoint health, stream state, IAP negotiation hints, and library singleton
+instances. Generation
+checks prevent cancelled discovery and transport results from reviving an old
+attempt or repopulating a cleared DNS cache. Network changes also invalidate DNS.
+
+On Android, reset awaits foreground-service shutdown. Automatic recovery then
+starts a fresh service before the retry delay; platform start/stop operations are serialized. The foreground
+service does not own the XMPP connection, so service restart alone is insufficient.
+Stop and Exit perform the same reset without scheduling a retry, and Exit awaits
+cleanup before closing the application window.
+
+The login screen's **Connection recovery → Empty Cache & Retry** also removes
+cached messages, roster, bookmarks, avatars, capabilities, FAST tokens, and IAP
+negotiation hints. It retains saved account settings and passwords and retries
+with the current form values. **Clear Cache & Exit** uses the same cache reset.
+Automatic recovery and ordinary Stop/Exit preserve cached chat history.

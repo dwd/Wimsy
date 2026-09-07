@@ -26,7 +26,7 @@ class _FakeXmppSocket extends XmppWebSocket {
     String? wsPath,
     Uri? wsUri,
     bool useWebSocket = false,
-      bool useWebTransport = false,
+    bool useWebTransport = false,
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
@@ -82,6 +82,27 @@ class _FakeXmppSocket extends XmppWebSocket {
 }
 
 void main() {
+  test('dispose during endpoint discovery prevents late socket acquisition',
+      () async {
+    final refresh = Completer<XmppEndpointRefreshResult>();
+    var created = 0;
+    final account = XmppAccountSettings.fromJid('cancel@example.com', 'secret')
+      ..refreshEndpoints = () => refresh.future;
+    final connection = Connection(account, socketFactory: () {
+      created++;
+      return _FakeXmppSocket();
+    });
+    final opening = connection.openSocket();
+    expect(connection.state, XmppConnectionState.SocketOpening);
+    connection.dispose();
+    refresh.complete(const XmppEndpointRefreshResult(quic: [], tcp: [
+      XmppTcpEndpoint(host: 'example.com', port: 5222, directTls: false),
+    ]));
+    await opening;
+    expect(created, 0);
+    expect(connection.state, XmppConnectionState.Closed);
+  });
+
   test('Connection retries next endpoint when first endpoint fails', () async {
     final account = XmppAccountSettings.fromJid('alice@example.com', 'secret')
       ..bufferedWritesEnabled = false;

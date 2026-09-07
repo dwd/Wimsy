@@ -35,6 +35,7 @@ import 'xmpp/jid_normalization.dart';
 import 'xmpp/vcard_utils.dart';
 import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
+import 'background/service_lifecycle.dart';
 import 'utils/graph_statistics.dart';
 import 'utils/display_layout.dart';
 import 'utils/physical_display_size.dart';
@@ -145,6 +146,7 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
   final ValueNotifier<LoginLinkValues?> _loginLink = ValueNotifier(null);
   AndroidLoginLinkReceiver? _loginLinkReceiver;
   bool _androidCallWindowActive = false;
+  final _backgroundServiceLifecycle = ServiceLifecycle();
 
   @override
   void initState() {
@@ -163,7 +165,14 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
       _service.setIncomingCallHandler(_handleIncomingCallSession);
       _service.setCallSessionEndedHandler(_handleCallSessionEnded);
       if (!kIsWeb && Platform.isAndroid) {
-        _startAndroidForegroundService();
+        _service.startBackgroundService = () =>
+            _backgroundServiceLifecycle.run(_startAndroidForegroundService);
+        _service.stopBackgroundService = () =>
+            _backgroundServiceLifecycle.run(() async {
+              if (!await FlutterForegroundTask.isRunningService) return;
+              final result = await FlutterForegroundTask.stopService();
+              if (result is ServiceRequestFailure) throw result.error;
+            });
         _loginLinkReceiver = AndroidLoginLinkReceiver();
         unawaited(
           _loginLinkReceiver!.start((values) {
@@ -481,11 +490,12 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
 
     final running = await FlutterForegroundTask.isRunningService;
     if (!running) {
-      await FlutterForegroundTask.startService(
+      final result = await FlutterForegroundTask.startService(
         notificationTitle: 'Wimsy is running',
         notificationText: 'Keeping your XMPP session connected.',
         callback: startCallback,
       );
+      if (result is ServiceRequestFailure) throw result.error;
     }
   }
 
@@ -4297,20 +4307,19 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   }
 
   Future<void> _confirmClearCacheAndExit() async {
-    final cleared = await _confirmClearCache();
+    final cleared = await _confirmClearCache(stopConnection: true);
     if (mounted && cleared) {
-      _handleExit();
+      await _handleExit();
     }
   }
 
-  void _handleExit() {
-    widget.service.disconnect();
+  Future<void> _handleExit() async {
+    await widget.service.disconnect();
     if (kIsWeb) {
       return;
     }
     if (Platform.isAndroid) {
-      FlutterForegroundTask.stopService();
-      SystemNavigator.pop();
+      await SystemNavigator.pop();
     } else {
       exit(0);
     }
@@ -4416,7 +4425,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _confirmClearCache() async {
+  Future<bool> _confirmClearCache({bool stopConnection = false}) async {
     final shouldClear = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -4442,12 +4451,16 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
       return false;
     }
     setState(() => _clearingCache = true);
-    await widget.storage.clearRoster();
-    await widget.storage.clearBookmarks();
-    await widget.storage.storeMessagesForJid('', const []);
-    await widget.storage.clearAvatars();
-    await widget.storage.clearVcardAvatars();
-    widget.service.clearCache();
+    if (stopConnection) {
+      await widget.service.emptyCache();
+    } else {
+      await widget.storage.clearRoster();
+      await widget.storage.clearBookmarks();
+      await widget.storage.storeMessagesForJid('', const []);
+      await widget.storage.clearAvatars();
+      await widget.storage.clearVcardAvatars();
+      widget.service.clearCache();
+    }
     if (mounted) {
       setState(() => _clearingCache = false);
     }

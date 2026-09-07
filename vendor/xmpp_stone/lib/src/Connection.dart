@@ -612,6 +612,7 @@ class Connection {
       if (!useWebSocket && account.refreshEndpoints != null) {
         try {
           final refreshed = await account.refreshEndpoints!();
+          if (acquisitionGeneration != _socketAcquisitionGeneration) return;
           account.quicEndpoints = refreshed.quic;
           account.tcpEndpoints = refreshed.tcp;
           Log.i(
@@ -641,8 +642,10 @@ class Connection {
                   ),
                 ]);
 
+      if (acquisitionGeneration != _socketAcquisitionGeneration) return;
       if (useWebSocket) {
         final socket = _socketFactory();
+        _acquiringSockets.add(socket);
         if (account.useWebTransport) {
           (socket as dynamic).serverCertificateHash =
               account.serverCertificateHash;
@@ -658,6 +661,11 @@ class Connection {
           tlsHost: account.domain,
           map: prepareStreamResponse,
         );
+        _acquiringSockets.remove(socket);
+        if (acquisitionGeneration != _socketAcquisitionGeneration) {
+          socket.close();
+          return;
+        }
         if (account.useWebTransport) {
           (socket as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
         }
@@ -668,6 +676,8 @@ class Connection {
       Future<xmppSocket.XmppWebSocket?> openQuic() async {
         Object? lastError;
         for (final endpoint in quicEndpoints) {
+          if (acquisitionGeneration != _socketAcquisitionGeneration)
+            return null;
           final socket = _socketFactory();
           _acquiringSockets.add(socket);
           try {
@@ -740,6 +750,8 @@ class Connection {
       Future<xmppSocket.XmppWebSocket?> openTcp() async {
         Object? lastError;
         for (final endpoint in endpoints) {
+          if (acquisitionGeneration != _socketAcquisitionGeneration)
+            return null;
           final socket = _socketFactory();
           _acquiringSockets.add(socket);
           try {
@@ -825,6 +837,10 @@ class Connection {
         }));
       }
       final opened = await winner.future;
+      if (acquisitionGeneration != _socketAcquisitionGeneration) {
+        opened.close();
+        return;
+      }
       _acquiringSockets.remove(opened);
       if (opened.isQuic) {
         (opened as dynamic).setAuxMapperFactory(makeStreamResponseMapper);
@@ -832,6 +848,7 @@ class Connection {
       _attachOpenedSocket(opened);
       return;
     } catch (error) {
+      if (acquisitionGeneration != _socketAcquisitionGeneration) return;
       Log.e(TAG, 'Socket Exception' + error.toString());
       print('XMPP socket error: $error');
       handleConnectionError(error.toString());
@@ -845,6 +862,11 @@ class Connection {
       socket.close();
     }
     _acquiringSockets.clear();
+    if (_state == XmppConnectionState.SocketOpening) {
+      // Cancellation is a completed failed acquisition, not an opening socket
+      // that manual retry must wait for until its deadline expires.
+      setState(XmppConnectionState.ForcefullyClosed);
+    }
   }
 
   Map<String, XmppElement> _buildCachedSasl2InlineFeatures() {
@@ -929,6 +951,9 @@ class Connection {
   ///
   /// If you intend to re-use the connection later, consider just calling [close] instead.
   void dispose() {
+    // Disposal must also work while DNS or a transport handshake is pending.
+    _state = XmppConnectionState.Closed;
+    _socketSubscription?.cancel();
     cancelSocketAcquisition();
     _acquisitionDeadlineTimer?.cancel();
     _phaseDeadlineTimer?.cancel();

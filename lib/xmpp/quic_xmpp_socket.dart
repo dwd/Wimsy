@@ -115,6 +115,8 @@ class QuicCapableXmppSocket extends XmppWebSocket
   final Set<Future<void>> _loserCleanupTasks = <Future<void>>{};
   static final QuicAddressHealth _addressHealth = QuicAddressHealth();
 
+  static void resetAddressHealth() => _addressHealth._failures.clear();
+
   /// Identifies the currently active logical connection attempt. Async work
   /// captures this value and must stop before mutating state when it changes.
   @visibleForTesting

@@ -78,6 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
       TextEditingController();
 
   bool _loadedAccount = false;
+  bool _resetting = false;
   bool _rememberPassword = false;
   bool _useWebSocket = kIsWeb;
   bool _useDirectTls = false;
@@ -92,6 +93,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _discoveryOptionsExpanded = false;
   bool _manualConnectionExpanded = false;
   bool _endpointDiscoveryBusy = false;
+  int _endpointDiscoveryGeneration = 0;
   String? _endpointDiscoveryMessage;
   String? _lastEndpointDiscoveryDomain;
   Timer? _endpointDiscoveryDebounce;
@@ -205,6 +207,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleConnect() {
+    if (_resetting) return;
     final port = int.tryParse(_portController.text.trim()) ?? 5222;
     final hasManualHost = _hostController.text.trim().isNotEmpty;
     final useWebSocket = kIsWeb || (!hasManualHost && _useWebSocket);
@@ -255,6 +258,29 @@ class _LoginScreenState extends State<LoginScreen> {
       useQuic: useQuic,
       useTcp: useTcp,
     );
+  }
+
+  Future<void> _emptyCacheAndRetry() async {
+    setState(() => _resetting = true);
+    _endpointDiscoveryGeneration++;
+    _endpointDiscoveryBusy = false;
+    _endpointDiscoveryDebounce?.cancel();
+    try {
+      await widget.service.emptyCache();
+      if (!mounted) return;
+      _lastEndpointDiscoveryDomain = null;
+      _endpointDiscoveryMessage = null;
+      setState(() => _resetting = false);
+      _handleConnect();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not reset connection: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _resetting = false);
+    }
   }
 
   void _scheduleEndpointDiscovery(String jid, {bool immediate = false}) {
@@ -309,8 +335,9 @@ class _LoginScreenState extends State<LoginScreen> {
       _endpointDiscoveryMessage = 'Discovering WebSocket endpoint…';
     });
     _lastEndpointDiscoveryDomain = domain;
+    final generation = ++_endpointDiscoveryGeneration;
     final discovered = await discoverWebSocketEndpoint(domain);
-    if (!mounted) {
+    if (!mounted || generation != _endpointDiscoveryGeneration) {
       return;
     }
     if (discovered != null) {
@@ -700,6 +727,27 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 12),
                         _buildDiscoveryOptions(service),
                         _buildManualConnection(service),
+                        Material(
+                          color: Colors.transparent,
+                          child: ExpansionTile(
+                            title: const Text('Connection recovery'),
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 16),
+                                child: Text(
+                                  'Clear cached messages, contacts, and connection data, then retry. Saved account settings and passwords are kept.',
+                                ),
+                              ),
+                              TextButton.icon(
+                                onPressed: _resetting
+                                    ? null
+                                    : _emptyCacheAndRetry,
+                                icon: const Icon(Icons.restart_alt),
+                                label: const Text('Empty Cache & Retry'),
+                              ),
+                            ],
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         Material(
                           color: Colors.transparent,
@@ -727,7 +775,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Expanded(
                               child: FilledButton(
-                                onPressed: service.isConnecting
+                                onPressed: _resetting
+                                    ? null
+                                    : service.isConnecting
                                     ? service.triggerImmediateReconnect
                                     : _handleConnect,
                                 child: Text(
