@@ -4788,6 +4788,77 @@ class MessageComposerTextField extends StatelessWidget {
   }
 }
 
+// XEP-0258: `<displaymarking fgcolor="..." bgcolor="...">` uses CSS/HTML
+// colour syntax (named colours, `#rgb`/`#rrggbb` hex, or `rgb(r,g,b)`).
+// Only a modest set of named colours is supported — enough for the common
+// classification colours (e.g. red/SECRET, navy/CONFIDENTIAL,
+// aqua/RESTRICTED) used by real-world policies and the XEP's own examples.
+const Map<String, Color> _cssNamedColors = {
+  'black': Color(0xFF000000),
+  'white': Color(0xFFFFFFFF),
+  'red': Color(0xFFFF0000),
+  'green': Color(0xFF008000),
+  'blue': Color(0xFF0000FF),
+  'yellow': Color(0xFFFFFF00),
+  'orange': Color(0xFFFFA500),
+  'purple': Color(0xFF800080),
+  'grey': Color(0xFF808080),
+  'gray': Color(0xFF808080),
+  'silver': Color(0xFFC0C0C0),
+  'maroon': Color(0xFF800000),
+  'olive': Color(0xFF808000),
+  'navy': Color(0xFF000080),
+  'teal': Color(0xFF008080),
+  'lime': Color(0xFF00FF00),
+  'aqua': Color(0xFF00FFFF),
+  'cyan': Color(0xFF00FFFF),
+  'fuchsia': Color(0xFFFF00FF),
+  'magenta': Color(0xFFFF00FF),
+  'pink': Color(0xFFFFC0CB),
+  'brown': Color(0xFFA52A2A),
+};
+
+Color? parseCssColorForSecurityLabel(String? value) {
+  final input = value?.trim().toLowerCase();
+  if (input == null || input.isEmpty) {
+    return null;
+  }
+  final named = _cssNamedColors[input];
+  if (named != null) {
+    return named;
+  }
+  if (input.startsWith('#')) {
+    var hex = input.substring(1);
+    if (hex.length == 3) {
+      hex = hex.split('').map((c) => '$c$c').join();
+    }
+    if (hex.length == 6) {
+      final parsed = int.tryParse(hex, radix: 16);
+      if (parsed != null) {
+        return Color(0xFF000000 | parsed);
+      }
+    }
+    return null;
+  }
+  final rgbMatch = RegExp(
+    r'^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$',
+  ).firstMatch(input);
+  if (rgbMatch != null) {
+    final r = int.tryParse(rgbMatch.group(1)!);
+    final g = int.tryParse(rgbMatch.group(2)!);
+    final b = int.tryParse(rgbMatch.group(3)!);
+    if (r != null && g != null && b != null) {
+      return Color.fromARGB(
+        255,
+        r.clamp(0, 255),
+        g.clamp(0, 255),
+        b.clamp(0, 255),
+      );
+    }
+  }
+  return null;
+}
+
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
@@ -4854,6 +4925,7 @@ class MessageBubble extends StatelessWidget {
     final callCard = message.callSid == null
         ? null
         : _CallMessageCard(message: message);
+    final securityLabelChip = _buildSecurityLabelChip(context);
     final reactions = message.reactions ?? const {};
     final ownReactions = _ownReactions(reactions);
 
@@ -4921,6 +4993,10 @@ class MessageBubble extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 6),
+                  if (securityLabelChip != null) ...[
+                    securityLabelChip,
+                    const SizedBox(height: 6),
+                  ],
                   if ((message.replyToId ?? '').isNotEmpty) ...[
                     _buildReplyCard(context),
                     const SizedBox(height: 8),
@@ -4984,6 +5060,37 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // XEP-0258: renders the server-rendered `<displaymarking/>` of this
+  // message's security label as a small coloured chip, when present.
+  Widget? _buildSecurityLabelChip(BuildContext context) {
+    final text = message.securityLabelText?.trim();
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+    final bgColor =
+        parseCssColorForSecurityLabel(message.securityLabelBgColor) ??
+        Colors.grey.shade700;
+    final fgColor =
+        parseCssColorForSecurityLabel(message.securityLabelFgColor) ??
+        Colors.white;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: fgColor,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
         ),
       ),
     );

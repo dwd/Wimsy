@@ -192,6 +192,13 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0258.html"/>
+        <xmpp:status>partial</xmpp:status>
+        <xmpp:note xml:lang="en">Renders the server-provided display marking of an incoming message's security label as a coloured chip. Sending/attaching labels (catalog lookup and the label picker) is not yet implemented.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0308.html"/>
         <xmpp:status>complete</xmpp:status>
       </xmpp:SupportedXep>

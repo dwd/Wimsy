@@ -105,6 +105,85 @@ void main() {
     expect(info.description, 'Preview');
   });
 
+  test('extractSecurityLabel reads displaymarking text and colours', () {
+    final stanza = _chatStanza(
+      id: 'm-sl1',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'Classified content',
+    );
+
+    final label = XmppElement()..name = 'securitylabel';
+    label.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'));
+    final displayMarking = XmppElement()..name = 'displaymarking';
+    displayMarking.addAttribute(XmppAttribute('fgcolor', 'black'));
+    displayMarking.addAttribute(XmppAttribute('bgcolor', 'red'));
+    displayMarking.textValue = 'SECRET';
+    label.addChild(displayMarking);
+    stanza.addChild(label);
+
+    final info = parser.extractSecurityLabel(stanza);
+    expect(info, isNotNull);
+    expect(info!.text, 'SECRET');
+    expect(info.fgColor, 'black');
+    expect(info.bgColor, 'red');
+  });
+
+  test('extractSecurityLabel reads displaymarking from forwarded message', () {
+    final stanza = _chatStanza(
+      id: 'm-sl2',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+
+    final label = XmppElement()..name = 'securitylabel';
+    label.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'));
+    final displayMarking = XmppElement()..name = 'displaymarking';
+    displayMarking.textValue = 'UNCLASSIFIED';
+    label.addChild(displayMarking);
+
+    stanza.addChild(_forwardedMessageContainer('received', label));
+
+    final info = parser.extractSecurityLabel(stanza);
+    expect(info, isNotNull);
+    expect(info!.text, 'UNCLASSIFIED');
+    expect(info.fgColor, isNull);
+    expect(info.bgColor, isNull);
+  });
+
+  test(
+    'extractSecurityLabel returns null when no securitylabel element present',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-sl3',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+        body: 'Just a normal message',
+      );
+
+      expect(parser.extractSecurityLabel(stanza), isNull);
+    },
+  );
+
+  test(
+    'extractSecurityLabel returns null when displaymarking has no text',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-sl4',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final label = XmppElement()..name = 'securitylabel';
+      label.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'));
+      final displayMarking = XmppElement()..name = 'displaymarking';
+      label.addChild(displayMarking);
+      stanza.addChild(label);
+
+      expect(parser.extractSecurityLabel(stanza), isNull);
+    },
+  );
+
   test(
     'extractReplaceId reads message correction from direct forwarded stanza',
     () {

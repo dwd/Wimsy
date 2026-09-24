@@ -31,6 +31,9 @@ void main() {
       callStatus: 'finished',
       callStartedAt: DateTime.parse('2024-08-09T10:11:30Z'),
       callEndedAt: DateTime.parse('2024-08-09T10:12:30Z'),
+      securityLabelText: 'SECRET',
+      securityLabelFgColor: 'black',
+      securityLabelBgColor: 'red',
     );
 
     final roundtrip = ChatMessage.fromMap(message.toMap());
@@ -58,6 +61,26 @@ void main() {
     expect(roundtrip.callStatus, 'finished');
     expect(roundtrip.callStartedAt, DateTime.parse('2024-08-09T10:11:30Z'));
     expect(roundtrip.callEndedAt, DateTime.parse('2024-08-09T10:12:30Z'));
+    expect(roundtrip.securityLabelText, 'SECRET');
+    expect(roundtrip.securityLabelFgColor, 'black');
+    expect(roundtrip.securityLabelBgColor, 'red');
+  });
+
+  test('ChatMessage without a security label round-trips as null', () {
+    final message = ChatMessage(
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'hello',
+      timestamp: DateTime.parse('2024-08-09T10:11:12Z'),
+      outgoing: false,
+      rawXml: '<message><body>hello</body></message>',
+    );
+
+    final roundtrip = ChatMessage.fromMap(message.toMap());
+    expect(roundtrip, isNotNull);
+    expect(roundtrip!.securityLabelText, isNull);
+    expect(roundtrip.securityLabelFgColor, isNull);
+    expect(roundtrip.securityLabelBgColor, isNull);
   });
 
   test('ChatMessage persists outgoing tick state', () {

@@ -37,6 +37,9 @@ class ChatMessage {
     this.readByMe = false,
     this.markerSent = false,
     this.receiptSent = false,
+    this.securityLabelText,
+    this.securityLabelFgColor,
+    this.securityLabelBgColor,
   });
 
   final String from;
@@ -79,6 +82,12 @@ class ChatMessage {
   final bool markerSent;
   // Whether a XEP-0184 delivery receipt has been sent for this message.
   final bool receiptSent;
+  // XEP-0258: the server-rendered `<displaymarking/>` text of this
+  // message's security label, and its suggested foreground/background
+  // colours, or null if the message carries no security label.
+  final String? securityLabelText;
+  final String? securityLabelFgColor;
+  final String? securityLabelBgColor;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -122,6 +131,9 @@ class ChatMessage {
     bool? readByMe,
     bool? markerSent,
     bool? receiptSent,
+    Object? securityLabelText = _absent,
+    Object? securityLabelFgColor = _absent,
+    Object? securityLabelBgColor = _absent,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -201,6 +213,15 @@ class ChatMessage {
       readByMe: readByMe ?? this.readByMe,
       markerSent: markerSent ?? this.markerSent,
       receiptSent: receiptSent ?? this.receiptSent,
+      securityLabelText: identical(securityLabelText, _absent)
+          ? this.securityLabelText
+          : securityLabelText as String?,
+      securityLabelFgColor: identical(securityLabelFgColor, _absent)
+          ? this.securityLabelFgColor
+          : securityLabelFgColor as String?,
+      securityLabelBgColor: identical(securityLabelBgColor, _absent)
+          ? this.securityLabelBgColor
+          : securityLabelBgColor as String?,
     );
   }
 
@@ -243,6 +264,9 @@ class ChatMessage {
       'readByMe': readByMe,
       'markerSent': markerSent,
       'receiptSent': receiptSent,
+      'securityLabelText': securityLabelText,
+      'securityLabelFgColor': securityLabelFgColor,
+      'securityLabelBgColor': securityLabelBgColor,
     };
   }
 
@@ -294,6 +318,9 @@ class ChatMessage {
     final readByMe = map['readByMe'] == true;
     final markerSent = map['markerSent'] == true;
     final receiptSent = map['receiptSent'] == true;
+    final securityLabelText = map['securityLabelText']?.toString();
+    final securityLabelFgColor = map['securityLabelFgColor']?.toString();
+    final securityLabelBgColor = map['securityLabelBgColor']?.toString();
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -357,6 +384,9 @@ class ChatMessage {
       readByMe: readByMe,
       markerSent: markerSent,
       receiptSent: receiptSent,
+      securityLabelText: securityLabelText,
+      securityLabelFgColor: securityLabelFgColor,
+      securityLabelBgColor: securityLabelBgColor,
     );
   }
 

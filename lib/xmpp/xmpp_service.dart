@@ -136,6 +136,7 @@ class XmppService extends ChangeNotifier {
       reactionChatTarget: _reactionChatTarget,
       extractOobInfoFromStanza: _messageStanzaParser.extractOobInfo,
       extractReplyPayload: _messageStanzaParser.extractReplyPayload,
+      extractSecurityLabel: _messageStanzaParser.extractSecurityLabel,
       isArchivedStanza: _isArchivedStanza,
       bareJid: _bareJid,
       hasReceiptRequest: _messageStanzaParser.hasReceiptRequest,
@@ -5895,6 +5896,9 @@ class XmppService extends ChangeNotifier {
           replyToId: intent.replyToId,
           replyToJid: intent.replyToJid,
           replyFallback: intent.replyFallback,
+          securityLabelText: intent.securityLabelText,
+          securityLabelFgColor: intent.securityLabelFgColor,
+          securityLabelBgColor: intent.securityLabelBgColor,
         );
       } else if (intent is UnhandledMessageIntent) {
         _logUnhandledMessage(stanza, intent);
@@ -7871,6 +7875,9 @@ class XmppService extends ChangeNotifier {
         );
         final oobUrl = oobInfo?.url;
         final oobDescription = oobInfo?.description;
+        final securityLabel = _messageStanzaParser.extractSecurityLabel(
+          message.messageStanza,
+        );
         final rawXml = _serializeStanza(message.messageStanza);
         final replaceId = _messageStanzaParser.extractReplaceId(
           message.messageStanza,
@@ -7932,6 +7939,9 @@ class XmppService extends ChangeNotifier {
           replyToId: parsedReply?.replyToId,
           replyToJid: parsedReply?.replyToJid,
           replyFallback: parsedReply?.fallbackBody,
+          securityLabelText: securityLabel?.text,
+          securityLabelFgColor: securityLabel?.fgColor,
+          securityLabelBgColor: securityLabel?.bgColor,
         );
       }
     }
@@ -7950,6 +7960,9 @@ class XmppService extends ChangeNotifier {
       );
       final oobUrl = oobInfo?.url;
       final oobDescription = oobInfo?.description;
+      final securityLabel = _messageStanzaParser.extractSecurityLabel(
+        message.messageStanza,
+      );
       final rawXml = _serializeStanza(message.messageStanza);
       final replaceId = _messageStanzaParser.extractReplaceId(
         message.messageStanza,
@@ -8009,6 +8022,9 @@ class XmppService extends ChangeNotifier {
         replyToId: parsedReply?.replyToId,
         replyToJid: parsedReply?.replyToJid,
         replyFallback: parsedReply?.fallbackBody,
+        securityLabelText: securityLabel?.text,
+        securityLabelFgColor: securityLabel?.fgColor,
+        securityLabelBgColor: securityLabel?.bgColor,
       );
     });
 
@@ -8038,6 +8054,9 @@ class XmppService extends ChangeNotifier {
     String? replyToId,
     String? replyToJid,
     String? replyFallback,
+    String? securityLabelText,
+    String? securityLabelFgColor,
+    String? securityLabelBgColor,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -8087,6 +8106,18 @@ class XmppService extends ChangeNotifier {
             (replyFallback != null && replyFallback.isNotEmpty)
             ? replyFallback
             : existing.replyFallback;
+        final nextSecurityLabelText =
+            (securityLabelText != null && securityLabelText.isNotEmpty)
+            ? securityLabelText
+            : existing.securityLabelText;
+        final nextSecurityLabelFgColor =
+            (securityLabelFgColor != null && securityLabelFgColor.isNotEmpty)
+            ? securityLabelFgColor
+            : existing.securityLabelFgColor;
+        final nextSecurityLabelBgColor =
+            (securityLabelBgColor != null && securityLabelBgColor.isNotEmpty)
+            ? securityLabelBgColor
+            : existing.securityLabelBgColor;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
@@ -8097,7 +8128,10 @@ class XmppService extends ChangeNotifier {
             nextInvitePassword != existing.invitePassword ||
             nextReplyToId != existing.replyToId ||
             nextReplyToJid != existing.replyToJid ||
-            nextReplyFallback != existing.replyFallback) {
+            nextReplyFallback != existing.replyFallback ||
+            nextSecurityLabelText != existing.securityLabelText ||
+            nextSecurityLabelFgColor != existing.securityLabelFgColor ||
+            nextSecurityLabelBgColor != existing.securityLabelBgColor) {
           list[existingIndex] = existing.copyWith(
             mamId: nextMamId,
             stanzaId: nextStanzaId,
@@ -8110,6 +8144,9 @@ class XmppService extends ChangeNotifier {
             replyToId: nextReplyToId,
             replyToJid: nextReplyToJid,
             replyFallback: nextReplyFallback,
+            securityLabelText: nextSecurityLabelText,
+            securityLabelFgColor: nextSecurityLabelFgColor,
+            securityLabelBgColor: nextSecurityLabelBgColor,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -8199,6 +8236,9 @@ class XmppService extends ChangeNotifier {
           replyToId: replyToId,
           replyToJid: replyToJid,
           replyFallback: replyFallback,
+          securityLabelText: securityLabelText,
+          securityLabelFgColor: securityLabelFgColor,
+          securityLabelBgColor: securityLabelBgColor,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -8227,6 +8267,9 @@ class XmppService extends ChangeNotifier {
       replyToId: replyToId,
       replyToJid: replyToJid,
       replyFallback: replyFallback,
+      securityLabelText: securityLabelText,
+      securityLabelFgColor: securityLabelFgColor,
+      securityLabelBgColor: securityLabelBgColor,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {

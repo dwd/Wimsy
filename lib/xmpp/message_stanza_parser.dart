@@ -62,6 +62,34 @@ class MessageStanzaParser {
     return null;
   }
 
+  // XEP-0258: extracts the human-readable `<displaymarking/>` (and its
+  // suggested colours) from a `<securitylabel/>` envelope. The full label
+  // (ESS/NATO/etc.) is intentionally not decoded here — only the
+  // server-rendered text is needed to show a marking chip.
+  SecurityLabelInfo? extractSecurityLabel(XmppElement stanza) {
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name != 'securitylabel' ||
+            child.getAttribute('xmlns')?.value != 'urn:xmpp:sec-label:0') {
+          continue;
+        }
+        final marking = child.getChild('displaymarking');
+        final text = marking?.textValue?.trim();
+        if (text == null || text.isEmpty) {
+          return null;
+        }
+        final fgColor = marking?.getAttribute('fgcolor')?.value?.trim();
+        final bgColor = marking?.getAttribute('bgcolor')?.value?.trim();
+        return SecurityLabelInfo(
+          text: text,
+          fgColor: (fgColor == null || fgColor.isEmpty) ? null : fgColor,
+          bgColor: (bgColor == null || bgColor.isEmpty) ? null : bgColor,
+        );
+      }
+    }
+    return null;
+  }
+
   ReactionUpdate? extractReactionUpdate(XmppElement stanza) {
     for (final candidate in _candidateMessages(stanza)) {
       for (final child in candidate.children) {

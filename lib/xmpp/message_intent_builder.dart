@@ -16,6 +16,19 @@ class OobInfo {
   final String? description;
 }
 
+/// The parsed `<displaymarking/>` of a XEP-0258 `<securitylabel/>` envelope.
+///
+/// The server pre-renders the human-readable marking (and its suggested
+/// colours) so a client can show it without understanding the underlying
+/// security policy at all.
+class SecurityLabelInfo {
+  const SecurityLabelInfo({required this.text, this.fgColor, this.bgColor});
+
+  final String text;
+  final String? fgColor;
+  final String? bgColor;
+}
+
 class ReplyPayload {
   const ReplyPayload({
     required this.replyToId,
@@ -108,6 +121,9 @@ class AddMessageIntent extends MessageIntent {
     this.replyToId,
     this.replyToJid,
     this.replyFallback,
+    this.securityLabelText,
+    this.securityLabelFgColor,
+    this.securityLabelBgColor,
   });
 
   final String bareJid;
@@ -122,6 +138,9 @@ class AddMessageIntent extends MessageIntent {
   final String? replyToId;
   final String? replyToJid;
   final String? replyFallback;
+  final String? securityLabelText;
+  final String? securityLabelFgColor;
+  final String? securityLabelBgColor;
 }
 
 class UnhandledMessageIntent extends MessageIntent {
@@ -141,6 +160,7 @@ class MessageIntentBuilder {
     required this.reactionChatTarget,
     required this.extractOobInfoFromStanza,
     this.extractReplyPayload,
+    this.extractSecurityLabel,
     required this.isArchivedStanza,
     required this.bareJid,
     required this.hasReceiptRequest,
@@ -158,6 +178,9 @@ class MessageIntentBuilder {
   final String Function(String fromBare, String toBare) reactionChatTarget;
   final OobInfo? Function(XmppElement stanza) extractOobInfoFromStanza;
   final ReplyPayloadExtractor? extractReplyPayload;
+  // XEP-0258: extracts the `<displaymarking/>` of a `<securitylabel/>`
+  // envelope, when present.
+  final SecurityLabelInfo? Function(XmppElement stanza)? extractSecurityLabel;
   final bool Function(MessageStanza stanza) isArchivedStanza;
   final String Function(String jid) bareJid;
   final bool Function(MessageStanza stanza) hasReceiptRequest;
@@ -217,6 +240,7 @@ class MessageIntentBuilder {
     final body = reply?.cleanedBody ?? stanza.body ?? '';
     final oobInfo = extractOobInfoFromStanza(stanza);
     final oobUrl = oobInfo?.url;
+    final securityLabel = extractSecurityLabel?.call(stanza);
     if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
       return const [UnhandledMessageIntent(reason: 'empty-body')];
     }
@@ -273,6 +297,9 @@ class MessageIntentBuilder {
         replyToId: reply?.replyToId,
         replyToJid: reply?.replyToJid,
         replyFallback: reply?.fallbackBody,
+        securityLabelText: securityLabel?.text,
+        securityLabelFgColor: securityLabel?.fgColor,
+        securityLabelBgColor: securityLabel?.bgColor,
       ),
     );
     if (intents.isEmpty) {
