@@ -16,17 +16,27 @@ class OobInfo {
   final String? description;
 }
 
-/// The parsed `<displaymarking/>` of a XEP-0258 `<securitylabel/>` envelope.
+/// The human-readable marking of a XEP-0258 `<securitylabel/>` envelope.
 ///
-/// The server pre-renders the human-readable marking (and its suggested
-/// colours) so a client can show it without understanding the underlying
-/// security policy at all.
+/// [text]/[fgColor]/[bgColor] are either derived by actually parsing the
+/// `<label/>` against a known security policy (SPIF) — the preferred,
+/// policy-accurate path — or, when that isn't possible (no policy known,
+/// unsupported/undecodable label format, ...), taken from the server's
+/// pre-rendered `<displaymarking/>` as a fallback. [isFallback] tells the
+/// UI which of the two happened, so it can warn the user that the shown
+/// marking hasn't been policy-verified.
 class SecurityLabelInfo {
-  const SecurityLabelInfo({required this.text, this.fgColor, this.bgColor});
+  const SecurityLabelInfo({
+    required this.text,
+    this.fgColor,
+    this.bgColor,
+    this.isFallback = false,
+  });
 
   final String text;
   final String? fgColor;
   final String? bgColor;
+  final bool isFallback;
 }
 
 class ReplyPayload {
@@ -124,6 +134,7 @@ class AddMessageIntent extends MessageIntent {
     this.securityLabelText,
     this.securityLabelFgColor,
     this.securityLabelBgColor,
+    this.securityLabelIsFallback = false,
   });
 
   final String bareJid;
@@ -141,6 +152,7 @@ class AddMessageIntent extends MessageIntent {
   final String? securityLabelText;
   final String? securityLabelFgColor;
   final String? securityLabelBgColor;
+  final bool securityLabelIsFallback;
 }
 
 class UnhandledMessageIntent extends MessageIntent {
@@ -300,6 +312,7 @@ class MessageIntentBuilder {
         securityLabelText: securityLabel?.text,
         securityLabelFgColor: securityLabel?.fgColor,
         securityLabelBgColor: securityLabel?.bgColor,
+        securityLabelIsFallback: securityLabel?.isFallback ?? false,
       ),
     );
     if (intents.isEmpty) {

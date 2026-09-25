@@ -34,6 +34,7 @@ void main() {
       securityLabelText: 'SECRET',
       securityLabelFgColor: 'black',
       securityLabelBgColor: 'red',
+      securityLabelIsFallback: true,
     );
 
     final roundtrip = ChatMessage.fromMap(message.toMap());
@@ -64,6 +65,7 @@ void main() {
     expect(roundtrip.securityLabelText, 'SECRET');
     expect(roundtrip.securityLabelFgColor, 'black');
     expect(roundtrip.securityLabelBgColor, 'red');
+    expect(roundtrip.securityLabelIsFallback, isTrue);
   });
 
   test('ChatMessage without a security label round-trips as null', () {
@@ -81,6 +83,7 @@ void main() {
     expect(roundtrip!.securityLabelText, isNull);
     expect(roundtrip.securityLabelFgColor, isNull);
     expect(roundtrip.securityLabelBgColor, isNull);
+    expect(roundtrip.securityLabelIsFallback, isFalse);
   });
 
   test('ChatMessage persists outgoing tick state', () {

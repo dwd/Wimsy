@@ -5065,8 +5065,12 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  // XEP-0258: renders the server-rendered `<displaymarking/>` of this
-  // message's security label as a small coloured chip, when present.
+  // XEP-0258: renders this message's security label marking as a small
+  // coloured chip, when present. The marking is preferably derived by
+  // parsing the label itself against a known security policy; when that
+  // isn't possible, the server's pre-rendered `<displaymarking/>` is shown
+  // instead, with a warning triangle to flag that it hasn't been
+  // policy-verified.
   Widget? _buildSecurityLabelChip(BuildContext context) {
     final text = message.securityLabelText?.trim();
     if (text == null || text.isEmpty) {
@@ -5078,7 +5082,7 @@ class MessageBubble extends StatelessWidget {
     final fgColor =
         parseCssColorForSecurityLabel(message.securityLabelFgColor) ??
         Colors.white;
-    return Container(
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: bgColor,
@@ -5092,6 +5096,26 @@ class MessageBubble extends StatelessWidget {
           fontWeight: FontWeight.bold,
           letterSpacing: 0.5,
         ),
+      ),
+    );
+    if (!message.securityLabelIsFallback) {
+      return chip;
+    }
+    return Tooltip(
+      message:
+          'Could not verify this label against a security policy; showing '
+          "the sender's server-supplied marking instead.",
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          chip,
+          const SizedBox(width: 4),
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 14,
+            color: Colors.amber,
+          ),
+        ],
       ),
     );
   }

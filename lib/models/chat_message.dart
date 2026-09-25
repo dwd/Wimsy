@@ -40,6 +40,7 @@ class ChatMessage {
     this.securityLabelText,
     this.securityLabelFgColor,
     this.securityLabelBgColor,
+    this.securityLabelIsFallback = false,
   });
 
   final String from;
@@ -82,12 +83,17 @@ class ChatMessage {
   final bool markerSent;
   // Whether a XEP-0184 delivery receipt has been sent for this message.
   final bool receiptSent;
-  // XEP-0258: the server-rendered `<displaymarking/>` text of this
-  // message's security label, and its suggested foreground/background
-  // colours, or null if the message carries no security label.
+  // XEP-0258: the display marking text of this message's security label,
+  // and its suggested foreground/background colours, or null if the
+  // message carries no security label. When [securityLabelIsFallback] is
+  // true, the label's `<label/>` could not be parsed against a known
+  // security policy, so this text/colour came from the server's
+  // pre-rendered `<displaymarking/>` instead and hasn't been
+  // policy-verified.
   final String? securityLabelText;
   final String? securityLabelFgColor;
   final String? securityLabelBgColor;
+  final bool securityLabelIsFallback;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -134,6 +140,7 @@ class ChatMessage {
     Object? securityLabelText = _absent,
     Object? securityLabelFgColor = _absent,
     Object? securityLabelBgColor = _absent,
+    bool? securityLabelIsFallback,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -222,6 +229,8 @@ class ChatMessage {
       securityLabelBgColor: identical(securityLabelBgColor, _absent)
           ? this.securityLabelBgColor
           : securityLabelBgColor as String?,
+      securityLabelIsFallback:
+          securityLabelIsFallback ?? this.securityLabelIsFallback,
     );
   }
 
@@ -267,6 +276,7 @@ class ChatMessage {
       'securityLabelText': securityLabelText,
       'securityLabelFgColor': securityLabelFgColor,
       'securityLabelBgColor': securityLabelBgColor,
+      'securityLabelIsFallback': securityLabelIsFallback,
     };
   }
 
@@ -321,6 +331,7 @@ class ChatMessage {
     final securityLabelText = map['securityLabelText']?.toString();
     final securityLabelFgColor = map['securityLabelFgColor']?.toString();
     final securityLabelBgColor = map['securityLabelBgColor']?.toString();
+    final securityLabelIsFallback = map['securityLabelIsFallback'] == true;
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -387,6 +398,7 @@ class ChatMessage {
       securityLabelText: securityLabelText,
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,
+      securityLabelIsFallback: securityLabelIsFallback,
     );
   }
 

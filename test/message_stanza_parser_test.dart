@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:spiffing/spiffing.dart' as spiffing;
 import 'package:wimsy/xmpp/message_stanza_parser.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
@@ -127,6 +130,7 @@ void main() {
     expect(info!.text, 'SECRET');
     expect(info.fgColor, 'black');
     expect(info.bgColor, 'red');
+    expect(info.isFallback, isTrue);
   });
 
   test('extractSecurityLabel reads displaymarking from forwarded message', () {
@@ -149,7 +153,125 @@ void main() {
     expect(info!.text, 'UNCLASSIFIED');
     expect(info.fgColor, isNull);
     expect(info.bgColor, isNull);
+    expect(info.isFallback, isTrue);
   });
+
+  test(
+    'extractSecurityLabel parses the primary label against a known policy',
+    () {
+      // Register a minimal SPIF so the primary <label/> (ESS/BER-encoded)
+      // can actually be decoded and rendered, rather than falling back to
+      // the server-supplied <displaymarking/>.
+      final site = spiffing.Site();
+      final policy = site.load('''
+<SPIF>
+  <securityPolicyId name="TestPolicy" id="1.2.3.4.5"/>
+  <securityClassifications>
+    <securityClassification lacv="10" name="SECRET" hierarchy="10" color="red"/>
+  </securityClassifications>
+</SPIF>
+''');
+      final label = spiffing.Label.forClassification(policy, 10);
+      final berBytes = label.write(spiffing.Format.ber);
+      final base64Data = base64.encode(latin1.encode(berBytes));
+
+      final stanza = _chatStanza(
+        id: 'm-sl5',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final securityLabel = XmppElement()..name = 'securitylabel';
+      securityLabel.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'),
+      );
+      final displayMarking = XmppElement()..name = 'displaymarking';
+      // A wrong/irrelevant server-supplied marking, to prove the parsed
+      // label — not this fallback — is what gets used.
+      displayMarking.textValue = 'SHOULD NOT BE USED';
+      securityLabel.addChild(displayMarking);
+      final labelElement = XmppElement()..name = 'label';
+      final essLabel = XmppElement()..name = 'esssecuritylabel';
+      essLabel.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:sec-label:ess:0'),
+      );
+      essLabel.textValue = base64Data;
+      labelElement.addChild(essLabel);
+      securityLabel.addChild(labelElement);
+      stanza.addChild(securityLabel);
+
+      final info = parser.extractSecurityLabel(stanza);
+      expect(info, isNotNull);
+      expect(info!.isFallback, isFalse);
+      expect(info.text, contains('SECRET'));
+      expect(info.fgColor, 'red');
+    },
+  );
+
+  test(
+    'extractSecurityLabel falls back to displaymarking when no policy is known',
+    () {
+      // A fresh policy id that has never been registered with any Site.
+      final stanza = _chatStanza(
+        id: 'm-sl6',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final securityLabel = XmppElement()..name = 'securitylabel';
+      securityLabel.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'),
+      );
+      final displayMarking = XmppElement()..name = 'displaymarking';
+      displayMarking.addAttribute(XmppAttribute('fgcolor', 'black'));
+      displayMarking.addAttribute(XmppAttribute('bgcolor', 'red'));
+      displayMarking.textValue = 'SECRET';
+      securityLabel.addChild(displayMarking);
+      final labelElement = XmppElement()..name = 'label';
+      final essLabel = XmppElement()..name = 'esssecuritylabel';
+      essLabel.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:sec-label:ess:0'),
+      );
+      // Not valid BER for any known policy - decoding must fail cleanly.
+      essLabel.textValue = base64.encode(latin1.encode('not a real label'));
+      labelElement.addChild(essLabel);
+      securityLabel.addChild(labelElement);
+      stanza.addChild(securityLabel);
+
+      final info = parser.extractSecurityLabel(stanza);
+      expect(info, isNotNull);
+      expect(info!.isFallback, isTrue);
+      expect(info.text, 'SECRET');
+      expect(info.fgColor, 'black');
+      expect(info.bgColor, 'red');
+    },
+  );
+
+  test(
+    'extractSecurityLabel falls back to displaymarking for an empty <label/>',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-sl7',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final securityLabel = XmppElement()..name = 'securitylabel';
+      securityLabel.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'),
+      );
+      final displayMarking = XmppElement()..name = 'displaymarking';
+      displayMarking.textValue = 'DEFAULT';
+      securityLabel.addChild(displayMarking);
+      securityLabel.addChild(XmppElement()..name = 'label');
+      stanza.addChild(securityLabel);
+
+      final info = parser.extractSecurityLabel(stanza);
+      expect(info, isNotNull);
+      expect(info!.isFallback, isTrue);
+      expect(info.text, 'DEFAULT');
+    },
+  );
 
   test(
     'extractSecurityLabel returns null when no securitylabel element present',

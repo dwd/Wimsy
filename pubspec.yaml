@@ -59,6 +59,12 @@ dependencies:
   qr_flutter: ^4.1.0
   flutter_quic:
     path: vendor/flutter_quic
+  # XEP-0258: parses/renders security labels against a Security Policy
+  # Information File (SPIF). Currently a local path dependency onto a
+  # sibling checkout; this should become a git dependency once
+  # spiffing-dart has a public/pinnable repository.
+  spiffing:
+    path: ../../src/spiffing-dart
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1
@@ -75,6 +81,11 @@ dev_dependencies:
 
 dependency_overrides:
   flutter_rust_bridge: 2.11.1
+  # spiffing-dart (path dep) constrains xml to ^6.5.0, but our vendored
+  # xmpp_stone needs xml ^7.0.1; override to the version xmpp_stone needs
+  # since spiffing-dart's usage (XmlDocument.parse/XmlBuilder) is unaffected
+  # by the 6->7 changes.
+  xml: ^7.0.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

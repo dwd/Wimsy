@@ -5899,6 +5899,7 @@ class XmppService extends ChangeNotifier {
           securityLabelText: intent.securityLabelText,
           securityLabelFgColor: intent.securityLabelFgColor,
           securityLabelBgColor: intent.securityLabelBgColor,
+          securityLabelIsFallback: intent.securityLabelIsFallback,
         );
       } else if (intent is UnhandledMessageIntent) {
         _logUnhandledMessage(stanza, intent);
@@ -7942,6 +7943,7 @@ class XmppService extends ChangeNotifier {
           securityLabelText: securityLabel?.text,
           securityLabelFgColor: securityLabel?.fgColor,
           securityLabelBgColor: securityLabel?.bgColor,
+          securityLabelIsFallback: securityLabel?.isFallback ?? false,
         );
       }
     }
@@ -8025,6 +8027,7 @@ class XmppService extends ChangeNotifier {
         securityLabelText: securityLabel?.text,
         securityLabelFgColor: securityLabel?.fgColor,
         securityLabelBgColor: securityLabel?.bgColor,
+        securityLabelIsFallback: securityLabel?.isFallback ?? false,
       );
     });
 
@@ -8057,6 +8060,7 @@ class XmppService extends ChangeNotifier {
     String? securityLabelText,
     String? securityLabelFgColor,
     String? securityLabelBgColor,
+    bool securityLabelIsFallback = false,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -8118,6 +8122,10 @@ class XmppService extends ChangeNotifier {
             (securityLabelBgColor != null && securityLabelBgColor.isNotEmpty)
             ? securityLabelBgColor
             : existing.securityLabelBgColor;
+        final nextSecurityLabelIsFallback =
+            (securityLabelText != null && securityLabelText.isNotEmpty)
+            ? securityLabelIsFallback
+            : existing.securityLabelIsFallback;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
@@ -8131,7 +8139,8 @@ class XmppService extends ChangeNotifier {
             nextReplyFallback != existing.replyFallback ||
             nextSecurityLabelText != existing.securityLabelText ||
             nextSecurityLabelFgColor != existing.securityLabelFgColor ||
-            nextSecurityLabelBgColor != existing.securityLabelBgColor) {
+            nextSecurityLabelBgColor != existing.securityLabelBgColor ||
+            nextSecurityLabelIsFallback != existing.securityLabelIsFallback) {
           list[existingIndex] = existing.copyWith(
             mamId: nextMamId,
             stanzaId: nextStanzaId,
@@ -8147,6 +8156,7 @@ class XmppService extends ChangeNotifier {
             securityLabelText: nextSecurityLabelText,
             securityLabelFgColor: nextSecurityLabelFgColor,
             securityLabelBgColor: nextSecurityLabelBgColor,
+            securityLabelIsFallback: nextSecurityLabelIsFallback,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -8239,6 +8249,7 @@ class XmppService extends ChangeNotifier {
           securityLabelText: securityLabelText,
           securityLabelFgColor: securityLabelFgColor,
           securityLabelBgColor: securityLabelBgColor,
+          securityLabelIsFallback: securityLabelIsFallback,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -8270,6 +8281,7 @@ class XmppService extends ChangeNotifier {
       securityLabelText: securityLabelText,
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,
+      securityLabelIsFallback: securityLabelIsFallback,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
