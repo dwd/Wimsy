@@ -14,6 +14,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter_spiffing/flutter_spiffing.dart';
+import 'package:spiffing/spiffing.dart' as spiffing;
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -1610,6 +1612,11 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           color: theme.colorScheme.surface,
           child: Column(
             children: [
+              if (_buildSecurityLabelPreviewChip(activeChat) != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _buildSecurityLabelPreviewChip(activeChat),
+                ),
               Expanded(
                 child: MessageComposerTextField(
                   fieldKey: _messageInputKey,
@@ -1628,6 +1635,13 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  IconButton(
+                    onPressed: canSend
+                        ? () => _showSecurityLabelPicker(context, activeChat)
+                        : null,
+                    icon: const Icon(Icons.security),
+                    tooltip: 'Add security label',
+                  ),
                   IconButton(
                     onPressed: canSend
                         ? () => _sendAttachment(
@@ -2133,6 +2147,14 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     ),
                   ),
                 ],
+                if (_buildSecurityLabelPreviewChip(activeChat) != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _buildSecurityLabelPreviewChip(activeChat),
+                    ),
+                  ),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final canSend =
@@ -2166,6 +2188,17 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: canSend
+                              ? () => _showSecurityLabelPicker(
+                                  context,
+                                  activeChat,
+                                )
+                              : null,
+                          icon: const Icon(Icons.security),
+                          tooltip: 'Add security label',
+                        ),
+                        const SizedBox(width: 4),
                         IconButton(
                           onPressed: canSend
                               ? () => _sendAttachment(
@@ -2276,6 +2309,144 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     }
     if (_messageFocusNode.canRequestFocus) {
       _messageFocusNode.requestFocus();
+    }
+  }
+
+  // XEP-0258: the compose-bar preview chip for a label staged (via
+  // [_showSecurityLabelPicker]) to be attached to the next outgoing
+  // message in [activeChat], with a "clear" affordance. Returns null
+  // when nothing is staged.
+  Widget? _buildSecurityLabelPreviewChip(String? activeChat) {
+    if (activeChat == null) {
+      return null;
+    }
+    final info = widget.service.pendingSecurityLabelFor(activeChat);
+    if (info == null) {
+      return null;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          buildSecurityLabelChip(
+            text: info.text,
+            fgColor: info.fgColor,
+            bgColor: info.bgColor,
+            isFallback: info.isFallback,
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: () => widget.service.setPendingSecurityLabel(
+              activeChat,
+              null,
+            ),
+            child: const Icon(Icons.close, size: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // XEP-0258: opens a bottom sheet listing the security labels the user
+  // is allowed to attach to their next message in [chatJid] (from the
+  // server's catalogue), plus an option to build a new one from scratch.
+  // Tapping an entry stages it via `setPendingSecurityLabel` - the actual
+  // attachment happens when the message is sent (see `sendMessage`/
+  // `sendRoomMessage`).
+  Future<void> _showSecurityLabelPicker(
+    BuildContext context,
+    String chatJid,
+  ) async {
+    final service = widget.service;
+    final catalog = service.securityLabelCatalog;
+    final hasKnownPolicy = service.securityLabelPolicies.isNotEmpty;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Add security label',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              for (final entry in catalog)
+                ListTile(
+                  title: buildSecurityLabelChip(
+                    text: entry.info.text,
+                    fgColor: entry.info.fgColor,
+                    bgColor: entry.info.bgColor,
+                    isFallback: entry.info.isFallback,
+                  ),
+                  subtitle: (entry.selector != null || entry.isDefault)
+                      ? Text(
+                          [
+                            if (entry.selector != null) entry.selector!,
+                            if (entry.isDefault) '(default)',
+                          ].join(' '),
+                        )
+                      : null,
+                  onTap: () {
+                    service.setPendingSecurityLabel(
+                      chatJid,
+                      entry.securityLabelElement,
+                    );
+                    Navigator.of(sheetContext).pop();
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.add),
+                title: const Text('Create new label…'),
+                subtitle: hasKnownPolicy
+                    ? null
+                    : const Text(
+                        'No security policy known yet - cannot build a '
+                        'new label.',
+                      ),
+                enabled: hasKnownPolicy,
+                onTap: !hasKnownPolicy
+                    ? null
+                    : () {
+                        Navigator.of(sheetContext).pop();
+                        _openSecurityLabelEditor(context, chatJid);
+                      },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // XEP-0258: opens `flutter_spiffing`'s [LabelEditor] seeded with a fresh
+  // label for the primary known policy, and stages the resulting
+  // `<securitylabel/>` element (see `buildOutgoingSecurityLabelElement`)
+  // for [chatJid] if the user applies it.
+  Future<void> _openSecurityLabelEditor(
+    BuildContext context,
+    String chatJid,
+  ) async {
+    final service = widget.service;
+    final ref = service.securityLabelPolicies.firstOrNull;
+    final spif = ref == null ? null : service.securityLabelPolicySpif(ref.id);
+    if (spif == null) {
+      _showSnack('Security policy not yet available.');
+      return;
+    }
+    final label = spiffing.Label.forPolicy(spif);
+    final element = await Navigator.of(context).push<XmppElement>(
+      MaterialPageRoute(
+        builder: (context) =>
+            _SecurityLabelEditorScreen(spif: spif, label: label),
+      ),
+    );
+    if (element != null) {
+      service.setPendingSecurityLabel(chatJid, element);
     }
   }
 
@@ -4859,6 +5030,129 @@ Color? parseCssColorForSecurityLabel(String? value) {
   return null;
 }
 
+// XEP-0258: renders a security-label marking as a small coloured chip.
+// Shared by [MessageBubble]'s per-message chip (a label already attached
+// to a sent/received message) and the compose-bar preview chip (a label
+// staged to be attached to the next outgoing message). When [isFallback]
+// is true, a warning triangle flags that the marking hasn't been
+// policy-verified (see `MessageStanzaParser.extractSecurityLabel`/
+// `parseSecurityLabelElement`).
+Widget buildSecurityLabelChip({
+  required String text,
+  String? fgColor,
+  String? bgColor,
+  bool isFallback = false,
+}) {
+  final resolvedBgColor =
+      parseCssColorForSecurityLabel(bgColor) ?? Colors.grey.shade700;
+  final resolvedFgColor =
+      parseCssColorForSecurityLabel(fgColor) ?? Colors.white;
+  final chip = Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(
+      color: resolvedBgColor,
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: resolvedFgColor,
+        fontSize: 11,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
+  if (!isFallback) {
+    return chip;
+  }
+  return Tooltip(
+    message:
+        'Could not verify this label against a security policy; showing '
+        "the sender's server-supplied marking instead.",
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        chip,
+        const SizedBox(width: 4),
+        const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.amber),
+      ],
+    ),
+  );
+}
+
+// XEP-0258: builds the outgoing `<securitylabel xmlns="urn:xmpp:sec-
+// label:0"/>` wire element for a user-edited [label], mirroring the shape
+// the server sends inline on messages/catalogue entries (a
+// `<displaymarking/>` sibling plus the primary, ESS/BER-encoded
+// `<label/>`) - see `MessageStanzaParser`/`security_label_catalog.dart`
+// for the parsing side of the same shape.
+XmppElement buildOutgoingSecurityLabelElement(spiffing.Label label) {
+  final securityLabel = XmppElement()..name = 'securitylabel';
+  securityLabel.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sec-label:0'));
+  final displayMarking = XmppElement()..name = 'displaymarking';
+  displayMarking.textValue = label.policy.displayMarking(label);
+  final fgColour = label.classification.fgcolour.trim();
+  if (fgColour.isNotEmpty) {
+    displayMarking.addAttribute(XmppAttribute('fgcolor', fgColour));
+  }
+  securityLabel.addChild(displayMarking);
+  final labelElement = XmppElement()..name = 'label';
+  final ess = XmppElement()..name = 'esssecuritylabel';
+  ess.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sec-label:ess:0'));
+  final berBytes = label.write(spiffing.Format.ber);
+  ess.textValue = base64.encode(latin1.encode(berBytes));
+  labelElement.addChild(ess);
+  securityLabel.addChild(labelElement);
+  return securityLabel;
+}
+
+// XEP-0258: a full-screen host for `flutter_spiffing`'s [LabelEditor],
+// used to build a brand-new security label from scratch (the "Create new
+// label…" option in the compose bar's label picker). Applying the label
+// pops the screen with the resulting outgoing `<securitylabel/>` element;
+// backing out without applying pops with null.
+class _SecurityLabelEditorScreen extends StatefulWidget {
+  const _SecurityLabelEditorScreen({required this.spif, required this.label});
+
+  final spiffing.Spif spif;
+  final spiffing.Label label;
+
+  @override
+  State<_SecurityLabelEditorScreen> createState() =>
+      _SecurityLabelEditorScreenState();
+}
+
+class _SecurityLabelEditorScreenState
+    extends State<_SecurityLabelEditorScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Create security label'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(
+                context,
+              ).pop(buildOutgoingSecurityLabelElement(widget.label));
+            },
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: LabelEditor(
+          spif: widget.spif,
+          label: widget.label,
+          onChanged: (_) => setState(() {}),
+        ),
+      ),
+    );
+  }
+}
+
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
@@ -5076,47 +5370,11 @@ class MessageBubble extends StatelessWidget {
     if (text == null || text.isEmpty) {
       return null;
     }
-    final bgColor =
-        parseCssColorForSecurityLabel(message.securityLabelBgColor) ??
-        Colors.grey.shade700;
-    final fgColor =
-        parseCssColorForSecurityLabel(message.securityLabelFgColor) ??
-        Colors.white;
-    final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: fgColor,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-    if (!message.securityLabelIsFallback) {
-      return chip;
-    }
-    return Tooltip(
-      message:
-          'Could not verify this label against a security policy; showing '
-          "the sender's server-supplied marking instead.",
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          chip,
-          const SizedBox(width: 4),
-          const Icon(
-            Icons.warning_amber_rounded,
-            size: 14,
-            color: Colors.amber,
-          ),
-        ],
-      ),
+    return buildSecurityLabelChip(
+      text: text,
+      fgColor: message.securityLabelFgColor,
+      bgColor: message.securityLabelBgColor,
+      isFallback: message.securityLabelIsFallback,
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:spiffing/spiffing.dart' as spiffing;
+import 'package:xml/xml.dart' as xmlpkg;
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../deployment_defaults.dart';
@@ -61,6 +62,7 @@ import 'quic_write_tracker.dart';
 import 'liveness_controller.dart';
 import 'recovery_work_queue.dart';
 import 'room_nickname.dart';
+import 'security_label_catalog.dart';
 import 'security_label_policy.dart';
 import 'tcp_endpoint_plan.dart';
 import 'unacked_message_recovery.dart';
@@ -286,6 +288,23 @@ class XmppService extends ChangeNotifier {
   // `<label/>` into an actual display marking instead of falling back to
   // the server-supplied `<displaymarking/>`.
   final spiffing.Site _securityLabelSite = spiffing.Site();
+  // XEP-0258 (policy extension): the SPIFs known to be loaded on the
+  // server, in server-defined (primary policy first) order. Populated by
+  // `_refreshSecurityLabelPolicies`. `Site` has no way to enumerate the
+  // policies registered with it, so this is kept alongside it.
+  List<SecurityLabelPolicyRef> _securityLabelPolicyRefs = [];
+  // XEP-0258 (catalog extension): the security labels the user is allowed
+  // to attach to an outgoing message, fetched once per session (without a
+  // `to=` recipient, so not filtered by peer clearance - see
+  // `security_label_catalog.dart`) and/or seeded from disk.
+  List<SecurityLabelCatalogEntry> _securityLabelCatalog = [];
+  // XEP-0258: a label staged by the user to be attached to their next
+  // outgoing message in a given chat (keyed by the chat's bare JID - works
+  // for both 1:1 chats and MUC rooms). Labels are per-outgoing-message,
+  // not sticky: the entry is cleared once the message carrying it is sent,
+  // and the user must re-pick a label for their next message.
+  final Map<String, ({XmppElement element, SecurityLabelInfo info})>
+  _pendingSecurityLabel = {};
   String? _rosterVersion;
   final Map<String, String> _displayedStanzaIdByChat = {};
   final Map<String, DateTime> _displayedAtByChat = {};
@@ -661,6 +680,7 @@ class XmppService extends ChangeNotifier {
     _seedVcardAvatars(storage.loadVcardAvatars());
     _seedVcardAvatarState(storage.loadVcardAvatarState());
     _seedSecurityLabelPolicies(storage.loadSecurityLabelPolicies());
+    _seedSecurityLabelCatalog(storage.loadSecurityLabelCatalog());
     _rosterVersion = storage.loadRosterVersion();
     _displayedStanzaIdByChat
       ..clear()
@@ -1765,6 +1785,7 @@ class XmppService extends ChangeNotifier {
           _setupDisplayedSync();
           _refreshExternalServices();
           _refreshSecurityLabelPolicies();
+          _refreshSecurityLabelCatalog();
           _scheduleMamRecovery();
           _scheduleVcardRecovery(_currentUserBareJid!);
           _sendInitialPresence();
@@ -2303,6 +2324,10 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final messageId = AbstractStanza.getRandomId();
+    // XEP-0258: capture the staged label (if any) before building the
+    // stanza, then clear it after sending - labels are per-outgoing-
+    // message, not sticky.
+    final pendingLabel = _pendingSecurityLabel[_bareJid(toBareJid)];
     final stanza = _buildChatMessageStanza(
       toBareJid: toBareJid,
       messageId: messageId,
@@ -2310,6 +2335,9 @@ class XmppService extends ChangeNotifier {
       reply: reply,
     );
     _writeOrQueueMessage(stanza);
+    if (pendingLabel != null) {
+      setPendingSecurityLabel(toBareJid, null);
+    }
     final sender =
         _currentUserBareJid ?? connection?.fullJid.userAtDomain ?? '';
     if (sender.isNotEmpty) {
@@ -2325,6 +2353,10 @@ class XmppService extends ChangeNotifier {
         replyToId: reply?.id,
         replyToJid: reply?.toJid,
         replyFallback: reply?.fallback,
+        securityLabelText: pendingLabel?.info.text,
+        securityLabelFgColor: pendingLabel?.info.fgColor,
+        securityLabelBgColor: pendingLabel?.info.bgColor,
+        securityLabelIsFallback: false,
       );
     }
     final chatManager = _chatManager;
@@ -2710,7 +2742,17 @@ class XmppService extends ChangeNotifier {
         ),
       );
     }
+    // XEP-0258: attach a deep copy of the staged label (if any), then
+    // clear it after sending - labels are per-outgoing-message, not
+    // sticky.
+    final pendingLabel = _pendingSecurityLabel[normalized];
+    if (pendingLabel != null) {
+      stanza.addChild(_deepCopyElement(pendingLabel.element));
+    }
     _writeOrQueueMessage(stanza);
+    if (pendingLabel != null) {
+      setPendingSecurityLabel(normalized, null);
+    }
     final rawXml = _serializeStanza(stanza);
     final nick = _roomNickFor(normalized);
     final now = DateTime.now();
@@ -2727,6 +2769,10 @@ class XmppService extends ChangeNotifier {
       replyToId: reply?.id,
       replyToJid: reply?.toJid,
       replyFallback: reply?.fallback,
+      securityLabelText: pendingLabel?.info.text,
+      securityLabelFgColor: pendingLabel?.info.fgColor,
+      securityLabelBgColor: pendingLabel?.info.bgColor,
+      securityLabelIsFallback: false,
     );
   }
 
@@ -5858,6 +5904,17 @@ class XmppService extends ChangeNotifier {
     selectChat(room.roomJid);
   }
 
+  /// Test-only seam mirroring [seedConnectedRoomForTesting] for 1:1 chats:
+  /// marks the session as connected (without a live connection) so
+  /// [sendMessage] can be exercised directly.
+  @visibleForTesting
+  void seedConnectedChatForTesting(String bareJid) {
+    _status = XmppStatus.connected;
+    _hasConnectedSession = true;
+    _currentUserBareJid = 'tester@example.com';
+    _ensureContact(_bareJid(bareJid));
+  }
+
   @visibleForTesting
   void simulateReconnectForTesting() {
     _status = XmppStatus.connecting;
@@ -6038,6 +6095,69 @@ class XmppService extends ChangeNotifier {
     _iceServers = parsed.map(_toIceServer).toList(growable: false);
   }
 
+  /// Every SPIF security policy known to be loaded on the server, in
+  /// server-defined (primary policy first) order. The first entry is the
+  /// primary policy, used as the default when creating a new label.
+  List<SecurityLabelPolicyRef> get securityLabelPolicies =>
+      List.unmodifiable(_securityLabelPolicyRefs);
+
+  /// Resolves a [SecurityLabelPolicyRef.id] to its parsed [spiffing.Spif],
+  /// or null if that policy isn't (yet, or ever was) registered with
+  /// [_securityLabelSite].
+  spiffing.Spif? securityLabelPolicySpif(String id) {
+    try {
+      return _securityLabelSite.spif(id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The security labels the user is allowed to attach to an outgoing
+  /// message, per the server's XEP-0258 catalogue extension. See
+  /// `security_label_catalog.dart` for the peer-clearance-filtering
+  /// (`to=`) limitation.
+  List<SecurityLabelCatalogEntry> get securityLabelCatalog =>
+      List.unmodifiable(_securityLabelCatalog);
+
+  /// Stages [securityLabelElement] to be attached to the next outgoing
+  /// message sent to [chatJid] (a 1:1 chat's bare JID or a MUC room's bare
+  /// JID), or clears any staged label for that chat if null. The staged
+  /// label is per-outgoing-message, not sticky: [sendMessage] and
+  /// [sendRoomMessage] clear it again once the message carrying it is
+  /// sent.
+  void setPendingSecurityLabel(
+    String chatJid,
+    XmppElement? securityLabelElement,
+  ) {
+    final normalized = _bareJid(chatJid);
+    if (normalized.isEmpty) {
+      return;
+    }
+    if (securityLabelElement == null) {
+      _pendingSecurityLabel.remove(normalized);
+      notifyListeners();
+      return;
+    }
+    final info = parseSecurityLabelElement(securityLabelElement);
+    if (info == null) {
+      _pendingSecurityLabel.remove(normalized);
+      notifyListeners();
+      return;
+    }
+    _pendingSecurityLabel[normalized] = (
+      element: securityLabelElement,
+      info: info,
+    );
+    notifyListeners();
+  }
+
+  /// The display info of the label currently staged for [chatJid] (see
+  /// [setPendingSecurityLabel]), for compose-bar preview, or null if none
+  /// is staged.
+  SecurityLabelInfo? pendingSecurityLabelFor(String chatJid) {
+    return _pendingSecurityLabel[_bareJid(chatJid)]?.info;
+  }
+
   /// Seeds the in-session security-policy [Site] from previously-persisted
   /// raw SPIF documents, so labels can be parsed against a known policy
   /// even before this session's own [_refreshSecurityLabelPolicies] fetch
@@ -6052,6 +6172,50 @@ class XmppService extends ChangeNotifier {
         );
       }
     }
+  }
+
+  /// Seeds `_securityLabelCatalog` from a previously-persisted raw
+  /// `<catalog/>` response, so the catalogue is available immediately even
+  /// before this session's own [_refreshSecurityLabelCatalog] fetch
+  /// completes (or if it never does, e.g. offline).
+  void _seedSecurityLabelCatalog(String? xml) {
+    if (xml == null || xml.isEmpty) {
+      return;
+    }
+    try {
+      final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.RESULT);
+      iq.addChild(_xmlElementFromString(xml));
+      _securityLabelCatalog = parseSecurityLabelCatalog(iq);
+    } catch (error) {
+      debugPrint(
+        'SecurityLabelCatalog: failed to seed the cached catalogue: $error',
+      );
+    }
+  }
+
+  /// Converts a raw XML string (as produced by [XmppElement.buildXmlString])
+  /// back into an [XmppElement] tree, mirroring the vendored
+  /// `StanzaParser.parseElement`'s (private) conversion logic.
+  XmppElement _xmlElementFromString(String rawXml) {
+    final root = xmlpkg.XmlDocument.parse(rawXml).rootElement;
+    return _xmlElementFromXmlNode(root);
+  }
+
+  XmppElement _xmlElementFromXmlNode(xmlpkg.XmlElement element) {
+    final xmppElement = XmppElement()..name = element.name.local;
+    for (final attribute in element.attributes) {
+      xmppElement.addAttribute(
+        XmppAttribute(attribute.name.local, attribute.value),
+      );
+    }
+    for (final child in element.children) {
+      if (child is xmlpkg.XmlElement) {
+        xmppElement.addChild(_xmlElementFromXmlNode(child));
+      } else if (child is xmlpkg.XmlText) {
+        xmppElement.textValue = child.value;
+      }
+    }
+    return xmppElement;
   }
 
   // XEP-0258 (policy extension): lists every SPIF security policy loaded on
@@ -6071,6 +6235,9 @@ class XmppService extends ChangeNotifier {
     if (refs == null || refs.isEmpty) {
       return;
     }
+    // The server returns refs in primary-policy-first order; keep that
+    // order so `securityLabelPolicies.firstOrNull` picks the right default.
+    _securityLabelPolicyRefs = refs;
     final fetchedDocuments = <String, String>{};
     for (final ref in refs) {
       final xml = await _fetchSecurityLabelPolicyDocument(domain, ref.id);
@@ -6089,6 +6256,54 @@ class XmppService extends ChangeNotifier {
     if (fetchedDocuments.isNotEmpty) {
       await _storage?.replaceSecurityLabelPolicies(fetchedDocuments);
     }
+    notifyListeners();
+  }
+
+  // XEP-0258 (catalog extension): fetches the security labels the user is
+  // allowed to attach to an outgoing message, without a `to=` recipient
+  // (so not filtered by peer clearance - see `security_label_catalog.dart`
+  // for that documented limitation), and persists the raw response so it
+  // survives a restart.
+  Future<void> _refreshSecurityLabelCatalog() async {
+    if (_connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    final domain = Jid.fromFullJid(_currentUserBareJid!).domain;
+    if (domain.isEmpty) {
+      return;
+    }
+    final result = await _fetchSecurityLabelCatalog(domain);
+    if (result == null) {
+      return;
+    }
+    _securityLabelCatalog = parseSecurityLabelCatalog(result);
+    final catalogElement = result.children.firstWhere(
+      (child) =>
+          child.name == 'catalog' &&
+          child.getAttribute('xmlns')?.value == securityLabelCatalogNamespace,
+      orElse: () => XmppElement(),
+    );
+    if (catalogElement.name == 'catalog') {
+      await _storage?.replaceSecurityLabelCatalog(
+        catalogElement.buildXmlString(),
+      );
+    }
+    notifyListeners();
+  }
+
+  Future<IqStanza?> _fetchSecurityLabelCatalog(String domain) async {
+    final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.GET);
+    iq.toJid = Jid.fromFullJid(domain);
+    final catalog = XmppElement()..name = 'catalog';
+    catalog.addAttribute(
+      XmppAttribute('xmlns', securityLabelCatalogNamespace),
+    );
+    iq.addChild(catalog);
+    final result = await _sendIqAndAwait(iq);
+    if (result == null || result.type != IqStanzaType.RESULT) {
+      return null;
+    }
+    return result;
   }
 
   Future<List<SecurityLabelPolicyRef>?> _fetchSecurityLabelPolicyList(
@@ -6787,7 +7002,10 @@ class XmppService extends ChangeNotifier {
   }) {
     final stanza = MessageStanza(messageId, MessageStanzaType.CHAT);
     stanza.toJid = Jid.fromFullJid(toBareJid);
-    stanza.fromJid = _connection?.fullJid;
+    final connectionFullJid = _connection?.fullJid;
+    if (connectionFullJid != null) {
+      stanza.fromJid = connectionFullJid;
+    }
     final payloadBody = _buildReplyBody(reply, body);
     stanza.body = payloadBody;
     if (reply != null) {
@@ -6806,7 +7024,18 @@ class XmppService extends ChangeNotifier {
     final markable = XmppElement()..name = 'markable';
     markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
     stanza.addChild(markable);
+    final pendingLabel = _pendingSecurityLabel[_bareJid(toBareJid)];
+    if (pendingLabel != null) {
+      stanza.addChild(_deepCopyElement(pendingLabel.element));
+    }
     return stanza;
+  }
+
+  /// Deep-copies an [XmppElement] subtree (round-tripping through XML text)
+  /// so a staged XEP-0258 `<securitylabel/>` (or any other element) can be
+  /// attached to an outgoing stanza without the two sharing mutable state.
+  XmppElement _deepCopyElement(XmppElement element) {
+    return _xmlElementFromString(element.buildXmlString());
   }
 
   XmppElement _buildReplyElement(ReplyReference reply) {

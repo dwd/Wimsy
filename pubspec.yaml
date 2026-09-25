@@ -65,6 +65,16 @@ dependencies:
   # spiffing-dart has a public/pinnable repository.
   spiffing:
     path: ../../src/spiffing-dart
+  # XEP-0258: Flutter widgets (label editor/picker) for the `spiffing`
+  # SPIF/Label/Clearance model above. Same local path-dependency caveat
+  # applies - should become a git dependency once flutter_spiffing has a
+  # public/pinnable repository.
+  flutter_spiffing:
+    path: ../../src/flutter_spiffing
+  # Used directly (not just transitively via spiffing/xmpp_stone) to
+  # round-trip a persisted/staged XEP-0258 <securitylabel/> element
+  # between its XML text form and an XmppElement tree.
+  xml: ^7.0.1
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1

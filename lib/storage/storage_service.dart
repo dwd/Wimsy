@@ -54,6 +54,11 @@ class StorageService {
   // replaces the per-chat fan-out at connect time. We persist the
   // anchor today; the unified query is a follow-up.
   static const _lastMamIdSeenKey = 'last_mam_id_seen';
+  // XEP-0258: the raw `<catalog/>` XML of the last-fetched security-label
+  // catalogue (the labels the user is allowed to attach to an outgoing
+  // message), so the catalogue is available offline / before the next
+  // fetch completes.
+  static const _securityLabelCatalogKey = 'security_label_catalog';
   static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   // ---------------------------------------------------------------------
@@ -114,6 +119,7 @@ class StorageService {
     _avatarMetadataKey,
     _vcardAvatarStateKey,
     _lastMamIdSeenKey,
+    _securityLabelCatalogKey,
   ];
 
   /// [secureStore] is only injected by tests; production code uses the
@@ -1067,6 +1073,26 @@ class StorageService {
     if (keep.isNotEmpty) {
       await box.putAll(keep);
     }
+  }
+
+  /// Loads the raw `<catalog/>` XML of the last-fetched security-label
+  /// catalogue, or null if none has ever been fetched/seeded.
+  String? loadSecurityLabelCatalog() {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    return box.get(_securityLabelCatalogKey)?.toString();
+  }
+
+  /// Replaces the persisted security-label catalogue with [xml] (the raw
+  /// `<catalog/>` document). Mirrors [replaceSecurityLabelPolicies].
+  Future<void> replaceSecurityLabelCatalog(String xml) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_securityLabelCatalogKey, xml);
   }
 
   /// Reads every record whose key starts with [prefix] into a map keyed by

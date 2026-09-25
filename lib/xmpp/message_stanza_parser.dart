@@ -80,70 +80,10 @@ class MessageStanzaParser {
             child.getAttribute('xmlns')?.value != 'urn:xmpp:sec-label:0') {
           continue;
         }
-        final parsed = _tryParseLabelMarking(child);
-        if (parsed != null) {
-          return parsed;
-        }
-        final marking = child.getChild('displaymarking');
-        final text = marking?.textValue?.trim();
-        if (text == null || text.isEmpty) {
-          return null;
-        }
-        final fgColor = marking?.getAttribute('fgcolor')?.value?.trim();
-        final bgColor = marking?.getAttribute('bgcolor')?.value?.trim();
-        return SecurityLabelInfo(
-          text: text,
-          fgColor: (fgColor == null || fgColor.isEmpty) ? null : fgColor,
-          bgColor: (bgColor == null || bgColor.isEmpty) ? null : bgColor,
-          isFallback: true,
-        );
+        return parseSecurityLabelElement(child);
       }
     }
     return null;
-  }
-
-  // Attempts to parse the `<securitylabel/>`'s `<label/>` child (the
-  // primary, policy-encoded label) and render its display marking against
-  // a known SPIF. Returns null (never throws) if the label is empty,
-  // unsupported, or otherwise cannot be decoded/rendered - callers should
-  // then fall back to the server-supplied `<displaymarking/>`.
-  SecurityLabelInfo? _tryParseLabelMarking(XmppElement securityLabel) {
-    final labelElement = securityLabel.getChild('label');
-    if (labelElement == null || labelElement.children.isEmpty) {
-      // An empty <label/> explicitly means "use the default label" per
-      // XEP-0258, which we don't currently model - fall back.
-      return null;
-    }
-    final essLabel = labelElement.children.firstWhere(
-      (c) =>
-          c.name == 'esssecuritylabel' &&
-          c.getAttribute('xmlns')?.value == 'urn:xmpp:sec-label:ess:0',
-      orElse: () => XmppElement(),
-    );
-    final base64Data = essLabel.textValue?.trim();
-    if (essLabel.name == null || base64Data == null || base64Data.isEmpty) {
-      // Only the ESS/BER encoding (the only one shown in XEP-0258 itself)
-      // is currently supported.
-      return null;
-    }
-    try {
-      final bytes = base64.decode(base64Data);
-      final data = latin1.decode(bytes);
-      final label = spiffing.Label.parse(data, spiffing.Format.ber);
-      final text = label.policy.displayMarking(label);
-      if (text.trim().isEmpty) {
-        return null;
-      }
-      final fgColour = label.classification.fgcolour.trim();
-      return SecurityLabelInfo(
-        text: text,
-        fgColor: fgColour.isEmpty ? null : fgColour,
-      );
-    } catch (_) {
-      // No policy known for this label, undecodable data, etc. - fall back
-      // to the server-supplied <displaymarking/>.
-      return null;
-    }
   }
 
   ReactionUpdate? extractReactionUpdate(XmppElement stanza) {
@@ -328,4 +268,81 @@ class _FallbackRange {
 
   final int start;
   final int end;
+}
+
+// XEP-0258: parses a `<securitylabel xmlns="urn:xmpp:sec-label:0"/>`
+// element into its human-readable marking. Shared by
+// [MessageStanzaParser.extractSecurityLabel] (inline labels on a message)
+// and `parseSecurityLabelCatalog` (the `<item/>` entries of a catalogue
+// response) since both carry an identically-shaped `<securitylabel/>`.
+//
+// We first try to actually parse the primary `<label/>` against a security
+// policy (SPIF) we know about, which is the only way to get a marking
+// that's guaranteed to match the label's real meaning. When that isn't
+// possible (no policy known, unsupported/undecodable label format, empty
+// `<label/>`, ...) we fall back to the server's pre-rendered
+// `<displaymarking/>`, flagging the result as a fallback so the UI can
+// warn that it hasn't been policy-verified.
+SecurityLabelInfo? parseSecurityLabelElement(XmppElement securityLabel) {
+  final parsed = _tryParseLabelMarking(securityLabel);
+  if (parsed != null) {
+    return parsed;
+  }
+  final marking = securityLabel.getChild('displaymarking');
+  final text = marking?.textValue?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  final fgColor = marking?.getAttribute('fgcolor')?.value?.trim();
+  final bgColor = marking?.getAttribute('bgcolor')?.value?.trim();
+  return SecurityLabelInfo(
+    text: text,
+    fgColor: (fgColor == null || fgColor.isEmpty) ? null : fgColor,
+    bgColor: (bgColor == null || bgColor.isEmpty) ? null : bgColor,
+    isFallback: true,
+  );
+}
+
+// Attempts to parse the `<securitylabel/>`'s `<label/>` child (the
+// primary, policy-encoded label) and render its display marking against a
+// known SPIF. Returns null (never throws) if the label is empty,
+// unsupported, or otherwise cannot be decoded/rendered - callers should
+// then fall back to the server-supplied `<displaymarking/>`.
+SecurityLabelInfo? _tryParseLabelMarking(XmppElement securityLabel) {
+  final labelElement = securityLabel.getChild('label');
+  if (labelElement == null || labelElement.children.isEmpty) {
+    // An empty <label/> explicitly means "use the default label" per
+    // XEP-0258, which we don't currently model - fall back.
+    return null;
+  }
+  final essLabel = labelElement.children.firstWhere(
+    (c) =>
+        c.name == 'esssecuritylabel' &&
+        c.getAttribute('xmlns')?.value == 'urn:xmpp:sec-label:ess:0',
+    orElse: () => XmppElement(),
+  );
+  final base64Data = essLabel.textValue?.trim();
+  if (essLabel.name == null || base64Data == null || base64Data.isEmpty) {
+    // Only the ESS/BER encoding (the only one shown in XEP-0258 itself)
+    // is currently supported.
+    return null;
+  }
+  try {
+    final bytes = base64.decode(base64Data);
+    final data = latin1.decode(bytes);
+    final label = spiffing.Label.parse(data, spiffing.Format.ber);
+    final text = label.policy.displayMarking(label);
+    if (text.trim().isEmpty) {
+      return null;
+    }
+    final fgColour = label.classification.fgcolour.trim();
+    return SecurityLabelInfo(
+      text: text,
+      fgColor: fgColour.isEmpty ? null : fgColour,
+    );
+  } catch (_) {
+    // No policy known for this label, undecodable data, etc. - fall back
+    // to the server-supplied <displaymarking/>.
+    return null;
+  }
 }
