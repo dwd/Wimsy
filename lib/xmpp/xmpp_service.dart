@@ -3620,6 +3620,9 @@ class XmppService extends ChangeNotifier {
       message.roomJid,
       message.nick,
     );
+    final securityLabel = message.rawStanza == null
+        ? null
+        : _messageStanzaParser.extractSecurityLabel(message.rawStanza!);
     _addRoomMessage(
       roomJid: message.roomJid,
       from: message.nick,
@@ -3635,6 +3638,10 @@ class XmppService extends ChangeNotifier {
       replyToId: message.replyToId,
       replyToJid: message.replyToJid,
       replyFallback: message.replyFallback,
+      securityLabelText: securityLabel?.text,
+      securityLabelFgColor: securityLabel?.fgColor,
+      securityLabelBgColor: securityLabel?.bgColor,
+      securityLabelIsFallback: securityLabel?.isFallback ?? false,
     );
   }
 
@@ -8428,6 +8435,10 @@ class XmppService extends ChangeNotifier {
     String? replyToId,
     String? replyToJid,
     String? replyFallback,
+    String? securityLabelText,
+    String? securityLabelFgColor,
+    String? securityLabelBgColor,
+    bool securityLabelIsFallback = false,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
@@ -8471,6 +8482,22 @@ class XmppService extends ChangeNotifier {
             (replyFallback != null && replyFallback.isNotEmpty)
             ? replyFallback
             : existing.replyFallback;
+        final nextSecurityLabelText =
+            (securityLabelText != null && securityLabelText.isNotEmpty)
+            ? securityLabelText
+            : existing.securityLabelText;
+        final nextSecurityLabelFgColor =
+            (securityLabelFgColor != null && securityLabelFgColor.isNotEmpty)
+            ? securityLabelFgColor
+            : existing.securityLabelFgColor;
+        final nextSecurityLabelBgColor =
+            (securityLabelBgColor != null && securityLabelBgColor.isNotEmpty)
+            ? securityLabelBgColor
+            : existing.securityLabelBgColor;
+        final nextSecurityLabelIsFallback =
+            (securityLabelText != null && securityLabelText.isNotEmpty)
+            ? securityLabelIsFallback
+            : existing.securityLabelIsFallback;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextReceiptReceived != existing.receiptReceived ||
@@ -8480,7 +8507,11 @@ class XmppService extends ChangeNotifier {
             nextRawXml != existing.rawXml ||
             nextReplyToId != existing.replyToId ||
             nextReplyToJid != existing.replyToJid ||
-            nextReplyFallback != existing.replyFallback) {
+            nextReplyFallback != existing.replyFallback ||
+            nextSecurityLabelText != existing.securityLabelText ||
+            nextSecurityLabelFgColor != existing.securityLabelFgColor ||
+            nextSecurityLabelBgColor != existing.securityLabelBgColor ||
+            nextSecurityLabelIsFallback != existing.securityLabelIsFallback) {
           final updated = existing.copyWith(
             timestamp: nextTimestamp,
             mamId: nextMamId,
@@ -8492,6 +8523,10 @@ class XmppService extends ChangeNotifier {
             replyToJid: nextReplyToJid,
             replyFallback: nextReplyFallback,
             receiptReceived: nextReceiptReceived,
+            securityLabelText: nextSecurityLabelText,
+            securityLabelFgColor: nextSecurityLabelFgColor,
+            securityLabelBgColor: nextSecurityLabelBgColor,
+            securityLabelIsFallback: nextSecurityLabelIsFallback,
           );
           if (firstReflection) {
             list.removeAt(existingIndex);
@@ -8538,6 +8573,10 @@ class XmppService extends ChangeNotifier {
           replyToId: replyToId,
           replyToJid: replyToJid,
           replyFallback: replyFallback,
+          securityLabelText: securityLabelText,
+          securityLabelFgColor: securityLabelFgColor,
+          securityLabelBgColor: securityLabelBgColor,
+          securityLabelIsFallback: securityLabelIsFallback,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -8579,6 +8618,10 @@ class XmppService extends ChangeNotifier {
       replyToId: replyToId,
       replyToJid: replyToJid,
       replyFallback: replyFallback,
+      securityLabelText: securityLabelText,
+      securityLabelFgColor: securityLabelFgColor,
+      securityLabelBgColor: securityLabelBgColor,
+      securityLabelIsFallback: securityLabelIsFallback,
     );
     _insertMessageOrdered(list, newMessage);
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so

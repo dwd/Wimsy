@@ -346,9 +346,21 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       stanza.children.firstWhereOrNull((child) => child.name == 'result');
   final forwarded = result?.getChild('forwarded');
   final forwardedMessage = forwarded?.getChild('message');
-  final from = _parseForwardedFrom(forwardedMessage) ?? stanza.fromJid;
+  final forwardedFrom = _parseForwardedFrom(forwardedMessage);
+  final from = forwardedFrom ?? stanza.fromJid;
   if (from == null) {
     return null;
+  }
+  // XEP-0313 security consideration: a MAM archive is only authoritative
+  // for its own JID. When this is a MAM result, the forwarded message's
+  // room (its bare `from`) must match the bare JID of the entity that
+  // actually sent this MAM response (the room/archive we queried).
+  // Otherwise a malicious/buggy/MITM'd archive could smuggle a message
+  // for a different room into this room's history — reject it.
+  if (result != null && forwardedFrom != null && stanza.fromJid != null) {
+    if (forwardedFrom.userAtDomain != stanza.fromJid!.userAtDomain) {
+      return null;
+    }
   }
   final roomJid = from.userAtDomain;
   final nick = from.resource;
@@ -399,6 +411,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       body: body,
       oobUrl: oobUrl,
       rawXml: stanza.buildXmlString(),
+      rawStanza: stanza,
       replaceId: replaceId,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
@@ -454,6 +467,7 @@ class MucMessage {
     this.stanzaId,
     this.oobUrl,
     this.rawXml,
+    this.rawStanza,
     this.replaceId,
     this.reactionTargetId,
     this.reactions = const [],
@@ -471,6 +485,12 @@ class MucMessage {
   final String? stanzaId;
   final String? oobUrl;
   final String? rawXml;
+  // The original <message/> stanza this event was parsed from (the live
+  // groupchat stanza, or the outer MAM-result-wrapping stanza when this
+  // came from archive catch-up) - kept around so callers can inspect
+  // extension elements (e.g. XEP-0258 <securitylabel/>) that aren't
+  // otherwise surfaced as dedicated fields here.
+  final XmppElement? rawStanza;
   final String? replaceId;
   final String? reactionTargetId;
   final List<String> reactions;

@@ -28,6 +28,10 @@ void main() {
       expect(parsed.message!.mamResultId, 'mam-7');
       expect(parsed.message!.stanzaId, 'stanza-9');
       expect(parsed.message!.timestamp, DateTime.parse('2024-08-09T10:11:12Z'));
+      // The outer stanza must be retained verbatim so callers can inspect
+      // extension elements (e.g. XEP-0258 <securitylabel/>) not otherwise
+      // surfaced as a dedicated MucMessage field.
+      expect(parsed.message!.rawStanza, same(stanza));
     });
 
     test('Subject-only message returns subject update', () {
@@ -84,6 +88,49 @@ void main() {
       expect(parsed.message!.stanzaId, isNull,
           reason: 'stanzaId must only reflect a room-applied XEP-0359 id, '
               'not the stanza own id attribute');
+    });
+
+    test('Rejects MAM result whose forwarded message is for a different room',
+        () {
+      // Simulates a malicious/buggy/MITM'd archive: we queried roomA's MAM
+      // archive (the outer stanza's `from` is roomA), but the forwarded
+      // message inside claims to be from roomB. This must not be filed
+      // under roomB's (nor roomA's) history.
+      final stanza = _mamGroupchatStanza(
+        roomJid: 'roomB@example.com',
+        nick: 'tester',
+        body: 'spoofed',
+        mamId: 'mam-1',
+        stanzaId: 'stanza-1',
+        stamp: '2024-08-09T10:11:12Z',
+      );
+      stanza.fromJid = Jid.fromFullJid('roomA@example.com');
+
+      final parsed = parseMucGroupMessage(stanza);
+
+      expect(parsed, isNull,
+          reason: 'A MAM result must only be trusted for the room that was '
+              'actually queried; cross-room spoofing must be rejected');
+    });
+
+    test('Accepts MAM result whose forwarded message matches the queried room',
+        () {
+      final stanza = _mamGroupchatStanza(
+        roomJid: 'room@example.com',
+        nick: 'tester',
+        body: 'legit',
+        mamId: 'mam-2',
+        stanzaId: 'stanza-2',
+        stamp: '2024-08-09T10:11:12Z',
+      );
+      stanza.fromJid = Jid.fromFullJid('room@example.com');
+
+      final parsed = parseMucGroupMessage(stanza);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.message, isNotNull);
+      expect(parsed.message!.roomJid, 'room@example.com');
+      expect(parsed.message!.body, 'legit');
     });
 
     test('Reaction-only message parses target and reactions', () {
