@@ -6,6 +6,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:spiffing/spiffing.dart' as spiffing;
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../deployment_defaults.dart';
@@ -60,6 +61,7 @@ import 'quic_write_tracker.dart';
 import 'liveness_controller.dart';
 import 'recovery_work_queue.dart';
 import 'room_nickname.dart';
+import 'security_label_policy.dart';
 import 'tcp_endpoint_plan.dart';
 import 'unacked_message_recovery.dart';
 
@@ -277,6 +279,13 @@ class XmppService extends ChangeNotifier {
   final Map<String, Timer> _mamCatchUpTimers = {};
   DateTime? _lastGlobalMamSyncAt;
   StorageService? _storage;
+  // XEP-0258: the security policies (SPIFs) known to this session, fetched
+  // from the server's `urn:xmpp:sec-label:policy:0` IQHandler and/or seeded
+  // from disk. Registering a policy here (via `Site.load`) is what lets
+  // `MessageStanzaParser.extractSecurityLabel` resolve a message's
+  // `<label/>` into an actual display marking instead of falling back to
+  // the server-supplied `<displaymarking/>`.
+  final spiffing.Site _securityLabelSite = spiffing.Site();
   String? _rosterVersion;
   final Map<String, String> _displayedStanzaIdByChat = {};
   final Map<String, DateTime> _displayedAtByChat = {};
@@ -651,6 +660,7 @@ class XmppService extends ChangeNotifier {
     _storage = storage;
     _seedVcardAvatars(storage.loadVcardAvatars());
     _seedVcardAvatarState(storage.loadVcardAvatarState());
+    _seedSecurityLabelPolicies(storage.loadSecurityLabelPolicies());
     _rosterVersion = storage.loadRosterVersion();
     _displayedStanzaIdByChat
       ..clear()
@@ -1754,6 +1764,7 @@ class XmppService extends ChangeNotifier {
           _setupBlocking();
           _setupDisplayedSync();
           _refreshExternalServices();
+          _refreshSecurityLabelPolicies();
           _scheduleMamRecovery();
           _scheduleVcardRecovery(_currentUserBareJid!);
           _sendInitialPresence();
@@ -6018,6 +6029,91 @@ class XmppService extends ChangeNotifier {
     final servicesElement = result.getChild('services');
     final parsed = parseExternalServices(servicesElement);
     _iceServers = parsed.map(_toIceServer).toList(growable: false);
+  }
+
+  /// Seeds the in-session security-policy [Site] from previously-persisted
+  /// raw SPIF documents, so labels can be parsed against a known policy
+  /// even before this session's own [_refreshSecurityLabelPolicies] fetch
+  /// completes (or if it never does, e.g. offline).
+  void _seedSecurityLabelPolicies(Map<String, String> policies) {
+    for (final xml in policies.values) {
+      try {
+        _securityLabelSite.load(xml);
+      } catch (error) {
+        debugPrint(
+          'SecurityLabelPolicy: failed to seed a cached policy: $error',
+        );
+      }
+    }
+  }
+
+  // XEP-0258 (policy extension): lists every SPIF security policy loaded on
+  // the user's own server, fetches each one's full document, registers it
+  // with `_securityLabelSite` so `MessageStanzaParser.extractSecurityLabel`
+  // can parse labels against it, and persists the raw documents so they
+  // survive a restart.
+  Future<void> _refreshSecurityLabelPolicies() async {
+    if (_connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    final domain = Jid.fromFullJid(_currentUserBareJid!).domain;
+    if (domain.isEmpty) {
+      return;
+    }
+    final refs = await _fetchSecurityLabelPolicyList(domain);
+    if (refs == null || refs.isEmpty) {
+      return;
+    }
+    final fetchedDocuments = <String, String>{};
+    for (final ref in refs) {
+      final xml = await _fetchSecurityLabelPolicyDocument(domain, ref.id);
+      if (xml == null) {
+        continue;
+      }
+      fetchedDocuments[ref.id] = xml;
+      try {
+        _securityLabelSite.load(xml);
+      } catch (error) {
+        debugPrint(
+          'SecurityLabelPolicy: failed to parse policy ${ref.id}: $error',
+        );
+      }
+    }
+    if (fetchedDocuments.isNotEmpty) {
+      await _storage?.replaceSecurityLabelPolicies(fetchedDocuments);
+    }
+  }
+
+  Future<List<SecurityLabelPolicyRef>?> _fetchSecurityLabelPolicyList(
+    String domain,
+  ) async {
+    final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.GET);
+    iq.toJid = Jid.fromFullJid(domain);
+    final policy = XmppElement()..name = 'policy';
+    policy.addAttribute(XmppAttribute('xmlns', securityLabelPolicyNamespace));
+    iq.addChild(policy);
+    final result = await _sendIqAndAwait(iq);
+    if (result == null || result.type != IqStanzaType.RESULT) {
+      return null;
+    }
+    return parseSecurityLabelPolicyList(result);
+  }
+
+  Future<String?> _fetchSecurityLabelPolicyDocument(
+    String domain,
+    String id,
+  ) async {
+    final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.GET);
+    iq.toJid = Jid.fromFullJid(domain);
+    final policy = XmppElement()..name = 'policy';
+    policy.addAttribute(XmppAttribute('xmlns', securityLabelPolicyNamespace));
+    policy.addAttribute(XmppAttribute('id', id));
+    iq.addChild(policy);
+    final result = await _sendIqAndAwait(iq);
+    if (result == null || result.type != IqStanzaType.RESULT) {
+      return null;
+    }
+    return parseSecurityLabelPolicyDocument(result);
   }
 
   Map<String, dynamic> _toIceServer(ExternalService service) {

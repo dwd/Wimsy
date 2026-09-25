@@ -75,6 +75,11 @@ class StorageService {
   static const _avatarBlobPrefix = 'ablob:';
   static const _vcardAvatarPrefix = 'vcav:';
   static const _entityCapsPrefix = 'caps:';
+  // XEP-0258: raw SPIF (Security Policy Information File) XML documents
+  // fetched from the server's policy IQHandler (`urn:xmpp:sec-label:policy:0`),
+  // keyed by policy id, so labels can still be parsed against a known
+  // policy offline / before the next fetch completes.
+  static const _securityLabelPolicyPrefix = 'seclabelpolicy:';
 
   /// Above this size the box is considered bloated and is compacted eagerly
   /// rather than waiting for Hive's own (60 overwrites) heuristic. Mutable
@@ -1030,6 +1035,38 @@ class StorageService {
 
   Map<String, String> loadVcardAvatars() {
     return _loadPrefixedStrings(_vcardAvatarPrefix);
+  }
+
+  /// Loads every persisted SPIF policy document, keyed by policy id.
+  Map<String, String> loadSecurityLabelPolicies() {
+    return _loadPrefixedStrings(_securityLabelPolicyPrefix);
+  }
+
+  /// Replaces the entire persisted SPIF policy set with [policies] (id ->
+  /// raw SPIF XML), dropping any previously-persisted policy no longer
+  /// present on the server. Mirrors [replaceAvatarBlobs].
+  Future<void> replaceSecurityLabelPolicies(
+    Map<String, String> policies,
+  ) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    final keep = <String, dynamic>{
+      for (final entry in policies.entries)
+        if (entry.key.isNotEmpty)
+          '$_securityLabelPolicyPrefix${entry.key}': entry.value,
+    };
+    final stale = _keysWithPrefix(
+      box,
+      _securityLabelPolicyPrefix,
+    ).where((key) => !keep.containsKey(key)).toList(growable: false);
+    if (stale.isNotEmpty) {
+      await box.deleteAll(stale);
+    }
+    if (keep.isNotEmpty) {
+      await box.putAll(keep);
+    }
   }
 
   /// Reads every record whose key starts with [prefix] into a map keyed by

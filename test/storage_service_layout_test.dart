@@ -200,6 +200,31 @@ void main() {
       expect(storage.loadEntityCaps(), isEmpty);
     });
 
+    test(
+      'security label policies are stored individually and replaceable',
+      () async {
+        await storage.replaceSecurityLabelPolicies({
+          'policy-a': '<SPIF>A</SPIF>',
+          'policy-b': '<SPIF>B</SPIF>',
+        });
+        expect(storage.loadSecurityLabelPolicies(), {
+          'policy-a': '<SPIF>A</SPIF>',
+          'policy-b': '<SPIF>B</SPIF>',
+        });
+
+        // A subsequent full refresh drops any policy no longer reported by
+        // the server, and updates ones that changed.
+        await storage.replaceSecurityLabelPolicies({
+          'policy-b': '<SPIF>B2</SPIF>',
+          'policy-c': '<SPIF>C</SPIF>',
+        });
+        expect(storage.loadSecurityLabelPolicies(), {
+          'policy-b': '<SPIF>B2</SPIF>',
+          'policy-c': '<SPIF>C</SPIF>',
+        });
+      },
+    );
+
     test('removing contact avatars only removes that contact', () async {
       await storage.storeVcardAvatar('alice@example.com', 'AAAA');
       await storage.storeVcardAvatar('bob@example.com', 'BBBB');
