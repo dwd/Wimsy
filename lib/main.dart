@@ -2375,6 +2375,15 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
+              if (catalog.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    'No labels are available in the server catalogue - '
+                    'you can still create one below.',
+                    style: TextStyle(fontStyle: FontStyle.italic),
+                  ),
+                ),
               for (final entry in catalog)
                 ListTile(
                   title: buildSecurityLabelChip(
