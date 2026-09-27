@@ -392,9 +392,11 @@ packages:
   flutter_spiffing:
     dependency: "direct main"
     description:
-      path: "../../src/flutter_spiffing"
-      relative: true
-    source: path
+      path: "."
+      ref: bfee025827be3b5db06d55e840b3bb4950f73a0
+      resolved-ref: bfee025827be3b5db06d55e840b3bb4950f73a03
+      url: "https://github.com/dwd/flutter_spiffing.git"
+    source: git
     version: "0.0.1"
   flutter_test:
     dependency: "direct dev"
