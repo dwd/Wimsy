@@ -193,7 +193,7 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev
+          sudo apt-get install -y curl clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev dpkg-dev
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -230,12 +230,55 @@ jobs:
         env:
           CC: clang
           CXX: clang++
-        run: flutter build linux -v
+        run: flutter build linux --release
+      - name: Package Linux
+        run: |
+          tar -C build/linux/x64/release -czf wimsy-linux.tar.gz bundle
+      - name: Package Linux (.deb)
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          PKG_DIR="wimsy_${VERSION}_amd64"
+          mkdir -p "$PKG_DIR/DEBIAN" \
+                   "$PKG_DIR/usr/lib/wimsy" \
+                   "$PKG_DIR/usr/bin" \
+                   "$PKG_DIR/usr/share/applications" \
+                   "$PKG_DIR/usr/share/icons/hicolor/512x512/apps"
+          cp -r build/linux/x64/release/bundle/* "$PKG_DIR/usr/lib/wimsy/"
+          install -m 644 web/icons/Icon-512.png "$PKG_DIR/usr/share/icons/hicolor/512x512/apps/wimsy.png"
+          cat > "$PKG_DIR/usr/bin/wimsy" <<'EOF'
+          #!/bin/sh
+          exec /usr/lib/wimsy/wimsy "$@"
+          EOF
+          chmod 755 "$PKG_DIR/usr/bin/wimsy"
+          cat > "$PKG_DIR/usr/share/applications/wimsy.desktop" <<'EOF'
+          [Desktop Entry]
+          Name=Wimsy
+          Exec=/usr/bin/wimsy
+          Icon=wimsy
+          Type=Application
+          Categories=Network;Chat;
+          EOF
+          cat > "$PKG_DIR/DEBIAN/control" <<EOF
+          Package: wimsy
+          Version: $VERSION
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0, libsecret-1-0, liblzma5
+          Maintainer: Wimsy
+          Description: Wimsy XMPP client
+          EOF
+          dpkg-deb --build "$PKG_DIR"
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-linux
-          path: build/linux/x64/release/bundle
+          path: wimsy-linux.tar.gz
+      - name: Upload Linux .deb artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: wimsy-linux-deb
+          path: wimsy_*.deb
 
   build-windows:
     needs: analyze
@@ -283,12 +326,22 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Build Windows
-        run: flutter build windows
+        run: flutter build windows --release
+      - name: Package Windows (MSIX)
+        run: dart run msix:create
+      - name: Package Windows
+        run: |
+          powershell -Command "Compress-Archive -Path build\\windows\\x64\\runner\\Release\\* -DestinationPath wimsy-windows.zip"
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-windows
-          path: build/windows/x64/runner/Release
+          path: wimsy-windows.zip
+      - name: Upload Windows MSIX artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: wimsy-windows-msix
+          path: build/windows/x64/runner/Release/*.msix
 
   build-macos:
     needs: analyze
@@ -323,12 +376,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Build macOS
-        run: flutter build macos
+        run: flutter build macos --release
+      - name: Package macOS
+        run: |
+          tar -C build/macos/Build/Products -czf wimsy-macos.tar.gz Release
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-macos
-          path: build/macos/Build/Products/Release
+          path: wimsy-macos.tar.gz
 
   build-ios:
     needs: analyze
@@ -404,9 +460,18 @@ jobs:
           echo "Build version set to ${version}"
       - name: Install dependencies
         run: flutter pub get
-      - name: Build Android (debug)
-        run: flutter build apk --debug
+      - name: Build Android (release)
+        run: flutter build apk --release
       - name: Upload Android artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: wimsy-android
+          path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Build Android (debug)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: flutter build apk --debug
+      - name: Upload Android debug artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-android-debug
@@ -444,11 +509,14 @@ jobs:
         run: flutter test --platform chrome test/webtransport_browser_test.dart
       - name: Build Web
         run: tool/build_web.sh
+      - name: Package Web
+        run: |
+          tar -C build -czf wimsy-web.tar.gz web
       - name: Upload Web artifact
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-web
-          path: build/web
+          path: wimsy-web.tar.gz
 
   deploy-web:
     needs: build-web
@@ -478,3 +546,33 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  publish-release:
+    needs: [build-linux, build-windows, build-macos, build-android, build-web, sbom]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: List release assets
+        run: ls -la dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/wimsy-linux/wimsy-linux.tar.gz
+            dist/wimsy-linux-deb/wimsy_*.deb
+            dist/wimsy-windows/wimsy-windows.zip
+            dist/wimsy-windows-msix/*.msix
+            dist/wimsy-macos/wimsy-macos.tar.gz
+            dist/wimsy-android/app-release.apk
+            dist/wimsy-web/wimsy-web.tar.gz
+            dist/sbom-linux/sbom-linux.cdx.json
+            dist/sbom-windows/sbom-windows.cdx.json
+            dist/sbom-macos/sbom-macos.cdx.json
+            dist/sbom-ios/sbom-ios.cdx.json
+            dist/sbom-android/sbom-android.cdx.json
+            dist/sbom-web/sbom-web.cdx.json
