@@ -1016,9 +1016,11 @@ packages:
   spiffing:
     dependency: "direct main"
     description:
-      path: "../../src/spiffing-dart"
-      relative: true
-    source: path
+      path: "."
+      ref: "43347a4"
+      resolved-ref: "43347a4fc570282ada7de83ba1d841f75fb0874a"
+      url: "https://github.com/dwd/spiffing-dart.git"
+    source: git
     version: "0.1.0"
   stack_trace:
     dependency: transitive

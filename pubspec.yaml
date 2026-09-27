@@ -60,11 +60,12 @@ dependencies:
   flutter_quic:
     path: vendor/flutter_quic
   # XEP-0258: parses/renders security labels against a Security Policy
-  # Information File (SPIF). Currently a local path dependency onto a
-  # sibling checkout; this should become a git dependency once
-  # spiffing-dart has a public/pinnable repository.
+  # Information File (SPIF). Now pinned to a specific commit on its
+  # public GitHub repository rather than a local path dependency.
   spiffing:
-    path: ../../src/spiffing-dart
+    git:
+      url: https://github.com/dwd/spiffing-dart.git
+      ref: 43347a4
   # XEP-0258: Flutter widgets (label editor/picker) for the `spiffing`
   # SPIF/Label/Clearance model above. Now pinned to a specific commit on
   # its public GitHub repository rather than a local path dependency.
@@ -92,18 +93,11 @@ dev_dependencies:
 
 dependency_overrides:
   flutter_rust_bridge: 2.11.1
-  # spiffing-dart (path dep) constrains xml to ^6.5.0, but our vendored
-  # xmpp_stone needs xml ^7.0.1; override to the version xmpp_stone needs
-  # since spiffing-dart's usage (XmlDocument.parse/XmlBuilder) is unaffected
-  # by the 6->7 changes.
+  # spiffing-dart constrains xml to ^6.5.0, but our vendored xmpp_stone
+  # needs xml ^7.0.1; override to the version xmpp_stone needs since
+  # spiffing-dart's usage (XmlDocument.parse/XmlBuilder) is unaffected by
+  # the 6->7 changes.
   xml: ^7.0.1
-  # flutter_spiffing (now a git dependency) in turn depends on spiffing via
-  # git, but we still depend on our own local checkout of spiffing-dart
-  # directly (see above). Pub refuses to mix path/git sources for the same
-  # package, so force the local path everywhere until spiffing itself also
-  # moves to a git dependency.
-  spiffing:
-    path: ../../src/spiffing-dart
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
