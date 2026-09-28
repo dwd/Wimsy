@@ -6460,6 +6460,7 @@ class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
   WebxdcSession? _session;
   Object? _error;
   bool _loading = true;
+  StreamSubscription<WebxdcJsSendToChatEvent>? _sendToChatSubscription;
 
   @override
   void initState() {
@@ -6485,6 +6486,14 @@ class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
           _error = 'Unable to open mini app.';
         }
       });
+      if (session != null) {
+        // XEP-0491: relay the mini-app's "share to chat" requests
+        // (window.webxdc.sendToChat) as a plain text message or file
+        // attachment sent to whichever chat is hosting this widget.
+        _sendToChatSubscription = session.sendToChatRequests.listen(
+          _handleSendToChatRequest,
+        );
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -6496,8 +6505,41 @@ class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
     }
   }
 
+  Future<void> _handleSendToChatRequest(WebxdcJsSendToChatEvent request) async {
+    final fileBytes = request.fileBytes;
+    if (fileBytes != null && fileBytes.isNotEmpty) {
+      final bytes = Uint8List.fromList(fileBytes);
+      final fileName = request.fileName ?? 'file';
+      if (widget.isRoom) {
+        await widget.service.sendRoomFile(
+          roomJid: widget.chatBareJid,
+          bytes: bytes,
+          fileName: fileName,
+          contentType: request.contentType,
+        );
+      } else {
+        await widget.service.sendFile(
+          toBareJid: widget.chatBareJid,
+          bytes: bytes,
+          fileName: fileName,
+          contentType: request.contentType,
+        );
+      }
+      return;
+    }
+    final text = request.text?.trim();
+    if (text != null && text.isNotEmpty) {
+      if (widget.isRoom) {
+        widget.service.sendRoomMessage(widget.chatBareJid, text);
+      } else {
+        widget.service.sendMessage(toBareJid: widget.chatBareJid, text: text);
+      }
+    }
+  }
+
   @override
   void dispose() {
+    unawaited(_sendToChatSubscription?.cancel());
     unawaited(widget.service.closeWebxdcSession(widget.threadId));
     super.dispose();
   }

@@ -317,7 +317,7 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0491.html"/>
         <xmpp:status>complete</xmpp:status>
-        <xmpp:note xml:lang="en">Sending and hosting WebXDC widgets (thread-linked file-sharing/OOB attachment plus urn:xmpp:webxdc:0 state updates with document/summary/JSON payload), using the vendored flutter_webxdc plugin to render the sandboxed mini-app, for both 1:1 chats and MUC rooms; selfAddr uses the room's XEP-0421 occupant-id when disclosed via presence, falling back to the xmpp:&lt;bare jid&gt; form otherwise, and selfName derived per-chat as specified.</xmpp:note>
+        <xmpp:note xml:lang="en">Sending and hosting WebXDC widgets (thread-linked file-sharing/OOB attachment plus urn:xmpp:webxdc:0 state updates with document/summary/JSON payload), using the vendored flutter_webxdc plugin to render the sandboxed mini-app, for both 1:1 chats and MUC rooms; selfAddr uses the room's XEP-0421 occupant-id when disclosed via presence, falling back to the xmpp:&lt;bare jid&gt; form otherwise, and selfName derived per-chat as specified. The hosted mini-app's "share to chat" requests are relayed as an outgoing text message or file attachment to the same chat.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>
