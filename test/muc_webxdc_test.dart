@@ -194,6 +194,62 @@ void main() {
     expect(selfAddr, 'xmpp:tester@example.com');
   });
 
+  test(
+    'the in-memory update log records every incoming update in order '
+    '(for full history replay, not just the latest merged state)',
+    () {
+      final offer = offerStanza(
+        id: 'offer-3',
+        threadId: 'thread-3',
+        oobUrl: 'https://upload.example/game.xdc',
+      );
+      service.handleRoomMessageForTesting(
+        MucMessage(
+          roomJid: roomJid,
+          nick: 'bob',
+          body: '',
+          messageId: 'offer-3',
+          timestamp: DateTime.utc(2026, 1, 1),
+          oobUrl: 'https://upload.example/game.xdc',
+          rawStanza: offer,
+        ),
+      );
+      service.handleRoomMessageForTesting(
+        MucMessage(
+          roomJid: roomJid,
+          nick: 'bob',
+          body: '',
+          messageId: 'update-3a',
+          timestamp: DateTime.utc(2026, 1, 1, 0, 1),
+          rawStanza: updateStanza(
+            id: 'update-3a',
+            threadId: 'thread-3',
+            json: '{"move":1}',
+          ),
+        ),
+      );
+      service.handleRoomMessageForTesting(
+        MucMessage(
+          roomJid: roomJid,
+          nick: 'bob',
+          body: '',
+          messageId: 'update-3b',
+          timestamp: DateTime.utc(2026, 1, 1, 0, 2),
+          rawStanza: updateStanza(
+            id: 'update-3b',
+            threadId: 'thread-3',
+            json: '{"move":2}',
+          ),
+        ),
+      );
+
+      final log = service.webxdcUpdateLogForTesting('thread-3');
+      expect(log, hasLength(2));
+      expect(log[0]['payload'], {'move': 1});
+      expect(log[1]['payload'], {'move': 2});
+    },
+  );
+
   test('an update for an unknown thread does not crash and is ignored', () {
     final update = updateStanza(
       id: 'update-2',

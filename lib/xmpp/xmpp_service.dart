@@ -221,6 +221,17 @@ class XmppService extends ChangeNotifier {
   final Map<String, Uint8List> _webxdcBytesCache = {};
   // XEP-0491: serials delivered from peers so we do not re-publish them.
   final Map<String, Set<int>> _webxdcPeerSerials = {};
+  // XEP-0491: in-memory, session-lifetime log of every update seen for a
+  // thread (both incoming and our own outgoing ones), in arrival order.
+  // Used to replay the widget's full update history when reopening a
+  // session without restarting the app; unlike the single merged
+  // "latest state" kept on the stored offer ChatMessage, this preserves
+  // every intermediate step for widgets whose state depends on it (e.g.
+  // a running tally of moves), not just the final snapshot. Not
+  // persisted across restarts - after a restart, only the latest merged
+  // state (from the stored ChatMessage) is available to replay.
+  final Map<String, List<Map<String, Object?>>> _webxdcUpdateLog = {};
+  static const int _webxdcUpdateLogCap = 500;
   final UnackedMessageRecovery _unackedMessageRecovery =
       UnackedMessageRecovery();
   final List<MessageStanza> _pendingMessages = [];
@@ -6203,6 +6214,14 @@ class XmppService extends ChangeNotifier {
     );
   }
 
+  // XEP-0491: test-only seam exposing the in-memory, ordered per-thread
+  // update log built up by [_recordWebxdcUpdate], used to replay a
+  // widget's full update history in [_replayStoredWebxdcUpdates].
+  @visibleForTesting
+  List<Map<String, Object?>> webxdcUpdateLogForTesting(String threadId) {
+    return List.unmodifiable(_webxdcUpdateLog[threadId] ?? const []);
+  }
+
   @visibleForTesting
   void seedConnectedRoomForTesting(
     RoomEntry room, {
@@ -7000,6 +7019,12 @@ class XmppService extends ChangeNotifier {
     String? summary,
     String? jsonPayload,
   }) {
+    _recordWebxdcUpdate(
+      threadId: threadId,
+      document: document,
+      summary: summary,
+      jsonPayload: jsonPayload,
+    );
     final normalized = _bareJid(bareJid);
     final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
     if (list == null || list.isEmpty) {
@@ -7056,12 +7081,62 @@ class XmppService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  // XEP-0491: appends an update to the in-memory per-thread log (see
+  // [_webxdcUpdateLog]), capped to avoid unbounded growth for very
+  // long-lived widgets.
+  void _recordWebxdcUpdate({
+    required String threadId,
+    String? document,
+    String? summary,
+    String? jsonPayload,
+  }) {
+    if (threadId.isEmpty) {
+      return;
+    }
+    if (jsonPayload == null || jsonPayload.isEmpty) {
+      return;
+    }
+    Object? payload;
+    try {
+      payload = jsonDecode(jsonPayload);
+    } catch (_) {
+      return;
+    }
+    final log = _webxdcUpdateLog.putIfAbsent(threadId, () => []);
+    log.add({
+      'payload': payload,
+      if (document != null && document.isNotEmpty) 'document': document,
+      if (summary != null && summary.isNotEmpty) 'summary': summary,
+    });
+    if (log.length > _webxdcUpdateLogCap) {
+      log.removeRange(0, log.length - _webxdcUpdateLogCap);
+    }
+  }
+
   void _replayStoredWebxdcUpdates({
     required String threadId,
     required String chatBareJid,
     required bool isRoom,
     required WebxdcSession session,
   }) {
+    // XEP-0491: prefer the full, ordered in-memory update log built up
+    // during this app session (every intermediate update, not just the
+    // latest merged state) when it's available.
+    final log = _webxdcUpdateLog[threadId];
+    if (log != null && log.isNotEmpty) {
+      for (final entry in log) {
+        try {
+          final delivered = session.deliverPeerUpdate(entry);
+          _webxdcPeerSerials
+              .putIfAbsent(threadId, () => <int>{})
+              .add(delivered.serial);
+        } catch (_) {}
+      }
+      return;
+    }
+    // Fallback (e.g. right after an app restart, before any update has
+    // been observed this session): only the latest merged state is known,
+    // stored on the offer ChatMessage itself.
     final normalized = _bareJid(chatBareJid);
     final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
     if (list == null) {
