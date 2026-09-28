@@ -77,6 +77,16 @@ dependencies:
   # round-trip a persisted/staged XEP-0258 <securitylabel/> element
   # between its XML text form and an XmppElement tree.
   xml: ^7.0.1
+  # XEP-0491: hosts WebXDC (webxdc.org) mini-app widgets shared in chats.
+  # Pinned to a specific commit on its public GitHub repository (the
+  # federated platform packages - flutter_webxdc_platform_interface,
+  # flutter_webxdc_memory, flutter_webxdc_web, flutter_webxdc_webview,
+  # flutter_webxdc_linux - are resolved transitively as path dependencies
+  # within the same git checkout).
+  flutter_webxdc:
+    git:
+      url: https://github.com/dwd/flutter_webxdc.git
+      ref: 8164dc9
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1

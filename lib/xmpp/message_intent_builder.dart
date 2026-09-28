@@ -1,6 +1,7 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'jmi.dart';
+import 'webxdc.dart';
 
 class ReactionUpdate {
   ReactionUpdate(this.targetId, this.reactions);
@@ -161,6 +162,29 @@ class UnhandledMessageIntent extends MessageIntent {
   final String reason;
 }
 
+// XEP-0491: applies a WebXDC widget update - either the initial
+// widget-sharing offer (see [isOffer]) or a later state update reusing
+// the same [threadId].
+class ApplyWebxdcUpdateIntent extends MessageIntent {
+  const ApplyWebxdcUpdateIntent({
+    required this.targetBareJid,
+    required this.threadId,
+    required this.update,
+    this.info,
+    required this.isOffer,
+    this.fileTransferOobUrl,
+    this.fileName,
+  });
+
+  final String targetBareJid;
+  final String threadId;
+  final WebxdcUpdatePayload update;
+  final String? info;
+  final bool isOffer;
+  final String? fileTransferOobUrl;
+  final String? fileName;
+}
+
 class MessageIntentBuilder {
   MessageIntentBuilder({
     required this.currentUserBareJid,
@@ -179,6 +203,9 @@ class MessageIntentBuilder {
     required this.hasMarkable,
     required this.serializeStanza,
     required this.now,
+    required this.extractThread,
+    required this.extractWebxdcUpdate,
+    required this.isWebxdcWidgetOffer,
   });
 
   final String? Function() currentUserBareJid;
@@ -199,6 +226,16 @@ class MessageIntentBuilder {
   final bool Function(MessageStanza stanza) hasMarkable;
   final String Function(XmppElement stanza) serializeStanza;
   final DateTime Function() now;
+  // XEP-0491: extracts the `<thread/>` id linking a widget offer message
+  // and its subsequent updates.
+  final String? Function(MessageStanza stanza) extractThread;
+  // XEP-0491: extracts the `<x xmlns='urn:xmpp:webxdc:0'>` payload of a
+  // widget update message, when present.
+  final WebxdcUpdatePayload? Function(MessageStanza stanza)
+  extractWebxdcUpdate;
+  // XEP-0491: whether this stanza is the initial widget-sharing offer.
+  final bool Function(MessageStanza stanza, String? oobUrl)
+  isWebxdcWidgetOffer;
 
   List<MessageIntent> build(MessageStanza stanza) {
     final fromBare = stanza.fromJid?.userAtDomain ?? '';
@@ -253,15 +290,25 @@ class MessageIntentBuilder {
     final oobInfo = extractOobInfoFromStanza(stanza);
     final oobUrl = oobInfo?.url;
     final securityLabel = extractSecurityLabel?.call(stanza);
-    if (body.trim().isEmpty && (oobUrl == null || oobUrl.isEmpty)) {
-      return const [UnhandledMessageIntent(reason: 'empty-body')];
-    }
     if (isArchivedStanza(stanza)) {
       return const [UnhandledMessageIntent(reason: 'archived')];
     }
     final selfBare = currentUserBareJid();
     if (selfBare != null && bareJid(fromBare) == selfBare) {
       return const [UnhandledMessageIntent(reason: 'self-message')];
+    }
+    // XEP-0491: widget offers/updates can carry an empty body and/or no
+    // oob attachment, so they must be recognised before the generic
+    // empty-body bail-out below.
+    final threadId = extractThread(stanza);
+    final webxdcUpdate = extractWebxdcUpdate(stanza);
+    final isOffer = isWebxdcWidgetOffer(stanza, oobUrl);
+    final isWebxdcMessage =
+        webxdcUpdate != null || (threadId != null && isOffer);
+    if (!isWebxdcMessage &&
+        body.trim().isEmpty &&
+        (oobUrl == null || oobUrl.isEmpty)) {
+      return const [UnhandledMessageIntent(reason: 'empty-body')];
     }
     final messageId = stanza.id;
     if (messageId == null || messageId.isEmpty) {
@@ -295,29 +342,65 @@ class MessageIntentBuilder {
         );
       }
     }
-    intents.add(
-      AddMessageIntent(
-        bareJid: fromBare,
-        from: fromBare,
-        to: stanza.toJid?.userAtDomain ?? '',
-        body: body,
-        timestamp: now(),
-        messageId: messageId,
-        rawXml: serializeStanza(stanza),
-        oobUrl: oobUrl,
-        oobDescription: oobInfo?.description,
-        replyToId: reply?.replyToId,
-        replyToJid: reply?.replyToJid,
-        replyFallback: reply?.fallbackBody,
-        securityLabelText: securityLabel?.text,
-        securityLabelFgColor: securityLabel?.fgColor,
-        securityLabelBgColor: securityLabel?.bgColor,
-        securityLabelIsFallback: securityLabel?.isFallback ?? false,
-      ),
-    );
+    if (isWebxdcMessage) {
+      intents.add(
+        ApplyWebxdcUpdateIntent(
+          targetBareJid: fromBare,
+          threadId: threadId ?? '',
+          update: webxdcUpdate ?? const WebxdcUpdatePayload(),
+          info: body.trim().isEmpty ? null : body,
+          isOffer: isOffer,
+          fileTransferOobUrl: isOffer ? oobUrl : null,
+          fileName: isOffer ? _deriveWebxdcFileName(oobInfo) : null,
+        ),
+      );
+    } else {
+      intents.add(
+        AddMessageIntent(
+          bareJid: fromBare,
+          from: fromBare,
+          to: stanza.toJid?.userAtDomain ?? '',
+          body: body,
+          timestamp: now(),
+          messageId: messageId,
+          rawXml: serializeStanza(stanza),
+          oobUrl: oobUrl,
+          oobDescription: oobInfo?.description,
+          replyToId: reply?.replyToId,
+          replyToJid: reply?.replyToJid,
+          replyFallback: reply?.fallbackBody,
+          securityLabelText: securityLabel?.text,
+          securityLabelFgColor: securityLabel?.fgColor,
+          securityLabelBgColor: securityLabel?.bgColor,
+          securityLabelIsFallback: securityLabel?.isFallback ?? false,
+        ),
+      );
+    }
     if (intents.isEmpty) {
       return const [UnhandledMessageIntent(reason: 'no-action')];
     }
     return intents;
   }
+}
+
+// XEP-0491: derives a simple display filename for a widget offer's `.xdc`
+// attachment - the oob `<desc/>` if present, otherwise the last path
+// segment of the oob URL.
+String? _deriveWebxdcFileName(OobInfo? oobInfo) {
+  final description = oobInfo?.description;
+  if (description != null && description.isNotEmpty) {
+    return description;
+  }
+  final url = oobInfo?.url;
+  if (url == null || url.isEmpty) {
+    return null;
+  }
+  final uri = Uri.tryParse(url);
+  final segments = uri?.pathSegments ?? const <String>[];
+  for (final segment in segments.reversed) {
+    if (segment.isNotEmpty) {
+      return segment;
+    }
+  }
+  return null;
 }

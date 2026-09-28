@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_webxdc/flutter_webxdc.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -1655,6 +1656,17 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                   ),
                   IconButton(
                     onPressed: canSend
+                        ? () => _sendWebxdcWidget(
+                            activeChat,
+                            isBookmark: isBookmark,
+                            roomEntry: roomEntry,
+                          )
+                        : null,
+                    icon: const Icon(Icons.widgets_outlined),
+                    tooltip: 'Send mini app',
+                  ),
+                  IconButton(
+                    onPressed: canSend
                         ? () => _sendPhotoMessage(
                             activeChat,
                             isBookmark: isBookmark,
@@ -1953,6 +1965,9 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             timestamp: timestamp,
                             avatarBytes: avatarBytes,
                             deferOobImages: service.lowBandwidthMode,
+                            chatBareJid: activeChat,
+                            isRoom: isBookmark,
+                            service: service,
                             replySenderName: replySenderName,
                             replyBody: replyBody,
                             onReplyTargetTap: (message.replyToId ?? '').isEmpty
@@ -2209,6 +2224,17 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                               : null,
                           icon: const Icon(Icons.attach_file),
                           tooltip: 'Send file',
+                        ),
+                        IconButton(
+                          onPressed: canSend
+                              ? () => _sendWebxdcWidget(
+                                  activeChat,
+                                  isBookmark: isBookmark,
+                                  roomEntry: roomEntry,
+                                )
+                              : null,
+                          icon: const Icon(Icons.widgets_outlined),
+                          tooltip: 'Send mini app',
                         ),
                         IconButton(
                           onPressed: canSend
@@ -3852,6 +3878,46 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     }
   }
 
+  // XEP-0491: pick a .xdc zip and share it as a WebXDC widget offer.
+  Future<void> _sendWebxdcWidget(
+    String? activeChat, {
+    required bool isBookmark,
+    RoomEntry? roomEntry,
+  }) async {
+    if (activeChat == null) {
+      return;
+    }
+    if (isBookmark && !(roomEntry?.joined ?? false)) {
+      return;
+    }
+    final selection = await FilePicker.pickFiles(
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: const ['xdc'],
+    );
+    if (selection == null || selection.files.isEmpty) {
+      return;
+    }
+    final file = selection.files.first;
+    final bytes = await _readPickedFileBytes(file);
+    if (bytes == null || bytes.isEmpty) {
+      _showSnack('Unable to read file.');
+      return;
+    }
+    final error = await widget.service.sendWebxdcWidget(
+      toBareJid: activeChat,
+      bytes: bytes,
+      fileName: file.name,
+      isRoom: isBookmark,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (error != null) {
+      _showSnack(error);
+    }
+  }
+
   Future<void> _promptAcceptFileTransfer(
     String activeChat,
     ChatMessage message,
@@ -5170,6 +5236,9 @@ class MessageBubble extends StatelessWidget {
     required this.timestamp,
     required this.avatarBytes,
     this.deferOobImages = false,
+    required this.chatBareJid,
+    required this.isRoom,
+    required this.service,
     required this.replySenderName,
     required this.replyBody,
     required this.onReplyTargetTap,
@@ -5194,6 +5263,9 @@ class MessageBubble extends StatelessWidget {
   final String timestamp;
   final Uint8List? avatarBytes;
   final bool deferOobImages;
+  final String chatBareJid;
+  final bool isRoom;
+  final XmppService service;
   final String? replySenderName;
   final String? replyBody;
   final VoidCallback? onReplyTargetTap;
@@ -5223,6 +5295,7 @@ class MessageBubble extends StatelessWidget {
         : xep0392ColorForLabel(senderName);
     final oobImage = _buildOobImage(context);
     final oobFileCard = _buildOobFileCard(context);
+    final webxdcCard = _buildWebxdcCard(context);
     final fileTransferCard = _buildFileTransferCard(context);
     final inviteCard = _buildInviteCard(context);
     final callCard = message.callSid == null
@@ -5318,6 +5391,10 @@ class MessageBubble extends StatelessWidget {
                   ],
                   if (oobImage != null) ...[
                     oobImage,
+                    const SizedBox(height: 8),
+                  ],
+                  if (webxdcCard != null) ...[
+                    webxdcCard,
                     const SizedBox(height: 8),
                   ],
                   if (oobFileCard != null) ...[
@@ -5806,7 +5883,72 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
+  Widget? _buildWebxdcCard(BuildContext context) {
+    if (!message.isWebxdcWidget) {
+      return null;
+    }
+    final theme = Theme.of(context);
+    final title = (message.webxdcDocument?.trim().isNotEmpty == true)
+        ? message.webxdcDocument!.trim()
+        : (message.oobDescription?.trim().isNotEmpty == true
+              ? message.oobDescription!.trim()
+              : 'Mini App');
+    final summary = message.webxdcSummary?.trim();
+    final threadId = message.webxdcThreadId?.trim() ?? '';
+    final oobUrl = message.oobUrl?.trim() ?? '';
+    final canOpen = threadId.isNotEmpty && oobUrl.isNotEmpty;
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: theme.textTheme.titleSmall),
+          if (summary != null && summary.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              summary,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton(
+              onPressed: canOpen
+                  ? () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => WebxdcHostScreen(
+                            service: service,
+                            threadId: threadId,
+                            oobUrl: oobUrl,
+                            chatBareJid: chatBareJid,
+                            isRoom: isRoom,
+                            title: title,
+                          ),
+                        ),
+                      );
+                    }
+                  : null,
+              child: const Text('Open'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget? _buildOobFileCard(BuildContext context) {
+    if (message.isWebxdcWidget) {
+      return null;
+    }
     final url = message.oobUrl?.trim() ?? '';
     if (url.isEmpty || _isImageUrl(url)) {
       return null;
@@ -6287,6 +6429,99 @@ class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
       onPointerUp: _handlePointerEnd,
       onPointerCancel: _handlePointerEnd,
       child: widget.child,
+    );
+  }
+}
+
+// XEP-0491: full-screen host for an opened WebXDC mini-app session.
+class WebxdcHostScreen extends StatefulWidget {
+  const WebxdcHostScreen({
+    super.key,
+    required this.service,
+    required this.threadId,
+    required this.oobUrl,
+    required this.chatBareJid,
+    required this.isRoom,
+    required this.title,
+  });
+
+  final XmppService service;
+  final String threadId;
+  final String oobUrl;
+  final String chatBareJid;
+  final bool isRoom;
+  final String title;
+
+  @override
+  State<WebxdcHostScreen> createState() => _WebxdcHostScreenState();
+}
+
+class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
+  WebxdcSession? _session;
+  Object? _error;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _openSession();
+  }
+
+  Future<void> _openSession() async {
+    try {
+      final session = await widget.service.openWebxdcSession(
+        threadId: widget.threadId,
+        oobUrl: widget.oobUrl,
+        chatBareJid: widget.chatBareJid,
+        isRoom: widget.isRoom,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _session = session;
+        _loading = false;
+        if (session == null) {
+          _error = 'Unable to open mini app.';
+        }
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(widget.service.closeWebxdcSession(widget.threadId));
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = _session;
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title)),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error.toString(),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          : session == null
+          ? const Center(child: Text('Unable to open mini app.'))
+          : session.buildHostWidget(),
     );
   }
 }

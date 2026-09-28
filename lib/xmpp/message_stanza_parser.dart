@@ -4,6 +4,7 @@ import 'package:spiffing/spiffing.dart' as spiffing;
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'message_intent_builder.dart';
+import 'webxdc.dart';
 
 class MessageStanzaParser {
   const MessageStanzaParser();
@@ -165,6 +166,85 @@ class MessageStanzaParser {
       }
     }
     return null;
+  }
+
+  // XEP-0491: extracts the top-level `<thread/>` id linking a widget
+  // offer message and its subsequent updates. Only looked up on the
+  // stanza (or its forwarded candidates) directly, matching how
+  // `<thread/>` is a top-level message child.
+  String? extractThread(XmppElement stanza) {
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name != 'thread') {
+          continue;
+        }
+        final id = child.textValue?.trim();
+        if (id != null && id.isNotEmpty) {
+          return id;
+        }
+      }
+    }
+    return null;
+  }
+
+  // XEP-0491: extracts the `<x xmlns='urn:xmpp:webxdc:0'>` payload of a
+  // widget update message, if present. An empty `<x/>` (no children)
+  // still yields a non-null [WebxdcUpdatePayload] with all fields null,
+  // since its mere presence signals "this is a widget update".
+  WebxdcUpdatePayload? extractWebxdcUpdate(XmppElement stanza) {
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name != 'x' ||
+            child.getAttribute('xmlns')?.value != webxdcNamespace) {
+          continue;
+        }
+        final document = child.getChild('document')?.textValue?.trim();
+        final summary = child.getChild('summary')?.textValue?.trim();
+        final json = child.getChild('json')?.textValue?.trim();
+        return WebxdcUpdatePayload(
+          document: (document == null || document.isEmpty)
+              ? null
+              : document,
+          summary: (summary == null || summary.isEmpty) ? null : summary,
+          json: (json == null || json.isEmpty) ? null : json,
+        );
+      }
+    }
+    return null;
+  }
+
+  // XEP-0491: whether this stanza is the initial widget-sharing offer
+  // (as opposed to a plain file/oob attachment, or a later widget
+  // update). This requires a `<thread/>` id together with either an oob
+  // URL ending in `.xdc`, or a XEP-0385 `<sims/>` (media-sharing) child
+  // whose nested `<file/>` descriptor declares [webxdcMediaType].
+  bool isWebxdcWidgetOffer(XmppElement stanza, {String? oobUrl}) {
+    if (extractThread(stanza) == null) {
+      return false;
+    }
+    if (oobUrl != null && oobUrl.toLowerCase().endsWith('.xdc')) {
+      return true;
+    }
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name != 'sims' &&
+            child.name != 'media-sharing') {
+          continue;
+        }
+        if (child.getAttribute('xmlns')?.value != 'urn:xmpp:sims:1') {
+          continue;
+        }
+        final file = child.getChild('file');
+        final mediaType = file
+            ?.getChild('media-type')
+            ?.textValue
+            ?.trim();
+        if (mediaType == webxdcMediaType) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   bool _hasChildWithXmlns(XmppElement stanza, String name, String xmlns) {

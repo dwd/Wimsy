@@ -358,4 +358,67 @@ void main() {
       });
     },
   );
+
+  test(
+    'applyWebxdcUpdateInList merges non-empty fields onto the last matching thread',
+    () {
+      final list = <ChatMessage>[
+        ChatMessage(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'offer',
+          timestamp: DateTime.utc(2026, 1, 1),
+          outgoing: false,
+          messageId: 'offer-1',
+          rawXml: '<message/>',
+          webxdcThreadId: 'thread-1',
+          isWebxdcWidget: true,
+          webxdcDocument: 'Old Doc',
+        ),
+        ChatMessage(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'later offer',
+          timestamp: DateTime.utc(2026, 1, 2),
+          outgoing: false,
+          messageId: 'offer-2',
+          rawXml: '<message/>',
+          webxdcThreadId: 'thread-1',
+          isWebxdcWidget: true,
+        ),
+      ];
+
+      final changed = ChatMessageMutations.applyWebxdcUpdateInList(
+        list,
+        threadId: 'thread-1',
+        document: 'New Doc',
+        summary: '3 events',
+        jsonPayload: '{"n":3}',
+      );
+
+      expect(changed, isTrue);
+      expect(list[0].webxdcDocument, 'Old Doc');
+      expect(list[1].webxdcDocument, 'New Doc');
+      expect(list[1].webxdcSummary, '3 events');
+      expect(list[1].webxdcJsonPayload, '{"n":3}');
+
+      final unchanged = ChatMessageMutations.applyWebxdcUpdateInList(
+        list,
+        threadId: 'thread-1',
+        document: null,
+        summary: '',
+        jsonPayload: null,
+      );
+      expect(unchanged, isTrue);
+      expect(list[1].webxdcDocument, 'New Doc');
+      expect(list[1].webxdcSummary, '3 events');
+
+      final missing = ChatMessageMutations.applyWebxdcUpdateInList(
+        list,
+        threadId: 'missing',
+        document: 'x',
+      );
+      expect(missing, isFalse);
+    },
+  );
 }

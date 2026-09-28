@@ -41,6 +41,11 @@ class ChatMessage {
     this.securityLabelFgColor,
     this.securityLabelBgColor,
     this.securityLabelIsFallback = false,
+    this.webxdcThreadId,
+    this.isWebxdcWidget = false,
+    this.webxdcDocument,
+    this.webxdcSummary,
+    this.webxdcJsonPayload,
   });
 
   final String from;
@@ -94,6 +99,21 @@ class ChatMessage {
   final String? securityLabelFgColor;
   final String? securityLabelBgColor;
   final bool securityLabelIsFallback;
+  // XEP-0491: the `<thread/>` id linking a widget-sharing offer message
+  // and its subsequent updates.
+  final String? webxdcThreadId;
+  // XEP-0491: whether this message is the original widget-sharing offer
+  // (as opposed to a plain file/oob attachment).
+  final bool isWebxdcWidget;
+  // XEP-0491: the latest known document/title for the widget, as carried
+  // by this specific message.
+  final String? webxdcDocument;
+  // XEP-0491: the latest known summary text for the widget, as carried
+  // by this specific message.
+  final String? webxdcSummary;
+  // XEP-0491: this message's own webxdc JSON payload as received on it
+  // (not the "latest merged state" across the whole thread).
+  final String? webxdcJsonPayload;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -141,6 +161,11 @@ class ChatMessage {
     Object? securityLabelFgColor = _absent,
     Object? securityLabelBgColor = _absent,
     bool? securityLabelIsFallback,
+    Object? webxdcThreadId = _absent,
+    bool? isWebxdcWidget,
+    Object? webxdcDocument = _absent,
+    Object? webxdcSummary = _absent,
+    Object? webxdcJsonPayload = _absent,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -231,6 +256,19 @@ class ChatMessage {
           : securityLabelBgColor as String?,
       securityLabelIsFallback:
           securityLabelIsFallback ?? this.securityLabelIsFallback,
+      webxdcThreadId: identical(webxdcThreadId, _absent)
+          ? this.webxdcThreadId
+          : webxdcThreadId as String?,
+      isWebxdcWidget: isWebxdcWidget ?? this.isWebxdcWidget,
+      webxdcDocument: identical(webxdcDocument, _absent)
+          ? this.webxdcDocument
+          : webxdcDocument as String?,
+      webxdcSummary: identical(webxdcSummary, _absent)
+          ? this.webxdcSummary
+          : webxdcSummary as String?,
+      webxdcJsonPayload: identical(webxdcJsonPayload, _absent)
+          ? this.webxdcJsonPayload
+          : webxdcJsonPayload as String?,
     );
   }
 
@@ -277,6 +315,11 @@ class ChatMessage {
       'securityLabelFgColor': securityLabelFgColor,
       'securityLabelBgColor': securityLabelBgColor,
       'securityLabelIsFallback': securityLabelIsFallback,
+      'webxdcThreadId': webxdcThreadId,
+      'isWebxdcWidget': isWebxdcWidget,
+      'webxdcDocument': webxdcDocument,
+      'webxdcSummary': webxdcSummary,
+      'webxdcJsonPayload': webxdcJsonPayload,
     };
   }
 
@@ -332,6 +375,11 @@ class ChatMessage {
     final securityLabelFgColor = map['securityLabelFgColor']?.toString();
     final securityLabelBgColor = map['securityLabelBgColor']?.toString();
     final securityLabelIsFallback = map['securityLabelIsFallback'] == true;
+    final webxdcThreadId = map['webxdcThreadId']?.toString();
+    final isWebxdcWidget = map['isWebxdcWidget'] == true;
+    final webxdcDocument = map['webxdcDocument']?.toString();
+    final webxdcSummary = map['webxdcSummary']?.toString();
+    final webxdcJsonPayload = map['webxdcJsonPayload']?.toString();
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -343,11 +391,13 @@ class ChatMessage {
     final hasRawXml = rawXml != null && rawXml.isNotEmpty;
     final hasInvite = inviteRoomJid != null && inviteRoomJid.isNotEmpty;
     final hasFileTransfer = fileTransferId != null && fileTransferId.isNotEmpty;
+    final hasWebxdc = isWebxdcWidget ||
+        (webxdcThreadId != null && webxdcThreadId.isNotEmpty);
     if (from.isEmpty ||
         to.isEmpty ||
         ts.isEmpty ||
         !hasRawXml ||
-        (!hasBody && !hasOobUrl && !hasInvite && !hasFileTransfer)) {
+        (!hasBody && !hasOobUrl && !hasInvite && !hasFileTransfer && !hasWebxdc)) {
       return null;
     }
     final timestamp = DateTime.tryParse(ts);
@@ -399,6 +449,11 @@ class ChatMessage {
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,
       securityLabelIsFallback: securityLabelIsFallback,
+      webxdcThreadId: webxdcThreadId,
+      isWebxdcWidget: isWebxdcWidget,
+      webxdcDocument: webxdcDocument,
+      webxdcSummary: webxdcSummary,
+      webxdcJsonPayload: webxdcJsonPayload,
     );
   }
 

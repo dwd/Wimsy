@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 import 'package:wimsy/xmpp/message_intent_builder.dart';
+import 'package:wimsy/xmpp/message_stanza_parser.dart';
+import 'package:wimsy/xmpp/webxdc.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 import 'package:wimsy/xmpp/jmi.dart';
 
@@ -17,6 +19,39 @@ MessageStanza _chatStanza({
     stanza.body = body;
   }
   return stanza;
+}
+
+// Builds a MessageIntentBuilder using the real MessageStanzaParser for the
+// XEP-0491 extraction callbacks, and simple stand-in behaviour for
+// everything else, so the webxdc branch of `build()` can be exercised in
+// isolation like the rest of this file's direct-builder tests.
+MessageIntentBuilder _webxdcTestBuilder({
+  String? currentUserBareJid,
+  String? activeChatBareJid,
+  bool archived = false,
+}) {
+  const parser = MessageStanzaParser();
+  return MessageIntentBuilder(
+    currentUserBareJid: () => currentUserBareJid,
+    activeChatBareJid: () => activeChatBareJid,
+    parseJmiAction: (_) => null,
+    extractReceiptsId: (_) => null,
+    extractMarkerId: (_, _) => null,
+    extractReactionUpdate: (_) => null,
+    reactionChatTarget: (from, _) => from,
+    extractOobInfoFromStanza: parser.extractOobInfo,
+    extractReplyPayload: null,
+    isArchivedStanza: (_) => archived,
+    bareJid: (jid) => jid,
+    hasReceiptRequest: (_) => false,
+    hasMarkable: (_) => false,
+    serializeStanza: (_) => '<message/>',
+    now: DateTime.now,
+    extractThread: parser.extractThread,
+    extractWebxdcUpdate: parser.extractWebxdcUpdate,
+    isWebxdcWidgetOffer: (stanza, oobUrl) =>
+        parser.isWebxdcWidgetOffer(stanza, oobUrl: oobUrl),
+  );
 }
 
 void main() {
@@ -37,6 +72,9 @@ void main() {
       hasMarkable: (_) => false,
       serializeStanza: (_) => '<message/>',
       now: DateTime.now,
+      extractThread: (_) => null,
+      extractWebxdcUpdate: (_) => null,
+      isWebxdcWidgetOffer: (_, _) => false,
     );
     final stanza = _chatStanza(
       id: 'm0',
@@ -238,5 +276,161 @@ void main() {
     expect(intents.first, isA<UnhandledMessageIntent>());
     final intent = intents.first as UnhandledMessageIntent;
     expect(intent.reason, 'empty-body');
+  });
+
+  // ── XEP-0491: WebXDC ─────────────────────────────────────────────────────
+
+  test(
+    'build returns ApplyWebxdcUpdateIntent for the initial widget offer',
+    () {
+      final builder = _webxdcTestBuilder();
+      final stanza = _chatStanza(
+        id: 'wxm1',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+        body: 'Juliet has shared a calendar widget.',
+      );
+      final thread = XmppElement()..name = 'thread';
+      thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+      stanza.addChild(thread);
+      final oob = XmppElement()..name = 'x';
+      oob.addAttribute(XmppAttribute('xmlns', 'jabber:x:oob'));
+      final url = XmppElement()..name = 'url';
+      url.textValue = 'https://example.com/widgets/calendar.xdc';
+      oob.addChild(url);
+      stanza.addChild(oob);
+
+      final intents = builder.build(stanza);
+
+      expect(intents.length, 1);
+      expect(intents.first, isA<ApplyWebxdcUpdateIntent>());
+      final intent = intents.first as ApplyWebxdcUpdateIntent;
+      expect(intent.targetBareJid, 'alice@example.com');
+      expect(intent.threadId, '018fe972-ea89-7f4b-90f8-729b85b7f32d');
+      expect(intent.isOffer, isTrue);
+      expect(
+        intent.fileTransferOobUrl,
+        'https://example.com/widgets/calendar.xdc',
+      );
+      expect(intent.fileName, 'calendar.xdc');
+      expect(intent.info, 'Juliet has shared a calendar widget.');
+      expect(intent.update.document, isNull);
+    },
+  );
+
+  test(
+    'build returns ApplyWebxdcUpdateIntent for a follow-up state update',
+    () {
+      final builder = _webxdcTestBuilder();
+      final stanza = _chatStanza(
+        id: 'wxm2',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+      final thread = XmppElement()..name = 'thread';
+      thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+      stanza.addChild(thread);
+      final x = XmppElement()..name = 'x';
+      x.addAttribute(XmppAttribute('xmlns', webxdcNamespace));
+      final document = XmppElement()..name = 'document';
+      document.textValue = 'Our Calendar';
+      final summary = XmppElement()..name = 'summary';
+      summary.textValue = '12 events';
+      final json = XmppElement()..name = 'json';
+      json.addAttribute(XmppAttribute('xmlns', webxdcJsonNamespace));
+      json.textValue = '{"foo":1}';
+      x.addChild(document);
+      x.addChild(summary);
+      x.addChild(json);
+      stanza.addChild(x);
+
+      final intents = builder.build(stanza);
+
+      expect(intents.length, 1);
+      expect(intents.first, isA<ApplyWebxdcUpdateIntent>());
+      final intent = intents.first as ApplyWebxdcUpdateIntent;
+      expect(intent.targetBareJid, 'alice@example.com');
+      expect(intent.threadId, '018fe972-ea89-7f4b-90f8-729b85b7f32d');
+      expect(intent.isOffer, isFalse);
+      expect(intent.fileTransferOobUrl, isNull);
+      expect(intent.fileName, isNull);
+      expect(intent.info, isNull);
+      expect(intent.update.document, 'Our Calendar');
+      expect(intent.update.summary, '12 events');
+      expect(intent.update.json, '{"foo":1}');
+    },
+  );
+
+  test(
+    'build returns ApplyWebxdcUpdateIntent with info for an info-only update',
+    () {
+      final builder = _webxdcTestBuilder();
+      final stanza = _chatStanza(
+        id: 'wxm3',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+        body: 'Juliet has added an event.',
+      );
+      final x = XmppElement()..name = 'x';
+      x.addAttribute(XmppAttribute('xmlns', webxdcNamespace));
+      stanza.addChild(x);
+
+      final intents = builder.build(stanza);
+
+      expect(intents.length, 1);
+      expect(intents.first, isA<ApplyWebxdcUpdateIntent>());
+      final intent = intents.first as ApplyWebxdcUpdateIntent;
+      expect(intent.isOffer, isFalse);
+      expect(intent.info, 'Juliet has added an event.');
+      expect(intent.update.document, isNull);
+      expect(intent.update.summary, isNull);
+      expect(intent.update.json, isNull);
+    },
+  );
+
+  test('build suppresses webxdc updates from archived stanzas', () {
+    final builder = _webxdcTestBuilder(archived: true);
+    final stanza = _chatStanza(
+      id: 'wxm4',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+    final thread = XmppElement()..name = 'thread';
+    thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+    stanza.addChild(thread);
+    final x = XmppElement()..name = 'x';
+    x.addAttribute(XmppAttribute('xmlns', webxdcNamespace));
+    stanza.addChild(x);
+
+    final intents = builder.build(stanza);
+
+    expect(intents.length, 1);
+    expect(intents.first, isA<UnhandledMessageIntent>());
+    final intent = intents.first as UnhandledMessageIntent;
+    expect(intent.reason, 'archived');
+  });
+
+  test('build suppresses webxdc updates sent by the current user', () {
+    final builder = _webxdcTestBuilder(
+      currentUserBareJid: 'alice@example.com',
+    );
+    final stanza = _chatStanza(
+      id: 'wxm5',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+    final thread = XmppElement()..name = 'thread';
+    thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+    stanza.addChild(thread);
+    final x = XmppElement()..name = 'x';
+    x.addAttribute(XmppAttribute('xmlns', webxdcNamespace));
+    stanza.addChild(x);
+
+    final intents = builder.build(stanza);
+
+    expect(intents.length, 1);
+    expect(intents.first, isA<UnhandledMessageIntent>());
+    final intent = intents.first as UnhandledMessageIntent;
+    expect(intent.reason, 'self-message');
   });
 }

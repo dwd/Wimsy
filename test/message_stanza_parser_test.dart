@@ -414,4 +414,218 @@ void main() {
     expect(payload!.fallbackBody, isNull);
     expect(payload.cleanedBody, 'unrelated fallback text');
   });
+
+  test('extractThread reads the top-level thread id', () {
+    final stanza = _chatStanza(
+      id: 'wx1',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+    final thread = XmppElement()..name = 'thread';
+    thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+    stanza.addChild(thread);
+
+    expect(
+      parser.extractThread(stanza),
+      '018fe972-ea89-7f4b-90f8-729b85b7f32d',
+    );
+  });
+
+  test('extractThread returns null when the thread element is empty', () {
+    final stanza = _chatStanza(
+      id: 'wx2',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+    final thread = XmppElement()..name = 'thread';
+    thread.textValue = '   ';
+    stanza.addChild(thread);
+
+    expect(parser.extractThread(stanza), isNull);
+  });
+
+  test('extractThread returns null when no thread element is present', () {
+    final stanza = _chatStanza(
+      id: 'wx3',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'no thread here',
+    );
+
+    expect(parser.extractThread(stanza), isNull);
+  });
+
+  test('extractWebxdcUpdate reads document/summary/json children', () {
+    final stanza = _chatStanza(
+      id: 'wx4',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'Juliet has added an event.',
+    );
+
+    final x = XmppElement()..name = 'x';
+    x.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:webxdc:0'));
+    final document = XmppElement()..name = 'document';
+    document.textValue = 'Our Calendar';
+    final summary = XmppElement()..name = 'summary';
+    summary.textValue = '12 events';
+    final json = XmppElement()..name = 'json';
+    json.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:json:0'));
+    json.textValue = '{"foo":1}';
+    x.addChild(document);
+    x.addChild(summary);
+    x.addChild(json);
+    stanza.addChild(x);
+
+    final update = parser.extractWebxdcUpdate(stanza);
+    expect(update, isNotNull);
+    expect(update!.document, 'Our Calendar');
+    expect(update.summary, '12 events');
+    expect(update.json, '{"foo":1}');
+  });
+
+  test(
+    'extractWebxdcUpdate returns a non-null empty payload for a bare <x/>',
+    () {
+      final stanza = _chatStanza(
+        id: 'wx5',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+        body: 'Juliet has added an event.',
+      );
+
+      final x = XmppElement()..name = 'x';
+      x.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:webxdc:0'));
+      stanza.addChild(x);
+
+      final update = parser.extractWebxdcUpdate(stanza);
+      expect(update, isNotNull);
+      expect(update!.document, isNull);
+      expect(update.summary, isNull);
+      expect(update.json, isNull);
+    },
+  );
+
+  test('extractWebxdcUpdate returns null when no matching <x/> is present', () {
+    final stanza = _chatStanza(
+      id: 'wx6',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'Just a normal message',
+    );
+
+    expect(parser.extractWebxdcUpdate(stanza), isNull);
+  });
+
+  test(
+    'extractWebxdcUpdate reads the payload from a carbons forwarded message',
+    () {
+      final stanza = _chatStanza(
+        id: 'wx7',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final x = XmppElement()..name = 'x';
+      x.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:webxdc:0'));
+      final summary = XmppElement()..name = 'summary';
+      summary.textValue = '13 events';
+      x.addChild(summary);
+
+      stanza.addChild(_forwardedMessageContainer('sent', x));
+
+      final update = parser.extractWebxdcUpdate(stanza);
+      expect(update, isNotNull);
+      expect(update!.summary, '13 events');
+    },
+  );
+
+  test(
+    'isWebxdcWidgetOffer is true when a thread id is paired with an .xdc oob url',
+    () {
+      final stanza = _chatStanza(
+        id: 'wx8',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+      final thread = XmppElement()..name = 'thread';
+      thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+      stanza.addChild(thread);
+
+      expect(
+        parser.isWebxdcWidgetOffer(
+          stanza,
+          oobUrl: 'https://example.com/calendar.XDC',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'isWebxdcWidgetOffer is true for a sims media-sharing descriptor '
+    'declaring the webxdc media type',
+    () {
+      final stanza = _chatStanza(
+        id: 'wx9',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+      final thread = XmppElement()..name = 'thread';
+      thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+      stanza.addChild(thread);
+
+      final sims = XmppElement()..name = 'sims';
+      sims.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:sims:1'));
+      final file = XmppElement()..name = 'file';
+      file.addAttribute(
+        XmppAttribute(
+          'xmlns',
+          'urn:xmpp:jingle:apps:file-transfer:5',
+        ),
+      );
+      final mediaType = XmppElement()..name = 'media-type';
+      mediaType.textValue = 'application/webxdc+zip';
+      file.addChild(mediaType);
+      sims.addChild(file);
+      stanza.addChild(sims);
+
+      expect(parser.isWebxdcWidgetOffer(stanza), isTrue);
+    },
+  );
+
+  test('isWebxdcWidgetOffer is false without a thread id', () {
+    final stanza = _chatStanza(
+      id: 'wx10',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+
+    expect(
+      parser.isWebxdcWidgetOffer(
+        stanza,
+        oobUrl: 'https://example.com/calendar.xdc',
+      ),
+      isFalse,
+    );
+  });
+
+  test('isWebxdcWidgetOffer is false for a plain non-xdc oob attachment', () {
+    final stanza = _chatStanza(
+      id: 'wx11',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+    );
+    final thread = XmppElement()..name = 'thread';
+    thread.textValue = '018fe972-ea89-7f4b-90f8-729b85b7f32d';
+    stanza.addChild(thread);
+
+    expect(
+      parser.isWebxdcWidgetOffer(
+        stanza,
+        oobUrl: 'https://example.com/photo.png',
+      ),
+      isFalse,
+    );
+  });
 }

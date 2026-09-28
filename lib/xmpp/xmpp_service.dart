@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter_webxdc/flutter_webxdc.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -51,6 +52,7 @@ import 'message_intent_builder.dart';
 import 'message_stanza_parser.dart';
 import 'startup_fetch_helpers.dart';
 import 'vcard_utils.dart';
+import 'webxdc.dart';
 import 'ws_endpoint.dart';
 import 'srv_lookup.dart';
 import 'dns_cache.dart';
@@ -147,6 +149,10 @@ class XmppService extends ChangeNotifier {
       hasMarkable: _messageStanzaParser.hasMarkable,
       serializeStanza: _serializeStanza,
       now: DateTime.now,
+      extractThread: _messageStanzaParser.extractThread,
+      extractWebxdcUpdate: _messageStanzaParser.extractWebxdcUpdate,
+      isWebxdcWidgetOffer: (stanza, url) =>
+          _messageStanzaParser.isWebxdcWidgetOffer(stanza, oobUrl: url),
     );
     _mamCoordinator = MamCoordinator(
       cursorStore: _mamCursorStore,
@@ -203,6 +209,18 @@ class XmppService extends ChangeNotifier {
   Timer? _connectivityDebounceTimer;
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<ChatMessage>> _roomMessages = {};
+  // XEP-0491: live hosted WebXDC sessions keyed by widget thread id.
+  final Map<String, WebxdcSession> _webxdcSessions = {};
+  // XEP-0491: chat bare JID each open session belongs to.
+  final Map<String, String> _webxdcSessionChatBareJids = {};
+  // XEP-0491: whether each open session's chat is a MUC room.
+  final Map<String, bool> _webxdcSessionIsRoom = {};
+  // XEP-0491: subscriptions on session.updates (local mini-app → XMPP).
+  final Map<String, StreamSubscription<WebxdcUpdate>> _webxdcUpdateSubs = {};
+  // XEP-0491: cached .xdc zip bytes keyed by thread id (and also by oob URL).
+  final Map<String, Uint8List> _webxdcBytesCache = {};
+  // XEP-0491: serials delivered from peers so we do not re-publish them.
+  final Map<String, Set<int>> _webxdcPeerSerials = {};
   final UnackedMessageRecovery _unackedMessageRecovery =
       UnackedMessageRecovery();
   final List<MessageStanza> _pendingMessages = [];
@@ -3087,6 +3105,189 @@ class XmppService extends ChangeNotifier {
     );
     chat.myState = ChatState.ACTIVE;
     return null;
+  }
+
+  // XEP-0491: share a new WebXDC widget (.xdc zip) as an OOB file offer
+  // carrying a fresh <thread/> id that later state updates will reuse.
+  Future<String?> sendWebxdcWidget({
+    required String toBareJid,
+    required Uint8List bytes,
+    required String fileName,
+    String? body,
+    bool isRoom = false,
+  }) async {
+    if (bytes.isEmpty) {
+      return 'File is empty.';
+    }
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return 'Not connected.';
+    }
+    if (!isRoom && isBookmark(toBareJid)) {
+      return 'Not connected to the room.';
+    }
+    final uploadService = await _resolveHttpUploadServiceJid();
+    if (uploadService == null) {
+      return 'Server does not advertise HTTP upload.';
+    }
+    final slot = await _requestHttpUploadSlot(
+      uploadService: uploadService,
+      fileName: fileName,
+      size: bytes.length,
+      contentType: webxdcMediaType,
+    );
+    if (slot == null) {
+      return 'Unable to request an upload slot.';
+    }
+    final uploaded = await _uploadToSlot(
+      slot: slot,
+      bytes: bytes,
+      contentType: webxdcMediaType,
+    );
+    if (!uploaded) {
+      return 'Upload failed.';
+    }
+    final normalized = _bareJid(toBareJid);
+    final messageId = AbstractStanza.getRandomId();
+    final threadId = AbstractStanza.getRandomId();
+    final url = slot.getUrl.toString();
+    final description = fileName.trim();
+    final bodyText = (body != null && body.trim().isNotEmpty)
+        ? body.trim()
+        : url;
+    final stanza = _buildOobMessageStanza(
+      targetJid: normalized,
+      messageId: messageId,
+      url: url,
+      description: description.isEmpty ? null : description,
+      isRoom: isRoom,
+      body: bodyText,
+      threadId: threadId,
+    );
+    connection.writeStanza(stanza);
+    final rawXml = _serializeStanza(stanza);
+    final now = DateTime.now();
+    _webxdcBytesCache[threadId] = bytes;
+    _webxdcBytesCache[url] = bytes;
+    if (isRoom) {
+      final nick = _roomNickFor(normalized);
+      _addRoomMessage(
+        roomJid: normalized,
+        from: nick,
+        body: bodyText,
+        rawXml: rawXml,
+        outgoing: true,
+        timestamp: now,
+        messageId: messageId,
+        oobUrl: url,
+        oobDescription: description.isEmpty ? null : description,
+        webxdcThreadId: threadId,
+        isWebxdcWidget: true,
+      );
+      return null;
+    }
+    final chatManager = _chatManager;
+    if (chatManager == null) {
+      return 'Not connected.';
+    }
+    final chat = chatManager.getChat(Jid.fromFullJid(normalized));
+    _ensureChatSubscription(chat);
+    _addMessage(
+      bareJid: normalized,
+      from: _currentUserBareJid ?? '',
+      to: normalized,
+      body: bodyText,
+      rawXml: rawXml,
+      oobUrl: url,
+      oobDescription: description.isEmpty ? null : description,
+      outgoing: true,
+      timestamp: now,
+      messageId: messageId,
+      webxdcThreadId: threadId,
+      isWebxdcWidget: true,
+    );
+    chat.myState = ChatState.ACTIVE;
+    return null;
+  }
+
+  // XEP-0491: open (or reuse) a live hosted WebXDC session for [threadId].
+  // Downloads the .xdc zip from [oobUrl] when not already cached.
+  Future<WebxdcSession?> openWebxdcSession({
+    required String threadId,
+    required String oobUrl,
+    required String chatBareJid,
+    bool isRoom = false,
+  }) async {
+    if (threadId.isEmpty) {
+      return null;
+    }
+    final existing = _webxdcSessions[threadId];
+    if (existing != null) {
+      return existing;
+    }
+    FlutterWebxdc.ensureInitialized();
+    var bytes = _webxdcBytesCache[threadId] ?? _webxdcBytesCache[oobUrl];
+    if (bytes == null || bytes.isEmpty) {
+      try {
+        final response = await http.get(Uri.parse(oobUrl));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return null;
+        }
+        bytes = response.bodyBytes;
+      } catch (_) {
+        return null;
+      }
+      if (bytes.isEmpty) {
+        return null;
+      }
+      _webxdcBytesCache[threadId] = bytes;
+      _webxdcBytesCache[oobUrl] = bytes;
+    }
+    final selfBare = _currentUserBareJid ?? chatBareJid;
+    final selfName =
+        webxdcSelfName(
+          nickname: selfBare.isEmpty ? null : displayNameFor(selfBare),
+        ) ??
+        '';
+    try {
+      final session = await WebxdcSession.open(
+        xdcBytes: bytes,
+        instanceId: threadId,
+        selfAddr: webxdcSelfAddr(bareJid: selfBare),
+        selfName: selfName,
+      );
+      _webxdcSessions[threadId] = session;
+      _webxdcSessionChatBareJids[threadId] = _bareJid(chatBareJid);
+      _webxdcSessionIsRoom[threadId] = isRoom;
+      _webxdcPeerSerials.putIfAbsent(threadId, () => <int>{});
+      _webxdcUpdateSubs[threadId] = session.updates.listen((update) {
+        _onLocalWebxdcUpdate(threadId: threadId, update: update);
+      });
+      _replayStoredWebxdcUpdates(
+        threadId: threadId,
+        chatBareJid: chatBareJid,
+        isRoom: isRoom,
+        session: session,
+      );
+      return session;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // XEP-0491: dispose a hosted session opened via [openWebxdcSession].
+  Future<void> closeWebxdcSession(String threadId) async {
+    final sub = _webxdcUpdateSubs.remove(threadId);
+    await sub?.cancel();
+    final session = _webxdcSessions.remove(threadId);
+    _webxdcSessionChatBareJids.remove(threadId);
+    _webxdcSessionIsRoom.remove(threadId);
+    _webxdcPeerSerials.remove(threadId);
+    if (session != null) {
+      try {
+        await session.dispose();
+      } catch (_) {}
+    }
   }
 
   Future<String?> fallbackFileTransferToHttpUpload({
@@ -5976,6 +6177,8 @@ class XmppService extends ChangeNotifier {
           securityLabelBgColor: intent.securityLabelBgColor,
           securityLabelIsFallback: intent.securityLabelIsFallback,
         );
+      } else if (intent is ApplyWebxdcUpdateIntent) {
+        _applyWebxdcUpdateIntent(stanza, intent);
       } else if (intent is UnhandledMessageIntent) {
         _logUnhandledMessage(stanza, intent);
       }
@@ -6602,6 +6805,261 @@ class XmppService extends ChangeNotifier {
     _messagePersistor?.call(normalized, List.unmodifiable(list));
   }
 
+  // XEP-0491: handle an incoming widget offer or state update.
+  void _applyWebxdcUpdateIntent(
+    MessageStanza stanza,
+    ApplyWebxdcUpdateIntent intent,
+  ) {
+    final from = stanza.fromJid?.userAtDomain ?? intent.targetBareJid;
+    final to = stanza.toJid?.userAtDomain ?? (_currentUserBareJid ?? '');
+    final rawXml = _serializeStanza(stanza);
+    final now = DateTime.now();
+    if (intent.isOffer) {
+      _addMessage(
+        bareJid: intent.targetBareJid,
+        from: from,
+        to: to,
+        body: intent.info ?? '',
+        rawXml: rawXml,
+        outgoing: false,
+        timestamp: now,
+        messageId: stanza.id,
+        oobUrl: intent.fileTransferOobUrl,
+        oobDescription: intent.fileName,
+        webxdcThreadId: intent.threadId,
+        isWebxdcWidget: true,
+        webxdcDocument: intent.update.document,
+        webxdcSummary: intent.update.summary,
+        webxdcJsonPayload: intent.update.json,
+      );
+      return;
+    }
+    _applyWebxdcUpdateToChat(
+      bareJid: intent.targetBareJid,
+      isRoom: false,
+      threadId: intent.threadId,
+      document: intent.update.document,
+      summary: intent.update.summary,
+      jsonPayload: intent.update.json,
+    );
+    _deliverPeerUpdateToOpenSession(
+      threadId: intent.threadId,
+      update: intent.update,
+      info: intent.info,
+    );
+    final info = intent.info?.trim();
+    if (info != null && info.isNotEmpty) {
+      _addMessage(
+        bareJid: intent.targetBareJid,
+        from: from,
+        to: to,
+        body: info,
+        rawXml: rawXml,
+        outgoing: false,
+        timestamp: now,
+        messageId: stanza.id,
+      );
+    }
+  }
+
+  void _applyWebxdcUpdateToChat({
+    required String bareJid,
+    required bool isRoom,
+    required String threadId,
+    String? document,
+    String? summary,
+    String? jsonPayload,
+  }) {
+    final normalized = _bareJid(bareJid);
+    final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return;
+    }
+    final changed = ChatMessageMutations.applyWebxdcUpdateInList(
+      list,
+      threadId: threadId,
+      document: document,
+      summary: summary,
+      jsonPayload: jsonPayload,
+    );
+    if (!changed) {
+      return;
+    }
+    notifyListeners();
+    if (isRoom) {
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    } else {
+      _messagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+  }
+
+  void _deliverPeerUpdateToOpenSession({
+    required String threadId,
+    required WebxdcUpdatePayload update,
+    String? info,
+  }) {
+    final session = _webxdcSessions[threadId];
+    if (session == null) {
+      return;
+    }
+    Object? payload;
+    final jsonText = update.json;
+    if (jsonText != null && jsonText.isNotEmpty) {
+      try {
+        payload = jsonDecode(jsonText);
+      } catch (_) {
+        payload = null;
+      }
+    }
+    try {
+      final delivered = session.deliverPeerUpdate({
+        'payload': payload,
+        if (info != null && info.isNotEmpty) 'info': info,
+        if (update.document != null && update.document!.isNotEmpty)
+          'document': update.document,
+        if (update.summary != null && update.summary!.isNotEmpty)
+          'summary': update.summary,
+      });
+      _webxdcPeerSerials
+          .putIfAbsent(threadId, () => <int>{})
+          .add(delivered.serial);
+    } catch (_) {}
+  }
+
+  void _replayStoredWebxdcUpdates({
+    required String threadId,
+    required String chatBareJid,
+    required bool isRoom,
+    required WebxdcSession session,
+  }) {
+    final normalized = _bareJid(chatBareJid);
+    final list = isRoom ? _roomMessages[normalized] : _messages[normalized];
+    if (list == null) {
+      return;
+    }
+    for (final message in list) {
+      if (message.webxdcThreadId != threadId) {
+        continue;
+      }
+      final jsonText = message.webxdcJsonPayload;
+      if (jsonText == null || jsonText.isEmpty) {
+        continue;
+      }
+      Object? payload;
+      try {
+        payload = jsonDecode(jsonText);
+      } catch (_) {
+        continue;
+      }
+      try {
+        final delivered = session.deliverPeerUpdate({
+          'payload': payload,
+          if (message.webxdcDocument != null &&
+              message.webxdcDocument!.isNotEmpty)
+            'document': message.webxdcDocument,
+          if (message.webxdcSummary != null && message.webxdcSummary!.isNotEmpty)
+            'summary': message.webxdcSummary,
+        });
+        _webxdcPeerSerials
+            .putIfAbsent(threadId, () => <int>{})
+            .add(delivered.serial);
+      } catch (_) {}
+    }
+  }
+
+  void _onLocalWebxdcUpdate({
+    required String threadId,
+    required WebxdcUpdate update,
+  }) {
+    final peerSerials = _webxdcPeerSerials[threadId];
+    if (peerSerials != null && peerSerials.contains(update.serial)) {
+      return;
+    }
+    final chatBareJid = _webxdcSessionChatBareJids[threadId];
+    if (chatBareJid == null || chatBareJid.isEmpty) {
+      return;
+    }
+    final isRoom = _webxdcSessionIsRoom[threadId] ?? false;
+    String? jsonText;
+    try {
+      jsonText = jsonEncode(update.payload);
+    } catch (_) {
+      jsonText = null;
+    }
+    final payload = WebxdcUpdatePayload(
+      document: update.document,
+      summary: update.summary,
+      json: jsonText,
+    );
+    unawaited(
+      _sendWebxdcUpdateMessage(
+        targetJid: chatBareJid,
+        threadId: threadId,
+        isRoom: isRoom,
+        update: payload,
+        body: update.info,
+      ),
+    );
+  }
+
+  Future<void> _sendWebxdcUpdateMessage({
+    required String targetJid,
+    required String threadId,
+    required bool isRoom,
+    required WebxdcUpdatePayload update,
+    String? body,
+  }) async {
+    final connection = _connection;
+    if (connection == null || _currentUserBareJid == null) {
+      return;
+    }
+    final normalized = _bareJid(targetJid);
+    final messageId = AbstractStanza.getRandomId();
+    final stanza = _buildWebxdcUpdateMessageStanza(
+      targetJid: normalized,
+      messageId: messageId,
+      threadId: threadId,
+      isRoom: isRoom,
+      update: update,
+      body: body,
+    );
+    connection.writeStanza(stanza);
+    final rawXml = _serializeStanza(stanza);
+    final now = DateTime.now();
+    final bodyText = body?.trim() ?? '';
+    if (isRoom) {
+      final nick = _roomNickFor(normalized);
+      _addRoomMessage(
+        roomJid: normalized,
+        from: nick,
+        body: bodyText,
+        rawXml: rawXml,
+        outgoing: true,
+        timestamp: now,
+        messageId: messageId,
+      );
+    } else {
+      _addMessage(
+        bareJid: normalized,
+        from: _currentUserBareJid ?? '',
+        to: normalized,
+        body: bodyText,
+        rawXml: rawXml,
+        outgoing: true,
+        timestamp: now,
+        messageId: messageId,
+      );
+    }
+    _applyWebxdcUpdateToChat(
+      bareJid: normalized,
+      isRoom: isRoom,
+      threadId: threadId,
+      document: update.document,
+      summary: update.summary,
+      jsonPayload: update.json,
+    );
+  }
+
   bool _applyMessageCorrection({
     required String bareJid,
     required String sender,
@@ -6958,6 +7416,7 @@ class XmppService extends ChangeNotifier {
     String? description,
     required bool isRoom,
     String? body,
+    String? threadId,
   }) {
     final stanza = MessageStanza(
       messageId,
@@ -6968,6 +7427,12 @@ class XmppService extends ChangeNotifier {
       stanza.fromJid = _connection?.fullJid;
     }
     stanza.body = (body != null && body.trim().isNotEmpty) ? body.trim() : url;
+    final trimmedThreadId = threadId?.trim();
+    if (trimmedThreadId != null && trimmedThreadId.isNotEmpty) {
+      final thread = XmppElement()..name = 'thread';
+      thread.textValue = trimmedThreadId;
+      stanza.addChild(thread);
+    }
     final oob = XmppElement()..name = 'x';
     oob.addAttribute(XmppAttribute('xmlns', 'jabber:x:oob'));
     final urlElement = XmppElement()..name = 'url';
@@ -6982,6 +7447,49 @@ class XmppService extends ChangeNotifier {
     stanza.addChild(oob);
     stanza.addChild(
       _buildFallbackElement(start: 0, end: stanza.body!.runes.length),
+    );
+    if (!isRoom) {
+      final receiptRequest = XmppElement()..name = 'request';
+      receiptRequest.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:receipts'));
+      stanza.addChild(receiptRequest);
+      final markable = XmppElement()..name = 'markable';
+      markable.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:chat-markers:0'));
+      stanza.addChild(markable);
+    }
+    return stanza;
+  }
+
+  // XEP-0491: build a state-update message reusing [threadId] with a
+  // <x xmlns='urn:xmpp:webxdc:0'/> child (and optional human-readable body).
+  MessageStanza _buildWebxdcUpdateMessageStanza({
+    required String targetJid,
+    required String messageId,
+    required String threadId,
+    required bool isRoom,
+    WebxdcUpdatePayload? update,
+    String? body,
+  }) {
+    final stanza = MessageStanza(
+      messageId,
+      isRoom ? MessageStanzaType.GROUPCHAT : MessageStanzaType.CHAT,
+    );
+    stanza.toJid = Jid.fromFullJid(targetJid);
+    if (!isRoom) {
+      stanza.fromJid = _connection?.fullJid;
+    }
+    final trimmedBody = body?.trim();
+    if (trimmedBody != null && trimmedBody.isNotEmpty) {
+      stanza.body = trimmedBody;
+    }
+    final thread = XmppElement()..name = 'thread';
+    thread.textValue = threadId;
+    stanza.addChild(thread);
+    stanza.addChild(
+      buildWebxdcUpdateElement(
+        document: update?.document,
+        summary: update?.summary,
+        json: update?.json,
+      ),
     );
     if (!isRoom) {
       final receiptRequest = XmppElement()..name = 'request';
@@ -8393,6 +8901,11 @@ class XmppService extends ChangeNotifier {
     String? securityLabelFgColor,
     String? securityLabelBgColor,
     bool securityLabelIsFallback = false,
+    String? webxdcThreadId,
+    bool isWebxdcWidget = false,
+    String? webxdcDocument,
+    String? webxdcSummary,
+    String? webxdcJsonPayload,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -8458,6 +8971,23 @@ class XmppService extends ChangeNotifier {
             (securityLabelText != null && securityLabelText.isNotEmpty)
             ? securityLabelIsFallback
             : existing.securityLabelIsFallback;
+        final nextWebxdcThreadId =
+            (webxdcThreadId != null && webxdcThreadId.isNotEmpty)
+            ? webxdcThreadId
+            : existing.webxdcThreadId;
+        final nextIsWebxdcWidget = isWebxdcWidget || existing.isWebxdcWidget;
+        final nextWebxdcDocument =
+            (webxdcDocument != null && webxdcDocument.isNotEmpty)
+            ? webxdcDocument
+            : existing.webxdcDocument;
+        final nextWebxdcSummary =
+            (webxdcSummary != null && webxdcSummary.isNotEmpty)
+            ? webxdcSummary
+            : existing.webxdcSummary;
+        final nextWebxdcJsonPayload =
+            (webxdcJsonPayload != null && webxdcJsonPayload.isNotEmpty)
+            ? webxdcJsonPayload
+            : existing.webxdcJsonPayload;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
@@ -8472,7 +9002,12 @@ class XmppService extends ChangeNotifier {
             nextSecurityLabelText != existing.securityLabelText ||
             nextSecurityLabelFgColor != existing.securityLabelFgColor ||
             nextSecurityLabelBgColor != existing.securityLabelBgColor ||
-            nextSecurityLabelIsFallback != existing.securityLabelIsFallback) {
+            nextSecurityLabelIsFallback != existing.securityLabelIsFallback ||
+            nextWebxdcThreadId != existing.webxdcThreadId ||
+            nextIsWebxdcWidget != existing.isWebxdcWidget ||
+            nextWebxdcDocument != existing.webxdcDocument ||
+            nextWebxdcSummary != existing.webxdcSummary ||
+            nextWebxdcJsonPayload != existing.webxdcJsonPayload) {
           list[existingIndex] = existing.copyWith(
             mamId: nextMamId,
             stanzaId: nextStanzaId,
@@ -8489,6 +9024,11 @@ class XmppService extends ChangeNotifier {
             securityLabelFgColor: nextSecurityLabelFgColor,
             securityLabelBgColor: nextSecurityLabelBgColor,
             securityLabelIsFallback: nextSecurityLabelIsFallback,
+            webxdcThreadId: nextWebxdcThreadId,
+            isWebxdcWidget: nextIsWebxdcWidget,
+            webxdcDocument: nextWebxdcDocument,
+            webxdcSummary: nextWebxdcSummary,
+            webxdcJsonPayload: nextWebxdcJsonPayload,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -8582,6 +9122,11 @@ class XmppService extends ChangeNotifier {
           securityLabelFgColor: securityLabelFgColor,
           securityLabelBgColor: securityLabelBgColor,
           securityLabelIsFallback: securityLabelIsFallback,
+          webxdcThreadId: webxdcThreadId,
+          isWebxdcWidget: isWebxdcWidget,
+          webxdcDocument: webxdcDocument,
+          webxdcSummary: webxdcSummary,
+          webxdcJsonPayload: webxdcJsonPayload,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -8614,6 +9159,11 @@ class XmppService extends ChangeNotifier {
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,
       securityLabelIsFallback: securityLabelIsFallback,
+      webxdcThreadId: webxdcThreadId,
+      isWebxdcWidget: isWebxdcWidget,
+      webxdcDocument: webxdcDocument,
+      webxdcSummary: webxdcSummary,
+      webxdcJsonPayload: webxdcJsonPayload,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
@@ -8668,6 +9218,11 @@ class XmppService extends ChangeNotifier {
     String? securityLabelFgColor,
     String? securityLabelBgColor,
     bool securityLabelIsFallback = false,
+    String? webxdcThreadId,
+    bool isWebxdcWidget = false,
+    String? webxdcDocument,
+    String? webxdcSummary,
+    String? webxdcJsonPayload,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
@@ -8727,6 +9282,23 @@ class XmppService extends ChangeNotifier {
             (securityLabelText != null && securityLabelText.isNotEmpty)
             ? securityLabelIsFallback
             : existing.securityLabelIsFallback;
+        final nextWebxdcThreadId =
+            (webxdcThreadId != null && webxdcThreadId.isNotEmpty)
+            ? webxdcThreadId
+            : existing.webxdcThreadId;
+        final nextIsWebxdcWidget = isWebxdcWidget || existing.isWebxdcWidget;
+        final nextWebxdcDocument =
+            (webxdcDocument != null && webxdcDocument.isNotEmpty)
+            ? webxdcDocument
+            : existing.webxdcDocument;
+        final nextWebxdcSummary =
+            (webxdcSummary != null && webxdcSummary.isNotEmpty)
+            ? webxdcSummary
+            : existing.webxdcSummary;
+        final nextWebxdcJsonPayload =
+            (webxdcJsonPayload != null && webxdcJsonPayload.isNotEmpty)
+            ? webxdcJsonPayload
+            : existing.webxdcJsonPayload;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextReceiptReceived != existing.receiptReceived ||
@@ -8740,7 +9312,12 @@ class XmppService extends ChangeNotifier {
             nextSecurityLabelText != existing.securityLabelText ||
             nextSecurityLabelFgColor != existing.securityLabelFgColor ||
             nextSecurityLabelBgColor != existing.securityLabelBgColor ||
-            nextSecurityLabelIsFallback != existing.securityLabelIsFallback) {
+            nextSecurityLabelIsFallback != existing.securityLabelIsFallback ||
+            nextWebxdcThreadId != existing.webxdcThreadId ||
+            nextIsWebxdcWidget != existing.isWebxdcWidget ||
+            nextWebxdcDocument != existing.webxdcDocument ||
+            nextWebxdcSummary != existing.webxdcSummary ||
+            nextWebxdcJsonPayload != existing.webxdcJsonPayload) {
           final updated = existing.copyWith(
             timestamp: nextTimestamp,
             mamId: nextMamId,
@@ -8756,6 +9333,11 @@ class XmppService extends ChangeNotifier {
             securityLabelFgColor: nextSecurityLabelFgColor,
             securityLabelBgColor: nextSecurityLabelBgColor,
             securityLabelIsFallback: nextSecurityLabelIsFallback,
+            webxdcThreadId: nextWebxdcThreadId,
+            isWebxdcWidget: nextIsWebxdcWidget,
+            webxdcDocument: nextWebxdcDocument,
+            webxdcSummary: nextWebxdcSummary,
+            webxdcJsonPayload: nextWebxdcJsonPayload,
           );
           if (firstReflection) {
             list.removeAt(existingIndex);
@@ -8806,6 +9388,11 @@ class XmppService extends ChangeNotifier {
           securityLabelFgColor: securityLabelFgColor,
           securityLabelBgColor: securityLabelBgColor,
           securityLabelIsFallback: securityLabelIsFallback,
+          webxdcThreadId: webxdcThreadId,
+          isWebxdcWidget: isWebxdcWidget,
+          webxdcDocument: webxdcDocument,
+          webxdcSummary: webxdcSummary,
+          webxdcJsonPayload: webxdcJsonPayload,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -8851,6 +9438,11 @@ class XmppService extends ChangeNotifier {
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,
       securityLabelIsFallback: securityLabelIsFallback,
+      webxdcThreadId: webxdcThreadId,
+      isWebxdcWidget: isWebxdcWidget,
+      webxdcDocument: webxdcDocument,
+      webxdcSummary: webxdcSummary,
+      webxdcJsonPayload: webxdcJsonPayload,
     );
     _insertMessageOrdered(list, newMessage);
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so

@@ -35,6 +35,11 @@ void main() {
       securityLabelFgColor: 'black',
       securityLabelBgColor: 'red',
       securityLabelIsFallback: true,
+      webxdcThreadId: '018fe972-ea89-7f4b-90f8-729b85b7f32d',
+      isWebxdcWidget: true,
+      webxdcDocument: 'Our Calendar',
+      webxdcSummary: '12 events',
+      webxdcJsonPayload: '{"foo":1}',
     );
 
     final roundtrip = ChatMessage.fromMap(message.toMap());
@@ -66,6 +71,14 @@ void main() {
     expect(roundtrip.securityLabelFgColor, 'black');
     expect(roundtrip.securityLabelBgColor, 'red');
     expect(roundtrip.securityLabelIsFallback, isTrue);
+    expect(
+      roundtrip.webxdcThreadId,
+      '018fe972-ea89-7f4b-90f8-729b85b7f32d',
+    );
+    expect(roundtrip.isWebxdcWidget, isTrue);
+    expect(roundtrip.webxdcDocument, 'Our Calendar');
+    expect(roundtrip.webxdcSummary, '12 events');
+    expect(roundtrip.webxdcJsonPayload, '{"foo":1}');
   });
 
   test('ChatMessage without a security label round-trips as null', () {
@@ -84,7 +97,53 @@ void main() {
     expect(roundtrip.securityLabelFgColor, isNull);
     expect(roundtrip.securityLabelBgColor, isNull);
     expect(roundtrip.securityLabelIsFallback, isFalse);
+    expect(roundtrip.webxdcThreadId, isNull);
+    expect(roundtrip.isWebxdcWidget, isFalse);
+    expect(roundtrip.webxdcDocument, isNull);
+    expect(roundtrip.webxdcSummary, isNull);
+    expect(roundtrip.webxdcJsonPayload, isNull);
   });
+
+  test(
+    'ChatMessage accepts a webxdc update with no body/oob/invite/file-transfer',
+    () {
+      final roundtrip = ChatMessage.fromMap({
+        'from': 'alice@example.com',
+        'to': 'bob@example.com',
+        'body': '',
+        'timestamp': '2024-08-09T10:11:12Z',
+        'outgoing': false,
+        'messageId': 'msg-webxdc-1',
+        'rawXml': '<message id="msg-webxdc-1"/>',
+        'webxdcThreadId': '018fe972-ea89-7f4b-90f8-729b85b7f32d',
+      });
+
+      expect(roundtrip, isNotNull);
+      expect(
+        roundtrip!.webxdcThreadId,
+        '018fe972-ea89-7f4b-90f8-729b85b7f32d',
+      );
+    },
+  );
+
+  test(
+    'ChatMessage accepts a webxdc widget offer with no body/oob/invite/file-transfer',
+    () {
+      final roundtrip = ChatMessage.fromMap({
+        'from': 'alice@example.com',
+        'to': 'bob@example.com',
+        'body': '',
+        'timestamp': '2024-08-09T10:11:12Z',
+        'outgoing': false,
+        'messageId': 'msg-webxdc-2',
+        'rawXml': '<message id="msg-webxdc-2"/>',
+        'isWebxdcWidget': true,
+      });
+
+      expect(roundtrip, isNotNull);
+      expect(roundtrip!.isWebxdcWidget, isTrue);
+    },
+  );
 
   test('ChatMessage persists outgoing tick state', () {
     final message = ChatMessage(
@@ -172,6 +231,11 @@ void main() {
       acked: false,
       receiptReceived: false,
       displayed: false,
+      webxdcThreadId: '018fe972-ea89-7f4b-90f8-729b85b7f32d',
+      isWebxdcWidget: false,
+      webxdcDocument: 'Our Calendar',
+      webxdcSummary: '12 events',
+      webxdcJsonPayload: '{"foo":1}',
     );
 
     test('returns identical field values when called with no arguments', () {
@@ -205,6 +269,11 @@ void main() {
       expect(copy.acked, base.acked);
       expect(copy.receiptReceived, base.receiptReceived);
       expect(copy.displayed, base.displayed);
+      expect(copy.webxdcThreadId, base.webxdcThreadId);
+      expect(copy.isWebxdcWidget, base.isWebxdcWidget);
+      expect(copy.webxdcDocument, base.webxdcDocument);
+      expect(copy.webxdcSummary, base.webxdcSummary);
+      expect(copy.webxdcJsonPayload, base.webxdcJsonPayload);
     });
 
     test('overrides scalar non-nullable fields', () {
@@ -217,6 +286,7 @@ void main() {
         acked: true,
         receiptReceived: true,
         displayed: true,
+        isWebxdcWidget: true,
       );
       expect(copy.from, 'carol@example.com');
       expect(copy.to, 'dave@example.com');
@@ -226,6 +296,7 @@ void main() {
       expect(copy.acked, isTrue);
       expect(copy.receiptReceived, isTrue);
       expect(copy.displayed, isTrue);
+      expect(copy.isWebxdcWidget, isTrue);
       // Unrelated fields must be unchanged.
       expect(copy.messageId, base.messageId);
       expect(copy.mamId, base.mamId);
@@ -246,6 +317,10 @@ void main() {
         replyToId: 'orig-2',
         replyToJid: 'carol@example.com',
         replyFallback: '> updated',
+        webxdcThreadId: 'new-thread',
+        webxdcDocument: 'New Calendar',
+        webxdcSummary: '13 events',
+        webxdcJsonPayload: '{"foo":2}',
       );
       expect(copy.messageId, 'new-id');
       expect(copy.mamId, 'new-mam');
@@ -260,6 +335,10 @@ void main() {
       expect(copy.replyToId, 'orig-2');
       expect(copy.replyToJid, 'carol@example.com');
       expect(copy.replyFallback, '> updated');
+      expect(copy.webxdcThreadId, 'new-thread');
+      expect(copy.webxdcDocument, 'New Calendar');
+      expect(copy.webxdcSummary, '13 events');
+      expect(copy.webxdcJsonPayload, '{"foo":2}');
     });
 
     test('overrides nullable int fields via sentinel', () {
@@ -292,6 +371,10 @@ void main() {
           replyToId: null,
           replyToJid: null,
           replyFallback: null,
+          webxdcThreadId: null,
+          webxdcDocument: null,
+          webxdcSummary: null,
+          webxdcJsonPayload: null,
         );
         expect(copy.messageId, isNull);
         expect(copy.mamId, isNull);
@@ -313,6 +396,10 @@ void main() {
         expect(copy.replyToId, isNull);
         expect(copy.replyToJid, isNull);
         expect(copy.replyFallback, isNull);
+        expect(copy.webxdcThreadId, isNull);
+        expect(copy.webxdcDocument, isNull);
+        expect(copy.webxdcSummary, isNull);
+        expect(copy.webxdcJsonPayload, isNull);
         // Non-nullable fields must be unchanged.
         expect(copy.from, base.from);
         expect(copy.body, base.body);

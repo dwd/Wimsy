@@ -58,6 +58,49 @@ class ChatMessageMutations {
     return false;
   }
 
+  // XEP-0491: finds the last message in [list] with a matching
+  // [webxdcThreadId] and merges any non-null/non-empty document, summary,
+  // and json payload into it. Returns true when a matching message was
+  // found (whether or not any field actually changed).
+  static bool applyWebxdcUpdateInList(
+    List<ChatMessage> list, {
+    required String threadId,
+    String? document,
+    String? summary,
+    String? jsonPayload,
+  }) {
+    if (threadId.isEmpty) {
+      return false;
+    }
+    for (var i = list.length - 1; i >= 0; i--) {
+      final existing = list[i];
+      if (existing.webxdcThreadId != threadId) {
+        continue;
+      }
+      final nextDocument = (document != null && document.isNotEmpty)
+          ? document
+          : existing.webxdcDocument;
+      final nextSummary = (summary != null && summary.isNotEmpty)
+          ? summary
+          : existing.webxdcSummary;
+      final nextJsonPayload = (jsonPayload != null && jsonPayload.isNotEmpty)
+          ? jsonPayload
+          : existing.webxdcJsonPayload;
+      if (existing.webxdcDocument == nextDocument &&
+          existing.webxdcSummary == nextSummary &&
+          existing.webxdcJsonPayload == nextJsonPayload) {
+        return true;
+      }
+      list[i] = existing.copyWith(
+        webxdcDocument: nextDocument,
+        webxdcSummary: nextSummary,
+        webxdcJsonPayload: nextJsonPayload,
+      );
+      return true;
+    }
+    return false;
+  }
+
   static bool updateReactionsInList(
     List<ChatMessage> list,
     String sender,
