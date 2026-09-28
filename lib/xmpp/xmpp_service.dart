@@ -3870,6 +3870,81 @@ class XmppService extends ChangeNotifier {
     final securityLabel = message.rawStanza == null
         ? null
         : _messageStanzaParser.extractSecurityLabel(message.rawStanza!);
+    // XEP-0491: recognise widget offers/updates arriving in a room the
+    // same way 1:1 chats do, before falling back to a plain text message.
+    final rawStanza = message.rawStanza;
+    final webxdcThreadId = rawStanza == null
+        ? null
+        : _messageStanzaParser.extractThread(rawStanza);
+    final webxdcUpdate = rawStanza == null
+        ? null
+        : _messageStanzaParser.extractWebxdcUpdate(rawStanza);
+    final isWebxdcOffer = rawStanza != null &&
+        _messageStanzaParser.isWebxdcWidgetOffer(
+          rawStanza,
+          oobUrl: message.oobUrl,
+        );
+    final isWebxdcMessage =
+        webxdcUpdate != null || (webxdcThreadId != null && isWebxdcOffer);
+    if (isWebxdcMessage && webxdcThreadId != null) {
+      if (isWebxdcOffer) {
+        _addRoomMessage(
+          roomJid: message.roomJid,
+          from: message.nick,
+          body: message.body,
+          oobUrl: message.oobUrl,
+          oobDescription: _deriveRoomWebxdcFileName(message.oobUrl),
+          rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
+          outgoing: isSelfReflection,
+          receivedFromRoom: true,
+          timestamp: message.timestamp,
+          messageId: message.messageId ?? message.stanzaId,
+          mamId: message.mamResultId,
+          stanzaId: message.stanzaId,
+          replyToId: message.replyToId,
+          replyToJid: message.replyToJid,
+          replyFallback: message.replyFallback,
+          securityLabelText: securityLabel?.text,
+          securityLabelFgColor: securityLabel?.fgColor,
+          securityLabelBgColor: securityLabel?.bgColor,
+          securityLabelIsFallback: securityLabel?.isFallback ?? false,
+          webxdcThreadId: webxdcThreadId,
+          isWebxdcWidget: true,
+          webxdcDocument: webxdcUpdate?.document,
+          webxdcSummary: webxdcUpdate?.summary,
+          webxdcJsonPayload: webxdcUpdate?.json,
+        );
+        return;
+      }
+      _applyWebxdcUpdateToChat(
+        bareJid: message.roomJid,
+        isRoom: true,
+        threadId: webxdcThreadId,
+        document: webxdcUpdate?.document,
+        summary: webxdcUpdate?.summary,
+        jsonPayload: webxdcUpdate?.json,
+      );
+      _deliverPeerUpdateToOpenSession(
+        threadId: webxdcThreadId,
+        update: webxdcUpdate ?? const WebxdcUpdatePayload(),
+        info: message.body.isEmpty ? null : message.body,
+      );
+      if (message.body.trim().isNotEmpty) {
+        _addRoomMessage(
+          roomJid: message.roomJid,
+          from: message.nick,
+          body: message.body,
+          rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
+          outgoing: isSelfReflection,
+          receivedFromRoom: true,
+          timestamp: message.timestamp,
+          messageId: message.messageId ?? message.stanzaId,
+          mamId: message.mamResultId,
+          stanzaId: message.stanzaId,
+        );
+      }
+      return;
+    }
     _addRoomMessage(
       roomJid: message.roomJid,
       from: message.nick,
@@ -7613,6 +7688,24 @@ class XmppService extends ChangeNotifier {
     replace.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:message-correct:0'));
     replace.addAttribute(XmppAttribute('id', replaceId));
     return replace;
+  }
+
+  // XEP-0491: derives a simple display filename for a widget offer's
+  // `.xdc` attachment arriving in a room, where (unlike the 1:1 path) no
+  // separate oob `<desc/>` is surfaced - just the last path segment of
+  // the oob URL.
+  String? _deriveRoomWebxdcFileName(String? oobUrl) {
+    if (oobUrl == null || oobUrl.isEmpty) {
+      return null;
+    }
+    final uri = Uri.tryParse(oobUrl);
+    final segments = uri?.pathSegments ?? const <String>[];
+    for (final segment in segments.reversed) {
+      if (segment.isNotEmpty) {
+        return segment;
+      }
+    }
+    return null;
   }
 
   String _buildIncomingGroupFallbackXml(MucMessage message) {
