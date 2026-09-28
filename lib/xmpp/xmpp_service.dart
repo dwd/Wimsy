@@ -231,6 +231,9 @@ class XmppService extends ChangeNotifier {
   final Map<String, RoomEntry> _rooms = {};
   final Map<String, Set<String>> _roomOccupants = {};
   final Map<String, String> _roomOccupantRealJids = {};
+  // XEP-0421: our own occupant-id in each occupant-id-capable room we've
+  // joined, keyed by room bare jid.
+  final Map<String, String> _roomSelfOccupantIds = {};
   final Map<String, MujiSessionState> _mujiSessions = {};
   final Map<String, StreamSubscription> _roomSubscriptions = {};
   final Map<String, PresenceData> _presenceByBareJid = {};
@@ -2108,6 +2111,7 @@ class XmppService extends ChangeNotifier {
     _rooms.clear();
     _roomOccupants.clear();
     _roomOccupantRealJids.clear();
+    _roomSelfOccupantIds.clear();
     _mucDefaultConfigSent.clear();
     _mujiSessions.clear();
     _mujiSessions.clear();
@@ -2726,6 +2730,7 @@ class XmppService extends ChangeNotifier {
     _roomOccupantRealJids.removeWhere(
       (occupantJid, _) => occupantJid.startsWith('${entry.roomJid}/'),
     );
+    _roomSelfOccupantIds.remove(entry.roomJid);
     notifyListeners();
   }
 
@@ -3249,11 +3254,16 @@ class XmppService extends ChangeNotifier {
           nickname: selfBare.isEmpty ? null : displayNameFor(selfBare),
         ) ??
         '';
+    final selfAddr = _webxdcSelfAddrFor(
+      chatBareJid: chatBareJid,
+      isRoom: isRoom,
+      selfBare: selfBare,
+    );
     try {
       final session = await WebxdcSession.open(
         xdcBytes: bytes,
         instanceId: threadId,
-        selfAddr: webxdcSelfAddr(bareJid: selfBare),
+        selfAddr: selfAddr,
         selfName: selfName,
       );
       _webxdcSessions[threadId] = session;
@@ -3273,6 +3283,20 @@ class XmppService extends ChangeNotifier {
     } catch (_) {
       return null;
     }
+  }
+
+  // XEP-0491/XEP-0421: computes the `selfAddr` to inject into a hosted
+  // widget - our occupant-id when [isRoom] and the room disclosed one via
+  // presence, else the 1:1 `xmpp:<bare jid>` form.
+  String _webxdcSelfAddrFor({
+    required String chatBareJid,
+    required bool isRoom,
+    required String selfBare,
+  }) {
+    final occupantId = isRoom
+        ? _roomSelfOccupantIds[_bareJid(chatBareJid)]
+        : null;
+    return webxdcSelfAddr(bareJid: selfBare, occupantId: occupantId);
   }
 
   // XEP-0491: dispose a hosted session opened via [openWebxdcSession].
@@ -4001,11 +4025,20 @@ class XmppService extends ChangeNotifier {
       if (presence.unavailable) {
         occupants.remove(presence.nick);
         _roomOccupantRealJids.remove(occupantKey);
+        if (presence.isSelf) {
+          _roomSelfOccupantIds.remove(roomJid);
+        }
       } else {
         occupants.add(presence.nick);
         final realJid = presence.realJid;
         if (realJid != null && realJid.isNotEmpty) {
           _roomOccupantRealJids[occupantKey] = _bareJid(realJid);
+        }
+        // XEP-0421: track our own occupant-id, used as the WebXDC
+        // selfAddr for occupant-id-capable rooms.
+        final occupantId = presence.occupantId;
+        if (presence.isSelf && occupantId != null && occupantId.isNotEmpty) {
+          _roomSelfOccupantIds[roomJid] = occupantId;
         }
       }
       if (presence.isSelf && !presence.unavailable) {
@@ -6146,6 +6179,28 @@ class XmppService extends ChangeNotifier {
     final normalized = _bareJid(roomJid);
     final existing = _rooms[normalized] ?? RoomEntry(roomJid: normalized);
     _rooms[normalized] = existing.copyWith(lastOwnMessageAt: timestamp);
+  }
+
+  // XEP-0421: test-only seam to seed our own occupant-id for a room,
+  // without needing a live presence stanza round-trip.
+  @visibleForTesting
+  void seedRoomSelfOccupantIdForTesting(String roomJid, String occupantId) {
+    _roomSelfOccupantIds[_bareJid(roomJid)] = occupantId;
+  }
+
+  // XEP-0491/XEP-0421: test-only seam exposing the selfAddr computation
+  // used by [openWebxdcSession].
+  @visibleForTesting
+  String webxdcSelfAddrForTesting({
+    required String chatBareJid,
+    required bool isRoom,
+    required String selfBare,
+  }) {
+    return _webxdcSelfAddrFor(
+      chatBareJid: chatBareJid,
+      isRoom: isRoom,
+      selfBare: selfBare,
+    );
   }
 
   @visibleForTesting
@@ -10524,6 +10579,7 @@ class XmppService extends ChangeNotifier {
     _rooms.clear();
     _roomOccupants.clear();
     _roomOccupantRealJids.clear();
+    _roomSelfOccupantIds.clear();
     _lastSeenAt.clear();
     _serverNotFound.clear();
     _chatStates.clear();

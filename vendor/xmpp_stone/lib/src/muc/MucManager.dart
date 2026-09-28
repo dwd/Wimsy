@@ -23,6 +23,8 @@ class MucJoinError {
 class MucManager {
   static const _mucNs = 'http://jabber.org/protocol/muc';
   static const _mucUserNs = 'http://jabber.org/protocol/muc#user';
+  // XEP-0421: Anonymous unique occupant identifiers for MUCs.
+  static const _occupantIdNs = 'urn:xmpp:occupant-id:0';
 
   static final Map<Connection, MucManager> _instances = {};
 
@@ -167,6 +169,14 @@ class MucManager {
         .toSet();
     final isSelf = statusCodes.contains('110');
     final isUnavailable = stanza.type == PresenceType.UNAVAILABLE;
+    final occupantId = stanza.children
+        .firstWhereOrNull(
+          (child) =>
+              child.name == 'occupant-id' &&
+              child.getAttribute('xmlns')?.value == _occupantIdNs,
+        )
+        ?.getAttribute('id')
+        ?.value;
     final presence = MucPresenceUpdate(
       roomJid: from.userAtDomain,
       nick: from.resource ?? '',
@@ -176,6 +186,9 @@ class MucManager {
       isSelf: isSelf,
       unavailable: isUnavailable,
       statusCodes: statusCodes,
+      occupantId: (occupantId == null || occupantId.isEmpty)
+          ? null
+          : occupantId,
     );
     _presenceController.add(presence);
   }
@@ -581,6 +594,7 @@ class MucPresenceUpdate {
     required this.isSelf,
     required this.unavailable,
     required this.statusCodes,
+    this.occupantId,
   });
 
   final String roomJid;
@@ -593,6 +607,11 @@ class MucPresenceUpdate {
   final bool isSelf;
   final bool unavailable;
   final Set<String> statusCodes;
+
+  /// XEP-0421: the occupant's anonymous unique identifier, stable for the
+  /// lifetime of the occupant's participation in an occupant-id-capable
+  /// room, when the server includes it.
+  final String? occupantId;
 }
 
 class MucSubjectUpdate {

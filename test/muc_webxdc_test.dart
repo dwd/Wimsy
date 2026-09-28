@@ -157,6 +157,43 @@ void main() {
     },
   );
 
+  test(
+    'a room with a known occupant-id uses it as the WebXDC selfAddr '
+    '(XEP-0421)',
+    () {
+      service.seedRoomSelfOccupantIdForTesting(roomJid, 'hth5wgnhw5wg');
+      final selfAddr = service.webxdcSelfAddrForTesting(
+        chatBareJid: roomJid,
+        isRoom: true,
+        selfBare: 'tester@example.com',
+      );
+      expect(selfAddr, 'hth5wgnhw5wg');
+    },
+  );
+
+  test(
+    'a room without a known occupant-id falls back to the 1:1 selfAddr '
+    'form',
+    () {
+      final selfAddr = service.webxdcSelfAddrForTesting(
+        chatBareJid: roomJid,
+        isRoom: true,
+        selfBare: 'tester@example.com',
+      );
+      expect(selfAddr, 'xmpp:tester@example.com');
+    },
+  );
+
+  test('a 1:1 chat always uses the xmpp:<bare jid> selfAddr form', () {
+    service.seedRoomSelfOccupantIdForTesting(roomJid, 'hth5wgnhw5wg');
+    final selfAddr = service.webxdcSelfAddrForTesting(
+      chatBareJid: roomJid,
+      isRoom: false,
+      selfBare: 'tester@example.com',
+    );
+    expect(selfAddr, 'xmpp:tester@example.com');
+  });
+
   test('an update for an unknown thread does not crash and is ignored', () {
     final update = updateStanza(
       id: 'update-2',

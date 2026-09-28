@@ -140,4 +140,61 @@ void main() {
     expect(update.nick, equals('alice'));
     expect(update.isSelf, isTrue);
   });
+
+  test(
+    'MUC presence with an occupant-id element (XEP-0421) exposes it',
+    () async {
+      final connection = Connection(
+        XmppAccountSettings('test6', 'user6', 'example.com', 'pass', 5222),
+      );
+      final manager = MucManager.getInstance(connection);
+
+      final presence = PresenceStanza();
+      presence.fromJid = Jid.fromFullJid('room@example.com/alice');
+      final x = XmppElement()..name = 'x';
+      x.addAttribute(
+        XmppAttribute('xmlns', 'http://jabber.org/protocol/muc#user'),
+      );
+      final status110 = XmppElement()..name = 'status';
+      status110.addAttribute(XmppAttribute('code', '110'));
+      x.addChild(status110);
+      presence.addChild(x);
+      final occupantId = XmppElement()..name = 'occupant-id';
+      occupantId.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:occupant-id:0'),
+      );
+      occupantId.addAttribute(XmppAttribute('id', 'hth5wgnhw5wg'));
+      presence.addChild(occupantId);
+
+      final nextUpdate = manager.roomPresenceStream.first;
+      connection.fireNewStanzaEvent(presence);
+      final update = await nextUpdate;
+
+      expect(update.occupantId, equals('hth5wgnhw5wg'));
+    },
+  );
+
+  test(
+    'MUC presence without an occupant-id element has a null occupantId',
+    () async {
+      final connection = Connection(
+        XmppAccountSettings('test7', 'user7', 'example.com', 'pass', 5222),
+      );
+      final manager = MucManager.getInstance(connection);
+
+      final presence = PresenceStanza();
+      presence.fromJid = Jid.fromFullJid('room@example.com/bob');
+      final x = XmppElement()..name = 'x';
+      x.addAttribute(
+        XmppAttribute('xmlns', 'http://jabber.org/protocol/muc#user'),
+      );
+      presence.addChild(x);
+
+      final nextUpdate = manager.roomPresenceStream.first;
+      connection.fireNewStanzaEvent(presence);
+      final update = await nextUpdate;
+
+      expect(update.occupantId, isNull);
+    },
+  );
 }
