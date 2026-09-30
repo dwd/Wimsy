@@ -86,7 +86,7 @@ dependencies:
   flutter_webxdc:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
-      ref: 8164dc9
+      ref: 772e85e61942a05c1725091737c432b2f343e1ef
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1
@@ -108,6 +108,21 @@ dependency_overrides:
   # spiffing-dart's usage (XmlDocument.parse/XmlBuilder) is unaffected by
   # the 6->7 changes.
   xml: ^7.0.1
+  # The published flutter_inappwebview_forge_linux 1.0.8 release on pub.dev
+  # fails to build against the system WPE WebKit dev packages (stale
+  # post-fork PLUGIN_NAME/header directory, calls to nonexistent WPE
+  # WebKit API, a variable-name typo - see bug-report.md previously filed
+  # for this package). flutter_webxdc_linux itself overrides this
+  # dependency to its own vendored/fixed copy, but dependency_overrides in
+  # a non-root package are ignored by pub, so the override must be
+  # repeated here in Wimsy's own pubspec.yaml, pointing at the same fixed
+  # copy vendored inside the flutter_webxdc repository (kept in lockstep
+  # with the flutter_webxdc git ref above).
+  flutter_inappwebview_forge_linux:
+    git:
+      url: https://github.com/dwd/flutter_webxdc.git
+      ref: 772e85e61942a05c1725091737c432b2f343e1ef
+      path: flutter_inappwebview_forge_linux
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

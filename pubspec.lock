@@ -351,12 +351,13 @@ packages:
     source: hosted
     version: "2.1.35"
   flutter_inappwebview_forge_linux:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: flutter_inappwebview_forge_linux
-      sha256: de194cca1d85cbddccb4c02bef935578acfdeae2c23ba68a07701e323195b05d
-      url: "https://pub.dev"
-    source: hosted
+      path: flutter_inappwebview_forge_linux
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      url: "https://github.com/dwd/flutter_webxdc.git"
+    source: git
     version: "1.0.8"
   flutter_inappwebview_forge_macos:
     dependency: transitive
@@ -588,8 +589,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "8164dc9"
-      resolved-ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
       url: "https://github.com/dwd/flutter_webxdc.git"
     source: git
     version: "0.0.1"
@@ -597,8 +598,8 @@ packages:
     dependency: transitive
     description:
       path: flutter_webxdc_linux
-      ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
-      resolved-ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
       url: "https://github.com/dwd/flutter_webxdc.git"
     source: git
     version: "0.0.1"
@@ -606,8 +607,8 @@ packages:
     dependency: transitive
     description:
       path: flutter_webxdc_memory
-      ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
-      resolved-ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
       url: "https://github.com/dwd/flutter_webxdc.git"
     source: git
     version: "0.0.1"
@@ -615,8 +616,8 @@ packages:
     dependency: transitive
     description:
       path: flutter_webxdc_platform_interface
-      ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
-      resolved-ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
       url: "https://github.com/dwd/flutter_webxdc.git"
     source: git
     version: "0.0.1"
@@ -624,8 +625,8 @@ packages:
     dependency: transitive
     description:
       path: flutter_webxdc_web
-      ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
-      resolved-ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
       url: "https://github.com/dwd/flutter_webxdc.git"
     source: git
     version: "0.0.1"
@@ -633,8 +634,8 @@ packages:
     dependency: transitive
     description:
       path: flutter_webxdc_webview
-      ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
-      resolved-ref: "8164dc93ee2c25063aa530ca6d0199070f3f7358"
+      ref: "772e85e61942a05c1725091737c432b2f343e1ef"
+      resolved-ref: "772e85e61942a05c1725091737c432b2f343e1ef"
       url: "https://github.com/dwd/flutter_webxdc.git"
     source: git
     version: "0.0.1"
