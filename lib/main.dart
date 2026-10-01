@@ -1230,232 +1230,253 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             : (contact.bookmarkAutoJoin
                                   ? 'Auto-join room'
                                   : 'Room bookmark');
-                        return InkWell(
-                          onTap: () => service.selectChat(jid),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surface,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: roomJoinError
-                                    ? theme.colorScheme.error.withValues(
-                                        alpha: 0.5,
-                                      )
-                                    : (isBookmark
-                                          ? theme.colorScheme.primary
-                                                .withValues(alpha: 0.35)
-                                          : theme.colorScheme.outlineVariant),
+                        return _ContactMenuRegion(
+                          contactKey: jid,
+                          builder: (menuKey) => InkWell(
+                            onTap: () => service.selectChat(jid),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
                               ),
-                            ),
-                            child: Opacity(
-                              opacity: isServerNotFound ? 0.5 : 1.0,
-                              child: Row(
-                                children: [
-                                  AvatarWithPresence(
-                                    label: contact.displayName,
-                                    bytes: avatarBytes,
-                                    showPresenceDot: !isBookmark,
-                                    presenceShow: isBookmark ? null : show,
-                                    badge: isBookmark
-                                        ? Container(
-                                            padding: const EdgeInsets.all(2),
-                                            decoration: BoxDecoration(
-                                              color: theme.colorScheme.surface,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color:
-                                                    theme.colorScheme.primary,
-                                                width: 1.2,
-                                              ),
-                                            ),
-                                            child: Icon(
-                                              Icons.meeting_room,
-                                              size: 12,
-                                              color: theme.colorScheme.primary,
-                                            ),
-                                          )
-                                        : null,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Flexible(
-                                              child: Text(
-                                                contact.displayName,
-                                                style: theme
-                                                    .textTheme
-                                                    .titleMedium
-                                                    ?.copyWith(
-                                                      fontWeight: isUnread
-                                                          ? FontWeight.w600
-                                                          : null,
-                                                    ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                            if (isBookmark) ...[
-                                              const SizedBox(width: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: theme
-                                                      .colorScheme
-                                                      .primary
-                                                      .withValues(alpha: 0.1),
-                                                  borderRadius:
-                                                      BorderRadius.circular(10),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: roomJoinError
+                                      ? theme.colorScheme.error.withValues(
+                                          alpha: 0.5,
+                                        )
+                                      : (isBookmark
+                                            ? theme.colorScheme.primary
+                                                  .withValues(alpha: 0.35)
+                                            : theme.colorScheme.outlineVariant),
+                                ),
+                              ),
+                              child: Opacity(
+                                opacity: isServerNotFound ? 0.5 : 1.0,
+                                child: Row(
+                                  children: [
+                                    _ContactMenuButton(
+                                      key: menuKey,
+                                      isBookmark: isBookmark,
+                                      isBlocked: service.isBlocked(jid),
+                                      onEditContact: () =>
+                                          _showContactDialog(contact: contact),
+                                      onRemoveContact: () =>
+                                          _confirmRemoveContact(contact),
+                                      onBlockContact: () =>
+                                          _blockContact(contact),
+                                      onUnblockContact: () =>
+                                          _unblockContact(contact),
+                                      onEditBookmark: () =>
+                                          _showBookmarkDialog(contact),
+                                      onRemoveBookmark: () =>
+                                          _confirmRemoveBookmark(contact),
+                                      child: AvatarWithPresence(
+                                        label: contact.displayName,
+                                        bytes: avatarBytes,
+                                        showPresenceDot: !isBookmark,
+                                        presenceShow: isBookmark ? null : show,
+                                        badge: isBookmark
+                                            ? Container(
+                                                padding: const EdgeInsets.all(
+                                                  2,
                                                 ),
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      theme.colorScheme.surface,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: theme
+                                                        .colorScheme
+                                                        .primary,
+                                                    width: 1.2,
+                                                  ),
+                                                ),
+                                                child: Icon(
+                                                  Icons.meeting_room,
+                                                  size: 12,
+                                                  color:
+                                                      theme.colorScheme.primary,
+                                                ),
+                                              )
+                                            : null,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Flexible(
                                                 child: Text(
-                                                  'ROOM',
+                                                  contact.displayName,
                                                   style: theme
                                                       .textTheme
-                                                      .labelSmall
+                                                      .titleMedium
+                                                      ?.copyWith(
+                                                        fontWeight: isUnread
+                                                            ? FontWeight.w600
+                                                            : null,
+                                                      ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (isBookmark) ...[
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: theme
+                                                        .colorScheme
+                                                        .primary
+                                                        .withValues(alpha: 0.1),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    'ROOM',
+                                                    style: theme
+                                                        .textTheme
+                                                        .labelSmall
+                                                        ?.copyWith(
+                                                          color: theme
+                                                              .colorScheme
+                                                              .primary,
+                                                          letterSpacing: 0.6,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            isBookmark
+                                                ? bookmarkStatusText
+                                                : ((effectiveStatusText
+                                                              ?.isNotEmpty ==
+                                                          true)
+                                                      ? effectiveStatusText!
+                                                      : service
+                                                            .presenceLabelFor(
+                                                              jid,
+                                                            )),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                  color: roomJoinError
+                                                      ? theme.colorScheme.error
+                                                      : theme
+                                                            .colorScheme
+                                                            .onSurfaceVariant,
+                                                ),
+                                          ),
+                                          if (latest != null) ...[
+                                            const SizedBox(height: 2),
+                                            Builder(
+                                              builder: (context) {
+                                                final previewText = isBookmark
+                                                    ? '${_roomPreviewSenderLabel(latest)}: ${_messagePreviewText(service, latest)}'
+                                                    : _messagePreviewText(
+                                                        service,
+                                                        latest,
+                                                      );
+                                                final isOutgoingPreview =
+                                                    latest.outgoing;
+                                                final isUnreadIncomingPreview =
+                                                    !latest.outgoing &&
+                                                    unreadCount > 0;
+                                                return Text(
+                                                  previewText,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: theme
+                                                      .textTheme
+                                                      .bodySmall
                                                       ?.copyWith(
                                                         color: theme
                                                             .colorScheme
-                                                            .primary,
-                                                        letterSpacing: 0.6,
+                                                            .onSurfaceVariant,
+                                                        fontStyle:
+                                                            isOutgoingPreview
+                                                            ? FontStyle.italic
+                                                            : null,
+                                                        fontWeight:
+                                                            isUnreadIncomingPreview
+                                                            ? FontWeight.w700
+                                                            : null,
                                                       ),
-                                                ),
-                                              ),
-                                            ],
-                                          ],
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          isBookmark
-                                              ? bookmarkStatusText
-                                              : ((effectiveStatusText
-                                                            ?.isNotEmpty ==
-                                                        true)
-                                                    ? effectiveStatusText!
-                                                    : service.presenceLabelFor(
-                                                        jid,
-                                                      )),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: roomJoinError
-                                                    ? theme.colorScheme.error
-                                                    : theme
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
-                                              ),
-                                        ),
-                                        if (latest != null) ...[
-                                          const SizedBox(height: 2),
-                                          Builder(
-                                            builder: (context) {
-                                              final previewText = isBookmark
-                                                  ? '${_roomPreviewSenderLabel(latest)}: ${_messagePreviewText(service, latest)}'
-                                                  : _messagePreviewText(
-                                                      service,
-                                                      latest,
-                                                    );
-                                              final isOutgoingPreview =
-                                                  latest.outgoing;
-                                              final isUnreadIncomingPreview =
-                                                  !latest.outgoing &&
-                                                  unreadCount > 0;
-                                              return Text(
-                                                previewText,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: theme.textTheme.bodySmall
-                                                    ?.copyWith(
-                                                      color: theme
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
-                                                      fontStyle:
-                                                          isOutgoingPreview
-                                                          ? FontStyle.italic
-                                                          : null,
-                                                      fontWeight:
-                                                          isUnreadIncomingPreview
-                                                          ? FontWeight.w700
-                                                          : null,
-                                                    ),
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                        if (!isBookmark &&
-                                            contact.groups.isNotEmpty) ...[
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            contact.groups
-                                                .map(
-                                                  (group) => '#${group.trim()}',
-                                                )
-                                                .join(' '),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.labelSmall
-                                                ?.copyWith(
-                                                  color:
-                                                      theme.colorScheme.primary,
-                                                  letterSpacing: 0.2,
-                                                ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  if (unreadCount > 0)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: theme.colorScheme.primary,
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        unreadCount > 99
-                                            ? '99+'
-                                            : unreadCount.toString(),
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                              color:
-                                                  theme.colorScheme.onPrimary,
-                                              fontWeight: FontWeight.w600,
+                                                );
+                                              },
                                             ),
+                                          ],
+                                          if (!isBookmark &&
+                                              contact.groups.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              contact.groups
+                                                  .map(
+                                                    (group) =>
+                                                        '#${group.trim()}',
+                                                  )
+                                                  .join(' '),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.labelSmall
+                                                  ?.copyWith(
+                                                    color: theme
+                                                        .colorScheme
+                                                        .primary,
+                                                    letterSpacing: 0.2,
+                                                  ),
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                     ),
-                                  if (unreadCount > 0) const SizedBox(width: 8),
-                                  _ContactActionsMenu(
-                                    isBookmark: isBookmark,
-                                    isBlocked: service.isBlocked(jid),
-                                    onEditContact: () =>
-                                        _showContactDialog(contact: contact),
-                                    onRemoveContact: () =>
-                                        _confirmRemoveContact(contact),
-                                    onBlockContact: () =>
-                                        _blockContact(contact),
-                                    onUnblockContact: () =>
-                                        _unblockContact(contact),
-                                    onEditBookmark: () =>
-                                        _showBookmarkDialog(contact),
-                                    onRemoveBookmark: () =>
-                                        _confirmRemoveBookmark(contact),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    if (unreadCount > 0)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: theme.colorScheme.primary,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          unreadCount > 99
+                                              ? '99+'
+                                              : unreadCount.toString(),
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(
+                                                color:
+                                                    theme.colorScheme.onPrimary,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                      ),
+                                    if (unreadCount > 0)
+                                      const SizedBox(width: 8),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -2350,10 +2371,8 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           ),
           const SizedBox(width: 6),
           InkWell(
-            onTap: () => widget.service.setPendingSecurityLabel(
-              activeChat,
-              null,
-            ),
+            onTap: () =>
+                widget.service.setPendingSecurityLabel(activeChat, null),
             child: const Icon(Icons.close, size: 16),
           ),
         ],
@@ -6679,10 +6698,7 @@ class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text(
-                  _error.toString(),
-                  textAlign: TextAlign.center,
-                ),
+                child: Text(_error.toString(), textAlign: TextAlign.center),
               ),
             )
           : session == null
@@ -6692,8 +6708,13 @@ class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
   }
 }
 
-class _ContactActionsMenu extends StatelessWidget {
-  const _ContactActionsMenu({
+/// A menu button hosting contact/bookmark actions (edit, remove, block,
+/// etc.), presented under the roster tile's avatar. When [child] is
+/// supplied (typically the avatar widget), tapping it opens the menu
+/// instead of showing a separate "more" icon.
+class _ContactMenuButton extends StatefulWidget {
+  const _ContactMenuButton({
+    super.key,
     required this.isBookmark,
     required this.isBlocked,
     required this.onEditContact,
@@ -6702,6 +6723,7 @@ class _ContactActionsMenu extends StatelessWidget {
     required this.onUnblockContact,
     required this.onEditBookmark,
     required this.onRemoveBookmark,
+    this.child,
   });
 
   final bool isBookmark;
@@ -6712,61 +6734,109 @@ class _ContactActionsMenu extends StatelessWidget {
   final VoidCallback onUnblockContact;
   final VoidCallback onEditBookmark;
   final VoidCallback onRemoveBookmark;
+  final Widget? child;
+
+  @override
+  State<_ContactMenuButton> createState() => _ContactMenuButtonState();
+}
+
+class _ContactMenuButtonState extends State<_ContactMenuButton> {
+  /// Opens the menu at [globalPosition], used when a long press is
+  /// detected anywhere on the surrounding roster tile.
+  Future<void> showAt(Offset globalPosition) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: _items(),
+    );
+    if (value != null && mounted) {
+      _handleSelected(value);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      icon: const Icon(Icons.more_vert),
-      onSelected: (value) {
-        switch (value) {
-          case 'edit_contact':
-            onEditContact();
-            break;
-          case 'remove_contact':
-            onRemoveContact();
-            break;
-          case 'block_contact':
-            onBlockContact();
-            break;
-          case 'unblock_contact':
-            onUnblockContact();
-            break;
-          case 'edit_bookmark':
-            onEditBookmark();
-            break;
-          case 'remove_bookmark':
-            onRemoveBookmark();
-            break;
-        }
-      },
-      itemBuilder: (context) {
-        if (isBookmark) {
-          return [
-            const PopupMenuItem(
-              value: 'edit_bookmark',
-              child: Text('Edit bookmark'),
-            ),
-            const PopupMenuItem(
-              value: 'remove_bookmark',
-              child: Text('Remove bookmark'),
-            ),
-          ];
-        }
-        return [
-          const PopupMenuItem(
-            value: 'edit_contact',
-            child: Text('Edit contact'),
-          ),
-          const PopupMenuItem(
-            value: 'remove_contact',
-            child: Text('Remove contact'),
-          ),
-          PopupMenuItem(
-            value: isBlocked ? 'unblock_contact' : 'block_contact',
-            child: Text(isBlocked ? 'Unblock' : 'Block'),
-          ),
-        ];
-      },
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+      icon: widget.child == null ? const Icon(Icons.more_vert) : null,
+      onSelected: _handleSelected,
+      itemBuilder: (context) => _items(),
+      child: widget.child,
+    );
+  }
+
+  List<PopupMenuEntry<String>> _items() {
+    if (widget.isBookmark) {
+      return [
+        const PopupMenuItem(
+          value: 'edit_bookmark',
+          child: Text('Edit bookmark'),
+        ),
+        const PopupMenuItem(
+          value: 'remove_bookmark',
+          child: Text('Remove bookmark'),
+        ),
+      ];
+    }
+    return [
+      const PopupMenuItem(value: 'edit_contact', child: Text('Edit contact')),
+      const PopupMenuItem(
+        value: 'remove_contact',
+        child: Text('Remove contact'),
+      ),
+      PopupMenuItem(
+        value: widget.isBlocked ? 'unblock_contact' : 'block_contact',
+        child: Text(widget.isBlocked ? 'Unblock' : 'Block'),
+      ),
+    ];
+  }
+
+  void _handleSelected(String value) {
+    switch (value) {
+      case 'edit_contact':
+        widget.onEditContact();
+      case 'remove_contact':
+        widget.onRemoveContact();
+      case 'block_contact':
+        widget.onBlockContact();
+      case 'unblock_contact':
+        widget.onUnblockContact();
+      case 'edit_bookmark':
+        widget.onEditBookmark();
+      case 'remove_bookmark':
+        widget.onRemoveBookmark();
+    }
+  }
+}
+
+/// Wraps a roster tile so that a touch long press anywhere on the tile
+/// opens the same contact actions menu that the avatar's
+/// [_ContactMenuButton] exposes on tap.
+class _ContactMenuRegion extends StatefulWidget {
+  const _ContactMenuRegion({required this.contactKey, required this.builder});
+
+  final String contactKey;
+  final Widget Function(GlobalKey<_ContactMenuButtonState> menuKey) builder;
+
+  @override
+  State<_ContactMenuRegion> createState() => _ContactMenuRegionState();
+}
+
+class _ContactMenuRegionState extends State<_ContactMenuRegion> {
+  final _menuKey = GlobalKey<_ContactMenuButtonState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return _TouchLongPressRegion(
+      key: Key('roster-tile-${widget.contactKey}'),
+      onLongPress: (position) => _menuKey.currentState?.showAt(position),
+      child: widget.builder(_menuKey),
     );
   }
 }
