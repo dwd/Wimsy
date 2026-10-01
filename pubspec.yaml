@@ -83,10 +83,16 @@ dependencies:
   # flutter_webxdc_memory, flutter_webxdc_web, flutter_webxdc_webview,
   # flutter_webxdc_linux - are resolved transitively as path dependencies
   # within the same git checkout).
+  # NOTE: ref bumped to f7afa65 to pick up the flutter_webxdc_webview fix
+  # switching it from flutter_inappwebview to flutter_inappwebview_forge
+  # (see that commit's message) so Windows builds no longer register two
+  # plugins that both declare the flutter_inappwebview_windows_plugin
+  # CMake target. Requires that commit to be pushed to the public repo
+  # before `flutter pub get`/CI can resolve it.
   flutter_webxdc:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
-      ref: 893ceaf69dd222d382cdd9744ea3c5ddb54a6aeb
+      ref: f7afa65
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1
@@ -121,7 +127,7 @@ dependency_overrides:
   flutter_inappwebview_forge_linux:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
-      ref: 893ceaf69dd222d382cdd9744ea3c5ddb54a6aeb
+      ref: f7afa65
       path: flutter_inappwebview_forge_linux
 
 # For information on the generic Dart part of this file, see the
