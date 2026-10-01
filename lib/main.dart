@@ -7534,11 +7534,11 @@ class _RoomOccupantTile extends StatelessWidget {
         : service.avatarBytesFor(avatarJid);
     final chips = <Widget>[
       if (occupant.role != null && occupant.role!.isNotEmpty)
-        _RoleAffiliationChip(label: _capitalizeWord(occupant.role!)),
+        _RoleAffiliationChip(label: occupant.role!),
       if (occupant.affiliation != null &&
           occupant.affiliation!.isNotEmpty &&
           occupant.affiliation != 'none')
-        _RoleAffiliationChip(label: _capitalizeWord(occupant.affiliation!)),
+        _RoleAffiliationChip(label: occupant.affiliation!),
     ];
     final status = occupant.status?.trim() ?? '';
     return ListTile(
@@ -7548,54 +7548,45 @@ class _RoomOccupantTile extends StatelessWidget {
         showPresenceDot: true,
         presenceShow: occupant.show ?? PresenceShowElement.CHAT,
       ),
-      title: Row(
+      title: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 6,
+        runSpacing: 2,
         children: [
-          Expanded(
-            child: Text(
-              occupant.nick,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyLarge,
-            ),
+          Text(
+            occupant.nick,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyLarge,
           ),
-          if (occupant.isSelf) ...[
-            const SizedBox(width: 6),
+          if (occupant.isSelf)
             Text(
               '(you)',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-          ],
+          ...chips,
         ],
       ),
-      subtitle: (chips.isEmpty && status.isEmpty)
+      subtitle: status.isEmpty
           ? null
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (chips.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Wrap(spacing: 6, runSpacing: 4, children: chips),
-                  ),
-                if (status.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      status,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-              ],
+          : Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                status,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
             ),
     );
   }
 }
 
-/// A small chip used to render an occupant's MUC role or affiliation.
+/// A small inline chip used to render an occupant's MUC role or
+/// affiliation next to their nickname, styled to match the "ROOM" chip
+/// shown against bookmarked room names in the roster.
 class _RoleAffiliationChip extends StatelessWidget {
   const _RoleAffiliationChip({required this.label});
 
@@ -7604,20 +7595,21 @@ class _RoleAffiliationChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Chip(
-      label: Text(label, style: theme.textTheme.labelSmall),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: const EdgeInsets.symmetric(horizontal: 6),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label.toUpperCase(),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.primary,
+          letterSpacing: 0.6,
+        ),
+      ),
     );
   }
-}
-
-String _capitalizeWord(String value) {
-  if (value.isEmpty) {
-    return value;
-  }
-  return value[0].toUpperCase() + value.substring(1);
 }
 
 class _MessageMenuButton extends StatefulWidget {
