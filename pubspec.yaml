@@ -87,8 +87,7 @@ dependencies:
   # switching it from flutter_inappwebview to flutter_inappwebview_forge
   # (see that commit's message) so Windows builds no longer register two
   # plugins that both declare the flutter_inappwebview_windows_plugin
-  # CMake target. Requires that commit to be pushed to the public repo
-  # before `flutter pub get`/CI can resolve it.
+  # CMake target.
   flutter_webxdc:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
