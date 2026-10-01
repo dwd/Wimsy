@@ -86,7 +86,7 @@ dependencies:
   flutter_webxdc:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
-      ref: 772e85e61942a05c1725091737c432b2f343e1ef
+      ref: 893ceaf69dd222d382cdd9744ea3c5ddb54a6aeb
 
 dev_dependencies:
   sentry_dart_plugin: ^3.2.1
@@ -121,7 +121,7 @@ dependency_overrides:
   flutter_inappwebview_forge_linux:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
-      ref: 772e85e61942a05c1725091737c432b2f343e1ef
+      ref: 893ceaf69dd222d382cdd9744ea3c5ddb54a6aeb
       path: flutter_inappwebview_forge_linux
 
 # For information on the generic Dart part of this file, see the
