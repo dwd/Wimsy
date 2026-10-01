@@ -17,6 +17,7 @@ import '../models/contact_entry.dart';
 import '../models/keepalive_tuning.dart';
 import '../models/muc_notify_settings.dart';
 import '../models/room_entry.dart';
+import '../models/room_occupant.dart';
 import '../bookmarks/bookmarks_manager.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
@@ -242,6 +243,9 @@ class XmppService extends ChangeNotifier {
   final Map<String, RoomEntry> _rooms = {};
   final Map<String, Set<String>> _roomOccupants = {};
   final Map<String, String> _roomOccupantRealJids = {};
+  // Keyed by room bare JID, then occupant nick: tracks the richer
+  // role/affiliation/status details used by the room occupant list panel.
+  final Map<String, Map<String, RoomOccupant>> _roomOccupantDetails = {};
   // XEP-0421: our own occupant-id in each occupant-id-capable room we've
   // joined, keyed by room bare jid.
   final Map<String, String> _roomSelfOccupantIds = {};
@@ -497,6 +501,28 @@ class XmppService extends ChangeNotifier {
   RoomEntry? roomFor(String bareJid) => _rooms[_bareJid(bareJid)];
   String? roomOccupantRealJid(String roomJid, String nick) {
     return _roomOccupantRealJids['${_bareJid(roomJid)}/$nick'];
+  }
+
+  /// Returns the current occupants of [roomJid], sorted by affiliation
+  /// (owners, then admins, then members, then others, then outcasts) and
+  /// alphabetically by nick within each group. Used by the room occupant
+  /// list panel opened from the "N online" chat header banner.
+  List<RoomOccupant> roomOccupantsFor(String roomJid) {
+    final details = _roomOccupantDetails[_bareJid(roomJid)];
+    if (details == null || details.isEmpty) {
+      return const [];
+    }
+    final occupants = details.values.toList();
+    occupants.sort((a, b) {
+      final rankCompare = roomOccupantAffiliationRank(
+        a.affiliation,
+      ).compareTo(roomOccupantAffiliationRank(b.affiliation));
+      if (rankCompare != 0) {
+        return rankCompare;
+      }
+      return a.nick.toLowerCase().compareTo(b.nick.toLowerCase());
+    });
+    return occupants;
   }
 
   Duration? get lastPingLatency => _lastPingLatency;
@@ -2122,6 +2148,7 @@ class XmppService extends ChangeNotifier {
     _rooms.clear();
     _roomOccupants.clear();
     _roomOccupantRealJids.clear();
+    _roomOccupantDetails.clear();
     _roomSelfOccupantIds.clear();
     _mucDefaultConfigSent.clear();
     _mujiSessions.clear();
@@ -2738,6 +2765,7 @@ class XmppService extends ChangeNotifier {
     muc.leaveRoom(Jid.fromFullJid(entry.roomJid), entry.nick!);
     _rooms[entry.roomJid] = entry.copyWith(joined: false);
     _roomOccupants.remove(entry.roomJid);
+    _roomOccupantDetails.remove(entry.roomJid);
     _roomOccupantRealJids.removeWhere(
       (occupantJid, _) => occupantJid.startsWith('${entry.roomJid}/'),
     );
@@ -4032,10 +4060,15 @@ class XmppService extends ChangeNotifier {
         _sendMucDefaultConfig(roomJid);
       }
       final occupants = _roomOccupants.putIfAbsent(roomJid, () => <String>{});
+      final occupantDetails = _roomOccupantDetails.putIfAbsent(
+        roomJid,
+        () => <String, RoomOccupant>{},
+      );
       final occupantKey = '$roomJid/${presence.nick}';
       if (presence.unavailable) {
         occupants.remove(presence.nick);
         _roomOccupantRealJids.remove(occupantKey);
+        occupantDetails.remove(presence.nick);
         if (presence.isSelf) {
           _roomSelfOccupantIds.remove(roomJid);
         }
@@ -4045,6 +4078,18 @@ class XmppService extends ChangeNotifier {
         if (realJid != null && realJid.isNotEmpty) {
           _roomOccupantRealJids[occupantKey] = _bareJid(realJid);
         }
+        occupantDetails[presence.nick] = RoomOccupant(
+          nick: presence.nick,
+          role: presence.role,
+          affiliation: presence.affiliation,
+          realJid: (realJid != null && realJid.isNotEmpty)
+              ? _bareJid(realJid)
+              : null,
+          status: presence.status,
+          occupantId: presence.occupantId,
+          isSelf: presence.isSelf,
+          show: presence.show,
+        );
         // XEP-0421: track our own occupant-id, used as the WebXDC
         // selfAddr for occupant-id-capable rooms.
         final occupantId = presence.occupantId;
@@ -10654,6 +10699,7 @@ class XmppService extends ChangeNotifier {
     _rooms.clear();
     _roomOccupants.clear();
     _roomOccupantRealJids.clear();
+    _roomOccupantDetails.clear();
     _roomSelfOccupantIds.clear();
     _lastSeenAt.clear();
     _serverNotFound.clear();

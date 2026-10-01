@@ -30,6 +30,7 @@ import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
 import 'models/muc_notify_settings.dart';
 import 'models/room_entry.dart';
+import 'models/room_occupant.dart';
 import 'notifications/notification_service.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
@@ -43,6 +44,7 @@ import 'utils/graph_statistics.dart';
 import 'utils/display_layout.dart';
 import 'utils/physical_display_size.dart';
 import 'utils/xep0392_color.dart';
+import 'widgets/avatar_with_presence.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -1187,7 +1189,6 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                   (presence != null
                                       ? PresenceShowElement.CHAT
                                       : null));
-                        final dotColor = _presenceDotColor(theme, show);
                         final avatarBytes = service.avatarBytesFor(jid);
                         final messages = isBookmark
                             ? service.roomMessagesFor(jid)
@@ -1254,17 +1255,13 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                               opacity: isServerNotFound ? 0.5 : 1.0,
                               child: Row(
                                 children: [
-                                  Stack(
-                                    children: [
-                                      _AvatarPlaceholder(
-                                        label: contact.displayName,
-                                        bytes: avatarBytes,
-                                      ),
-                                      if (isBookmark)
-                                        Positioned(
-                                          right: 0,
-                                          bottom: 0,
-                                          child: Container(
+                                  AvatarWithPresence(
+                                    label: contact.displayName,
+                                    bytes: avatarBytes,
+                                    showPresenceDot: !isBookmark,
+                                    presenceShow: isBookmark ? null : show,
+                                    badge: isBookmark
+                                        ? Container(
                                             padding: const EdgeInsets.all(2),
                                             decoration: BoxDecoration(
                                               color: theme.colorScheme.surface,
@@ -1280,27 +1277,8 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                               size: 12,
                                               color: theme.colorScheme.primary,
                                             ),
-                                          ),
-                                        )
-                                      else
-                                        Positioned(
-                                          right: 0,
-                                          bottom: 0,
-                                          child: Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: dotColor,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color:
-                                                    theme.colorScheme.surface,
-                                                width: 2,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                    ],
+                                          )
+                                        : null,
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
@@ -1719,18 +1697,27 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                        Text(
-                          activeChat == null
-                              ? 'Secure connection active'
-                              : isBookmark
-                              ? _roomSubtitle(roomEntry)
-                              : service.chatStateLabelFor(activeChat).isNotEmpty
-                              ? service.chatStateLabelFor(activeChat)
-                              : 'Secure connection active',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                        if (activeChat != null && isBookmark)
+                          _buildRoomBannerSubtitle(
+                            context: context,
+                            theme: theme,
+                            service: service,
+                            roomEntry: roomEntry,
+                            roomJid: activeChat,
+                          )
+                        else
+                          Text(
+                            activeChat == null
+                                ? 'Secure connection active'
+                                : service
+                                      .chatStateLabelFor(activeChat)
+                                      .isNotEmpty
+                                ? service.chatStateLabelFor(activeChat)
+                                : 'Secure connection active',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
                         if (activeChat != null && isBookmark)
                           _buildRoomSubjectHeader(
                             roomEntry: roomEntry,
@@ -3588,6 +3575,110 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     );
   }
 
+  /// Builds the "Joined · N online" subtitle shown under the room name in
+  /// the chat header, with the occupant count made tappable so it opens
+  /// the full room occupant list (see [_showRoomOccupants]).
+  Widget _buildRoomBannerSubtitle({
+    required BuildContext context,
+    required ThemeData theme,
+    required XmppService service,
+    required RoomEntry? roomEntry,
+    required String roomJid,
+  }) {
+    final baseStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final joined = roomEntry?.joined ?? false;
+    final occupantCount = roomEntry?.occupantCount ?? 0;
+    final spans = <TextSpan>[
+      TextSpan(text: joined ? 'Joined' : 'Not joined', style: baseStyle),
+    ];
+    if (occupantCount > 0) {
+      spans.add(TextSpan(text: ' · ', style: baseStyle));
+      spans.add(
+        TextSpan(
+          text: '$occupantCount online',
+          style: baseStyle?.copyWith(
+            color: theme.colorScheme.primary,
+            decoration: TextDecoration.underline,
+          ),
+          recognizer: TapGestureRecognizer()
+            ..onTap = () => _showRoomOccupants(context, service, roomJid),
+        ),
+      );
+    }
+    return RichText(text: TextSpan(children: spans));
+  }
+
+  /// Opens the full room occupant list for [roomJid]. On wide displays this
+  /// slides in as a right-hand panel over the chat; on narrower/smaller
+  /// devices it is pushed as a standalone full-screen page. Either way, a
+  /// back/close button dismisses it.
+  void _showRoomOccupants(
+    BuildContext context,
+    XmppService service,
+    String roomJid,
+  ) {
+    final useSidePanel = MediaQuery.sizeOf(context).width >= 700;
+    if (useSidePanel) {
+      showGeneralDialog<void>(
+        context: context,
+        barrierLabel: 'Room occupants',
+        barrierDismissible: true,
+        barrierColor: Colors.black54,
+        transitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (dialogContext, animation, secondaryAnimation) {
+          return Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: 360,
+              height: double.infinity,
+              child: Material(
+                elevation: 8,
+                child: SafeArea(
+                  child: _RoomOccupantsList(
+                    service: service,
+                    roomJid: roomJid,
+                    onClose: () => Navigator.of(dialogContext).pop(),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (routeContext) => Scaffold(
+          appBar: AppBar(
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back',
+              onPressed: () => Navigator.of(routeContext).pop(),
+            ),
+            title: const Text('Room occupants'),
+          ),
+          body: _RoomOccupantsList(service: service, roomJid: roomJid),
+        ),
+      ),
+    );
+  }
+
   Widget _buildRoomSubjectHeader({
     required RoomEntry? roomEntry,
     required String roomJid,
@@ -5321,7 +5412,12 @@ class MessageBubble extends StatelessWidget {
               onEdit: onEdit,
               onReply: onReply,
               onAddToRoster: onAddToRoster,
-              child: _AvatarPlaceholder(label: senderName, bytes: avatarBytes),
+              child: AvatarWithPresence(
+                label: senderName,
+                bytes: avatarBytes,
+                showPresenceDot: true,
+                presenceShow: _resolveSenderPresenceShow(),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -5506,6 +5602,34 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
+  /// Resolves the presence `<show/>` state to display on the sender's
+  /// avatar dot. For room messages, looks up the sender's nick in the
+  /// current occupant list; for 1:1 chats, uses the roster presence (or
+  /// our own presence, for outgoing messages). Returns `null` when the
+  /// sender's presence is unknown (rendered as a neutral/offline dot).
+  PresenceShowElement? _resolveSenderPresenceShow() {
+    if (isRoom) {
+      for (final occupant in service.roomOccupantsFor(chatBareJid)) {
+        if (occupant.nick == message.from) {
+          return occupant.show ?? PresenceShowElement.CHAT;
+        }
+      }
+      return null;
+    }
+    if (message.outgoing) {
+      return service.selfPresence.showElement ?? PresenceShowElement.CHAT;
+    }
+    final presence = service.presenceFor(message.from);
+    if (presence == null) {
+      return null;
+    }
+    final statusText = presence.status?.trim();
+    if (statusText != null && statusText.toLowerCase() == 'unavailable') {
+      return null;
+    }
+    return presence.showElement ?? PresenceShowElement.CHAT;
+  }
+
   Widget? _tickIcon(ThemeData theme) {
     if (!message.outgoing) {
       return null;
@@ -5650,7 +5774,7 @@ class MessageBubble extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _AvatarPlaceholder(label: title, bytes: inviteAvatarBytes),
+          AvatarWithPresence(label: title, bytes: inviteAvatarBytes),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -7173,7 +7297,7 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
           children: [
             Row(
               children: [
-                _AvatarPlaceholder(label: previewLabel, bytes: avatarBytes),
+                AvatarWithPresence(label: previewLabel, bytes: avatarBytes),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -7307,29 +7431,193 @@ extension ListLastOrNull<T> on List<T> {
   T? get lastOrNull => isEmpty ? null : last;
 }
 
-class _AvatarPlaceholder extends StatelessWidget {
-  const _AvatarPlaceholder({required this.label, this.bytes});
+/// Full list of a joined MUC room's occupants, opened by tapping the
+/// "N online" part of the room's chat header banner. Rendered either as a
+/// right-hand panel (wide displays) or a standalone full-screen page
+/// (smaller devices) by [_showRoomOccupants].
+class _RoomOccupantsList extends StatelessWidget {
+  const _RoomOccupantsList({
+    required this.service,
+    required this.roomJid,
+    this.onClose,
+  });
 
-  final String label;
-  final Uint8List? bytes;
+  final XmppService service;
+  final String roomJid;
+
+  /// When set, a close button is shown (used for the right-hand panel
+  /// presentation, which has no [AppBar] back button of its own).
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
-    final initial = label.trim().isEmpty ? '?' : label.trim()[0].toUpperCase();
-    if (bytes != null) {
-      return CircleAvatar(radius: 18, backgroundImage: MemoryImage(bytes!));
-    }
-    final baseColor = xep0392ColorForLabel(label);
-    final onBase = baseColor.computeLuminance() > 0.5
-        ? Colors.black
-        : Colors.white;
-    return CircleAvatar(
-      radius: 18,
-      backgroundColor: baseColor,
-      foregroundColor: onBase,
-      child: Text(initial),
+    final theme = Theme.of(context);
+    return AnimatedBuilder(
+      animation: service,
+      builder: (context, _) {
+        final occupants = service.roomOccupantsFor(roomJid);
+        return Column(
+          children: [
+            if (onClose != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Room occupants',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Close',
+                      onPressed: onClose,
+                    ),
+                  ],
+                ),
+              ),
+            if (onClose != null) const Divider(height: 1),
+            Expanded(
+              child: occupants.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No occupants',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: occupants.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, index) => _RoomOccupantTile(
+                        service: service,
+                        roomJid: roomJid,
+                        occupant: occupants[index],
+                      ),
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
+}
+
+/// A single occupant row: avatar on the left, nickname (plus role and
+/// affiliation chips) on top, and the occupant's presence `<status/>`
+/// message underneath, when present.
+class _RoomOccupantTile extends StatelessWidget {
+  const _RoomOccupantTile({
+    required this.service,
+    required this.roomJid,
+    required this.occupant,
+  });
+
+  final XmppService service;
+  final String roomJid;
+  final RoomOccupant occupant;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final avatarJid = roomOccupantAvatarJid(
+      roomJid: roomJid,
+      nick: occupant.nick,
+      outgoing: false,
+    );
+    final avatarBytes = avatarJid == null
+        ? null
+        : service.avatarBytesFor(avatarJid);
+    final chips = <Widget>[
+      if (occupant.role != null && occupant.role!.isNotEmpty)
+        _RoleAffiliationChip(label: _capitalizeWord(occupant.role!)),
+      if (occupant.affiliation != null &&
+          occupant.affiliation!.isNotEmpty &&
+          occupant.affiliation != 'none')
+        _RoleAffiliationChip(label: _capitalizeWord(occupant.affiliation!)),
+    ];
+    final status = occupant.status?.trim() ?? '';
+    return ListTile(
+      leading: AvatarWithPresence(
+        label: occupant.nick,
+        bytes: avatarBytes,
+        showPresenceDot: true,
+        presenceShow: occupant.show ?? PresenceShowElement.CHAT,
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              occupant.nick,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyLarge,
+            ),
+          ),
+          if (occupant.isSelf) ...[
+            const SizedBox(width: 6),
+            Text(
+              '(you)',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+      subtitle: (chips.isEmpty && status.isEmpty)
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (chips.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Wrap(spacing: 6, runSpacing: 4, children: chips),
+                  ),
+                if (status.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      status,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+/// A small chip used to render an occupant's MUC role or affiliation.
+class _RoleAffiliationChip extends StatelessWidget {
+  const _RoleAffiliationChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Chip(
+      label: Text(label, style: theme.textTheme.labelSmall),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+    );
+  }
+}
+
+String _capitalizeWord(String value) {
+  if (value.isEmpty) {
+    return value;
+  }
+  return value[0].toUpperCase() + value.substring(1);
 }
 
 class _MessageMenuButton extends StatefulWidget {
@@ -7520,34 +7808,6 @@ String _formatTimestamp(DateTime timestamp) {
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
   return '$year-$month-$day $hours:$minutes';
-}
-
-String _roomSubtitle(RoomEntry? entry) {
-  if (entry == null) {
-    return 'Room';
-  }
-  final parts = <String>[];
-  parts.add(entry.joined ? 'Joined' : 'Not joined');
-  if (entry.occupantCount > 0) {
-    parts.add('${entry.occupantCount} online');
-  }
-  return parts.join(' · ');
-}
-
-Color _presenceDotColor(ThemeData theme, PresenceShowElement? show) {
-  if (show == null) {
-    return theme.colorScheme.outlineVariant;
-  }
-  switch (show) {
-    case PresenceShowElement.CHAT:
-      return const Color(0xFF2FB84D);
-    case PresenceShowElement.AWAY:
-      return const Color(0xFFF9A825);
-    case PresenceShowElement.DND:
-      return const Color(0xFFC62828);
-    case PresenceShowElement.XA:
-      return const Color(0xFFF9A825);
-  }
 }
 
 class _PresenceMenu extends StatelessWidget {
@@ -7832,7 +8092,7 @@ class _PresenceMenu extends StatelessWidget {
     final latencyLabel = latencyMs == null ? '--' : '$latencyMs ms';
     final dotColor = service.isDegraded
         ? const Color(0xFFF9A825)
-        : _presenceDotColor(
+        : presenceDotColor(
             theme,
             service.selfPresence.showElement ??
                 (service.isConnected ? PresenceShowElement.CHAT : null),

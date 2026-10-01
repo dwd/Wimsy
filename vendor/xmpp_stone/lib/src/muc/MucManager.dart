@@ -189,6 +189,8 @@ class MucManager {
       occupantId: (occupantId == null || occupantId.isEmpty)
           ? null
           : occupantId,
+      status: stanza.status,
+      show: stanza.show,
     );
     _presenceController.add(presence);
   }
@@ -595,6 +597,8 @@ class MucPresenceUpdate {
     required this.unavailable,
     required this.statusCodes,
     this.occupantId,
+    this.status,
+    this.show,
   });
 
   final String roomJid;
@@ -612,6 +616,15 @@ class MucPresenceUpdate {
   /// lifetime of the occupant's participation in an occupant-id-capable
   /// room, when the server includes it.
   final String? occupantId;
+
+  /// The occupant's free-text presence `<status/>` message (e.g. an away
+  /// message), when present.
+  final String? status;
+
+  /// The occupant's presence `<show/>` element (e.g. "away", "dnd"), when
+  /// present. `null` means the occupant is simply online/available with no
+  /// particular mode advertised.
+  final PresenceShowElement? show;
 }
 
 class MucSubjectUpdate {

@@ -25,6 +25,10 @@ PresenceStanza _buildMucPresence({
   required String nick,
   required bool unavailable,
   String? realJid,
+  String? role,
+  String? affiliation,
+  String? statusText,
+  PresenceShowElement? show,
 }) {
   final stanza = unavailable
       ? PresenceStanza.withType(PresenceType.UNAVAILABLE)
@@ -33,16 +37,24 @@ PresenceStanza _buildMucPresence({
   final x = XmppElement()..name = 'x';
   x.addAttribute(XmppAttribute('xmlns', 'http://jabber.org/protocol/muc#user'));
   final item = XmppElement()..name = 'item';
-  item.addAttribute(XmppAttribute('role', 'participant'));
-  item.addAttribute(XmppAttribute('affiliation', 'member'));
+  item.addAttribute(XmppAttribute('role', role ?? 'participant'));
+  item.addAttribute(XmppAttribute('affiliation', affiliation ?? 'member'));
   if (realJid != null) {
     item.addAttribute(XmppAttribute('jid', realJid));
   }
   x.addChild(item);
-  final status = XmppElement()..name = 'status';
-  status.addAttribute(XmppAttribute('code', '110'));
-  x.addChild(status);
+  final mucStatusCode = XmppElement()..name = 'status';
+  mucStatusCode.addAttribute(XmppAttribute('code', '110'));
+  x.addChild(mucStatusCode);
   stanza.addChild(x);
+  if (statusText != null) {
+    // The free-text presence `<status/>` (no `code` attribute) is distinct
+    // from the MUC numeric `<status code="..."/>` elements above.
+    stanza.status = statusText;
+  }
+  if (show != null) {
+    stanza.show = show;
+  }
   return stanza;
 }
 
@@ -161,5 +173,79 @@ void main() {
     expect(update.nick, 'me');
     expect(update.isSelf, true);
     expect(update.unavailable, false);
+  });
+
+  test(
+    'MUC presence update captures role, affiliation, and status text',
+    () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final muc = connection.getMucModule();
+
+      final presence = _buildMucPresence(
+        fromFullJid: 'room@conference.example',
+        nick: 'alice',
+        unavailable: false,
+        role: 'moderator',
+        affiliation: 'owner',
+        statusText: 'Away at lunch',
+        show: PresenceShowElement.AWAY,
+      );
+
+      final completer = Completer<MucPresenceUpdate>();
+      final sub = muc.roomPresenceStream.listen((event) {
+        completer.complete(event);
+      });
+
+      connection.fireNewStanzaEvent(presence);
+
+      final update = await completer.future.timeout(
+        const Duration(seconds: 1),
+      );
+      await sub.cancel();
+
+      expect(update.nick, 'alice');
+      expect(update.role, 'moderator');
+      expect(update.affiliation, 'owner');
+      expect(update.status, 'Away at lunch');
+      expect(update.show, PresenceShowElement.AWAY);
+    },
+  );
+
+  test('MUC presence update defaults show to null when absent', () async {
+    final account = XmppAccountSettings(
+      'test',
+      'user',
+      'example.com',
+      'pass',
+      5222,
+    );
+    final connection = TestConnection(account);
+    final muc = connection.getMucModule();
+
+    final presence = _buildMucPresence(
+      fromFullJid: 'room@conference.example',
+      nick: 'bob',
+      unavailable: false,
+    );
+
+    final completer = Completer<MucPresenceUpdate>();
+    final sub = muc.roomPresenceStream.listen((event) {
+      completer.complete(event);
+    });
+
+    connection.fireNewStanzaEvent(presence);
+
+    final update = await completer.future.timeout(const Duration(seconds: 1));
+    await sub.cancel();
+
+    expect(update.nick, 'bob');
+    expect(update.show, isNull);
   });
 }
