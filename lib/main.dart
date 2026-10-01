@@ -738,6 +738,16 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   final Map<String, double> _remoteVideoAspectBySid = {};
   final Map<String, double> _localVideoAspectBySid = {};
   bool _localVideoMirrored = true;
+  // XEP-0491: the WebXDC mini-app currently hosted as a card within the
+  // chat window (if any), keyed by the chat it was opened from so it only
+  // shows up while that chat is the active one. [_webxdcMaximized] lets the
+  // card grow to fill the chat area instead of staying a small card.
+  String? _webxdcThreadId;
+  String? _webxdcOobUrl;
+  String? _webxdcChatBareJid;
+  bool _webxdcIsRoom = false;
+  String? _webxdcTitle;
+  bool _webxdcMaximized = false;
 
   @override
   void initState() {
@@ -2051,6 +2061,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                         message.fileState == 'declined'))
                                 ? () => _fallbackFileTransfer(message)
                                 : null,
+                            onOpenWebxdc: _openWebxdcPanel,
                           );
                         },
                       ),
@@ -2065,6 +2076,8 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             child: const Icon(Icons.arrow_downward),
                           ),
                         ),
+                      if (_buildWebxdcPanel(activeChat) != null)
+                        _buildWebxdcPanel(activeChat)!,
                     ],
                   ),
           ),
@@ -3366,6 +3379,92 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                 : 'Resume incoming video',
           ),
       ],
+    );
+  }
+
+  // XEP-0491: opens [threadId]'s WebXDC mini-app as a card embedded in the
+  // chat window for [chatBareJid]. Replaces whatever mini-app card (if any)
+  // was already open, closing its session first.
+  void _openWebxdcPanel({
+    required String threadId,
+    required String oobUrl,
+    required String chatBareJid,
+    required bool isRoom,
+    required String title,
+  }) {
+    final previousThreadId = _webxdcThreadId;
+    setState(() {
+      _webxdcThreadId = threadId;
+      _webxdcOobUrl = oobUrl;
+      _webxdcChatBareJid = chatBareJid;
+      _webxdcIsRoom = isRoom;
+      _webxdcTitle = title;
+      _webxdcMaximized = false;
+    });
+    if (previousThreadId != null && previousThreadId != threadId) {
+      unawaited(widget.service.closeWebxdcSession(previousThreadId));
+    }
+  }
+
+  void _closeWebxdcPanel() {
+    final threadId = _webxdcThreadId;
+    setState(() {
+      _webxdcThreadId = null;
+      _webxdcOobUrl = null;
+      _webxdcChatBareJid = null;
+      _webxdcIsRoom = false;
+      _webxdcTitle = null;
+      _webxdcMaximized = false;
+    });
+    if (threadId != null) {
+      unawaited(widget.service.closeWebxdcSession(threadId));
+    }
+  }
+
+  void _toggleWebxdcMaximized() {
+    setState(() {
+      _webxdcMaximized = !_webxdcMaximized;
+    });
+  }
+
+  /// Builds the WebXDC mini-app card for the chat window's message area,
+  /// shown only while [activeChat] matches the chat the mini-app was opened
+  /// from. By default it's a bounded-height card floating above the recent
+  /// messages; [_webxdcMaximized] lets the user grow it to fill the chat
+  /// area without leaving the main Wimsy window.
+  Widget? _buildWebxdcPanel(String? activeChat) {
+    final threadId = _webxdcThreadId;
+    final oobUrl = _webxdcOobUrl;
+    final chatBareJid = _webxdcChatBareJid;
+    final title = _webxdcTitle;
+    if (threadId == null ||
+        oobUrl == null ||
+        chatBareJid == null ||
+        title == null ||
+        chatBareJid != activeChat) {
+      return null;
+    }
+    final panel = WebxdcHostPanel(
+      key: ValueKey('webxdc-panel-$threadId'),
+      service: widget.service,
+      threadId: threadId,
+      oobUrl: oobUrl,
+      chatBareJid: chatBareJid,
+      isRoom: _webxdcIsRoom,
+      title: title,
+      maximized: _webxdcMaximized,
+      onToggleMaximized: _toggleWebxdcMaximized,
+      onClose: _closeWebxdcPanel,
+    );
+    if (_webxdcMaximized) {
+      return Positioned.fill(child: panel);
+    }
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 16,
+      height: 320,
+      child: panel,
     );
   }
 
@@ -5366,6 +5465,7 @@ class MessageBubble extends StatelessWidget {
     required this.onAcceptFile,
     required this.onDeclineFile,
     required this.onFallbackUpload,
+    this.onOpenWebxdc,
   });
 
   final ChatMessage message;
@@ -5393,6 +5493,10 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onAcceptFile;
   final VoidCallback? onDeclineFile;
   final VoidCallback? onFallbackUpload;
+  // XEP-0491: when supplied, used to open a WebXDC mini-app as an embedded
+  // card within the current chat window instead of pushing a full-screen
+  // route. Falls back to the full-screen host when omitted.
+  final OpenWebxdcCallback? onOpenWebxdc;
 
   @override
   Widget build(BuildContext context) {
@@ -6066,15 +6170,29 @@ class MessageBubble extends StatelessWidget {
             child: FilledButton(
               onPressed: canOpen
                   ? () {
+                      final openInline = onOpenWebxdc;
+                      if (openInline != null) {
+                        openInline(
+                          threadId: threadId,
+                          oobUrl: oobUrl,
+                          chatBareJid: chatBareJid,
+                          isRoom: isRoom,
+                          title: title,
+                        );
+                        return;
+                      }
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => WebxdcHostScreen(
+                          builder: (_) => WebxdcHostPanel(
                             service: service,
                             threadId: threadId,
                             oobUrl: oobUrl,
                             chatBareJid: chatBareJid,
                             isRoom: isRoom,
                             title: title,
+                            maximized: true,
+                            onToggleMaximized: () {},
+                            onClose: () => Navigator.of(context).pop(),
                           ),
                         ),
                       );
@@ -6576,9 +6694,24 @@ class _TouchLongPressRegionState extends State<_TouchLongPressRegion> {
   }
 }
 
-// XEP-0491: full-screen host for an opened WebXDC mini-app session.
-class WebxdcHostScreen extends StatefulWidget {
-  const WebxdcHostScreen({
+// XEP-0491: callback used by [MessageBubble] to ask the hosting chat
+// window to open a WebXDC mini-app as an embedded card, rather than the
+// widget pushing a full-screen route itself.
+typedef OpenWebxdcCallback =
+    void Function({
+      required String threadId,
+      required String oobUrl,
+      required String chatBareJid,
+      required bool isRoom,
+      required String title,
+    });
+
+// XEP-0491: embeddable host for an opened WebXDC mini-app session. By
+// default this is shown as a card within the chat window (see
+// [_WimsyHomeState._buildWebxdcPanel]); [maximized] lets it grow to fill
+// the chat area instead of a separate OS/full-screen window.
+class WebxdcHostPanel extends StatefulWidget {
+  const WebxdcHostPanel({
     super.key,
     required this.service,
     required this.threadId,
@@ -6586,6 +6719,9 @@ class WebxdcHostScreen extends StatefulWidget {
     required this.chatBareJid,
     required this.isRoom,
     required this.title,
+    required this.maximized,
+    required this.onToggleMaximized,
+    required this.onClose,
   });
 
   final XmppService service;
@@ -6594,12 +6730,15 @@ class WebxdcHostScreen extends StatefulWidget {
   final String chatBareJid;
   final bool isRoom;
   final String title;
+  final bool maximized;
+  final VoidCallback onToggleMaximized;
+  final VoidCallback onClose;
 
   @override
-  State<WebxdcHostScreen> createState() => _WebxdcHostScreenState();
+  State<WebxdcHostPanel> createState() => _WebxdcHostPanelState();
 }
 
-class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
+class _WebxdcHostPanelState extends State<WebxdcHostPanel> {
   WebxdcSession? _session;
   Object? _error;
   bool _loading = true;
@@ -6690,20 +6829,68 @@ class _WebxdcHostScreenState extends State<WebxdcHostScreen> {
   @override
   Widget build(BuildContext context) {
     final session = _session;
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(_error.toString(), textAlign: TextAlign.center),
+    final theme = Theme.of(context);
+    return Card(
+      margin: widget.maximized ? EdgeInsets.zero : const EdgeInsets.all(8),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Material(
+            color: theme.colorScheme.surfaceContainerHighest,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 4,
               ),
-            )
-          : session == null
-          ? const Center(child: Text('Unable to open mini app.'))
-          : session.buildHostWidget(),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: theme.textTheme.titleSmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      widget.maximized
+                          ? Icons.close_fullscreen
+                          : Icons.open_in_full,
+                    ),
+                    tooltip: widget.maximized
+                        ? 'Restore mini app'
+                        : 'Maximize mini app',
+                    onPressed: widget.onToggleMaximized,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Close mini app',
+                    onPressed: widget.onClose,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _error.toString(),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : session == null
+                ? const Center(child: Text('Unable to open mini app.'))
+                : session.buildHostWidget(),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -9458,6 +9458,14 @@ class XmppService extends ChangeNotifier {
         'messageId=$messageId',
       );
       _incomingMessageHandler?.call(normalized, newMessage);
+      // R1.4: if the chat is already open while this live message arrives,
+      // the user is implicitly displaying it — keep the XEP-0490 MDS state
+      // (and the XEP-0333 marker sent to the peer) current instead of only
+      // publishing once when the chat was first opened via selectChat().
+      if (normalized == _activeChatBareJid) {
+        _sendDisplayedForChat(normalized);
+        _publishDisplayedState(normalized);
+      }
     } else if (!outgoing) {
       debugPrint(
         'NewMsg[DM] suppressing incomingMessageHandler for chat=$normalized: '
@@ -9734,7 +9742,17 @@ class XmppService extends ChangeNotifier {
         'messageId=$messageId',
       );
       _incomingRoomMessageHandler?.call(normalized, newMessage);
-    } else if (!outgoing) {
+    }
+    // R1.4: keep the XEP-0490 MDS marker current while the room is open and
+    // new live messages keep arriving, instead of only publishing once when
+    // the room was first opened via selectChat().
+    if (!outgoing &&
+        !hasMamIdRoom &&
+        catchUpCompleteRoom &&
+        normalized == _activeChatBareJid) {
+      _publishDisplayedState(normalized);
+    }
+    if (!outgoing && !(!hasMamIdRoom && catchUpCompleteRoom && shouldNotifyRoom)) {
       debugPrint(
         'NewMsg[MUC] suppressing incomingRoomMessageHandler for chat=$normalized: '
         'outgoing=$outgoing hasMamId=$hasMamIdRoom '

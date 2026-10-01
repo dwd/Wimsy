@@ -187,13 +187,31 @@ jobs:
 
   build-linux:
     needs: analyze
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
+      - name: Add WPE WebKit APT repository
+        # WPEWebKit (and its libwpe/WPEBackend-fdo dependencies) are no
+        # longer shipped in Ubuntu's own archives (see
+        # linux/build-wpewebkit.sh for the full rationale), so pull
+        # pre-built packages from our own APT repository instead of
+        # compiling them from source on every CI run.
+        env:
+          WPE_WEBKIT_APT_KEY_URL: ${{ vars.WPE_WEBKIT_APT_KEY_URL || 'https://nexus.cridland.io/repository/public/cridland-nexus-key.asc' }}
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /etc/apt/keyrings
+          sudo curl -fsSL -o /etc/apt/keyrings/cridland-nexus.asc "${WPE_WEBKIT_APT_KEY_URL}"
+          echo "deb [signed-by=/etc/apt/keyrings/cridland-nexus.asc] https://nexus.cridland.io/repository/wpe-webkit resolute main" \
+            | sudo tee /etc/apt/sources.list.d/wpe-webkit.list
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev dpkg-dev
+          sudo apt-get install -y curl clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev libcurl4-openssl-dev dpkg-dev \
+            libwoff2-1 libwoff2-dev \
+            libwpe-1.0-1 libwpe-1.0-dev \
+            libwpebackend-fdo-1.0-1 libwpebackend-fdo-1.0-dev \
+            libwpewebkit-1.0-3 libwpewebkit-1.0-dev
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -264,7 +282,7 @@ jobs:
           Section: net
           Priority: optional
           Architecture: amd64
-          Depends: libgtk-3-0, libsecret-1-0, liblzma5
+          Depends: libgtk-3-0, libsecret-1-0, liblzma5, libwpewebkit-1.0-3, libwpe-1.0-1, libwpebackend-fdo-1.0-1, libwoff2-1
           Maintainer: Wimsy
           Description: Wimsy XMPP client
           EOF
