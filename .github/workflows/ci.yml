@@ -211,7 +211,12 @@ jobs:
             libwoff2-1 libwoff2-dev \
             libwpe-1.0-1 libwpe-1.0-dev \
             libwpebackend-fdo-1.0-1 libwpebackend-fdo-1.0-dev \
-            libwpewebkit-1.0-3 libwpewebkit-1.0-dev
+            libwpewebkit-1.0-3 libwpewebkit-1.0-dev libsoup-3.0-dev
+      - name: Verify WPE development dependencies
+        # Listing a .pc file or reading its version does not resolve Requires.
+        # Check the full dependency graph before CMake's quiet plugin probes.
+        run: |
+          pkg-config --print-errors --cflags --libs wpe-webkit-2.0 wpe-1.0 wpebackend-fdo-1.0
       - uses: subosito/flutter-action@v2
         with:
           channel: stable

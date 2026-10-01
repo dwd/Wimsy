@@ -492,7 +492,7 @@ Architecture: ${ARCH}
 Section: libdevel
 Priority: optional
 Maintainer: Wimsy
-Depends: libwpewebkit-1.0-3 (= ${pkgver})
+Depends: libwpewebkit-1.0-3 (= ${pkgver}), libglib2.0-dev, libsoup-3.0-dev, libwpe-1.0-dev
 Description: WPEWebKit web content engine for embedded devices (development)
  Development headers and pkg-config file for libwpewebkit-1.0.
 EOF

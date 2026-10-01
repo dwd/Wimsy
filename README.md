@@ -48,6 +48,24 @@ Builds, but untested on:
 - macOS builds that use `flutter_secure_storage` require the `keychain-access-groups`
   entitlement (not `com.apple.security.keychain-access-groups`) to avoid `-34018`.
 
+## Linux build dependencies
+
+The WebXDC webview uses WPE WebKit. On Ubuntu 26.04, configure the WPE APT
+repository used in `.github/workflows/ci.yml` (or build packages with
+`linux/build-wpewebkit.sh`), then install the development dependencies:
+
+```sh
+sudo apt-get install libwpewebkit-1.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libsoup-3.0-dev
+pkg-config --print-errors --cflags --libs wpe-webkit-2.0 wpe-1.0 wpebackend-fdo-1.0
+flutter build linux --release
+```
+
+`pkg-config --list-all` and `--modversion` can report WPE WebKit even when
+dependencies listed in its `Requires` field are missing. Use the flags check
+above to expose missing development packages behind CMake's "WPE WebKit
+development files were not found" error. Older locally built WebKit development
+packages do not declare all these dependencies, so install them explicitly.
+
 ## Android test login links
 
 Android builds accept login links in either of these forms:
