@@ -155,6 +155,44 @@ void main() {
       expect(rooms['room@conf.example.com']!.single.body, 'in a room');
     });
 
+    test('messages are bounded to maxCachedMessagesPerChat on store and load', () async {
+      storage.maxCachedMessagesPerChat = 5;
+      final messages = [
+        for (var i = 0; i < 10; i++) _message('m$i', body: 'message $i'),
+      ];
+
+      await storage.storeMessagesForJid('bob@example.com', messages);
+      final loaded = storage.loadMessages()['bob@example.com']!;
+      expect(loaded.length, 5);
+      expect(loaded.map((m) => m.messageId), ['m5', 'm6', 'm7', 'm8', 'm9']);
+
+      // Lock and unlock to verify that on cold start, _seedMessageCaches only
+      // decodes the bounded number of messages.
+      await storage.lock();
+      await storage.unlock('1234');
+
+      final reloaded = storage.loadMessages()['bob@example.com']!;
+      expect(reloaded.length, 5);
+      expect(reloaded.map((m) => m.messageId), ['m5', 'm6', 'm7', 'm8', 'm9']);
+    });
+
+    test('seedMessageCaches limits messages even if oversized record exists in box', () async {
+      storage.maxCachedMessagesPerChat = 10;
+      final messages = [
+        for (var i = 0; i < 10; i++) _message('m$i', body: 'msg $i'),
+      ];
+      await storage.storeRoomMessagesForJid('room@conf.example.com', messages);
+
+      // Now lower the cache limit and reopen
+      storage.maxCachedMessagesPerChat = 3;
+      await storage.lock();
+      await storage.unlock('1234');
+
+      final rooms = storage.loadRoomMessages()['room@conf.example.com']!;
+      expect(rooms.length, 3);
+      expect(rooms.map((m) => m.messageId), ['m7', 'm8', 'm9']);
+    });
+
     test('storing one chat does not rewrite the other chats', () async {
       // Seed a sizeable second conversation, then measure how much the file
       // grows when an unrelated, tiny chat is updated. With the old

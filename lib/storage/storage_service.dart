@@ -86,6 +86,22 @@ class StorageService {
   // policy offline / before the next fetch completes.
   static const _securityLabelPolicyPrefix = 'seclabelpolicy:';
 
+  /// The maximum number of messages loaded or retained in the local cache per
+  /// conversation.
+  ///
+  /// The initial chat viewport displays 60 messages (`_initialMessageWindowSize`).
+  /// Keeping 100 messages per conversation in cache guarantees that the initial
+  /// window is rendered immediately on open without network latency, while
+  /// leaving headroom for smooth backwards scrolling before paging older history
+  /// from the MAM archive on the server. Bounding the cached history per chat
+  /// also prevents slow startup decoding, memory bloat, GC pressure, and large
+  /// write amplification as the client runs over time.
+  @visibleForTesting
+  static const int defaultMaxCachedMessagesPerChat = 100;
+
+  @visibleForTesting
+  int maxCachedMessagesPerChat = defaultMaxCachedMessagesPerChat;
+
   /// Above this size the box is considered bloated and is compacted eagerly
   /// rather than waiting for Hive's own (60 overwrites) heuristic. Mutable
   /// so tests can exercise the guard without writing tens of megabytes.
@@ -501,7 +517,10 @@ class StorageService {
       return;
     }
     final cache = isRoom ? _roomMessageCache : _messageCache;
-    cache[jid] = List<ChatMessage>.from(messages);
+    final bounded = messages.length > maxCachedMessagesPerChat
+        ? messages.sublist(messages.length - maxCachedMessagesPerChat)
+        : messages;
+    cache[jid] = List<ChatMessage>.from(bounded);
     final touched = <_MessageCacheKey>{_MessageCacheKey(jid, isRoom)};
     touched.addAll(_enforceMessageCacheLimit());
     await _writeMessageRecords(touched);
@@ -580,8 +599,11 @@ class StorageService {
       if (value is! List) {
         continue;
       }
+      final rawList = value.length > maxCachedMessagesPerChat
+          ? value.sublist(value.length - maxCachedMessagesPerChat)
+          : value;
       final messages = <ChatMessage>[];
-      for (final raw in value) {
+      for (final raw in rawList) {
         if (raw is! Map) {
           continue;
         }
