@@ -522,8 +522,7 @@ void main() {
     expect(find.byTooltip('Invite to room'), findsOneWidget);
     expect(find.byTooltip('Leave room'), findsOneWidget);
     expect(find.text('Leave'), findsNothing);
-    expect(find.byTooltip('Send file'), findsOneWidget);
-    expect(find.byTooltip('Send photo'), findsOneWidget);
+    expect(find.byTooltip('Attachments'), findsOneWidget);
     expect(find.byTooltip('Send'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('chat-header-details-button')));
@@ -635,8 +634,7 @@ void main() {
     expect(find.byTooltip('Invite to room'), findsOneWidget);
     expect(find.byTooltip('Leave room'), findsOneWidget);
     expect(find.text('Leave'), findsNothing);
-    expect(find.byTooltip('Send file'), findsOneWidget);
-    expect(find.byTooltip('Send photo'), findsOneWidget);
+    expect(find.byTooltip('Attachments'), findsOneWidget);
     expect(find.byTooltip('Send'), findsOneWidget);
     expect(find.textContaining('Signed in as'), findsNothing);
     expect(find.byTooltip('Set presence'), findsOneWidget);
@@ -657,8 +655,7 @@ void main() {
     );
     expect(find.text('The Lounge'), findsNothing);
     expect(find.byTooltip('Set presence'), findsNothing);
-    expect(find.byTooltip('Send file'), findsOneWidget);
-    expect(find.byTooltip('Send photo'), findsOneWidget);
+    expect(find.byTooltip('Attachments'), findsOneWidget);
     expect(find.byTooltip('Send'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
     expect(
@@ -1561,4 +1558,102 @@ void main() {
     expect(find.text('Direct TLS'), findsOneWidget);
     expect(find.text('QUIC'), findsOneWidget);
   });
+
+  testWidgets(
+    'portrait phone composer has expandable attachment button with options',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await PreferencesService.load();
+      final room = RoomEntry(
+        roomJid: 'general@conference.example.com',
+        nick: 'tester',
+        joined: true,
+      );
+      final service = XmppService()
+        ..seedConnectedRoomForTesting(room, name: 'General');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: WimsyHome(
+            service: service,
+            storage: StorageService(),
+            notifications: NotificationService(),
+            preferences: prefs,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Verify the single '+' attachments button exists and distinct attachment buttons are not directly in composer.
+      final attachmentButton = find.byTooltip('Attachments');
+      expect(attachmentButton, findsOneWidget);
+      expect(find.descendant(of: attachmentButton, matching: find.byIcon(Icons.add)), findsOneWidget);
+      expect(find.byTooltip('Send file'), findsNothing);
+      expect(find.byTooltip('Send photo'), findsNothing);
+      expect(find.byTooltip('Send mini app'), findsNothing);
+
+      // Tap the attachments '+' button to open the popup menu.
+      await tester.tap(attachmentButton);
+      await tester.pumpAndSettle();
+
+      // Verify all attachment options are visible in the popup menu.
+      expect(find.text('Send file'), findsOneWidget);
+      expect(find.byIcon(Icons.attach_file), findsOneWidget);
+      expect(find.text('Send photo'), findsOneWidget);
+      expect(find.byIcon(Icons.photo_camera), findsOneWidget);
+      expect(find.text('Send mini app'), findsOneWidget);
+      expect(find.byIcon(Icons.widgets_outlined), findsOneWidget);
+
+      // Dismiss menu.
+      await tester.tap(find.text('Send file'));
+      await tester.pumpAndSettle();
+      expect(find.text('Send mini app'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'attachments button is disabled when chat cannot be sent to',
+    (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await PreferencesService.load();
+      final room = RoomEntry(
+        roomJid: 'inactive@conference.example.com',
+        nick: 'tester',
+        joined: false,
+      );
+      final service = XmppService();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: WimsyHome(
+            service: service,
+            storage: StorageService(),
+            notifications: NotificationService(),
+            preferences: prefs,
+          ),
+        ),
+      );
+      await tester.pump();
+      service.seedConnectedRoomForTesting(room, name: 'Inactive Room');
+      await tester.pump();
+
+      final popup = tester.widget<PopupMenuButton<dynamic>>(
+        find.byWidgetPredicate(
+          (w) => w is PopupMenuButton && w.tooltip == 'Attachments',
+        ),
+      );
+      expect(popup.enabled, isFalse);
+    },
+  );
 }

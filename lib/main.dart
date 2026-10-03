@@ -1652,38 +1652,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     icon: const Icon(Icons.security),
                     tooltip: 'Add security label',
                   ),
-                  IconButton(
-                    onPressed: canSend
-                        ? () => _sendAttachment(
-                            activeChat,
-                            isBookmark: isBookmark,
-                            roomEntry: roomEntry,
-                          )
-                        : null,
-                    icon: const Icon(Icons.attach_file),
-                    tooltip: 'Send file',
-                  ),
-                  IconButton(
-                    onPressed: canSend
-                        ? () => _sendWebxdcWidget(
-                            activeChat,
-                            isBookmark: isBookmark,
-                            roomEntry: roomEntry,
-                          )
-                        : null,
-                    icon: const Icon(Icons.widgets_outlined),
-                    tooltip: 'Send mini app',
-                  ),
-                  IconButton(
-                    onPressed: canSend
-                        ? () => _sendPhotoMessage(
-                            activeChat,
-                            isBookmark: isBookmark,
-                            roomEntry: roomEntry,
-                          )
-                        : null,
-                    icon: const Icon(Icons.photo_camera),
-                    tooltip: 'Send photo',
+                  _buildAttachmentButton(
+                    context,
+                    activeChat,
+                    isBookmark: isBookmark,
+                    roomEntry: roomEntry,
+                    enabled: canSend,
                   ),
                   IconButton(
                     onPressed: canSend ? () => _sendMessage(activeChat) : null,
@@ -2235,38 +2209,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                           tooltip: 'Add security label',
                         ),
                         const SizedBox(width: 4),
-                        IconButton(
-                          onPressed: canSend
-                              ? () => _sendAttachment(
-                                  activeChat,
-                                  isBookmark: isBookmark,
-                                  roomEntry: roomEntry,
-                                )
-                              : null,
-                          icon: const Icon(Icons.attach_file),
-                          tooltip: 'Send file',
-                        ),
-                        IconButton(
-                          onPressed: canSend
-                              ? () => _sendWebxdcWidget(
-                                  activeChat,
-                                  isBookmark: isBookmark,
-                                  roomEntry: roomEntry,
-                                )
-                              : null,
-                          icon: const Icon(Icons.widgets_outlined),
-                          tooltip: 'Send mini app',
-                        ),
-                        IconButton(
-                          onPressed: canSend
-                              ? () => _sendPhotoMessage(
-                                  activeChat,
-                                  isBookmark: isBookmark,
-                                  roomEntry: roomEntry,
-                                )
-                              : null,
-                          icon: const Icon(Icons.photo_camera),
-                          tooltip: 'Send photo',
+                        _buildAttachmentButton(
+                          context,
+                          activeChat,
+                          isBookmark: isBookmark,
+                          roomEntry: roomEntry,
+                          enabled: canSend,
                         ),
                         const SizedBox(width: 4),
                         IconButton(
@@ -2390,6 +2338,82 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           ),
         ],
       ),
+    );
+  }
+
+  // Compact attachment menu: expands a single '+' button to present options
+  // for sending a file, a photo/camera image, or a WebXDC mini app.
+  Widget _buildAttachmentButton(
+    BuildContext context,
+    String? activeChat, {
+    required bool isBookmark,
+    required RoomEntry? roomEntry,
+    required bool enabled,
+  }) {
+    return PopupMenuButton<_AttachmentAction>(
+      tooltip: 'Attachments',
+      icon: const Icon(Icons.add),
+      enabled: enabled,
+      onSelected: (action) {
+        if (!enabled || activeChat == null) {
+          return;
+        }
+        switch (action) {
+          case _AttachmentAction.file:
+            _sendAttachment(
+              activeChat,
+              isBookmark: isBookmark,
+              roomEntry: roomEntry,
+            );
+            break;
+          case _AttachmentAction.photo:
+            _sendPhotoMessage(
+              activeChat,
+              isBookmark: isBookmark,
+              roomEntry: roomEntry,
+            );
+            break;
+          case _AttachmentAction.webxdc:
+            _sendWebxdcWidget(
+              activeChat,
+              isBookmark: isBookmark,
+              roomEntry: roomEntry,
+            );
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem<_AttachmentAction>(
+          value: _AttachmentAction.file,
+          child: Row(
+            children: [
+              Icon(Icons.attach_file),
+              SizedBox(width: 12),
+              Text('Send file'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<_AttachmentAction>(
+          value: _AttachmentAction.photo,
+          child: Row(
+            children: [
+              Icon(Icons.photo_camera),
+              SizedBox(width: 12),
+              Text('Send photo'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<_AttachmentAction>(
+          value: _AttachmentAction.webxdc,
+          child: Row(
+            children: [
+              Icon(Icons.widgets_outlined),
+              SizedBox(width: 12),
+              Text('Send mini app'),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -8964,6 +8988,12 @@ String? _guessImageMimeType(String fileName) {
     default:
       return null;
   }
+}
+
+enum _AttachmentAction {
+  file,
+  photo,
+  webxdc,
 }
 
 enum _PresenceAction {
