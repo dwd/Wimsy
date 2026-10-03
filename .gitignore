@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /build--OLD/
+/android/build/
 vendor/xmpp_stone/build/
 /coverage/
 
