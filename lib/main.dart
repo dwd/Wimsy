@@ -36,6 +36,7 @@ import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/jid_discovery.dart';
 import 'xmpp/jid_normalization.dart';
+import 'xmpp/security_label_policy.dart';
 import 'xmpp/vcard_utils.dart';
 import 'xmpp/xmpp_service.dart';
 import 'background/foreground_task_handler.dart';
@@ -2502,7 +2503,8 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   }
 
   // XEP-0258: opens `flutter_spiffing`'s [LabelEditor] seeded with a fresh
-  // label for the primary known policy, and stages the resulting
+  // label for the available policies (allowing the user to select the
+  // policy when multiple are loaded), and stages the resulting
   // `<securitylabel/>` element (see `buildOutgoingSecurityLabelElement`)
   // for [chatJid] if the user applies it.
   Future<void> _openSecurityLabelEditor(
@@ -2510,17 +2512,21 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     String chatJid,
   ) async {
     final service = widget.service;
-    final ref = service.securityLabelPolicies.firstOrNull;
-    final spif = ref == null ? null : service.securityLabelPolicySpif(ref.id);
-    if (spif == null) {
+    final availablePolicies = <SecurityLabelPolicyOption>[];
+    for (final ref in service.securityLabelPolicies) {
+      final spif = service.securityLabelPolicySpif(ref.id);
+      if (spif != null) {
+        availablePolicies.add(SecurityLabelPolicyOption(ref: ref, spif: spif));
+      }
+    }
+    if (availablePolicies.isEmpty) {
       _showSnack('Security policy not yet available.');
       return;
     }
-    final label = spiffing.Label.forPolicy(spif);
     final element = await Navigator.of(context).push<XmppElement>(
       MaterialPageRoute(
         builder: (context) =>
-            _SecurityLabelEditorScreen(spif: spif, label: label),
+            SecurityLabelEditorScreen(policies: availablePolicies),
       ),
     );
     if (element != null) {
@@ -5415,24 +5421,74 @@ XmppElement buildOutgoingSecurityLabelElement(spiffing.Label label) {
   return securityLabel;
 }
 
+class SecurityLabelPolicyOption {
+  const SecurityLabelPolicyOption({
+    required this.ref,
+    required this.spif,
+  });
+
+  final SecurityLabelPolicyRef ref;
+  final spiffing.Spif spif;
+
+  String get displayName {
+    if (ref.name.trim().isNotEmpty) {
+      return ref.name.trim();
+    }
+    if (spif.name.trim().isNotEmpty) {
+      return spif.name.trim();
+    }
+    return ref.id;
+  }
+}
+
 // XEP-0258: a full-screen host for `flutter_spiffing`'s [LabelEditor],
 // used to build a brand-new security label from scratch (the "Create new
-// label…" option in the compose bar's label picker). Applying the label
-// pops the screen with the resulting outgoing `<securitylabel/>` element;
-// backing out without applying pops with null.
-class _SecurityLabelEditorScreen extends StatefulWidget {
-  const _SecurityLabelEditorScreen({required this.spif, required this.label});
+// label…" option in the compose bar's label picker). If the server provides
+// multiple security policies, a dropdown allows the user to select the
+// policy before creating the label. Applying the label pops the screen with
+// the resulting outgoing `<securitylabel/>` element; backing out without
+// applying pops with null.
+class SecurityLabelEditorScreen extends StatefulWidget {
+  const SecurityLabelEditorScreen({
+    super.key,
+    required this.policies,
+    this.initialPolicyId,
+  }) : assert(policies.length > 0, 'Must provide at least one policy');
 
-  final spiffing.Spif spif;
-  final spiffing.Label label;
+  final List<SecurityLabelPolicyOption> policies;
+  final String? initialPolicyId;
 
   @override
-  State<_SecurityLabelEditorScreen> createState() =>
+  State<SecurityLabelEditorScreen> createState() =>
       _SecurityLabelEditorScreenState();
 }
 
-class _SecurityLabelEditorScreenState
-    extends State<_SecurityLabelEditorScreen> {
+class _SecurityLabelEditorScreenState extends State<SecurityLabelEditorScreen> {
+  late SecurityLabelPolicyOption _selectedPolicy;
+  late spiffing.Label _label;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedPolicy = widget.policies.firstWhere(
+      (p) => p.ref.id == widget.initialPolicyId,
+      orElse: () => widget.policies.first,
+    );
+    _label = spiffing.Label.forPolicy(_selectedPolicy.spif);
+  }
+
+  void _onPolicyChanged(String? newPolicyId) {
+    if (newPolicyId == null || newPolicyId == _selectedPolicy.ref.id) {
+      return;
+    }
+    final newPolicy =
+        widget.policies.firstWhere((p) => p.ref.id == newPolicyId);
+    setState(() {
+      _selectedPolicy = newPolicy;
+      _label = spiffing.Label.forPolicy(newPolicy.spif);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -5443,7 +5499,7 @@ class _SecurityLabelEditorScreenState
             onPressed: () {
               Navigator.of(
                 context,
-              ).pop(buildOutgoingSecurityLabelElement(widget.label));
+              ).pop(buildOutgoingSecurityLabelElement(_label));
             },
             child: const Text('Apply'),
           ),
@@ -5451,10 +5507,34 @@ class _SecurityLabelEditorScreenState
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
-        child: LabelEditor(
-          spif: widget.spif,
-          label: widget.label,
-          onChanged: (_) => setState(() {}),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.policies.length > 1) ...[
+              DropdownButtonFormField<String>(
+                key: const Key('security-policy-selector'),
+                initialValue: _selectedPolicy.ref.id,
+                decoration: const InputDecoration(
+                  labelText: 'Security policy',
+                ),
+                items: [
+                  for (final policy in widget.policies)
+                    DropdownMenuItem(
+                      value: policy.ref.id,
+                      child: Text(policy.displayName),
+                    ),
+                ],
+                onChanged: _onPolicyChanged,
+              ),
+              const SizedBox(height: 12),
+            ],
+            LabelEditor(
+              key: ValueKey(_selectedPolicy.ref.id),
+              spif: _selectedPolicy.spif,
+              label: _label,
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
         ),
       ),
     );
