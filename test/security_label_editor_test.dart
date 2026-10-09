@@ -1,4 +1,6 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_spiffing/flutter_spiffing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spiffing/spiffing.dart' as spiffing;
 import 'package:wimsy/main.dart';
@@ -19,6 +21,51 @@ String _policyXml({
   </securityClassifications>
 </SPIF>
 ''';
+}
+
+class _SimpleMaterialLocalizationsDelegate
+    extends LocalizationsDelegate<MaterialLocalizations> {
+  const _SimpleMaterialLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => true;
+
+  @override
+  Future<MaterialLocalizations> load(Locale locale) =>
+      DefaultMaterialLocalizations.load(locale);
+
+  @override
+  bool shouldReload(_SimpleMaterialLocalizationsDelegate old) => false;
+}
+
+class _SimpleCupertinoLocalizationsDelegate
+    extends LocalizationsDelegate<CupertinoLocalizations> {
+  const _SimpleCupertinoLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => true;
+
+  @override
+  Future<CupertinoLocalizations> load(Locale locale) =>
+      DefaultCupertinoLocalizations.load(locale);
+
+  @override
+  bool shouldReload(_SimpleCupertinoLocalizationsDelegate old) => false;
+}
+
+class _SimpleWidgetsLocalizationsDelegate
+    extends LocalizationsDelegate<WidgetsLocalizations> {
+  const _SimpleWidgetsLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => true;
+
+  @override
+  Future<WidgetsLocalizations> load(Locale locale) =>
+      DefaultWidgetsLocalizations.load(locale);
+
+  @override
+  bool shouldReload(_SimpleWidgetsLocalizationsDelegate old) => false;
 }
 
 void main() {
@@ -191,6 +238,102 @@ void main() {
         );
 
         expect(find.text('SECRET'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'populates langTag from locale on LabelEditor',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: const [
+              _SimpleMaterialLocalizationsDelegate(),
+              _SimpleCupertinoLocalizationsDelegate(),
+              _SimpleWidgetsLocalizationsDelegate(),
+            ],
+            supportedLocales: const [Locale('fr', 'FR'), Locale('en', 'US')],
+            locale: const Locale('fr', 'FR'),
+            home: SecurityLabelEditorScreen(policies: [policyOption1]),
+          ),
+        );
+
+        final editor = tester.widget<LabelEditor>(find.byType(LabelEditor));
+        expect(editor.langTag, 'fr-FR');
+      },
+    );
+
+    testWidgets(
+      'populates simple language code as langTag on LabelEditor',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: const [
+              _SimpleMaterialLocalizationsDelegate(),
+              _SimpleCupertinoLocalizationsDelegate(),
+              _SimpleWidgetsLocalizationsDelegate(),
+            ],
+            supportedLocales: const [Locale('de'), Locale('en', 'US')],
+            locale: const Locale('de'),
+            home: SecurityLabelEditorScreen(policies: [policyOption1]),
+          ),
+        );
+
+        final editor = tester.widget<LabelEditor>(find.byType(LabelEditor));
+        expect(editor.langTag, 'de');
+      },
+    );
+
+    testWidgets(
+      'falls back to "en" when Localizations widget is not present',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Localizations(
+              locale: const Locale('und'),
+              delegates: const [
+                _SimpleMaterialLocalizationsDelegate(),
+                _SimpleWidgetsLocalizationsDelegate(),
+              ],
+              child: MediaQuery(
+                data: const MediaQueryData(),
+                child: Material(
+                  child: SecurityLabelEditorScreen(policies: [policyOption1]),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final editor = tester.widget<LabelEditor>(find.byType(LabelEditor));
+        expect(editor.langTag, 'en');
+      },
+    );
+
+    testWidgets(
+      'falls back to "en" when ambient locale is "und"',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Localizations(
+              locale: const Locale('und'),
+              delegates: const [
+                _SimpleMaterialLocalizationsDelegate(),
+                _SimpleWidgetsLocalizationsDelegate(),
+              ],
+              child: MediaQuery(
+                data: const MediaQueryData(),
+                child: Material(
+                  child: SecurityLabelEditorScreen(policies: [policyOption1]),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final editor = tester.widget<LabelEditor>(find.byType(LabelEditor));
+        expect(editor.langTag, 'en');
       },
     );
   });

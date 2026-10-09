@@ -5532,12 +5532,29 @@ class _SecurityLabelEditorScreenState extends State<SecurityLabelEditorScreen> {
               key: ValueKey(_selectedPolicy.ref.id),
               spif: _selectedPolicy.spif,
               label: _label,
+              langTag: _resolveLangTag(context),
               onChanged: (_) => setState(() {}),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// Resolves the language tag to pass to [LabelEditor], preferring the ambient
+  /// [Locale] if available, and falling back to `'en'`.
+  String _resolveLangTag(BuildContext context) {
+    final locale = Localizations.maybeLocaleOf(context);
+    if (locale != null) {
+      final languageCode = locale.languageCode.trim();
+      if (languageCode.isNotEmpty && languageCode != 'und') {
+        final tag = locale.toLanguageTag().trim();
+        if (tag.isNotEmpty && tag != 'und') {
+          return tag;
+        }
+      }
+    }
+    return 'en';
   }
 }
 
