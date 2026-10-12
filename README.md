@@ -54,7 +54,9 @@ Builds, but untested on:
 reproducible state (two seeded accounts already in each other's roster) plus
 [Maestro](https://maestro.mobile.dev/) flows that drive Wimsy in an Android
 emulator against it. See `maestro/README.md` for how to start Openfire,
-point an emulator at it, and run the flows.
+point an emulator at it, and run the flows. These flows also run
+automatically in CI, in the `maestro-e2e` job of
+`.github/workflows/ci.yml`.
 
 ## Linux build dependencies
 

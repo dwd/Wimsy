@@ -500,6 +500,72 @@ jobs:
           name: wimsy-android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
 
+  maestro-e2e:
+    needs: build-android
+    # The debug APK (needed by this job) is only built for non-release
+    # commits; see the "Build Android (debug)" step above.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download Android debug artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wimsy-android-debug
+          path: build/app/outputs/flutter-apk
+      - name: Start Openfire
+        working-directory: maestro
+        run: |
+          set -euo pipefail
+          docker compose up -d
+          echo "Waiting for Openfire to report healthy..."
+          container_id="$(docker compose ps -q openfire)"
+          for _ in $(seq 1 30); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' "$container_id" 2>/dev/null || true)"
+            if [[ "$status" == "healthy" ]]; then
+              echo "Openfire is healthy."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Openfire did not become healthy in time."
+          docker compose logs
+          exit 1
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Maestro CLI
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Enable KVM group perms
+        # Required for the Android emulator to use hardware acceleration on
+        # GitHub-hosted Ubuntu runners.
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Maestro flows against an Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            adb reverse tcp:5222 tcp:5222
+            adb install -r build/app/outputs/flutter-apk/app-debug.apk
+            maestro test maestro/flows/login_alice.yaml
+            maestro test maestro/flows/send_message.yaml
+      - name: Stop Openfire
+        if: always()
+        working-directory: maestro
+        run: docker compose down -v
+
   build-web:
     needs: analyze
     runs-on: ubuntu-latest

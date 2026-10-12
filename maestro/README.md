@@ -87,6 +87,26 @@ maestro test maestro/flows/send_message.yaml
   `Bob` (pre-seeded in alice's roster) and sends a message, asserting it
   appears in the conversation.
 
+## Running in CI
+
+These flows run automatically in the `maestro-e2e` job of
+`.github/workflows/ci.yml`, on every push and pull request (skipped for
+release tags, since those don't build a debug APK). The job:
+
+1. Downloads the debug APK produced by the `build-android` job.
+2. Starts Openfire with this directory's `docker-compose.yml` and waits for
+   its health check to pass.
+3. Boots a hardware-accelerated Android emulator on the GitHub-hosted
+   Ubuntu runner (via `reactivecircus/android-emulator-runner`) and installs
+   the Maestro CLI.
+4. Runs `adb reverse tcp:5222 tcp:5222`, installs the APK, and runs
+   `login_alice.yaml` then `send_message.yaml` on the emulator.
+5. Tears down the Openfire container (and its volume) afterwards.
+
+To reproduce the CI job locally, follow steps 1-3 above manually (start
+Openfire, `adb reverse`, install the APK on your own emulator) and then run
+`maestro test maestro/flows/<flow>.yaml` as in step 4.
+
 ## Notes
 
 - The manual-connection host/port fields are used instead of relying on SRV
