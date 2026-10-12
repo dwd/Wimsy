@@ -1,0 +1,31 @@
+# Logs in as the "alice" account seeded by maestro/openfire/openfire.xml
+# against the Openfire instance started via maestro/docker-compose.yml.
+#
+# Requires, before running `maestro test`:
+#   - The Openfire container is up and healthy (see maestro/README.md).
+#   - `adb reverse tcp:5222 tcp:5222` has been run so that "localhost" inside
+#     the emulator reaches the Openfire container published on the host.
+appId: im.cridland.wimsy
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+- inputText: "5222"
+- hideKeyboard
+- tapOn:
+    id: "login-connect-button"
+- assertVisible:
+    text: "Signed in as alice@localhost"
+    timeout: 20000

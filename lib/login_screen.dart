@@ -485,6 +485,7 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextButton.icon(
+          key: const Key('manual-connection-toggle'),
           onPressed: service.isConnecting
               ? null
               : () {
@@ -510,6 +511,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Expanded(
                   flex: 2,
                   child: TextField(
+                    key: const Key('login-host-field'),
                     controller: _hostController,
                     enabled: !service.isConnecting,
                     decoration: const InputDecoration(
@@ -520,6 +522,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: TextField(
+                    key: const Key('login-port-field'),
                     controller: _portController,
                     enabled: !service.isConnecting,
                     keyboardType: TextInputType.number,
@@ -669,6 +672,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text('Connect', style: theme.textTheme.titleLarge),
                         const SizedBox(height: 16),
                         TextField(
+                          key: const Key('login-jid-field'),
                           controller: _jidController,
                           enabled: !service.isConnecting,
                           decoration: const InputDecoration(
@@ -709,6 +713,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                         const SizedBox(height: 12),
                         TextField(
+                          key: const Key('login-password-field'),
                           controller: _passwordController,
                           enabled: !service.isConnecting,
                           obscureText: true,
@@ -718,6 +723,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 12),
                         TextField(
+                          key: const Key('login-display-name-field'),
                           controller: _displayNameController,
                           enabled: !service.isConnecting,
                           decoration: const InputDecoration(
@@ -775,6 +781,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Expanded(
                               child: FilledButton(
+                                key: const Key('login-connect-button'),
                                 onPressed: _resetting
                                     ? null
                                     : service.isConnecting

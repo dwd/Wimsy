@@ -1661,6 +1661,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     enabled: canSend,
                   ),
                   IconButton(
+                    key: const Key('message-send-button'),
                     onPressed: canSend ? () => _sendMessage(activeChat) : null,
                     icon: const Icon(Icons.send),
                     tooltip: 'Send',
@@ -2219,6 +2220,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                         ),
                         const SizedBox(width: 4),
                         IconButton(
+                          key: const Key('message-send-button'),
                           onPressed: canSend
                               ? () => _sendMessage(activeChat)
                               : null,

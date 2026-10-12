@@ -48,6 +48,14 @@ Builds, but untested on:
 - macOS builds that use `flutter_secure_storage` require the `keychain-access-groups`
   entitlement (not `com.apple.security.keychain-access-groups`) to avoid `-34018`.
 
+## End-to-end testing
+
+`maestro/` contains a Docker-based Openfire setup that boots with a known,
+reproducible state (two seeded accounts already in each other's roster) plus
+[Maestro](https://maestro.mobile.dev/) flows that drive Wimsy in an Android
+emulator against it. See `maestro/README.md` for how to start Openfire,
+point an emulator at it, and run the flows.
+
 ## Linux build dependencies
 
 The WebXDC webview uses WPE WebKit. On Ubuntu 26.04, configure the WPE APT

@@ -1,0 +1,36 @@
+# Logs in as "alice", opens the chat with "bob" (already in each other's
+# roster thanks to maestro/openfire/openfire.xml) and sends a message.
+#
+# Run maestro/flows/login_alice.yaml once beforehand on a device/session if
+# you want a clean starting point, or rely on `clearState: true` below.
+appId: im.cridland.wimsy
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+- inputText: "5222"
+- hideKeyboard
+- tapOn:
+    id: "login-connect-button"
+- assertVisible:
+    text: "Signed in as alice@localhost"
+    timeout: 20000
+- tapOn: "Bob"
+- tapOn:
+    id: "message-composer-input"
+- inputText: "Hello from Maestro"
+- tapOn:
+    id: "message-send-button"
+- assertVisible: "Hello from Maestro"

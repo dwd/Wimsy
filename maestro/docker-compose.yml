@@ -1,0 +1,46 @@
+# Brings up a single-node Openfire server in a known, reproducible state for
+# Maestro end-to-end tests against Wimsy. See maestro/README.md for usage.
+#
+# The "openfire-seed" service copies openfire.xml (which contains an
+# <autosetup/> block, see that file for details) into the data volume once,
+# before Openfire's own entrypoint runs. Openfire deletes the <autosetup/>
+# block after it completes setup, so the seed step is skipped on subsequent
+# starts unless the volume is removed (`docker compose down -v`).
+services:
+  openfire-seed:
+    image: alpine:3.20
+    volumes:
+      - ./openfire:/seed:ro
+      - openfire-data:/var/lib/openfire
+    entrypoint: >
+      sh -c "
+        mkdir -p /var/lib/openfire/conf &&
+        if [ ! -f /var/lib/openfire/conf/openfire.xml ]; then
+          cp /seed/openfire.xml /var/lib/openfire/conf/openfire.xml &&
+          echo 'Seeded fresh openfire.xml into the data volume.';
+        else
+          echo 'openfire.xml already present; leaving existing server state untouched.';
+        fi
+      "
+
+  openfire:
+    image: ghcr.io/igniterealtime/openfire:latest
+    depends_on:
+      openfire-seed:
+        condition: service_completed_successfully
+    ports:
+      - "5222:5222" # Client-to-server (c2s)
+      - "5269:5269" # Server-to-server (s2s)
+      - "7070:7070" # BOSH / HTTP binding
+      - "7443:7443" # Admin console (HTTPS)
+      - "9090:9090" # Admin console (HTTP)
+    volumes:
+      - openfire-data:/var/lib/openfire
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  openfire-data:

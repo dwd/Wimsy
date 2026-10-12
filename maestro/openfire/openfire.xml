@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Openfire "autosetup" configuration used to bring up a server in a known,
+  reproducible state for Maestro end-to-end tests.
+
+  Openfire reads this file on its very first boot. If a block called
+  <autosetup><run>true</run>...</autosetup> is present and setup has not
+  already completed, Openfire performs the setup described here instead of
+  requiring the web-based setup wizard, then removes the <autosetup/> block
+  from the file. Because of this, the file should only be mounted into a
+  *fresh* data volume; see maestro/docker-compose.yml and maestro/README.md
+  for how the volume is reset between test runs.
+
+  Two accounts are seeded, already in each other's rosters, so Maestro flows
+  can exercise chat between two parties without needing to add contacts
+  through the UI first:
+    - alice@localhost / alice123
+    - bob@localhost   / bob123
+-->
+<jive>
+  <autosetup>
+    <run>true</run>
+    <locale>en</locale>
+    <connectionProvider>
+      <className>org.jivesoftware.database.EmbeddedConnectionProvider</className>
+    </connectionProvider>
+    <xmpp>
+      <domain>localhost</domain>
+      <fqdn>localhost</fqdn>
+      <socket>
+        <ssl>
+          <active>false</active>
+        </ssl>
+      </socket>
+    </xmpp>
+    <encryption>
+      <algorithm>AES</algorithm>
+      <key>wimsy-maestro-test-key</key>
+    </encryption>
+    <admin>
+      <email>admin@localhost</email>
+      <password>admin</password>
+    </admin>
+    <authprovider>
+      <mode>default</mode>
+    </authprovider>
+    <users>
+      <user1>
+        <username>alice</username>
+        <password>alice123</password>
+        <name>Alice</name>
+        <email>alice@localhost</email>
+        <roster>
+          <item1>
+            <jid>bob@localhost</jid>
+            <nickname>Bob</nickname>
+          </item1>
+        </roster>
+      </user1>
+      <user2>
+        <username>bob</username>
+        <password>bob123</password>
+        <name>Bob</name>
+        <email>bob@localhost</email>
+        <roster>
+          <item1>
+            <jid>alice@localhost</jid>
+            <nickname>Alice</nickname>
+          </item1>
+        </roster>
+      </user2>
+    </users>
+  </autosetup>
+  <adminConsole>
+    <port>9090</port>
+    <securePort>9091</securePort>
+    <interface>0.0.0.0</interface>
+  </adminConsole>
+</jive>
