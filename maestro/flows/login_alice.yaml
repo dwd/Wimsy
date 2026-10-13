@@ -26,6 +26,11 @@ appId: im.cridland.wimsy
 - hideKeyboard
 - tapOn:
     id: "login-connect-button"
-- assertVisible:
-    text: "Signed in as alice@localhost"
+# assertVisible's built-in fluent retry only waits ~7s, which is not always
+# long enough for Openfire to finish the handshake, so extendedWaitUntil is
+# used here to allow a longer, explicit timeout (timeout is not a valid
+# assertVisible property).
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
     timeout: 20000
