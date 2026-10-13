@@ -5,6 +5,7 @@ import 'package:universal_io/io.dart';
 import 'package:xmpp_stone/src/Connection.dart';
 import 'package:xmpp_stone/src/account/XmppAccountSettings.dart';
 import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
+import 'package:xmpp_stone/src/data/Jid.dart';
 import 'package:xmpp_stone/src/elements/stanzas/IqStanza.dart';
 import 'package:xmpp_stone/src/features/streammanagement/KeepaliveState.dart';
 import 'package:xmpp_stone/src/features/streammanagement/StreamManagmentModule.dart';
@@ -198,6 +199,33 @@ void main() {
     setup.connection.setState(XmppConnectionState.SessionInitialized);
     setup.connection.write('<presence/>');
     expect(setup.socket.writes, hasLength(2));
+  });
+
+  test(
+      'fullJidRetrieved unblocks post-bind writes even while the '
+      'connection state is still Authenticated', () {
+    // Regression test for a deadlock: servers that advertise
+    // <session><optional/></session> (effectively all modern servers,
+    // including Openfire) only reach XmppConnectionState.SessionInitialized
+    // once SessionInitiationNegotiator gets its turn. If a negotiator that
+    // runs *between* resource binding and session initiation (such as
+    // StreamManagementModule, trying to write <enable/>) had its write
+    // dropped because the connection state hadn't advanced yet, that
+    // negotiator would never reach NegotiatorState.DONE, so
+    // negotiateNextFeature() would never hand control to
+    // SessionInitiationNegotiator, and the connection would stall in
+    // Authenticated forever.
+    final setup = _newConnection();
+    setup.connection.setState(XmppConnectionState.Authenticated);
+    setup.socket.writes.clear();
+
+    setup.connection.fullJidRetrieved(
+      Jid.fromFullJid('alice@example.com/resource1'),
+    );
+    setup.connection.write('<enable xmlns="urn:xmpp:sm:3"/>');
+
+    expect(setup.connection.state, XmppConnectionState.Authenticated);
+    expect(setup.socket.writes, equals(['<enable xmlns="urn:xmpp:sm:3"/>']));
   });
 
   test('StreamManagementModule.configure overrides start out at defaults', () {

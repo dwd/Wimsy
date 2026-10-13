@@ -9,6 +9,11 @@ appId: im.cridland.wimsy
 ---
 - launchApp:
     clearState: true
+# A fresh install with clearState always lands on the one-time "Set a PIN"
+# screen before the login screen; skip it since we don't need a PIN for
+# these tests.
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
 - tapOn:
     id: "login-jid-field"
 - inputText: "alice@localhost"
@@ -22,6 +27,9 @@ appId: im.cridland.wimsy
 - inputText: "localhost"
 - tapOn:
     id: "login-port-field"
+# The port field already defaults to "5222", so it must be cleared first or
+# inputText would append to it (producing the invalid port "52225222").
+- eraseText
 - inputText: "5222"
 - hideKeyboard
 - tapOn:

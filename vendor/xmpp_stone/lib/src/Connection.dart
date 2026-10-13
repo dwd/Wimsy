@@ -140,6 +140,21 @@ class Connection {
   bool get bind2Completed => _bind2Completed;
   bool _bind2Completed = false;
 
+  /// Whether the XMPP resource has been bound, via either Bind 2 (XEP-0386,
+  /// inline during SASL2) or the legacy IQ-based `<bind/>` negotiator. Used
+  /// by [_isWriteAllowedInCurrentPhase] to unblock post-bind writes (e.g.
+  /// Stream Management's `<enable/>`) as soon as binding succeeds, instead
+  /// of waiting for [XmppConnectionState] to reach [XmppConnectionState.
+  /// SessionInitialized] — which (for servers that advertise
+  /// `<session><optional/></session>`, like most modern servers) only
+  /// happens once [SessionInitiationNegotiator] gets a turn. If a negotiator
+  /// between bind and session initiation (such as
+  /// [StreamManagementModule]) tries to write first, its write would
+  /// otherwise be dropped forever, since that negotiator would never reach
+  /// `DONE` and hand control to the next one, permanently stalling the
+  /// connection in [XmppConnectionState.Authenticated].
+  bool _resourceBound = false;
+
   /// Whether message carbons (XEP-0280) were enabled inline during Bind 2.
   /// When true, the CarbonsNegotiator should skip its IQ round-trip.
   bool get carbons2EnabledInline => _carbons2EnabledInline;
@@ -199,6 +214,7 @@ class Connection {
     _authorizedBareJid = Jid(jid.local, jid.domain, '');
     _authorizationIdentifier = _authorizedBareJid!.userAtDomain;
     account.resource = jid.resource;
+    _resourceBound = true;
   }
 
   String? get authorizationIdentifier => _authorizationIdentifier;
@@ -580,6 +596,7 @@ class Connection {
     _deferredFeatureElement = null;
     _deferredPostAuthFeatureElement = null;
     _bind2Completed = false;
+    _resourceBound = false;
     _carbons2EnabledInline = false;
     final iapScheme = account.iapConfigVersionScheme?.trim();
     final iapValue = account.iapConfigVersionValue?.trim();
@@ -1180,7 +1197,8 @@ class Connection {
   }
 
   bool _isWriteAllowedInCurrentPhase(String payload) {
-    if (state == XmppConnectionState.SessionInitialized ||
+    if (_resourceBound ||
+        state == XmppConnectionState.SessionInitialized ||
         state == XmppConnectionState.Ready ||
         state == XmppConnectionState.Resumed) {
       return true;

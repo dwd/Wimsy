@@ -11,6 +11,8 @@ maestro/
   openfire/openfire.xml   Openfire "autosetup" config: seeds the server with
                            two accounts (alice/bob) already in each other's
                            rosters, using the embedded database.
+  openfire/security.xml   Pre-seeded conf/security.xml (see that file for why
+                           this is needed alongside openfire.xml).
   docker-compose.yml       Brings up that Openfire instance in a container.
   flows/                    Maestro flow YAML files.
 ```
@@ -112,9 +114,22 @@ Openfire, `adb reverse`, install the APK on your own emulator) and then run
 - The manual-connection host/port fields are used instead of relying on SRV
   discovery because the `localhost` domain configured for the test Openfire
   instance does not publish `_xmpp-client._tcp` records.
-- `login_screen.dart` and `main.dart` expose stable widget keys (e.g.
-  `login-jid-field`, `login-password-field`, `manual-connection-toggle`,
-  `login-host-field`, `login-port-field`, `login-connect-button`,
-  `message-composer-input`, `message-send-button`) specifically so Maestro
-  flows can target them with `id:` selectors instead of brittle text
-  matching.
+- The port field pre-fills `5222` by default, so flows must `eraseText`
+  before typing into it, or the typed value gets appended to the existing
+  one instead of replacing it.
+- A fresh install always shows a one-time "Set a PIN" screen before login;
+  flows tap its `pin-setup-continue-without-pin-button` right after
+  `launchApp` to skip it.
+- `login_screen.dart` and `main.dart` wrap the relevant widgets in both a
+  `Semantics(identifier: ...)` (e.g. `login-jid-field`, `login-password-field`,
+  `manual-connection-toggle`, `login-host-field`, `login-port-field`,
+  `login-connect-button`, `message-composer-input`, `message-send-button`,
+  `pin-setup-continue-without-pin-button`) and a matching `Key`. Maestro reads
+  the Semantics tree (not Flutter `Key`s, which aren't exposed to it) for its
+  `id:` selectors, while the `Key`s remain for the existing Flutter widget
+  tests.
+- Roster entries merge the contact's name and presence into a single
+  accessibility node (e.g. `"Bob\noffline"`), and Maestro's text selector
+  requires a full match against that whole node rather than a substring.
+  `send_message.yaml` therefore matches it with `"(?s)Bob.*"` instead of
+  plain `"Bob"`.

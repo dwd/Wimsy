@@ -18,12 +18,21 @@
     - bob@localhost   / bob123
 -->
 <jive>
+  <!--
+    This is read directly by DbConnectionManager (as the top-level XML
+    property "connectionProvider.className"), not by the <autosetup> block
+    below: runAutoSetup() only ever writes database.defaultProvider.* XML
+    properties when autosetup.database.mode is "standard", so an embedded
+    <connectionProvider> nested under <autosetup> would silently be ignored,
+    leaving no connection provider configured and every DB-touching autosetup
+    step (e.g. creating the seeded users) failing.
+  -->
+  <connectionProvider>
+    <className>org.jivesoftware.database.EmbeddedConnectionProvider</className>
+  </connectionProvider>
   <autosetup>
     <run>true</run>
     <locale>en</locale>
-    <connectionProvider>
-      <className>org.jivesoftware.database.EmbeddedConnectionProvider</className>
-    </connectionProvider>
     <xmpp>
       <domain>localhost</domain>
       <fqdn>localhost</fqdn>

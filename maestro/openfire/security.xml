@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pre-seeded alongside openfire.xml (see that file and docker-compose.yml)
+  to work around an Openfire bug: on a completely fresh data volume, Openfire
+  has no conf/security.xml yet, so the <encrypt><algorithm> property it reads
+  during <autosetup> is null. XMPPServer.runAutoSetup() always calls
+  JiveGlobals.setupPropertyEncryptionAlgorithm(...) (defaulting to
+  "Blowfish" even when openfire.xml's <autosetup><encryption> block is
+  omitted), and that method does `!oldAlg.equals(alg)` without a null check,
+  so Openfire crashes with a NullPointerException ("Cannot invoke
+  "String.equals(Object)" because "oldAlg" is null") before setup can
+  complete. Seeding this file first (matching Openfire's own default
+  conf/security.xml template) ensures oldAlg is already "Blowfish", so that
+  comparison succeeds and setup proceeds normally.
+-->
+<security>
+
+  <encrypt>
+    <!-- This can be set to "AES" or "Blowfish" (default) at setup time -->
+    <algorithm>Blowfish</algorithm>
+    <key>
+       <current />
+    </key>
+    <property>
+      <name>database.defaultProvider.username</name>
+      <name>database.defaultProvider.password</name>
+    </property>
+  </encrypt>
+
+</security>

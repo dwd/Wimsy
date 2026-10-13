@@ -484,22 +484,27 @@ class _LoginScreenState extends State<LoginScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextButton.icon(
-          key: const Key('manual-connection-toggle'),
-          onPressed: service.isConnecting
-              ? null
-              : () {
-                  setState(() {
-                    _manualConnectionExpanded = !_manualConnectionExpanded;
-                  });
-                },
-          icon: Icon(
-            _manualConnectionExpanded ? Icons.expand_less : Icons.expand_more,
-          ),
-          label: Text(
-            _manualConnectionExpanded
-                ? 'Hide manual connection'
-                : 'Manual connection',
+        Semantics(
+          identifier: 'manual-connection-toggle',
+          child: TextButton.icon(
+            key: const Key('manual-connection-toggle'),
+            onPressed: service.isConnecting
+                ? null
+                : () {
+                    setState(() {
+                      _manualConnectionExpanded = !_manualConnectionExpanded;
+                    });
+                  },
+            icon: Icon(
+              _manualConnectionExpanded
+                  ? Icons.expand_less
+                  : Icons.expand_more,
+            ),
+            label: Text(
+              _manualConnectionExpanded
+                  ? 'Hide manual connection'
+                  : 'Manual connection',
+            ),
           ),
         ),
         if (_manualConnectionExpanded) ...[
@@ -510,23 +515,29 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 Expanded(
                   flex: 2,
-                  child: TextField(
-                    key: const Key('login-host-field'),
-                    controller: _hostController,
-                    enabled: !service.isConnecting,
-                    decoration: const InputDecoration(
-                      labelText: 'Host (optional)',
+                  child: Semantics(
+                    identifier: 'login-host-field',
+                    child: TextField(
+                      key: const Key('login-host-field'),
+                      controller: _hostController,
+                      enabled: !service.isConnecting,
+                      decoration: const InputDecoration(
+                        labelText: 'Host (optional)',
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
-                    key: const Key('login-port-field'),
-                    controller: _portController,
-                    enabled: !service.isConnecting,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Port'),
+                  child: Semantics(
+                    identifier: 'login-port-field',
+                    child: TextField(
+                      key: const Key('login-port-field'),
+                      controller: _portController,
+                      enabled: !service.isConnecting,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Port'),
+                    ),
                   ),
                 ),
               ],
@@ -671,19 +682,23 @@ class _LoginScreenState extends State<LoginScreen> {
                       children: [
                         Text('Connect', style: theme.textTheme.titleLarge),
                         const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('login-jid-field'),
-                          controller: _jidController,
-                          enabled: !service.isConnecting,
-                          decoration: const InputDecoration(
-                            labelText: 'JID',
-                            hintText: 'user@domain',
-                          ),
-                          onChanged: (value) =>
-                              _scheduleEndpointDiscovery(value),
-                          onEditingComplete: () => _scheduleEndpointDiscovery(
-                            _jidController.text.trim(),
-                            immediate: true,
+                        Semantics(
+                          identifier: 'login-jid-field',
+                          child: TextField(
+                            key: const Key('login-jid-field'),
+                            controller: _jidController,
+                            enabled: !service.isConnecting,
+                            decoration: const InputDecoration(
+                              labelText: 'JID',
+                              hintText: 'user@domain',
+                            ),
+                            onChanged: (value) =>
+                                _scheduleEndpointDiscovery(value),
+                            onEditingComplete: () =>
+                                _scheduleEndpointDiscovery(
+                                  _jidController.text.trim(),
+                                  immediate: true,
+                                ),
                           ),
                         ),
                         if (_endpointDiscoveryMessage != null) ...[
@@ -712,22 +727,28 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                         const SizedBox(height: 12),
-                        TextField(
-                          key: const Key('login-password-field'),
-                          controller: _passwordController,
-                          enabled: !service.isConnecting,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Password',
+                        Semantics(
+                          identifier: 'login-password-field',
+                          child: TextField(
+                            key: const Key('login-password-field'),
+                            controller: _passwordController,
+                            enabled: !service.isConnecting,
+                            obscureText: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Password',
+                            ),
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          key: const Key('login-display-name-field'),
-                          controller: _displayNameController,
-                          enabled: !service.isConnecting,
-                          decoration: const InputDecoration(
-                            labelText: 'Display name',
+                        Semantics(
+                          identifier: 'login-display-name-field',
+                          child: TextField(
+                            key: const Key('login-display-name-field'),
+                            controller: _displayNameController,
+                            enabled: !service.isConnecting,
+                            decoration: const InputDecoration(
+                              labelText: 'Display name',
+                            ),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -780,17 +801,20 @@ class _LoginScreenState extends State<LoginScreen> {
                         Row(
                           children: [
                             Expanded(
-                              child: FilledButton(
-                                key: const Key('login-connect-button'),
-                                onPressed: _resetting
-                                    ? null
-                                    : service.isConnecting
-                                    ? service.triggerImmediateReconnect
-                                    : _handleConnect,
-                                child: Text(
-                                  service.isConnecting
-                                      ? 'Connecting... (tap to retry now)'
-                                      : 'Connect',
+                              child: Semantics(
+                                identifier: 'login-connect-button',
+                                child: FilledButton(
+                                  key: const Key('login-connect-button'),
+                                  onPressed: _resetting
+                                      ? null
+                                      : service.isConnecting
+                                      ? service.triggerImmediateReconnect
+                                      : _handleConnect,
+                                  child: Text(
+                                    service.isConnecting
+                                        ? 'Connecting... (tap to retry now)'
+                                        : 'Connect',
+                                  ),
                                 ),
                               ),
                             ),

@@ -1,25 +1,48 @@
 # Brings up a single-node Openfire server in a known, reproducible state for
 # Maestro end-to-end tests against Wimsy. See maestro/README.md for usage.
 #
-# The "openfire-seed" service copies openfire.xml (which contains an
-# <autosetup/> block, see that file for details) into the data volume once,
-# before Openfire's own entrypoint runs. Openfire deletes the <autosetup/>
-# block after it completes setup, so the seed step is skipped on subsequent
-# starts unless the volume is removed (`docker compose down -v`).
+# The "openfire-seed" service initializes the data volume's conf/ directory
+# once, before Openfire's own entrypoint runs, then overlays our openfire.xml
+# (which contains an <autosetup/> block, see that file for details) and
+# security.xml on top. Openfire deletes the <autosetup/> block after it
+# completes setup, so the seed step is skipped on subsequent starts unless
+# the volume is removed (`docker compose down -v`).
+#
+# The seed step uses the same Openfire image (rather than a generic image
+# like alpine) specifically so it has access to the image's own
+# resources/security_org/ (default keystore/truststore) and conf_org/
+# (default conf/ templates): Openfire's /sbin/entrypoint.sh only populates
+# conf/ (copying conf_org/ and resources/security_org/ into the volume) the
+# very first time conf/ doesn't exist yet. If our seed step only dropped in
+# openfire.xml/security.xml without doing this copy first, conf/ would
+# "already exist" by the time the real entrypoint runs, so it would skip
+# that copy and Openfire would start with no keystore/truststore at all
+# (TLS and the HTTP bind connector would fail to initialize).
+#
+# A dedicated .wimsy-seeded marker (rather than checking whether conf/ or
+# our files already exist) tracks whether *we* have run, since conf_org
+# already ships its own default openfire.xml/security.xml, which would
+# otherwise make an existence check on those filenames false right after
+# the conf_org copy above and skip overlaying our custom versions.
 services:
   openfire-seed:
-    image: alpine:3.20
+    image: ghcr.io/igniterealtime/openfire:latest
     volumes:
       - ./openfire:/seed:ro
       - openfire-data:/var/lib/openfire
     entrypoint: >
       sh -c "
-        mkdir -p /var/lib/openfire/conf &&
-        if [ ! -f /var/lib/openfire/conf/openfire.xml ]; then
-          cp /seed/openfire.xml /var/lib/openfire/conf/openfire.xml &&
-          echo 'Seeded fresh openfire.xml into the data volume.';
+        if [ -f /var/lib/openfire/.wimsy-seeded ]; then
+          echo 'Data volume already seeded; leaving existing server state untouched.';
         else
-          echo 'openfire.xml already present; leaving existing server state untouched.';
+          if [ ! -d /var/lib/openfire/conf ]; then
+            cp -a /usr/local/openfire/conf_org /var/lib/openfire/conf &&
+            cp -a /usr/local/openfire/resources/security_org /var/lib/openfire/conf/security;
+          fi &&
+          cp /seed/security.xml /var/lib/openfire/conf/security.xml &&
+          cp /seed/openfire.xml /var/lib/openfire/conf/openfire.xml &&
+          touch /var/lib/openfire/.wimsy-seeded &&
+          echo 'Seeded fresh Openfire config into the data volume.';
         fi
       "
 

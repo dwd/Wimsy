@@ -7,6 +7,11 @@ appId: im.cridland.wimsy
 ---
 - launchApp:
     clearState: true
+# A fresh install with clearState always lands on the one-time "Set a PIN"
+# screen before the login screen; skip it since we don't need a PIN for
+# these tests.
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
 - tapOn:
     id: "login-jid-field"
 - inputText: "alice@localhost"
@@ -20,6 +25,9 @@ appId: im.cridland.wimsy
 - inputText: "localhost"
 - tapOn:
     id: "login-port-field"
+# The port field already defaults to "5222", so it must be cleared first or
+# inputText would append to it (producing the invalid port "52225222").
+- eraseText
 - inputText: "5222"
 - hideKeyboard
 - tapOn:
@@ -32,7 +40,19 @@ appId: im.cridland.wimsy
     visible:
       text: "Signed in as alice@localhost"
     timeout: 20000
-- tapOn: "Bob"
+# The roster (and "Bob"'s entry in it) populates asynchronously right after
+# sign-in, so tapOn's own ~7s fluent retry isn't always enough; wait longer
+# and explicitly before tapping it. The contact's name and presence status
+# are merged into a single accessibility node (e.g. "Bob\noffline"), and
+# Maestro's text selector requires a full match against that whole node, not
+# just a substring, so the pattern must account for the trailing status line
+# (via "(?s)" so "." also matches the newline) rather than matching "Bob"
+# alone.
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Bob.*"
+    timeout: 30000
+- tapOn: "(?s)Bob.*"
 - tapOn:
     id: "message-composer-input"
 - inputText: "Hello from Maestro"

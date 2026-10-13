@@ -1660,11 +1660,16 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     roomEntry: roomEntry,
                     enabled: canSend,
                   ),
-                  IconButton(
-                    key: const Key('message-send-button'),
-                    onPressed: canSend ? () => _sendMessage(activeChat) : null,
-                    icon: const Icon(Icons.send),
-                    tooltip: 'Send',
+                  Semantics(
+                    identifier: 'message-send-button',
+                    child: IconButton(
+                      key: const Key('message-send-button'),
+                      onPressed: canSend
+                          ? () => _sendMessage(activeChat)
+                          : null,
+                      icon: const Icon(Icons.send),
+                      tooltip: 'Send',
+                    ),
                   ),
                 ],
               ),
@@ -2219,13 +2224,16 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                           enabled: canSend,
                         ),
                         const SizedBox(width: 4),
-                        IconButton(
-                          key: const Key('message-send-button'),
-                          onPressed: canSend
-                              ? () => _sendMessage(activeChat)
-                              : null,
-                          icon: const Icon(Icons.send),
-                          tooltip: 'Send',
+                        Semantics(
+                          identifier: 'message-send-button',
+                          child: IconButton(
+                            key: const Key('message-send-button'),
+                            onPressed: canSend
+                                ? () => _sendMessage(activeChat)
+                                : null,
+                            icon: const Icon(Icons.send),
+                            tooltip: 'Send',
+                          ),
                         ),
                       ],
                     );
@@ -5254,23 +5262,26 @@ class MessageComposerTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      key: fieldKey ?? const Key('message-composer-input'),
-      controller: controller,
-      focusNode: focusNode,
-      autofocus: autofocus,
-      enabled: enabled,
-      keyboardType: TextInputType.text,
-      textCapitalization: TextCapitalization.sentences,
-      autocorrect: true,
-      enableSuggestions: true,
-      minLines: fullscreen ? null : 1,
-      maxLines: fullscreen ? null : 6,
-      expands: fullscreen,
-      textInputAction: TextInputAction.send,
-      decoration: const InputDecoration(labelText: 'Message'),
-      onChanged: onChanged,
-      onSubmitted: onSubmitted,
+    return Semantics(
+      identifier: 'message-composer-input',
+      child: TextField(
+        key: fieldKey ?? const Key('message-composer-input'),
+        controller: controller,
+        focusNode: focusNode,
+        autofocus: autofocus,
+        enabled: enabled,
+        keyboardType: TextInputType.text,
+        textCapitalization: TextCapitalization.sentences,
+        autocorrect: true,
+        enableSuggestions: true,
+        minLines: fullscreen ? null : 1,
+        maxLines: fullscreen ? null : 6,
+        expands: fullscreen,
+        textInputAction: TextInputAction.send,
+        decoration: const InputDecoration(labelText: 'Message'),
+        onChanged: onChanged,
+        onSubmitted: onSubmitted,
+      ),
     );
   }
 }
@@ -9275,9 +9286,15 @@ class _PinSetupScreenState extends State<_PinSetupScreen> {
                         child: Text(_submitting ? 'Setting...' : 'Set PIN'),
                       ),
                       const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: _submitting ? null : _continueWithoutPin,
-                        child: const Text('Continue without PIN'),
+                      Semantics(
+                        identifier: 'pin-setup-continue-without-pin-button',
+                        child: TextButton(
+                          key: const Key(
+                            'pin-setup-continue-without-pin-button',
+                          ),
+                          onPressed: _submitting ? null : _continueWithoutPin,
+                          child: const Text('Continue without PIN'),
+                        ),
                       ),
                       if (_error != null) ...[
                         const SizedBox(height: 12),
