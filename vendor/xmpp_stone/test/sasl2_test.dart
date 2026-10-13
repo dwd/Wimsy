@@ -580,6 +580,58 @@ void main() {
       expect(connection.fullJid.resource, equals('wimsy-server-assigned'));
     });
 
+    test(
+        'full-JID authorization-identifier with empty <bound/> still '
+        'unblocks resource-bound writes (XEP-0388)', () async {
+      // Regression test: per XEP-0388, a full JID (including resource) in
+      // the SASL2 success's <authorization-identifier> indicates that
+      // resource binding has already occurred, even when the accompanying
+      // Bind 2 <bound/> element is empty and doesn't repeat the JID in its
+      // own <jid> child. Some server implementations (e.g. newer Openfire
+      // builds) rely on this rather than always including <jid> in <bound/>.
+      // Without honoring this, the connection would never consider itself
+      // resource-bound and would silently drop all subsequent writes.
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true
+        ..bufferedWritesEnabled = false;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:0': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
+      });
+      final socket = _RecordingSocket();
+      connection.socket = socket;
+
+      final handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      final resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com/wimsy/abc123'
+        '</authorization-identifier>'
+        "<bound xmlns='urn:xmpp:bind:0'/>"
+        "</success></xmpp_stone>",
+      );
+      final result = await resultFuture;
+      expect(result.successful, isTrue);
+      expect(connection.bind2Completed, isTrue);
+      expect(connection.fullJid.resource, equals('wimsy/abc123'));
+
+      // The connection should now accept ordinary (non-negotiation) writes
+      // even while still in an "Authenticated"-like state, proving the
+      // resource-bound write gate was actually unblocked.
+      connection.setState(XmppConnectionState.Authenticated);
+      connection.write('<enable xmlns="urn:xmpp:sm:3"/>');
+      expect(socket.writes, contains('<enable xmlns="urn:xmpp:sm:3"/>'));
+    });
+
     test('bind2Completed is false when no Bind 2 element in success', () async {
       final account =
           XmppAccountSettings.fromJid('alice@example.com', 'secret');

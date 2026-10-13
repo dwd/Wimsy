@@ -249,7 +249,7 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0386.html"/>
         <xmpp:status>complete</xmpp:status>
-        <xmpp:note xml:lang="en">Bind 2 inline resource binding via SASL2. Sends bind element with tag in authenticate, parses bound JID from success, skips legacy IQ bind when Bind 2 completes.</xmpp:note>
+        <xmpp:note xml:lang="en">Bind 2 inline resource binding via SASL2. Sends bind element with tag in authenticate, parses bound JID from success, skips legacy IQ bind when Bind 2 completes. Also recognizes resource binding when the server conveys the bound resource solely via a full-JID authorization-identifier (XEP-0388) with an empty &lt;bound/&gt; element.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>

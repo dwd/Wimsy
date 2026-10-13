@@ -26,7 +26,7 @@
 # the conf_org copy above and skip overlaying our custom versions.
 services:
   openfire-seed:
-    image: ghcr.io/igniterealtime/openfire:latest
+    image: docker.cridland.io/openfire:dwd-deploy
     volumes:
       - ./openfire:/seed:ro
       - openfire-data:/var/lib/openfire
@@ -47,7 +47,7 @@ services:
       "
 
   openfire:
-    image: ghcr.io/igniterealtime/openfire:latest
+    image: docker.cridland.io/openfire:dwd-deploy
     depends_on:
       openfire-seed:
         condition: service_completed_successfully
@@ -60,7 +60,9 @@ services:
     volumes:
       - openfire-data:/var/lib/openfire
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/"]
+      # The dwd-deploy image doesn't ship wget/curl, so probe the admin
+      # console port directly using bash's /dev/tcp pseudo-device instead.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/9090' 2>/dev/null"]
       interval: 5s
       timeout: 5s
       retries: 20

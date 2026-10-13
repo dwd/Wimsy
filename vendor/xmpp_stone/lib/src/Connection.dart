@@ -219,9 +219,20 @@ class Connection {
 
   String? get authorizationIdentifier => _authorizationIdentifier;
 
-  void setAuthorizationIdentifier(String bareJid) {
-    final parsed = Jid.fromFullJid(bareJid);
+  /// Records the SASL2 `authorization-identifier` (XEP-0388). Per XEP-0388,
+  /// a *full* JID (i.e. one that includes a resource) here indicates that
+  /// resource binding has already occurred, even if the accompanying Bind 2
+  /// (XEP-0386) `<bound/>` element is empty and doesn't repeat the JID in its
+  /// own `<jid>` child. In that case this is treated the same as
+  /// [fullJidRetrieved] so the connection doesn't stay stuck believing the
+  /// resource is unbound.
+  void setAuthorizationIdentifier(String identifier) {
+    final parsed = Jid.fromFullJid(identifier);
     if (!parsed.isValid()) {
+      return;
+    }
+    if (parsed.resource != null && parsed.resource!.isNotEmpty) {
+      fullJidRetrieved(parsed);
       return;
     }
     _authorizedBareJid = Jid(parsed.local, parsed.domain, '');
