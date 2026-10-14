@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xmpp_stone/src/connection/HappyEyeballsConnector.dart';
@@ -53,7 +54,9 @@ class XmppWebSocketIo extends XmppWebSocket {
       bool useWebTransport = false,
       bool useQuic = false,
       bool directTls = false,
-      String? tlsHost}) async {
+      String? tlsHost,
+      bool Function(X509Certificate certificate)? onBadCertificate,
+      Uint8List? pinnedCertSha256}) async {
     if (useQuic) {
       throw UnsupportedError('QUIC is not implemented in XmppWebSocketIo');
     }
@@ -81,8 +84,8 @@ class XmppWebSocketIo extends XmppWebSocket {
         Log.i(TAG, 'Direct TLS: SecureSocket.connect');
         final rawSocket = await connector.connect(host, port);
         _logHappyEyeballsWinner(rawSocket);
-        _tcpSocket =
-            await _secureSocketFactory(rawSocket, host: tlsHost ?? host);
+        _tcpSocket = await _secureSocketFactory(rawSocket,
+            host: tlsHost ?? host, onBadCertificate: onBadCertificate);
       } else {
         Log.i(TAG, 'Plain TCP: HappyEyeballs connect');
         _tcpSocket = await connector.connect(host, port);

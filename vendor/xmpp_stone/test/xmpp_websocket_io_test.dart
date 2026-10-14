@@ -10,6 +10,8 @@ class MockSecureSocket extends Mock implements SecureSocket {}
 
 class MockWebSocketChannel extends Mock implements WebSocketChannel {}
 
+class _FakeCertificate extends Mock implements X509Certificate {}
+
 void main() {
   group('XmppWebSocketIo', () {
     test('Uses websocket factory when useWebSocket=true', () async {
@@ -92,6 +94,42 @@ void main() {
 
       expect(tcpCalled, isTrue);
       expect(secureCalled, isTrue);
+    });
+
+    test('Direct TLS forwards onBadCertificate to the secure socket factory',
+        () async {
+      // Regression test for the TLS trust-on-first-use flow: Direct TLS
+      // must let the caller (ultimately Connection._validateCertificateTrust)
+      // decide whether an otherwise-invalid certificate should be accepted,
+      // rather than always accepting or always rejecting it.
+      bool Function(X509Certificate certificate)? capturedCallback;
+      final rawSocket = MockSocket();
+      final secureSocket = MockSecureSocket();
+      final socket = XmppWebSocketIo(
+        hostLookup: (host, {type = InternetAddressType.any}) async =>
+            <InternetAddress>[InternetAddress('203.0.113.21')],
+        tcpConnect: (address, port, {timeout}) => Future.value(rawSocket),
+        secureSocketFactory: (socket,
+            {host, context, onBadCertificate, supportedProtocols}) {
+          capturedCallback = onBadCertificate;
+          return Future.value(secureSocket);
+        },
+      );
+
+      var decisionCalls = 0;
+      await socket.connect(
+        'example.com',
+        5223,
+        directTls: true,
+        onBadCertificate: (certificate) {
+          decisionCalls++;
+          return false;
+        },
+      );
+
+      expect(capturedCallback, isNotNull);
+      expect(capturedCallback!(_FakeCertificate()), isFalse);
+      expect(decisionCalls, 1);
     });
 
     test('Happy Eyeballs falls back from IPv6 to IPv4', () async {

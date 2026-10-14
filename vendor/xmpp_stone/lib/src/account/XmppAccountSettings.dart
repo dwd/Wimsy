@@ -1,3 +1,4 @@
+import 'package:universal_io/io.dart' show X509Certificate;
 import 'package:xmpp_stone/src/data/Jid.dart';
 
 class XmppTcpEndpoint {
@@ -51,6 +52,22 @@ class XmppAccountSettings {
 
   /// Base64-encoded SHA-256 digest passed to WebTransport certificate pinning.
   String? serverCertificateHash;
+
+  /// Decides whether a TLS certificate presented by [host]:[port] should be
+  /// trusted. Used by both the StartTLS and Direct TLS connection paths
+  /// instead of blindly accepting (or rejecting) unrecognized certificates:
+  /// the embedding application is expected to maintain a trust store (e.g.
+  /// trust-on-first-use) and consult it here.
+  bool Function(String host, int port, X509Certificate certificate)?
+      isCertificateTrusted;
+
+  /// Notifies the embedding application that a TLS certificate presented by
+  /// [host]:[port] was not trusted (i.e. [isCertificateTrusted] returned
+  /// false, or was unset). Typically used to surface the certificate's
+  /// details (subject, issuer, fingerprint) to the user so they can decide
+  /// whether to trust it for future connections.
+  void Function(String host, int port, X509Certificate certificate)?
+      onUntrustedCertificate;
   List<XmppTcpEndpoint>? tcpEndpoints;
   List<XmppQuicEndpoint>? quicEndpoints;
   Duration quicExclusiveHeadStart = const Duration(seconds: 12);

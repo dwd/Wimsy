@@ -11,6 +11,7 @@
 ///  - FAST fallback to SCRAM when token is absent/expired.
 import 'dart:convert';
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:test/test.dart';
@@ -48,6 +49,8 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
+    bool Function(X509Certificate certificate)? onBadCertificate,
+    Uint8List? pinnedCertSha256,
   }) async {
     return this;
   }

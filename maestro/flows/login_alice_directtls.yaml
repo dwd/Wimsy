@@ -1,0 +1,66 @@
+# Logs in as the "alice" account seeded by maestro/openfire/openfire.xml
+# against the Openfire instance started via maestro/docker-compose.yml,
+# using Direct TLS (XEP-0368) on port 15223 instead of StartTLS on 15222.
+# docker-compose.yml publishes the client ports on a dedicated 15222-15224
+# host range (instead of Openfire's conventional 5222-5224) to avoid
+# colliding with unrelated local services/containers.
+#
+# Requires, before running `maestro test`:
+#   - The Openfire container is up and healthy (see maestro/README.md).
+#   - `adb reverse tcp:15223 tcp:15223` has been run so that
+#     "localhost:15223" inside the emulator reaches the Openfire container's
+#     Direct TLS port published on the host.
+appId: im.cridland.wimsy
+---
+- launchApp:
+    clearState: true
+# A fresh install with clearState always lands on the one-time "Set a PIN"
+# screen before the login screen; skip it since we don't need a PIN for
+# these tests.
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+# The port field already defaults to "5222", so it must be cleared first or
+# inputText would append to it (producing the invalid port "522215223").
+- eraseText
+- inputText: "15223"
+# The protocol selector is an inline SegmentedButton (not a dropdown menu),
+# so the "Direct TLS" option can be tapped directly without first opening
+# anything.
+- tapOn: "Direct TLS"
+- hideKeyboard
+# Launching the app can trigger Android's "Allow Wimsy to send you
+# notifications?" permission dialog with some delay; dismiss it here if it
+# appears, since it would otherwise cover the Connect button.
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    id: "login-connect-button"
+# Direct TLS presents Openfire's self-signed test certificate, which fails
+# standard CA validation and triggers the "Untrusted certificate" dialog
+# (see login_screen.dart's _showCertificateTrustDialog); click through it by
+# trusting the certificate so the connection can proceed.
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
+# assertVisible's built-in fluent retry only waits ~7s, which is not always
+# long enough for Openfire to finish the handshake, so extendedWaitUntil is
+# used here to allow a longer, explicit timeout (timeout is not a valid
+# assertVisible property).
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000

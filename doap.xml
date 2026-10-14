@@ -243,6 +243,7 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0368.html"/>
         <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">Certificates that fail standard CA validation (e.g. self-signed) are not accepted automatically: the user is shown the certificate's subject, issuer and SHA-256 fingerprint and asked to trust it before the connection proceeds, with the decision remembered per-server for future connections.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>
@@ -305,6 +306,7 @@
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0467.html"/>
         <xmpp:status>partial</xmpp:status>
+        <xmpp:note xml:lang="en">Unlike StartTLS/Direct TLS, an untrusted certificate is not surfaced via an interactive dialog; instead the user can pin the server's expected SHA-256 certificate fingerprint (the same value/format used for WebTransport certificate pinning) and the connection is accepted only if the presented certificate matches, either via standard CA validation or that pinned fingerprint.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
     <doap:implements>

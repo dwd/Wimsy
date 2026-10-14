@@ -3,6 +3,12 @@
 #
 # Run maestro/flows/login_alice.yaml once beforehand on a device/session if
 # you want a clean starting point, or rely on `clearState: true` below.
+#
+# Requires, before running `maestro test`:
+#   - The Openfire container is up and healthy (see maestro/README.md).
+#   - `adb reverse tcp:15222 tcp:15222` has been run so that
+#     "localhost:15222" inside the emulator reaches the Openfire container's
+#     StartTLS port published on the host.
 appId: im.cridland.wimsy
 ---
 - launchApp:
@@ -26,12 +32,27 @@ appId: im.cridland.wimsy
 - tapOn:
     id: "login-port-field"
 # The port field already defaults to "5222", so it must be cleared first or
-# inputText would append to it (producing the invalid port "52225222").
+# inputText would append to it (producing the invalid port "522215222").
+# docker-compose.yml publishes StartTLS on host port 15222 (instead of the
+# conventional 5222) to avoid colliding with unrelated local services.
 - eraseText
-- inputText: "5222"
+- inputText: "15222"
 - hideKeyboard
+# Launching the app can trigger Android's "Allow Wimsy to send you
+# notifications?" permission dialog with some delay; dismiss it here if it
+# appears, since it would otherwise cover the Connect button.
+- tapOn:
+    text: "Allow"
+    optional: true
 - tapOn:
     id: "login-connect-button"
+# StartTLS presents Openfire's self-signed test certificate, which fails
+# standard CA validation and triggers the "Untrusted certificate" dialog
+# (see login_screen.dart's _showCertificateTrustDialog); click through it by
+# trusting the certificate so the connection can proceed.
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
 # assertVisible's built-in fluent retry only waits ~7s, which is not always
 # long enough for Openfire to finish the handshake, so extendedWaitUntil is
 # used here to allow a longer, explicit timeout (timeout is not a valid

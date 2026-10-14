@@ -85,6 +85,10 @@ class StorageService {
   // keyed by policy id, so labels can still be parsed against a known
   // policy offline / before the next fetch completes.
   static const _securityLabelPolicyPrefix = 'seclabelpolicy:';
+  // Trust-on-first-use decisions for TLS certificates that failed standard
+  // CA validation (e.g. self-signed certificates), keyed by `host:port`, so
+  // the user is only prompted once per server certificate.
+  static const _trustedCertPrefix = 'trustedcert:';
 
   /// The maximum number of messages loaded or retained in the local cache per
   /// conversation.
@@ -940,6 +944,47 @@ class StorageService {
   /// R5: clear the entire caps cache (e.g. for "forget account" flows).
   Future<void> clearEntityCaps() async {
     await _deleteKeysWithPrefix(_entityCapsPrefix);
+  }
+
+  /// Returns whether a SHA-256 certificate fingerprint ([sha256Hex], lower
+  /// case hex) was previously trusted by the user for `$host:$port`, used to
+  /// avoid re-prompting on every connection to the same server.
+  bool isCertificateTrusted(String host, int port, String sha256Hex) {
+    final box = _box;
+    if (box == null) {
+      return false;
+    }
+    final value = box.get('$_trustedCertPrefix$host:$port');
+    if (value is! List) {
+      return false;
+    }
+    return value.any(
+      (entry) => entry is String && entry.toLowerCase() == sha256Hex,
+    );
+  }
+
+  /// Remembers that the certificate fingerprint [sha256Hex] presented by
+  /// `$host:$port` was accepted by the user. Multiple fingerprints can be
+  /// trusted per server (e.g. across a certificate rotation).
+  Future<void> trustCertificate(String host, int port, String sha256Hex) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    final recordKey = '$_trustedCertPrefix$host:$port';
+    final existing = box.get(recordKey);
+    final fingerprints = <String>{
+      if (existing is List)
+        for (final entry in existing)
+          if (entry is String) entry,
+    }..add(sha256Hex.toLowerCase());
+    await box.put(recordKey, fingerprints.toList(growable: false));
+  }
+
+  /// Clears all remembered certificate trust decisions (e.g. for "forget
+  /// account" flows, or a security-conscious user wanting a clean slate).
+  Future<void> clearTrustedCertificates() async {
+    await _deleteKeysWithPrefix(_trustedCertPrefix);
   }
 
   /// R2.1: load the persisted "newest MAM id we've seen" anchor across

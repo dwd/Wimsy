@@ -32,6 +32,95 @@ fn client_crypto() -> &'static Mutex<ClientCrypto> {
     }))
 }
 
+/// A `ServerVerifier` that accepts a server identity either when it passes
+/// standard webpki (CA-rooted) verification, or when the SHA-256 digest of
+/// the presented end-entity (leaf) certificate matches a user-supplied
+/// pinned hash. This mirrors the manual certificate-hash pinning already
+/// used for WebTransport (see `account.serverCertificateHash`): the pin is
+/// a last-resort fallback for self-signed/untrusted certificates, not a
+/// replacement for normal CA verification.
+#[derive(Debug)]
+struct PinnedServerVerifier {
+    inner: Arc<rustls::client::WebPkiServerVerifier>,
+    pinned_sha256: [u8; 32],
+}
+
+impl rustls::client::danger::ServerVerifier for PinnedServerVerifier {
+    fn verify_identity(
+        &self,
+        identity: &rustls::client::danger::ServerIdentity<'_>,
+    ) -> Result<rustls::client::danger::PeerVerified, rustls::Error> {
+        match self.inner.verify_identity(identity) {
+            Ok(verified) => Ok(verified),
+            Err(err) => {
+                if let rustls::crypto::Identity::X509(cert) = identity.identity {
+                    let digest = ring::digest::digest(&ring::digest::SHA256, cert.end_entity.as_ref());
+                    if digest.as_ref() == self.pinned_sha256 {
+                        return Ok(rustls::client::danger::PeerVerified::assertion());
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        input: &rustls::client::danger::SignatureVerificationInput<'_>,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(input)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        input: &rustls::client::danger::SignatureVerificationInput<'_>,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(input)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::crypto::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+
+    fn request_ocsp_response(&self) -> bool {
+        self.inner.request_ocsp_response()
+    }
+
+    fn hash_config(&self, h: &mut dyn std::hash::Hasher) {
+        self.inner.hash_config(h);
+        h.write(&self.pinned_sha256);
+    }
+}
+
+/// Build a one-off (NOT globally cached) client TLS config that accepts a
+/// server certificate when either standard CA-rooted verification succeeds,
+/// or the leaf certificate's SHA-256 digest matches `pinned_sha256`. This is
+/// intentionally not cached via `client_crypto()`/`OnceLock`: the pin is
+/// specific to one account/connection attempt, so sharing it globally (and
+/// thereby reusing session-resumption tickets across accounts/pins) would be
+/// incorrect. 0-RTT/session-store resumption is not configured here.
+fn build_pinned_client_crypto(pinned_sha256: [u8; 32]) -> Arc<quinn::crypto::rustls::QuicClientConfig> {
+    let provider = Arc::new(rustls_ring::DEFAULT_PROVIDER);
+    let roots = Arc::new(rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned()));
+    let webpki_verifier = Arc::new(
+        rustls::client::WebPkiServerVerifier::builder(roots, &provider)
+            .build()
+            .expect("valid webpki verifier config"),
+    );
+    let verifier: Arc<dyn rustls::client::danger::ServerVerifier> = Arc::new(PinnedServerVerifier {
+        inner: webpki_verifier,
+        pinned_sha256,
+    });
+    let mut crypto = rustls::ClientConfig::builder(provider)
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_no_client_auth()
+        .expect("valid TLS provider");
+    crypto.alpn_protocols = vec![b"xmpp-client".as_slice().into()];
+    Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
+        .expect("TLS 1.3 provider supports QUIC"))
+}
+
 /// Configure before endpoint creation. Repeated calls for the same encrypted
 /// store preserve both the TLS configuration and its tickets.
 pub(crate) fn configure_session_storage(path: String, key: Vec<u8>) -> Result<(), QuicError> {
@@ -74,30 +163,42 @@ impl QuicEndpoint {
     /// Create a client endpoint using the Mozilla trust roots
     pub fn client() -> Result<Self, QuicError> {
         let bind_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
-        Self::client_with_bind_addr(bind_addr, None)
+        Self::client_with_bind_addr(bind_addr, None, None)
     }
 
     /// Create a client endpoint suitable for the target remote address family.
     pub fn client_for_remote(remote_addr: SocketAddr) -> Result<Self, QuicError> {
-        Self::client_for_remote_with_qlog(remote_addr, None)
+        Self::client_for_remote_with_qlog(remote_addr, None, None)
     }
 
     /// Create a client endpoint suitable for the target remote address family,
-    /// optionally writing a qlog trace to `qlog_path`.
+    /// optionally writing a qlog trace to `qlog_path`, and optionally pinning
+    /// the server's end-entity certificate SHA-256 digest as a fallback when
+    /// standard CA verification fails (used for self-signed/untrusted certs
+    /// the user has manually pinned, mirroring WebTransport's
+    /// `serverCertificateHash`).
     pub fn client_for_remote_with_qlog(
         remote_addr: SocketAddr,
         qlog_path: Option<String>,
+        pinned_cert_sha256: Option<[u8; 32]>,
     ) -> Result<Self, QuicError> {
         let bind_addr = if remote_addr.is_ipv6() {
             SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)
         } else {
             SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)
         };
-        Self::client_with_bind_addr(bind_addr, qlog_path)
+        Self::client_with_bind_addr(bind_addr, qlog_path, pinned_cert_sha256)
     }
 
-    fn client_with_bind_addr(bind_addr: SocketAddr, qlog_path: Option<String>) -> Result<Self, QuicError> {
-        let crypto = client_crypto().lock().unwrap().crypto.clone();
+    fn client_with_bind_addr(
+        bind_addr: SocketAddr,
+        qlog_path: Option<String>,
+        pinned_cert_sha256: Option<[u8; 32]>,
+    ) -> Result<Self, QuicError> {
+        let crypto = match pinned_cert_sha256 {
+            Some(pinned) => build_pinned_client_crypto(pinned),
+            None => client_crypto().lock().unwrap().crypto.clone(),
+        };
         let mut config = quinn::ClientConfig::new(crypto);
 
         // Configure transport parameters for better performance
@@ -302,5 +403,59 @@ mod early_data_tests {
     #[tokio::test]
     async fn rejects_early_streams_but_allows_replay_after_handshake() {
         tokio::time::timeout(std::time::Duration::from_secs(10), resumed_connection(true)).await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod pinned_cert_tests {
+    use super::*;
+    use rustls::client::danger::ServerVerifier;
+    use rustls_pki_types::{ServerName, UnixTime};
+
+    /// Build a `PinnedServerVerifier` whose standard webpki verification is
+    /// guaranteed to fail (its trust anchor is an unrelated self-signed
+    /// certificate), so each test exercises only the pinned-hash fallback.
+    fn build_verifier(pinned_sha256: [u8; 32]) -> PinnedServerVerifier {
+        let unrelated = rcgen::generate_simple_self_signed(vec!["unrelated.example".into()]).unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(unrelated.cert.der().clone()).unwrap();
+        let provider = rustls_ring::DEFAULT_PROVIDER;
+        let webpki_verifier = Arc::new(
+            rustls::client::WebPkiServerVerifier::builder(Arc::new(roots), &provider)
+                .build()
+                .expect("valid webpki verifier config"),
+        );
+        PinnedServerVerifier { inner: webpki_verifier, pinned_sha256 }
+    }
+
+    #[test]
+    fn accepts_matching_pinned_hash() {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let end_entity_der = cert.cert.der().clone();
+        let digest = ring::digest::digest(&ring::digest::SHA256, end_entity_der.as_ref());
+        let pinned_sha256: [u8; 32] = digest.as_ref().try_into().unwrap();
+        let verifier = build_verifier(pinned_sha256);
+
+        let identity = rustls::crypto::Identity::from_cert_chain(vec![end_entity_der]).unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let server_identity = rustls::client::danger::ServerIdentity::new(&identity, &server_name, UnixTime::now());
+
+        assert!(verifier.verify_identity(&server_identity).is_ok(),
+            "a certificate matching the pinned SHA-256 hash should be accepted");
+    }
+
+    #[test]
+    fn rejects_mismatching_pinned_hash() {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let end_entity_der = cert.cert.der().clone();
+        let wrong_pin = [0u8; 32];
+        let verifier = build_verifier(wrong_pin);
+
+        let identity = rustls::crypto::Identity::from_cert_chain(vec![end_entity_der]).unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let server_identity = rustls::client::danger::ServerIdentity::new(&identity, &server_name, UnixTime::now());
+
+        assert!(verifier.verify_identity(&server_identity).is_err(),
+            "a certificate not matching the pinned SHA-256 hash must be rejected");
     }
 }

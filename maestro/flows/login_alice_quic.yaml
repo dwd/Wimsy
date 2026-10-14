@@ -1,0 +1,73 @@
+# Logs in as the "alice" account seeded by maestro/openfire/openfire.xml
+# against the Openfire instance started via maestro/docker-compose.yml,
+# using QUIC (XEP-0467) on port 15224 instead of StartTLS on 15222.
+# docker-compose.yml publishes the client ports on a dedicated 15222-15224
+# host range (instead of Openfire's conventional 5222-5224) to avoid
+# colliding with unrelated local services/containers.
+#
+# Requires, before running `maestro test`:
+#   - The Openfire container is up and healthy (see maestro/README.md).
+#   - No `adb reverse` is needed: QUIC runs over UDP, which `adb reverse`
+#     cannot forward, so the flow connects directly to the emulator's
+#     host-loopback alias "10.0.2.2", which reaches the Openfire
+#     container's QUIC port published on the host.
+appId: im.cridland.wimsy
+---
+- launchApp:
+    clearState: true
+# A fresh install with clearState always lands on the one-time "Set a PIN"
+# screen before the login screen; skip it since we don't need a PIN for
+# these tests.
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "10.0.2.2"
+- tapOn:
+    id: "login-port-field"
+# The port field already defaults to "5222", so it must be cleared first or
+# inputText would append to it (producing the invalid port "522215224").
+- eraseText
+- inputText: "15224"
+# The protocol selector is an inline SegmentedButton (not a dropdown menu),
+# so the "QUIC" option can be tapped directly without first opening
+# anything.
+- tapOn: "QUIC"
+- hideKeyboard
+# QUIC has no interactive "untrusted certificate" dialog (unlike StartTLS
+# and Direct TLS); instead it pins the server's certificate by SHA-256
+# fingerprint up front via this field. This is the fingerprint of the
+# self-signed certificate baked into the Openfire image used by
+# maestro/docker-compose.yml; it must be regenerated (see maestro/README.md)
+# if that image's keystore ever changes. The keyboard is hidden first (and
+# re-hidden after typing) because the field sits further down the
+# scrollable form and the still-open port-field keyboard would otherwise
+# cover it, preventing Maestro from finding it.
+- tapOn:
+    id: "login-server-certificate-hash-field"
+- inputText: "7q6ZLbCQAXrycBvIif3239Ac3vgN+nFMYdAt+9c4Jx4="
+- hideKeyboard
+# Launching the app can trigger Android's "Allow Wimsy to send you
+# notifications?" permission dialog with some delay; dismiss it here if it
+# appears, since it would otherwise cover the Connect button.
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    id: "login-connect-button"
+# assertVisible's built-in fluent retry only waits ~7s, which is not always
+# long enough for Openfire to finish the handshake, so extendedWaitUntil is
+# used here to allow a longer, explicit timeout (timeout is not a valid
+# assertVisible property).
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000

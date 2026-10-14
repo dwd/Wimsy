@@ -50,3 +50,8 @@ app.*.map.json
 sentry.properties
 .output.txt
 .sentry-native/
+
+# Maestro test output (screenshots, logs, recordings), redirected here
+# (instead of the default ~/.maestro/tests) via `maestro test --debug-output`
+# so test artifacts stay inside the project directory.
+/.maestro-output/

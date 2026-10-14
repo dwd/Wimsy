@@ -731,6 +731,17 @@ class Connection {
                       (account.sasl2CachedFastMechanisms ?? [])
                           .contains(account.fastMechanism);
             }
+            // QUIC does not get an interactive "untrusted certificate" dialog
+            // (that is reserved for StartTLS/Direct TLS); instead it reuses
+            // the same manual "Server certificate hash" pinning already used
+            // for WebTransport above, decoded from base64 into the raw
+            // SHA-256 digest bytes expected by the native QUIC layer.
+            final serverCertificateHash = account.serverCertificateHash;
+            final pinnedCertSha256 =
+                (serverCertificateHash != null &&
+                        serverCertificateHash.isNotEmpty)
+                    ? base64Decode(serverCertificateHash)
+                    : null;
             await socket.connect(
               endpoint.host,
               endpoint.port,
@@ -739,6 +750,7 @@ class Connection {
               directTls: false,
               tlsHost: endpoint.tlsHost ?? account.domain,
               map: prepareStreamResponse,
+              pinnedCertSha256: pinnedCertSha256,
             );
             if (acquisitionGeneration != _socketAcquisitionGeneration) {
               socket.close();
@@ -796,6 +808,13 @@ class Connection {
               directTls: endpoint.directTls,
               tlsHost: endpoint.tlsHost ?? account.domain,
               map: prepareStreamResponse,
+              onBadCertificate: endpoint.directTls
+                  ? (certificate) => _validateCertificateTrust(
+                        endpoint.host,
+                        endpoint.port,
+                        certificate,
+                      )
+                  : null,
             );
             if (acquisitionGeneration != _socketAcquisitionGeneration) {
               socket.close();
@@ -1513,7 +1532,14 @@ class Connection {
     print('XMPP StartTLS: securing socket');
 
     _socket!
-        .secure(host: account.domain, onBadCertificate: _validateBadCertificate)
+        .secure(
+      host: account.domain,
+      onBadCertificate: (certificate) => _validateCertificateTrust(
+        account.host ?? account.domain,
+        account.port,
+        certificate,
+      ),
+    )
         .then((secureSocket) {
       if (secureSocket == null) return;
 
@@ -1565,8 +1591,24 @@ class Connection {
     setState(XmppConnectionState.Authenticating);
   }
 
-  bool _validateBadCertificate(X509Certificate certificate) {
-    return true;
+  /// Consults [XmppAccountSettings.isCertificateTrusted] to decide whether a
+  /// certificate presented by [host]:[port] should be accepted. Unlike the
+  /// old behaviour (which always returned true), an untrusted certificate is
+  /// now rejected and reported via [XmppAccountSettings.onUntrustedCertificate]
+  /// so the embedding application can prompt the user and, if they accept,
+  /// remember the decision and retry the connection.
+  bool _validateCertificateTrust(
+    String host,
+    int port,
+    X509Certificate certificate,
+  ) {
+    final trusted =
+        account.isCertificateTrusted?.call(host, port, certificate) ?? false;
+    if (!trusted) {
+      Log.w(TAG, 'Untrusted certificate presented by $host:$port');
+      account.onUntrustedCertificate?.call(host, port, certificate);
+    }
+    return trusted;
   }
 
   bool isTlsRequired() {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 
 XmppWebSocket createSocket() {
@@ -18,7 +19,9 @@ abstract class XmppWebSocket extends Stream<String> {
       bool useWebTransport = false,
       bool useQuic = false,
       bool directTls = false,
-      String? tlsHost});
+      String? tlsHost,
+      bool Function(X509Certificate certificate)? onBadCertificate,
+      Uint8List? pinnedCertSha256});
 
   void write(Object? message);
 

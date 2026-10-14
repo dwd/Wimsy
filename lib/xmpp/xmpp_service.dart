@@ -31,6 +31,7 @@ import '../av/muji_session.dart';
 import '../av/sdp_mapper.dart';
 import '../utils/graph_statistics.dart';
 import 'call_ice.dart';
+import 'certificate_trust.dart';
 import 'extdisco.dart';
 import 'jmi.dart';
 import 'blocking.dart';
@@ -202,6 +203,13 @@ class XmppService extends ChangeNotifier {
   XmppStatus _status = XmppStatus.disconnected;
   String? _errorMessage;
   String? _currentUserBareJid;
+  // A TLS certificate that failed standard CA validation (e.g. self-signed)
+  // and is awaiting a trust decision from the user, or null when there is
+  // none. Set from [XmppAccountSettings.onUntrustedCertificate] and cleared
+  // once the user accepts or rejects it (or a new connection attempt
+  // starts). See [pendingCertificate], [trustPendingCertificateAndRetry]
+  // and [rejectPendingCertificate].
+  PendingCertificateTrust? _pendingCertificate;
   XmppConnectionState? _lastConnectionState;
   bool _hasConnectedSession = false;
   bool _backgroundMode = false;
@@ -470,6 +478,11 @@ class XmppService extends ChangeNotifier {
   XmppStatus get status => _status;
   String? get errorMessage => _errorMessage;
   String? get currentUserBareJid => _currentUserBareJid;
+
+  /// A TLS certificate awaiting a trust decision from the user, or null.
+  /// The login UI should show its details (subject, issuer, fingerprint)
+  /// and call [trustPendingCertificateAndRetry] or [rejectPendingCertificate].
+  PendingCertificateTrust? get pendingCertificate => _pendingCertificate;
 
   /// Password used by the active session, exposed for the explicit web-to-APK
   /// test-account export flow. It is never persisted by this getter.
@@ -1424,6 +1437,7 @@ class XmppService extends ChangeNotifier {
 
       _status = XmppStatus.connecting;
       _errorMessage = null;
+      _pendingCertificate = null;
       notifyListeners();
       await startBackgroundService?.call();
       if (generation != _connectGeneration) return;
@@ -1582,6 +1596,30 @@ class XmppService extends ChangeNotifier {
       account.useWebTransport = useWebTransport;
       account.serverCertificateHash = effectiveServerCertificateHash?.trim();
       account.directTls = resolvedDirectTls;
+      // TLS trust-on-first-use (StartTLS and Direct TLS only; QUIC uses
+      // standard CA validation plus optional fingerprint pinning via
+      // [serverCertificateHash]-style config, not this callback pair). A
+      // certificate is trusted only once the user has explicitly accepted
+      // it via [trustPendingCertificateAndRetry]; see [pendingCertificate].
+      account.isCertificateTrusted = (certHost, certPort, certificate) {
+        return _storage?.isCertificateTrusted(
+              certHost,
+              certPort,
+              certificateSha256Fingerprint(certificate),
+            ) ??
+            false;
+      };
+      account.onUntrustedCertificate = (certHost, certPort, certificate) {
+        if (generation != _connectGeneration) return;
+        _pendingCertificate = PendingCertificateTrust(
+          host: certHost,
+          port: certPort,
+          subject: certificate.subject,
+          issuer: certificate.issuer,
+          sha256Fingerprint: certificateSha256Fingerprint(certificate),
+        );
+        notifyListeners();
+      };
       account.sasl2Software = 'Wimsy';
       account.sasl2UserAgentId = await _storage?.saslUserAgentId(bareJid);
       if (generation != _connectGeneration) return;
@@ -1942,6 +1980,34 @@ class XmppService extends ChangeNotifier {
     });
   }
 
+  /// Accepts [pendingCertificate], remembering the decision (so future
+  /// connections to the same server are not re-prompted) and immediately
+  /// retrying the connection.
+  Future<void> trustPendingCertificateAndRetry() async {
+    final pending = _pendingCertificate;
+    if (pending == null) return;
+    await _storage?.trustCertificate(
+      pending.host,
+      pending.port,
+      pending.sha256Fingerprint,
+    );
+    _pendingCertificate = null;
+    notifyListeners();
+    triggerImmediateReconnect();
+  }
+
+  /// Rejects [pendingCertificate]. The current connection attempt is left
+  /// to fail/report its error as normal and no automatic retry is
+  /// scheduled, since retrying would simply hit the same untrusted
+  /// certificate again.
+  void rejectPendingCertificate() {
+    if (_pendingCertificate == null) return;
+    _pendingCertificate = null;
+    _connectRetryTimer?.cancel();
+    _connectRetryTimer = null;
+    _setError('Certificate rejected; connection cancelled.');
+  }
+
   /// Triggers an immediate reconnect attempt, even if one is already in
   /// progress. This is intended for the user to manually kick a stuck or
   /// slow reconnect loop. It force-closes the current connection (if any)
@@ -2021,6 +2087,12 @@ class XmppService extends ChangeNotifier {
       _connectTransaction = null;
       _status = XmppStatus.disconnected;
       _errorMessage = null;
+      // Note: deliberately does NOT clear _pendingCertificate here. The
+      // normal connection-failure path (_recoverFailedConnection) calls
+      // disconnect() right after onUntrustedCertificate has populated it,
+      // so clearing it here would wipe the prompt before the user ever
+      // sees it. It is cleared explicitly at the start of connect() and by
+      // [trustPendingCertificateAndRetry]/[rejectPendingCertificate].
       notifyListeners();
     }
   }
@@ -3942,7 +4014,8 @@ class XmppService extends ChangeNotifier {
     final webxdcUpdate = rawStanza == null
         ? null
         : _messageStanzaParser.extractWebxdcUpdate(rawStanza);
-    final isWebxdcOffer = rawStanza != null &&
+    final isWebxdcOffer =
+        rawStanza != null &&
         _messageStanzaParser.isWebxdcWidgetOffer(
           rawStanza,
           oobUrl: message.oobUrl,
@@ -6692,9 +6765,7 @@ class XmppService extends ChangeNotifier {
     final iq = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.GET);
     iq.toJid = Jid.fromFullJid(domain);
     final catalog = XmppElement()..name = 'catalog';
-    catalog.addAttribute(
-      XmppAttribute('xmlns', securityLabelCatalogNamespace),
-    );
+    catalog.addAttribute(XmppAttribute('xmlns', securityLabelCatalogNamespace));
     iq.addChild(catalog);
     final result = await _sendIqAndAwait(iq);
     if (result == null || result.type != IqStanzaType.RESULT) {
@@ -7207,7 +7278,8 @@ class XmppService extends ChangeNotifier {
           if (message.webxdcDocument != null &&
               message.webxdcDocument!.isNotEmpty)
             'document': message.webxdcDocument,
-          if (message.webxdcSummary != null && message.webxdcSummary!.isNotEmpty)
+          if (message.webxdcSummary != null &&
+              message.webxdcSummary!.isNotEmpty)
             'summary': message.webxdcSummary,
         });
         _webxdcPeerSerials
@@ -9752,7 +9824,8 @@ class XmppService extends ChangeNotifier {
         normalized == _activeChatBareJid) {
       _publishDisplayedState(normalized);
     }
-    if (!outgoing && !(!hasMamIdRoom && catchUpCompleteRoom && shouldNotifyRoom)) {
+    if (!outgoing &&
+        !(!hasMamIdRoom && catchUpCompleteRoom && shouldNotifyRoom)) {
       debugPrint(
         'NewMsg[MUC] suppressing incomingRoomMessageHandler for chat=$normalized: '
         'outgoing=$outgoing hasMamId=$hasMamIdRoom '

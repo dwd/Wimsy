@@ -13,6 +13,8 @@ import '../frb_generated.dart';
 import '../models/types.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `parse_pinned_cert_sha256`
+
 /// Create a new QUIC client endpoint
 Future<QuicEndpoint> createClientEndpoint() =>
     RustLib.instance.api.crateApiBridgeCreateClientEndpoint();
@@ -124,17 +126,24 @@ Future<QuicSendStream> connectionOpenUni({
 /// The resulting file can be analysed offline with tools such as
 /// [qvis](https://qvis.quictools.info/) or Wireshark's qlog importer.
 ///
+/// If `pinned_cert_sha256` is `Some`, it must be exactly 32 bytes (a SHA-256
+/// digest of the server's end-entity certificate DER). It is accepted as a
+/// fallback when standard CA verification fails, mirroring the manual
+/// "Server certificate hash" pinning already used for WebTransport.
+///
 /// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge.
 Future<(QuicEndpoint, QuicConnection)> endpointConnect({
   required QuicEndpoint endpoint,
   required String addr,
   required String serverName,
   String? qlogPath,
+  Uint8List? pinnedCertSha256,
 }) => RustLib.instance.api.crateApiBridgeEndpointConnect(
   endpoint: endpoint,
   addr: addr,
   serverName: serverName,
   qlogPath: qlogPath,
+  pinnedCertSha256: pinnedCertSha256,
 );
 
 /// Install encrypted ticket persistence before opening the first endpoint.
@@ -153,10 +162,12 @@ Future<(QuicEndpoint, QuicConnection, bool)> endpointConnectEarly({
   required String addr,
   required String serverName,
   String? qlogPath,
+  Uint8List? pinnedCertSha256,
 }) => RustLib.instance.api.crateApiBridgeEndpointConnectEarly(
   addr: addr,
   serverName: serverName,
   qlogPath: qlogPath,
+  pinnedCertSha256: pinnedCertSha256,
 );
 
 /// Cancel acquisition/handshake work and release blocked stream operations.

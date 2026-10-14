@@ -145,19 +145,35 @@ pub async fn connection_open_uni(
 /// The resulting file can be analysed offline with tools such as
 /// [qvis](https://qvis.quictools.info/) or Wireshark's qlog importer.
 ///
+/// If `pinned_cert_sha256` is `Some`, it must be exactly 32 bytes (a SHA-256
+/// digest of the server's end-entity certificate DER). It is accepted as a
+/// fallback when standard CA verification fails, mirroring the manual
+/// "Server certificate hash" pinning already used for WebTransport.
+///
 /// This exposes the QuicEndpoint.connect() method to flutter_rust_bridge.
 pub async fn endpoint_connect(
     _endpoint: QuicEndpoint,
     addr: String,
     server_name: String,
     qlog_path: Option<String>,
+    pinned_cert_sha256: Option<Vec<u8>>,
 ) -> Result<(QuicEndpoint, QuicConnection), QuicError> {
+    let pinned_cert_sha256 = parse_pinned_cert_sha256(pinned_cert_sha256)?;
     // Build the endpoint inside the async executor context.
     let remote_addr: SocketAddr = addr.parse()
         .map_err(|e| QuicError::Connection(format!("Invalid address: {:?}", e)))?;
-    let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path)?;
+    let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path, pinned_cert_sha256)?;
     let connection = endpoint.connect(addr, server_name).await?;
     Ok((endpoint, connection))
+}
+
+/// Validate an optional pinned certificate SHA-256 digest, converting it
+/// into the fixed-size array expected by `QuicEndpoint`.
+fn parse_pinned_cert_sha256(pinned_cert_sha256: Option<Vec<u8>>) -> Result<Option<[u8; 32]>, QuicError> {
+    pinned_cert_sha256.map(|bytes| {
+        <[u8; 32]>::try_from(bytes.as_slice())
+            .map_err(|_| QuicError::Config("pinned_cert_sha256 must be exactly 32 bytes (a SHA-256 digest)".into()))
+    }).transpose()
 }
 
 /// Install encrypted ticket persistence before opening the first endpoint.
@@ -172,10 +188,12 @@ pub async fn endpoint_connect_early(
     addr: String,
     server_name: String,
     qlog_path: Option<String>,
+    pinned_cert_sha256: Option<Vec<u8>>,
 ) -> Result<(QuicEndpoint, QuicConnection, bool), QuicError> {
+    let pinned_cert_sha256 = parse_pinned_cert_sha256(pinned_cert_sha256)?;
     let remote_addr: SocketAddr = addr.parse()
         .map_err(|e| QuicError::Config(format!("Invalid address: {e}")))?;
-    let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path)?;
+    let endpoint = QuicEndpoint::client_for_remote_with_qlog(remote_addr, qlog_path, pinned_cert_sha256)?;
     let (connection, early) = endpoint.connect_early(addr, server_name).await?;
     Ok((endpoint, connection, early))
 }

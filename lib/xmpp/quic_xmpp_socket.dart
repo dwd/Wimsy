@@ -237,6 +237,8 @@ class QuicCapableXmppSocket extends XmppWebSocket
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
+    bool Function(X509Certificate certificate)? onBadCertificate,
+    Uint8List? pinnedCertSha256,
   }) async {
     _emitWriteEvents(
       _writeTracker.failGeneration(
@@ -268,6 +270,7 @@ class QuicCapableXmppSocket extends XmppWebSocket
         useQuic: false,
         directTls: directTls,
         tlsHost: tlsHost,
+        onBadCertificate: onBadCertificate,
       );
     }
 
@@ -286,7 +289,13 @@ class QuicCapableXmppSocket extends XmppWebSocket
         'QUIC ticket persistence unavailable; using existing session configuration',
       );
     }
-    await _connectQuic(host, port, tlsHost ?? host, generation);
+    await _connectQuic(
+      host,
+      port,
+      tlsHost ?? host,
+      generation,
+      pinnedCertSha256: pinnedCertSha256,
+    );
     if (!_isCurrentGeneration(generation)) {
       throw StateError('QUIC connection generation $generation was superseded');
     }
@@ -622,8 +631,9 @@ class QuicCapableXmppSocket extends XmppWebSocket
     String host,
     int port,
     String serverName,
-    int generation,
-  ) async {
+    int generation, {
+    Uint8List? pinnedCertSha256,
+  }) async {
     final refreshedAddresses = <InternetAddress>[];
     final addresses = await resolveHostCached(
       host,
@@ -661,6 +671,7 @@ class QuicCapableXmppSocket extends XmppWebSocket
           port,
           serverName,
           generation,
+          pinnedCertSha256: pinnedCertSha256,
         );
         if (!_isCurrentGeneration(generation)) {
           throw StateError(
@@ -730,8 +741,9 @@ class QuicCapableXmppSocket extends XmppWebSocket
     List<InternetAddress> candidates,
     int port,
     String serverName,
-    int generation,
-  ) async {
+    int generation, {
+    Uint8List? pinnedCertSha256,
+  }) async {
     if (candidates.isEmpty) {
       throw SocketException('No QUIC candidates to attempt');
     }
@@ -775,6 +787,7 @@ class QuicCapableXmppSocket extends XmppWebSocket
               timeout: quicConnectTimeout,
               generation: generation,
               attemptId: attemptId,
+              pinnedCertSha256: pinnedCertSha256,
             )
             .then((result) async {
               if (completer.isCompleted || !_isCurrentGeneration(generation)) {
@@ -863,6 +876,7 @@ class QuicCapableXmppSocket extends XmppWebSocket
     required Duration timeout,
     required int generation,
     required int attemptId,
+    Uint8List? pinnedCertSha256,
   }) async {
     final endpoint = await createClientEndpoint();
     // Build a per-connection qlog path so each QUIC session gets its own
@@ -881,6 +895,7 @@ class QuicCapableXmppSocket extends XmppWebSocket
         addr: _formatSocketAddress(address, port),
         serverName: serverName,
         qlogPath: qlogPath,
+        pinnedCertSha256: pinnedCertSha256,
       );
     } else {
       pending = endpointConnect(
@@ -888,6 +903,7 @@ class QuicCapableXmppSocket extends XmppWebSocket
         addr: _formatSocketAddress(address, port),
         serverName: serverName,
         qlogPath: qlogPath,
+        pinnedCertSha256: pinnedCertSha256,
       ).then((result) => (result.$1, result.$2, false));
     }
     final connected = await pending

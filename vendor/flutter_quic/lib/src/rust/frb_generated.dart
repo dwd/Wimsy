@@ -199,6 +199,7 @@ abstract class RustLibApi extends BaseApi {
     required String addr,
     required String serverName,
     String? qlogPath,
+    Uint8List? pinnedCertSha256,
   });
 
   Future<(QuicEndpoint, QuicConnection, bool)>
@@ -206,6 +207,7 @@ abstract class RustLibApi extends BaseApi {
     required String addr,
     required String serverName,
     String? qlogPath,
+    Uint8List? pinnedCertSha256,
   });
 
   Future<void> crateApiBridgeEndpointRebindToCurrentAddress({
@@ -1380,6 +1382,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String addr,
     required String serverName,
     String? qlogPath,
+    Uint8List? pinnedCertSha256,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1392,6 +1395,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(addr, serializer);
           sse_encode_String(serverName, serializer);
           sse_encode_opt_String(qlogPath, serializer);
+          sse_encode_opt_list_prim_u_8_strict(pinnedCertSha256, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1405,7 +1409,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_quic_error,
         ),
         constMeta: kCrateApiBridgeEndpointConnectConstMeta,
-        argValues: [endpoint, addr, serverName, qlogPath],
+        argValues: [endpoint, addr, serverName, qlogPath, pinnedCertSha256],
         apiImpl: this,
       ),
     );
@@ -1414,7 +1418,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiBridgeEndpointConnectConstMeta =>
       const TaskConstMeta(
         debugName: "endpoint_connect",
-        argNames: ["endpoint", "addr", "serverName", "qlogPath"],
+        argNames: [
+          "endpoint",
+          "addr",
+          "serverName",
+          "qlogPath",
+          "pinnedCertSha256",
+        ],
       );
 
   @override
@@ -1423,6 +1433,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String addr,
     required String serverName,
     String? qlogPath,
+    Uint8List? pinnedCertSha256,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1431,6 +1442,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(addr, serializer);
           sse_encode_String(serverName, serializer);
           sse_encode_opt_String(qlogPath, serializer);
+          sse_encode_opt_list_prim_u_8_strict(pinnedCertSha256, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1444,7 +1456,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_quic_error,
         ),
         constMeta: kCrateApiBridgeEndpointConnectEarlyConstMeta,
-        argValues: [addr, serverName, qlogPath],
+        argValues: [addr, serverName, qlogPath, pinnedCertSha256],
         apiImpl: this,
       ),
     );
@@ -1453,7 +1465,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiBridgeEndpointConnectEarlyConstMeta =>
       const TaskConstMeta(
         debugName: "endpoint_connect_early",
-        argNames: ["addr", "serverName", "qlogPath"],
+        argNames: ["addr", "serverName", "qlogPath", "pinnedCertSha256"],
       );
 
   @override

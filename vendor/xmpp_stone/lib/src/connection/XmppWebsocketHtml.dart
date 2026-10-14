@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:universal_io/io.dart';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -38,7 +39,9 @@ class XmppWebSocketHtml extends XmppWebSocket {
       bool useWebTransport = false,
       bool useQuic = false,
       bool directTls = false,
-      String? tlsHost}) async {
+      String? tlsHost,
+      bool Function(X509Certificate certificate)? onBadCertificate,
+      Uint8List? pinnedCertSha256}) async {
     // Try WebTransport first when requested and supported by the browser.
     if (useWebTransport && XmppWebTransportHtml.isSupported()) {
       final wt = XmppWebTransportHtml(

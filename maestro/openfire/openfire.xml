@@ -37,8 +37,17 @@
       <domain>localhost</domain>
       <fqdn>localhost</fqdn>
       <socket>
+        <!--
+          Enables the legacy/"Direct TLS" (XEP-0368) client connection on
+          Openfire's default secure port 5223, in addition to the StartTLS
+          connection on 5222 (always on) and QUIC (XEP-0467) on 5224 (always
+          on in this image, independent of this setting). Maestro flows rely
+          on all three being reachable; see maestro/README.md and
+          maestro/docker-compose.yml.
+        -->
         <ssl>
-          <active>false</active>
+          <active>true</active>
+          <port>5223</port>
         </ssl>
       </socket>
     </xmpp>

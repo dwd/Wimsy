@@ -10,6 +10,7 @@ import 'storage/account_record.dart';
 import 'storage/preferences_service.dart';
 import 'storage/storage_service.dart';
 import 'xmpp/alt_connection.dart';
+import 'xmpp/certificate_trust.dart';
 import 'xmpp/jid_normalization.dart';
 import 'xmpp/ws_endpoint.dart';
 import 'xmpp/xmpp_service.dart';
@@ -100,6 +101,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final ScrollController _connectionLogScrollController = ScrollController();
   final List<String> _connectionLogEntries = [];
   StreamSubscription<String>? _connectionLogSubscription;
+
+  // Guards against stacking duplicate certificate-trust dialogs across the
+  // multiple rebuilds that can happen while one is already open.
+  bool _certificateDialogShowing = false;
 
   @override
   void initState() {
@@ -496,9 +501,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     });
                   },
             icon: Icon(
-              _manualConnectionExpanded
-                  ? Icons.expand_less
-                  : Icons.expand_more,
+              _manualConnectionExpanded ? Icons.expand_less : Icons.expand_more,
             ),
             label: Text(
               _manualConnectionExpanded
@@ -543,30 +546,42 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<_ManualTransport>(
-              key: const Key('manual-transport-selector'),
-              initialValue: _manualTransport,
-              decoration: const InputDecoration(labelText: 'Protocol'),
-              items: const [
-                DropdownMenuItem(
-                  value: _ManualTransport.startTls,
-                  child: Text('StartTLS'),
-                ),
-                DropdownMenuItem(
-                  value: _ManualTransport.directTls,
-                  child: Text('Direct TLS'),
-                ),
-                DropdownMenuItem(
-                  value: _ManualTransport.quic,
-                  child: Text('QUIC'),
-                ),
-              ],
-              onChanged: service.isConnecting
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      setState(() => _manualTransport = value);
-                    },
+            Text('Protocol', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 4),
+            // A SegmentedButton is used here instead of a
+            // DropdownButtonFormField because the latter opens its menu in a
+            // full-screen modal route; closing that route after a selection
+            // is a long-standing Flutter accessibility issue
+            // (flutter/flutter#40101) where the semantics tree for widgets
+            // below the dropdown stops updating, hiding them (including the
+            // Connect button) from accessibility services and automation
+            // tools such as Maestro. SegmentedButton renders its options
+            // inline with no overlay route, avoiding the problem entirely.
+            Semantics(
+              identifier: 'manual-transport-selector',
+              child: SegmentedButton<_ManualTransport>(
+                key: const Key('manual-transport-selector'),
+                segments: const [
+                  ButtonSegment(
+                    value: _ManualTransport.startTls,
+                    label: Text('StartTLS'),
+                  ),
+                  ButtonSegment(
+                    value: _ManualTransport.directTls,
+                    label: Text('Direct TLS'),
+                  ),
+                  ButtonSegment(
+                    value: _ManualTransport.quic,
+                    label: Text('QUIC'),
+                  ),
+                ],
+                selected: {_manualTransport},
+                onSelectionChanged: service.isConnecting
+                    ? null
+                    : (selection) {
+                        setState(() => _manualTransport = selection.first);
+                      },
+              ),
             ),
             const SizedBox(height: 12),
           ],
@@ -586,13 +601,28 @@ class _LoginScreenState extends State<LoginScreen> {
                     'wss://host/xmpp-websocket  or  https://host/xmpp-webtransport',
               ),
             ),
+          ],
+          // Shown for WebTransport (where the browser's
+          // serverCertificateHashes API consumes it directly) and for QUIC
+          // (where XmppQuicSocket/flutter_quic pin it against the peer's
+          // leaf certificate instead of prompting interactively; see
+          // _showCertificateTrustDialog). StartTLS/Direct TLS use the
+          // interactive trust dialog instead, so the field stays hidden for
+          // those.
+          if (showWsFields ||
+              (!kIsWeb && _manualTransport == _ManualTransport.quic)) ...[
             const SizedBox(height: 12),
-            TextField(
-              controller: _serverCertificateHashController,
-              enabled: !service.isConnecting,
-              decoration: const InputDecoration(
-                labelText: 'Server certificate hash',
-                hintText: 'Base64-encoded SHA-256 digest (WebTransport)',
+            Semantics(
+              identifier: 'login-server-certificate-hash-field',
+              child: TextField(
+                key: const Key('login-server-certificate-hash-field'),
+                controller: _serverCertificateHashController,
+                enabled: !service.isConnecting,
+                decoration: const InputDecoration(
+                  labelText: 'Server certificate hash',
+                  hintText:
+                      'Base64-encoded SHA-256 digest (WebTransport / QUIC)',
+                ),
               ),
             ),
           ],
@@ -614,12 +644,106 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  /// Shows a dialog presenting the TLS certificate in
+  /// [XmppService.pendingCertificate] (subject, issuer, SHA-256 fingerprint)
+  /// and lets the user trust it (remembering the decision and retrying the
+  /// connection) or reject it (leaving the connection attempt failed).
+  ///
+  /// Used for StartTLS and Direct TLS, which can present certificates that
+  /// fail standard CA validation (e.g. self-signed certificates). The
+  /// dialog is not shown for QUIC, which pins a server certificate
+  /// fingerprint manually (see the "Server certificate hash" field) rather
+  /// than prompting interactively.
+  Future<void> _showCertificateTrustDialog() async {
+    final service = widget.service;
+    final pending = service.pendingCertificate;
+    if (pending == null) return;
+    setState(() => _certificateDialogShowing = true);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Untrusted certificate'),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'The certificate presented by ${pending.host}:${pending.port} '
+                    "could not be verified against a trusted authority. Only "
+                    'trust it if you recognize the details below.',
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Subject',
+                    style: Theme.of(dialogContext).textTheme.labelMedium,
+                  ),
+                  SelectableText(pending.subject),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Issuer',
+                    style: Theme.of(dialogContext).textTheme.labelMedium,
+                  ),
+                  SelectableText(pending.issuer),
+                  const SizedBox(height: 8),
+                  Text(
+                    'SHA-256 fingerprint',
+                    style: Theme.of(dialogContext).textTheme.labelMedium,
+                  ),
+                  SelectableText(
+                    formatCertificateFingerprint(pending.sha256Fingerprint),
+                    style: const TextStyle(fontFamily: 'monospace'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              Semantics(
+                identifier: 'certificate-trust-reject-button',
+                child: TextButton(
+                  key: const Key('certificate-trust-reject-button'),
+                  onPressed: () {
+                    service.rejectPendingCertificate();
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Reject'),
+                ),
+              ),
+              Semantics(
+                identifier: 'certificate-trust-trust-button',
+                child: FilledButton(
+                  key: const Key('certificate-trust-trust-button'),
+                  onPressed: () {
+                    unawaited(service.trustPendingCertificateAndRetry());
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Trust'),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      if (mounted) setState(() => _certificateDialogShowing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final service = widget.service;
     final theme = Theme.of(context);
     final size = MediaQuery.of(context).size;
     final stateLabel = service.lastConnectionState?.name ?? 'Idle';
+
+    if (service.pendingCertificate != null && !_certificateDialogShowing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showCertificateTrustDialog();
+      });
+    }
 
     return Scaffold(
       body: Container(
@@ -694,11 +818,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             onChanged: (value) =>
                                 _scheduleEndpointDiscovery(value),
-                            onEditingComplete: () =>
-                                _scheduleEndpointDiscovery(
-                                  _jidController.text.trim(),
-                                  immediate: true,
-                                ),
+                            onEditingComplete: () => _scheduleEndpointDiscovery(
+                              _jidController.text.trim(),
+                              immediate: true,
+                            ),
                           ),
                         ),
                         if (_endpointDiscoveryMessage != null) ...[

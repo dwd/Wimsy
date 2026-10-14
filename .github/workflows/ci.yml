@@ -557,7 +557,7 @@ jobs:
           disable-animations: true
           script: |
             set -euo pipefail
-            adb reverse tcp:5222 tcp:5222
+            adb reverse tcp:15222 tcp:15222
             adb install -r build/app/outputs/flutter-apk/app-debug.apk
             maestro test maestro/flows/login_alice.yaml
             maestro test maestro/flows/send_message.yaml

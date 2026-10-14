@@ -1454,6 +1454,7 @@ fn wire__crate__api__bridge__endpoint_connect_impl(
             let api_addr = <String>::sse_decode(&mut deserializer);
             let api_server_name = <String>::sse_decode(&mut deserializer);
             let api_qlog_path = <Option<String>>::sse_decode(&mut deserializer);
+            let api_pinned_cert_sha256 = <Option<Vec<u8>>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicError>(
@@ -1463,6 +1464,7 @@ fn wire__crate__api__bridge__endpoint_connect_impl(
                             api_addr,
                             api_server_name,
                             api_qlog_path,
+                            api_pinned_cert_sha256,
                         )
                         .await?;
                         Ok(output_ok)
@@ -1498,6 +1500,7 @@ fn wire__crate__api__bridge__endpoint_connect_early_impl(
             let api_addr = <String>::sse_decode(&mut deserializer);
             let api_server_name = <String>::sse_decode(&mut deserializer);
             let api_qlog_path = <Option<String>>::sse_decode(&mut deserializer);
+            let api_pinned_cert_sha256 = <Option<Vec<u8>>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::errors::QuicError>(
@@ -1506,6 +1509,7 @@ fn wire__crate__api__bridge__endpoint_connect_early_impl(
                             api_addr,
                             api_server_name,
                             api_qlog_path,
+                            api_pinned_cert_sha256,
                         )
                         .await?;
                         Ok(output_ok)

@@ -52,7 +52,14 @@ services:
       openfire-seed:
         condition: service_completed_successfully
     ports:
-      - "5222:5222" # Client-to-server (c2s)
+      # The client-facing ports are published on dedicated 15222-15224 host
+      # ports (rather than Openfire's conventional 5222-5224) to avoid
+      # colliding with unrelated local services/containers that may already
+      # be bound to those well-known ports; the container-side ports (and
+      # thus openfire.xml's configuration) are unaffected.
+      - "15222:5222" # Client-to-server (c2s), StartTLS
+      - "15223:5223" # Client-to-server (c2s), Direct TLS (XEP-0368)
+      - "15224:5224/udp" # Client-to-server (c2s), QUIC (XEP-0467)
       - "5269:5269" # Server-to-server (s2s)
       - "7070:7070" # BOSH / HTTP binding
       - "7443:7443" # Admin console (HTTPS)

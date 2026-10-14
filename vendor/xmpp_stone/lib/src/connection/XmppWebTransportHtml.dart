@@ -110,6 +110,12 @@ class XmppWebTransportHtml extends XmppWebSocket {
     bool useQuic = false,
     bool directTls = false,
     String? tlsHost,
+    bool Function(X509Certificate certificate)? onBadCertificate,
+    // Not applicable to WebTransport: certificate-hash pinning is instead
+    // supplied via `serverCertificateHashes` on the underlying WebTransport
+    // socket itself (see the `serverCertificateHash` wiring below). Accepted
+    // here only so all `XmppWebSocket` implementations share one signature.
+    Uint8List? pinnedCertSha256,
   }) async {
     _map = map ?? (e) => e;
     _closed = false;
