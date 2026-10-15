@@ -16,6 +16,10 @@
   through the UI first:
     - alice@localhost / alice123
     - bob@localhost   / bob123
+
+  Alice also has herself as a second roster item, so flows can open a
+  self-chat (Alice messaging Alice) without going through the "Add by JID"
+  UI first - see maestro/flows/security_label_self_message.yaml.
 -->
 <jive>
   <!--
@@ -73,6 +77,10 @@
             <jid>bob@localhost</jid>
             <nickname>Bob</nickname>
           </item1>
+          <item2>
+            <jid>alice@localhost</jid>
+            <nickname>Alice</nickname>
+          </item2>
         </roster>
       </user1>
       <user2>

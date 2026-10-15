@@ -49,7 +49,9 @@ Seeded accounts (domain `localhost`, see `openfire/openfire.xml`):
 | alice@localhost  | alice123  |
 | bob@localhost    | bob123    |
 
-Both accounts already have each other in their roster.
+Both accounts already have each other in their roster, and `alice@localhost`
+also has herself as a second roster item (for self-chat flows, e.g.
+`security_label_self_message.yaml`).
 
 ## 2. Point the emulator at Openfire
 
@@ -122,6 +124,15 @@ maestro test --debug-output .maestro-output maestro/flows/send_message.yaml
   `Bob` (pre-seeded in alice's roster) and sends a message, asserting it
   appears in the conversation. Also clicks through the untrusted-certificate
   dialog, same as `login_alice.yaml`.
+- `security_label_self_message.yaml` — logs in as `alice@localhost`, opens a
+  self-chat with herself (also pre-seeded in her own roster), sends an
+  unlabelled message, then applies a XEP-0258 security label built from the
+  active policy's lowest classification and sends a second message,
+  asserting the label's display marking renders correctly. Needs a security
+  policy (SPIF) configured server-side via the Spiffing plugin, which the
+  seeded `openfire.xml` does not provide on its own, so this flow is **not**
+  part of the CI job below; see the flow file's header comment for manual
+  setup.
 
 ## Running in CI
 
