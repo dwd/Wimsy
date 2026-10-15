@@ -40,7 +40,7 @@ class StanzaParser {
     }
     element.attributes.forEach((xmlAttribute) {
       stanza!.addAttribute(
-          XmppAttribute(xmlAttribute.name.local, xmlAttribute.value));
+          XmppAttribute(_attributeName(xmlAttribute), xmlAttribute.value));
     });
     element.children.forEach((child) {
       if (child is xml.XmlElement) stanza!.addChild(parseElement(child));
@@ -84,6 +84,19 @@ class StanzaParser {
     return presenceStanza;
   }
 
+  /// Returns the attribute's local name, except for attributes explicitly
+  /// namespaced with the reserved `xml:` prefix (e.g. `xml:lang`), whose
+  /// prefix must be preserved - otherwise it is indistinguishable from an
+  /// unqualified attribute of the same local name (e.g. a plain `lang`
+  /// attribute, or a `<markingData/>` with no language specified at all),
+  /// which breaks any xml:lang-aware consumers of the resulting [XmppElement]
+  /// (such as Spiffing security label policy parsing).
+  static String _attributeName(xml.XmlAttribute xmlAttribute) {
+    return xmlAttribute.name.prefix == 'xml'
+        ? 'xml:${xmlAttribute.name.local}'
+        : xmlAttribute.name.local;
+  }
+
   static XmppElement parseElement(xml.XmlElement xmlElement) {
     XmppElement xmppElement;
     var parentName = (xmlElement.parent as xml.XmlElement?)?.name.local ?? '';
@@ -102,7 +115,7 @@ class StanzaParser {
     xmppElement.name = xmlElement.name.local;
     xmlElement.attributes.forEach((xmlAttribute) {
       xmppElement.addAttribute(
-          XmppAttribute(xmlAttribute.name.local, xmlAttribute.value));
+          XmppAttribute(_attributeName(xmlAttribute), xmlAttribute.value));
     });
     xmlElement.children.forEach((xmlChild) {
       if (xmlChild is xml.XmlElement) {
