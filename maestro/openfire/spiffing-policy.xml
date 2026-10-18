@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A small, made-up (not a real-world standard) example XEP-0258/Open XML SPIF
+  security label policy, used to give the Maestro test Openfire instance a
+  security-label policy out of the box - see maestro/README.md and
+  maestro/docker-compose.yml ("Spiffing policy bootstrap") for how this file
+  gets loaded.
+
+  It deliberately does not reuse one of the real-world example policies
+  shipped with the Spiffing plugin/library (e.g. the NATO 4774 one) to avoid
+  any ambiguity about redistributing third-party policy documents inside
+  this repository; everything below was written specifically for Wimsy's
+  own tests.
+
+  Four classifications are defined, lowest (PUBLIC, hierarchy 0) to highest
+  (SECRET, hierarchy 3). None of them declare a translated <markingData/>
+  phrase, so their display marking always falls back to the plain
+  classification name below (e.g. "PUBLIC"), per XEP-0258's rule that an
+  unqualified (no xml:lang) display marking request should use the policy's
+  classification name rather than a translated phrase.
+-->
+<SPIF>
+  <securityPolicyId name="Wimsy" id="1.3.6.1.4.1.0.0.55.1"/>
+  <securityClassifications>
+    <securityClassification name="PUBLIC" lacv="0" hierarchy="0" color="#4caf50"/>
+    <securityClassification name="INTERNAL" lacv="1" hierarchy="1" color="#2196f3"/>
+    <securityClassification name="CONFIDENTIAL" lacv="2" hierarchy="2" color="#ff9800"/>
+    <securityClassification name="SECRET" lacv="3" hierarchy="3" color="#f44336"/>
+  </securityClassifications>
+</SPIF>

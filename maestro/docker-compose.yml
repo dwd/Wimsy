@@ -10,14 +10,16 @@
 #
 # The seed step uses the same Openfire image (rather than a generic image
 # like alpine) specifically so it has access to the image's own
-# resources/security_org/ (default keystore/truststore) and conf_org/
-# (default conf/ templates): Openfire's /sbin/entrypoint.sh only populates
-# conf/ (copying conf_org/ and resources/security_org/ into the volume) the
-# very first time conf/ doesn't exist yet. If our seed step only dropped in
-# openfire.xml/security.xml without doing this copy first, conf/ would
-# "already exist" by the time the real entrypoint runs, so it would skip
-# that copy and Openfire would start with no keystore/truststore at all
-# (TLS and the HTTP bind connector would fail to initialize).
+# resources/security_org/ (default keystore/truststore), conf_org/ (default
+# conf/ templates), and plugins_org/ (bundled plugins, e.g. Spiffing):
+# Openfire's /sbin/entrypoint.sh only populates conf/ and plugins/ (copying
+# conf_org/, resources/security_org/, and plugins_org/ into the volume) the
+# very first time conf/ doesn't exist yet. Since this seed step always
+# creates conf/ itself, the main "openfire" service's own entrypoint would
+# otherwise find conf/ "already exists" and skip all of those copies - not
+# just leaving Openfire with no keystore/truststore (breaking TLS and the
+# HTTP bind connector), but also silently starting with none of the
+# bundled plugins loaded at all. So this step does that copying itself.
 #
 # A dedicated .wimsy-seeded marker (rather than checking whether conf/ or
 # our files already exist) tracks whether *we* have run, since conf_org
@@ -39,6 +41,9 @@ services:
             cp -a /usr/local/openfire/conf_org /var/lib/openfire/conf &&
             cp -a /usr/local/openfire/resources/security_org /var/lib/openfire/conf/security;
           fi &&
+          if [ ! -d /var/lib/openfire/plugins ]; then
+            cp -a /usr/local/openfire/plugins_org /var/lib/openfire/plugins;
+          fi &&
           cp /seed/security.xml /var/lib/openfire/conf/security.xml &&
           cp /seed/openfire.xml /var/lib/openfire/conf/openfire.xml &&
           touch /var/lib/openfire/.wimsy-seeded &&
@@ -51,6 +56,17 @@ services:
     depends_on:
       openfire-seed:
         condition: service_completed_successfully
+    environment:
+      # Tells the Spiffing plugin (already bundled in this image) to load
+      # spiffing-policy.xml below as the server's default security-label
+      # policy on startup, whenever none is configured yet - see
+      # SpiffingProperties.getBootstrapPolicyFile() in
+      # ~/src/openfire-spiffing-plugin for the resolution order. A JVM
+      # system property (rather than, say, an <autosetup/> entry in
+      # openfire.xml) is used because it needs to be readable during the
+      # plugin's very first startup, before Openfire's database-backed
+      # property store is necessarily populated.
+      OPENFIRE_OPTS: "-Dspiffing.bootstrapPolicyFile=/seed/spiffing-policy.xml"
     ports:
       # The client-facing ports are published on dedicated 15222-15224 host
       # ports (rather than Openfire's conventional 5222-5224) to avoid
@@ -65,6 +81,11 @@ services:
       - "7443:7443" # Admin console (HTTPS)
       - "9090:9090" # Admin console (HTTP)
     volumes:
+      # spiffing-policy.xml (mounted as /seed/spiffing-policy.xml, see
+      # OPENFIRE_OPTS above) is the only thing from ./openfire this service
+      # itself needs; the rest (openfire.xml, security.xml) is only read by
+      # the one-shot openfire-seed service above.
+      - ./openfire:/seed:ro
       - openfire-data:/var/lib/openfire
     healthcheck:
       # The dwd-deploy image doesn't ship wget/curl, so probe the admin

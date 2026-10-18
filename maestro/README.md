@@ -8,11 +8,15 @@ server that starts in a known, reproducible state.
 
 ```text
 maestro/
-  openfire/openfire.xml   Openfire "autosetup" config: seeds the server with
-                           two accounts (alice/bob) already in each other's
-                           rosters, using the embedded database.
-  openfire/security.xml   Pre-seeded conf/security.xml (see that file for why
-                           this is needed alongside openfire.xml).
+  openfire/openfire.xml        Openfire "autosetup" config: seeds the server
+                                 with two accounts (alice/bob) already in each
+                                 other's rosters, using the embedded database.
+  openfire/security.xml        Pre-seeded conf/security.xml (see that file for
+                                 why this is needed alongside openfire.xml).
+  openfire/spiffing-policy.xml  A small, made-up XEP-0258/SPIF security-label
+                                 policy, loaded automatically by the Spiffing
+                                 plugin on first startup (see "Security label
+                                 policy bootstrap" below).
   docker-compose.yml       Brings up that Openfire instance in a container.
   flows/                    Maestro flow YAML files.
 ```
@@ -52,6 +56,31 @@ Seeded accounts (domain `localhost`, see `openfire/openfire.xml`):
 Both accounts already have each other in their roster, and `alice@localhost`
 also has herself as a second roster item (for self-chat flows, e.g.
 `security_label_self_message.yaml`).
+
+### Security label policy bootstrap
+
+The `openfire` service's `OPENFIRE_OPTS` environment variable (see
+`docker-compose.yml`) points the bundled Spiffing plugin at
+`openfire/spiffing-policy.xml` via the `-Dspiffing.bootstrapPolicyFile=...`
+JVM system property. On a fresh install, if no security-label policy has
+been configured yet, the plugin loads that file automatically and saves it
+as the server's default policy - with a server clearance and default
+outgoing-message label both set to the policy's lowest classification
+(`PUBLIC`) - so `security_label_self_message.yaml` has a working policy to
+exercise without any manual Admin Console setup. It never overrides a
+policy that's already configured, so it's a no-op on a volume that's been
+reset or reused with its own policy already in place.
+
+`spiffing-policy.xml` is a small example policy written for Wimsy's own
+tests (four classifications: `PUBLIC`, `INTERNAL`, `CONFIDENTIAL`,
+`SECRET`), not one of the real-world example policies shipped with the
+Spiffing plugin/library - see that file's header comment for why.
+
+This bootstrap support (`SpiffingProperties.BOOTSTRAP_POLICY_FILE` /
+`SpiffingPlugin.bootstrapPolicyIfConfigured()`) lives in the Spiffing plugin
+itself (`~/src/openfire-spiffing-plugin`), not in this repository, so the
+`docker.cridland.io/openfire:dwd-deploy` image needs to be rebuilt from an
+up-to-date plugin build for it to take effect.
 
 ## 2. Point the emulator at Openfire
 
@@ -125,14 +154,13 @@ maestro test --debug-output .maestro-output maestro/flows/send_message.yaml
   appears in the conversation. Also clicks through the untrusted-certificate
   dialog, same as `login_alice.yaml`.
 - `security_label_self_message.yaml` — logs in as `alice@localhost`, opens a
-  self-chat with herself (also pre-seeded in her own roster), sends an
-  unlabelled message, then applies a XEP-0258 security label built from the
-  active policy's lowest classification and sends a second message,
-  asserting the label's display marking renders correctly. Needs a security
-  policy (SPIF) configured server-side via the Spiffing plugin, which the
-  seeded `openfire.xml` does not provide on its own, so this flow is **not**
-  part of the CI job below; see the flow file's header comment for manual
-  setup.
+  self-chat with herself (also pre-seeded in her own roster). First sends a
+  message without touching the label picker at all, asserting the server's
+  bootstrapped *default* label (see "Security label policy bootstrap" above)
+  is still applied and displayed automatically. Then explicitly builds and
+  applies a XEP-0258 security label for a different classification and
+  sends a second message, asserting that display marking renders correctly
+  too.
 
 ## Running in CI
 
@@ -147,7 +175,8 @@ release tags, since those don't build a debug APK). The job:
    Ubuntu runner (via `reactivecircus/android-emulator-runner`) and installs
    the Maestro CLI.
 4. Runs `adb reverse tcp:15222 tcp:15222`, installs the APK, and runs
-   `login_alice.yaml` then `send_message.yaml` on the emulator.
+   `login_alice.yaml`, `send_message.yaml`, then
+   `security_label_self_message.yaml` on the emulator.
 5. Tears down the Openfire container (and its volume) afterwards.
 
 To reproduce the CI job locally, follow steps 1-3 above manually (start

@@ -1,21 +1,21 @@
 # Logs in as "alice", opens a self-chat with "alice@localhost" (already in
-# her own roster thanks to maestro/openfire/openfire.xml), applies a
-# security label (XEP-0258) and sends a message to herself, then verifies
-# the label's display marking is shown correctly on the resulting message.
+# her own roster thanks to maestro/openfire/openfire.xml), and verifies
+# XEP-0258 security-label display markings are shown correctly: first that
+# the server's configured *default* label is applied automatically to a
+# message that doesn't explicitly set one, then that explicitly picking a
+# different classification is also reflected correctly.
 #
-# Unlike send_message.yaml, this flow needs a security-label *policy* (SPIF)
-# to be configured server-side, which the Spiffing plugin does not ship with
-# a default for. It is therefore not part of the CI job (see
-# maestro/README.md's "Running in CI" section) and is intended to be run
-# manually against a dev Openfire instance that already has the Spiffing
-# plugin's NATO/4774 test policy uploaded and configured as the active
-# policy for alice@localhost (Server Settings -> Spiffing). See
-# ~/src/spiffing/ for the test policy and ~/src/openfire-spiffing-plugin/
-# for the plugin itself.
+# This needs a security-label *policy* (SPIF) to be configured server-side,
+# which the test Openfire container now bootstraps automatically on a fresh
+# install - see maestro/openfire/spiffing-policy.xml (the policy document
+# itself) and maestro/docker-compose.yml's "openfire" service
+# (OPENFIRE_OPTS, which points the Spiffing plugin at it) for how. It is
+# therefore part of the normal CI job, unlike when this flow was first
+# written (see maestro/README.md's "Running in CI" section for the current
+# list of flows run there).
 #
 # Requires, before running `maestro test`:
-#   - The Openfire container is up and healthy, with the Spiffing plugin's
-#     NATO policy configured as above (see maestro/README.md).
+#   - The Openfire container is up and healthy (see maestro/README.md).
 #   - `adb reverse tcp:15222 tcp:15222` has been run so that
 #     "localhost:15222" inside the emulator reaches the Openfire container's
 #     StartTLS port published on the host.
@@ -71,51 +71,56 @@ appId: im.cridland.wimsy
     visible:
       text: "Signed in as alice@localhost"
     timeout: 20000
-# The roster populates asynchronously right after sign-in. The contact's
-# name and presence status are merged into a single accessibility node
-# (e.g. "alice@localhost\nOnline"), and Maestro's text selector requires a
-# full match against that whole node, not just a substring, hence "(?s)"
-# (so "." also matches the newline) rather than matching the bare JID.
+# The roster populates asynchronously right after sign-in. Alice's
+# self-roster item (seeded in maestro/openfire/openfire.xml) is shown under
+# its configured nickname ("Alice"), not the raw JID, and its name and
+# presence status are merged into a single accessibility node (e.g.
+# "Alice\nOnline"), hence "(?s)" (so "." also matches the newline) rather
+# than matching on just the nickname substring.
 - extendedWaitUntil:
     visible:
-      text: "(?s)alice@localhost.*"
+      text: "(?s)Alice.*"
     timeout: 30000
-- tapOn: "(?s)alice@localhost.*"
-# First, send one message with no security label, to confirm the self-chat
-# path works on its own and that an unlabelled message shows no marking
-# chip at all.
+- tapOn: "(?s)Alice.*"
+# First, send a message *without* touching "Add security label" at all. The
+# server's active policy (maestro/openfire/spiffing-policy.xml) has a
+# default label configured for its lowest classification ("PUBLIC"), which
+# the client is expected to apply automatically to outgoing messages that
+# don't otherwise specify one - so even this "unlabelled" message should
+# still show a marking chip for it.
 - tapOn:
     id: "message-composer-input"
-- inputText: "Hello, unlabelled"
+- inputText: "Hello, default label"
 - tapOn:
     id: "message-send-button"
-- assertVisible: "Hello, unlabelled"
-- assertNotVisible: "NATO"
-# Now apply a security label via the composer's "Add security label"
-# button. The active policy has no label catalogue entries pre-defined, so
-# the picker falls through to "Create new label..." for building one from
-# the policy's classifications directly.
+- assertVisible: "Hello, default label"
+# The marking chip's text is merged, together with the sender name and
+# timestamp, into a single accessibility node (e.g. "You\n16:40\nWimsy
+# PUBLIC"), and Maestro's text selector requires a full match against that
+# whole node, hence "(?s)" (so "." also matches the newlines) rather than
+# matching the marking text alone.
+- assertVisible: "(?s)You.*Wimsy PUBLIC"
+# Now explicitly apply a label with a *different* classification via the
+# composer's "Add security label" button, to confirm an explicit choice is
+# also reflected correctly (not just the default). The active policy has no
+# label catalogue entries pre-defined, so the picker falls through to
+# "Create new label..." for building one from the policy's classifications
+# directly.
 - tapOn:
     text: "Add security label"
 - tapOn: "Create new label…"
-# Pick the policy's lowest (default) classification. Its display text here
-# may be rendered in whichever language the policy's markingData happens to
-# carry for that classification (this is the open multilingual-marking
-# question this flow is meant to help pin down), so match on either the
-# English classification name or the French marking phrase actually defined
-# for it in the NATO/4774 test policy.
-- tapOn: "(?s)(UNCLASSIFIED|SANS CLASSIFICATION)"
+- tapOn: "INTERNAL"
 - tapOn: "Apply"
 - tapOn:
     id: "message-composer-input"
-- inputText: "Hello, labelled"
+- inputText: "Hello, explicit label"
 - tapOn:
     id: "message-send-button"
-- assertVisible: "Hello, labelled"
+- assertVisible: "Hello, explicit label"
 # Per XEP-0258, a <displaymarking/> with no language specified should fall
-# back to the policy's plain classification name (here, "UNCLASSIFIED"),
-# not a translated marking phrase - confirmed directly against the
-# `spiffing` package's own displayMarking('') behaviour for this policy.
-# If this assertion fails, the display-marking language fallback is
-# regressed; do not weaken it to match whatever currently renders.
-- assertVisible: "NATO UNCLASSIFIED"
+# back to the policy's plain classification name (here, "INTERNAL"), not a
+# translated marking phrase. If this assertion fails, the display-marking
+# language fallback is regressed; do not weaken it to match whatever
+# currently renders. See the note above about the marking chip's text being
+# merged into a single "You\n<time>\n<marking>" accessibility node.
+- assertVisible: "(?s)You.*Wimsy INTERNAL"
