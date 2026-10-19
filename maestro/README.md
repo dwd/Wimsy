@@ -247,7 +247,10 @@ of retyping the password, which isn't otherwise remembered across restarts.
   read/unread lifecycle of a message from Bob for each of the three ways it
   can arrive (roster foregrounded, Bob's chat already open, app not
   running), including surviving a warm and a cold restart - see "5.
-  Checking read/unread state" above.
+  Checking read/unread state" above. All three assert the roster's unread
+  badge/preview appears *before* the chat is opened, including
+  `receive_message_while_app_not_running.yaml`'s message, which arrives
+  entirely while the app process is dead.
 
 ## Running in CI
 
@@ -306,13 +309,12 @@ Openfire, `adb reverse`, install the APK on your own emulator) and then run
   find the row, or anchored forms like
   `"(?s)Bob\\n(online|offline)\\n.*<preview>$"` to assert a specific
   read/unread state) instead of plain `"Bob"`.
-- After a true process kill-and-relaunch (`stopApp` + `launchApp`, as
-  opposed to a warm resume or the message arriving while the app is
-  already running), a contact's roster preview/unread badge does not
-  refresh on its own for a chat that hasn't been opened yet in the new
-  process, even though the message has already been received and stored -
-  it only catches up once that contact's chat is opened.
-  `receive_message_while_app_not_running.yaml` works around this by
-  opening the chat directly instead of asserting the badge beforehand; see
-  that flow's comments for details. This looks like a real (if minor) gap
-  worth investigating separately.
+- Previously, a contact's roster preview/unread badge only populated once
+  that contact's chat had been opened at least once, because the MAM
+  archive catch-up performed on connect only fanned out to chats that
+  already had at least one locally cached message. `XmppService._primeMamSync`
+  now also requests an initial archive page for every roster contact with
+  no local messages yet, so the badge/preview appears as soon as the
+  archive (and any synced MDS read marker) resolves, without requiring the
+  chat to be opened first - this is what `receive_message_while_app_not_running.yaml`
+  and the other two read/unread scenarios assert.

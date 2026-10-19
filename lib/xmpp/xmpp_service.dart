@@ -11339,6 +11339,27 @@ class XmppService extends ChangeNotifier {
           () => _startMamCatchUp(bareJid, isRoom: false),
         );
       }
+      // The loop above only covers chats that already have at least one
+      // locally cached message, so after a cold start (wiped storage, or a
+      // roster contact we've never opened a chat with) a contact's archive
+      // is otherwise never fetched until the user opens that chat — leaving
+      // the roster stuck showing no unread badge/preview even though the
+      // contact may have unread messages waiting on the server. Request an
+      // initial archive page for every roster contact that has no local
+      // messages yet, so their unread state populates as soon as the
+      // archive (and any synced MDS read marker) resolves, instead of only
+      // on demand.
+      for (final contact in _contacts) {
+        final bareJid = _bareJid(contact.jid);
+        final existingMessages = _messages[bareJid];
+        if (existingMessages != null && existingMessages.isNotEmpty) {
+          continue;
+        }
+        _enqueueRecoveryLaunch(
+          RecoveryPriority.messages,
+          () => _requestMamInitial(bareJid),
+        );
+      }
     }
 
     for (final bookmark in _bookmarks) {

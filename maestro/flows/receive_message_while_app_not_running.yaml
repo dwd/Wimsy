@@ -29,20 +29,16 @@ appId: im.cridland.wimsy
     visible:
       text: "Signed in as alice@localhost"
     timeout: 20000
-# NOTE: unlike receive_message_unread_state.yaml, this intentionally does
-# *not* assert the roster's unread badge/preview here first. Investigation
-# while writing this flow found that after a true process kill-and-relaunch
-# (as opposed to a warm resume, or the message arriving while the app was
-# already running), the roster list's cached "last message"/unread count
-# for a contact whose chat hasn't been opened yet in the new process does
-# not refresh on its own even though the message has already been received
-# and stored - it only catches up once that contact's chat is opened. This
-# looks like a real gap in how the roster list picks up
-# AppLifecycleState.resumed message notifications versus fully active
-# chats, worth investigating separately; this flow instead opens the chat
-# directly to confirm the message was received at all (the main thing this
-# scenario is meant to exercise) before checking the read-state lifecycle
-# below, same as the other two scenarios.
+# On reconnect, the roster's own archive catch-up now fetches every
+# contact's history up front (not just the one whose chat happens to be
+# open), so the unread badge for Bob's message - received entirely while
+# the app process was dead - shows up on its own, same as
+# receive_message_unread_state.yaml, without needing to open the chat
+# first.
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: app-not-running message.*\\n\\d+"
+    timeout: 30000
 - tapOn: "(?s)Bob.*"
 - extendedWaitUntil:
     visible:
