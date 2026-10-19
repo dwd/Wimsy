@@ -1,0 +1,95 @@
+# Checks the full read/unread lifecycle of a message received from Bob
+# while Alice's app is connected/foregrounded on the roster (i.e. NOT
+# already viewing Bob's chat - see receive_message_while_chat_open.yaml for
+# that case, and receive_message_while_app_not_running.yaml for messages
+# that arrive while the app isn't running at all):
+#
+#   1. The message arrives unread: the roster shows an unread badge.
+#   2. Opening the chat marks it read: the badge disappears.
+#   3. The read state survives a "warm" restart (app relaunched, storage
+#      kept - see warm_restart_reconnect.yaml).
+#   4. The read state survives a "cold" restart (storage wiped and the
+#      account logged back in from scratch): this only works because the
+#      read marker is synced from the server (XEP-0333/MDS), not stored
+#      only on the device - local chat history is gone after the wipe, so
+#      this also re-verifies MAM re-delivers the message and the synced
+#      marker correctly resolves against it.
+#
+# Must run right after login_alice_remember.yaml and
+# `dart run maestro/send_as_bob.dart "<message>"` with the *same* message
+# text substituted for READ_STATE_MESSAGE below - see maestro/README.md
+# ("Checking read/unread state").
+appId: im.cridland.wimsy
+---
+# Roster entries merge the contact's name, presence and message preview
+# into a single accessibility node, with the unread count appended as a
+# trailing line when there is one (e.g. "Bob\nonline\n<preview>\n1") and
+# omitted entirely once the chat has been read (e.g. "Bob\nonline\n<preview>").
+# Matching the whole node with "(?s)" (so "." also matches newlines) lets
+# these two states be told apart reliably.
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: roster message.*\\n\\d+"
+    timeout: 30000
+- tapOn: "(?s)Bob.*"
+- extendedWaitUntil:
+    visible:
+      text: "Read-state check: roster message"
+    timeout: 15000
+- tapOn:
+    id: "chat-back-button"
+# Opening the chat should have marked the message read, so the unread
+# count is gone from the roster node - assert the exact text (anchored at
+# the end) so this fails if a trailing count is still (or again) present.
+- assertVisible:
+    text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: roster message$"
+- runFlow: "warm_restart_reconnect.yaml"
+# Still read after a warm restart.
+- assertVisible:
+    text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: roster message$"
+# Now a cold restart: wipe storage and log back in from scratch, same
+# steps as login_alice.yaml.
+- clearState
+- launchApp
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+- eraseText
+- inputText: "15222"
+- hideKeyboard
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    id: "login-connect-button"
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000
+# Give MAM time to re-deliver history into the now-empty local store, and
+# resolve the synced read marker against it, before asserting the final
+# state.
+- tapOn: "(?s)Bob.*"
+- extendedWaitUntil:
+    visible:
+      text: "Read-state check: roster message"
+    timeout: 15000
+- tapOn:
+    id: "chat-back-button"
+- assertVisible:
+    text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: roster message$"

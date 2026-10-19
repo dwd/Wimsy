@@ -1,0 +1,25 @@
+# Simulates a "warm" restart: the app process is stopped and relaunched,
+# but local storage is *not* wiped (unlike cold_restart_relogin.yaml's
+# style of a full clearState). Requires the account to have been logged in
+# with "Remember password on this device" ticked (see
+# login_alice_remember.yaml), since the JID/host/port are always remembered
+# across restarts but the password is not - without it, the password field
+# comes back empty and "Connect" fails.
+#
+# Intended to be chained after login_alice_remember.yaml (directly, or
+# after other steps that keep Alice's session connected) in the read-state
+# flows under maestro/flows/, e.g. receive_message_unread_state.yaml.
+appId: im.cridland.wimsy
+---
+- stopApp
+- launchApp
+- tapOn:
+    id: "login-connect-button"
+    optional: true
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000

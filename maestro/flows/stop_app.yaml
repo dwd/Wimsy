@@ -1,0 +1,10 @@
+# Force-stops Wimsy, simulating "the app is not running at all" (as
+# opposed to merely backgrounded) for
+# receive_message_while_app_not_running.yaml - run this right after
+# login_alice_remember.yaml and before
+# `dart run maestro/send_as_bob.dart "<message>"`, so the message arrives
+# while there is no running app process to handle it at all. See
+# maestro/README.md ("Checking read/unread state").
+appId: im.cridland.wimsy
+---
+- stopApp

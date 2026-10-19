@@ -1,0 +1,65 @@
+# Same as login_alice.yaml, but also ticks "Remember password on this
+# device" before connecting. The login screen already remembers the JID,
+# host/port and protocol across restarts (SharedPreferences), but *not* the
+# password unless this checkbox is ticked - so flows that need to simulate
+# a warm restart (app relaunched without wiping storage, e.g.
+# warm_restart_reconnect.yaml) use this flow to log in first, otherwise
+# the password field would come back empty and "Connect" would fail.
+#
+# Requires, before running `maestro test`:
+#   - The Openfire container is up and healthy (see maestro/README.md).
+#   - `adb reverse tcp:15222 tcp:15222` has been run so that
+#     "localhost:15222" inside the emulator reaches the Openfire container's
+#     StartTLS port published on the host.
+appId: im.cridland.wimsy
+---
+- launchApp:
+    clearState: true
+# A fresh install with clearState always lands on the one-time "Set a PIN"
+# screen before the login screen; skip it since we don't need a PIN for
+# these tests.
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+# The port field already defaults to "5222", so it must be cleared first or
+# inputText would append to it (producing the invalid port "522215222").
+- eraseText
+- inputText: "15222"
+- hideKeyboard
+- tapOn:
+    text: "Remember password on this device"
+# Launching the app can trigger Android's "Allow Wimsy to send you
+# notifications?" permission dialog with some delay; dismiss it here if it
+# appears, since it would otherwise cover the Connect button.
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    id: "login-connect-button"
+# StartTLS presents Openfire's self-signed test certificate, which fails
+# standard CA validation and triggers the "Untrusted certificate" dialog
+# (see login_screen.dart's _showCertificateTrustDialog); click through it by
+# trusting the certificate so the connection can proceed.
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
+# assertVisible's built-in fluent retry only waits ~7s, which is not always
+# long enough for Openfire to finish the handshake, so extendedWaitUntil is
+# used here to allow a longer, explicit timeout (timeout is not a valid
+# assertVisible property).
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000

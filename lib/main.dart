@@ -1687,9 +1687,14 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
             child: Row(
               children: [
                 if (showBack)
-                  IconButton(
-                    onPressed: () => service.selectChat(null),
-                    icon: const Icon(Icons.arrow_back),
+                  Semantics(
+                    identifier: 'chat-back-button',
+                    child: IconButton(
+                      key: const Key('chat-back-button'),
+                      onPressed: () => service.selectChat(null),
+                      icon: const Icon(Icons.arrow_back),
+                      tooltip: 'Back to chat list',
+                    ),
                   ),
                 Expanded(
                   child: Column(

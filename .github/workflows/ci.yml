@@ -577,6 +577,25 @@ jobs:
             # ("4. Receiving a message").
             dart run maestro/send_as_bob.dart
             maestro test maestro/flows/receive_message.yaml
+            # Exercises the full read/unread lifecycle (unread badge, marking
+            # read, surviving a warm restart, surviving a cold restart) for
+            # each of the three ways a message can arrive: while the roster
+            # is foregrounded, while Bob's chat is already open, and while
+            # the app isn't running at all. Each scenario starts from
+            # login_alice_remember.yaml (rather than login_alice.yaml) so
+            # that the warm-restart leg of each flow can reconnect with just
+            # "Connect" (password remembered) instead of retyping it. See
+            # maestro/README.md ("Checking read/unread state").
+            maestro test maestro/flows/login_alice_remember.yaml
+            dart run maestro/send_as_bob.dart "Read-state check: roster message"
+            maestro test maestro/flows/receive_message_unread_state.yaml
+            maestro test maestro/flows/open_bob_chat.yaml
+            dart run maestro/send_as_bob.dart "Read-state check: chat-open message"
+            maestro test maestro/flows/receive_message_while_chat_open.yaml
+            maestro test maestro/flows/login_alice_remember.yaml
+            maestro test maestro/flows/stop_app.yaml
+            dart run maestro/send_as_bob.dart "Read-state check: app-not-running message"
+            maestro test maestro/flows/receive_message_while_app_not_running.yaml
             maestro test maestro/flows/send_message.yaml
             maestro test maestro/flows/security_label_self_message.yaml
       - name: Stop Openfire

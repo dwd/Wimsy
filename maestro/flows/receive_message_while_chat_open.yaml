@@ -1,0 +1,76 @@
+# Checks the read state of a message received from Bob while Alice is
+# already viewing his chat (as opposed to receive_message_unread_state.yaml,
+# where the roster is foregrounded instead): since the chat is already
+# open, the message must never show up as unread at all, and that read
+# state must still survive a "warm" restart and a "cold" restart (wiped
+# storage, logged back in from scratch, relying on the read marker being
+# synced from the server rather than stored only on the device).
+#
+# Must run right after open_bob_chat.yaml and
+# `dart run maestro/send_as_bob.dart "<message>"` with the *same* message
+# text substituted for the text below - see maestro/README.md ("Checking
+# read/unread state").
+appId: im.cridland.wimsy
+---
+- extendedWaitUntil:
+    visible:
+      text: "Read-state check: chat-open message"
+    timeout: 15000
+- tapOn:
+    id: "chat-back-button"
+# The message arrived while the chat was already open, so it should never
+# have been counted as unread - assert the exact (anchored) roster text,
+# with no trailing unread count, same pattern as
+# receive_message_unread_state.yaml.
+- assertVisible:
+    text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: chat-open message$"
+- runFlow: "warm_restart_reconnect.yaml"
+# Still read after a warm restart.
+- assertVisible:
+    text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: chat-open message$"
+# Now a cold restart: wipe storage and log back in from scratch, same
+# steps as login_alice.yaml.
+- clearState
+- launchApp
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+- eraseText
+- inputText: "15222"
+- hideKeyboard
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    id: "login-connect-button"
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000
+# Give MAM time to re-deliver history into the now-empty local store, and
+# resolve the synced read marker against it, before asserting the final
+# state.
+- tapOn: "(?s)Bob.*"
+- extendedWaitUntil:
+    visible:
+      text: "Read-state check: chat-open message"
+    timeout: 15000
+- tapOn:
+    id: "chat-back-button"
+- assertVisible:
+    text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: chat-open message$"

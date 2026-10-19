@@ -1,0 +1,15 @@
+# Opens Alice's chat with Bob and leaves it open/foregrounded. Does *not*
+# launchApp - it continues from whatever state Alice's app is already in,
+# same style as receive_message.yaml. Used by
+# receive_message_while_chat_open.yaml to put the app into "Bob's chat is
+# already open" state before the message-while-chat-open scenario sends a
+# message as Bob - see maestro/README.md ("Checking read/unread state").
+appId: im.cridland.wimsy
+---
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Bob.*"
+    timeout: 30000
+- tapOn: "(?s)Bob.*"
+- assertVisible:
+    id: "message-composer-input"
