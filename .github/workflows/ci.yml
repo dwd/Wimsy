@@ -508,6 +508,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        # Needed to resolve the vendored xmpp_stone path dependency so
+        # `dart run maestro/send_as_bob.dart` (see below) can import it.
+        run: flutter pub get
       - name: Download Android debug artifact
         uses: actions/download-artifact@v4
         with:
@@ -560,6 +568,15 @@ jobs:
             adb reverse tcp:15222 tcp:15222
             adb install -r build/app/outputs/flutter-apk/app-debug.apk
             maestro test maestro/flows/login_alice.yaml
+            # Exercises an incoming message while Alice's session is still
+            # connected/foregrounded from login_alice.yaml above (which ends
+            # on the signed-in roster screen, same as receive_message.yaml
+            # expects): send_as_bob.dart connects directly to Openfire (not
+            # through the emulator) as "bob" and sends a message, then
+            # receive_message.yaml asserts it arrived. See maestro/README.md
+            # ("4. Receiving a message").
+            dart run maestro/send_as_bob.dart
+            maestro test maestro/flows/receive_message.yaml
             maestro test maestro/flows/send_message.yaml
             maestro test maestro/flows/security_label_self_message.yaml
       - name: Stop Openfire

@@ -124,6 +124,29 @@ maestro test --debug-output .maestro-output maestro/flows/login_alice.yaml
 maestro test --debug-output .maestro-output maestro/flows/send_message.yaml
 ```
 
+## 4. Receiving a message (Bob → Alice)
+
+`receive_message.yaml` doesn't log in by itself - it asserts that a message
+sent by `bob@localhost` shows up for Alice while her session is already
+connected/foregrounded, so it has to run as the third step of a short
+sequence: log Alice in (or reuse an already-connected session), send a
+message as Bob from the host with `send_as_bob.dart`, then assert it
+arrived:
+
+```sh
+maestro test --debug-output .maestro-output maestro/flows/login_alice.yaml
+dart run maestro/send_as_bob.dart
+maestro test --debug-output .maestro-output maestro/flows/receive_message.yaml
+```
+
+`send_as_bob.dart` is a small standalone script (not a Maestro flow) that
+connects directly to Openfire as `bob@localhost` using the vendored
+`xmpp_stone` package and sends a single chat message to `alice@localhost`,
+then disconnects. It talks to `localhost:15222` straight from the host
+running `maestro test` (not through the emulator), so it needs the Openfire
+container up but no `adb reverse`. See that file's header comment for
+details.
+
 ## Flows
 
 - `login_alice.yaml` — logs in as `alice@localhost` via the manual-connection
@@ -161,6 +184,10 @@ maestro test --debug-output .maestro-output maestro/flows/send_message.yaml
   applies a XEP-0258 security label for a different classification and
   sends a second message, asserting that display marking renders correctly
   too.
+- `receive_message.yaml` — does *not* `launchApp`; it continues from
+  whatever state Alice's app is already in (see "4. Receiving a message"
+  above) and asserts that a message sent by `bob@localhost` via
+  `send_as_bob.dart` is visible in her chat with Bob.
 
 ## Running in CI
 
@@ -175,7 +202,10 @@ release tags, since those don't build a debug APK). The job:
    Ubuntu runner (via `reactivecircus/android-emulator-runner`) and installs
    the Maestro CLI.
 4. Runs `adb reverse tcp:15222 tcp:15222`, installs the APK, and runs
-   `login_alice.yaml`, `send_message.yaml`, then
+   `login_alice.yaml`, then `dart run maestro/send_as_bob.dart` followed by
+   `receive_message.yaml` (see "4. Receiving a message" above, this relies
+   on Alice's session still being connected/foregrounded from
+   `login_alice.yaml`), then `send_message.yaml` and
    `security_label_self_message.yaml` on the emulator.
 5. Tears down the Openfire container (and its volume) afterwards.
 

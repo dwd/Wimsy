@@ -1,0 +1,33 @@
+# Asserts that a message sent by "bob" while Alice's session is
+# connected/foregrounded shows up in her chat with Bob.
+#
+# Unlike the other flows in this directory, this one does NOT launchApp:
+# it continues from whatever state Alice's app is already in. Run it after
+# maestro/flows/login_alice.yaml (to get Alice connected and foregrounded)
+# and maestro/send_as_bob.dart (to actually send the message), e.g.:
+#
+#   maestro test maestro/flows/login_alice.yaml
+#   dart run maestro/send_as_bob.dart
+#   maestro test maestro/flows/receive_message.yaml
+#
+# See maestro/README.md for the full requirements (Openfire container up,
+# `adb reverse tcp:15222 tcp:15222`, etc).
+appId: im.cridland.wimsy
+---
+# The roster (and "Bob"'s entry in it) populates asynchronously, and its
+# accessibility node merges the contact's name and presence into a single
+# string (e.g. "Bob\noffline"); Maestro's text selector requires a full
+# match against that whole node, so the pattern accounts for the trailing
+# status line (via "(?s)" so "." also matches the newline) rather than
+# matching "Bob" alone - same as send_message.yaml.
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Bob.*"
+    timeout: 30000
+- tapOn: "(?s)Bob.*"
+# Give the message a little extra time to arrive and render as a bubble in
+# the chat, on top of assertVisible's own ~7s fluent retry.
+- extendedWaitUntil:
+    visible:
+      text: "Hello from Bob via Maestro"
+    timeout: 15000
