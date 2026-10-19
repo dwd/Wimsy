@@ -303,7 +303,21 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
     }
     if (!kIsWeb && Platform.isAndroid) {
       _service.setBackgroundMode(state != AppLifecycleState.resumed);
+      if (state != AppLifecycleState.resumed) {
+        // The UI isn't painting while backgrounded, so decoded images
+        // (avatars, shared media previews, ...) are pure memory overhead.
+        // Dropping them here lowers the resident set the OS sees for our
+        // process, making it a less likely low-memory-killer target while
+        // the foreground service keeps the XMPP connection alive.
+        _trimMemoryForBackground();
+      }
     }
+  }
+
+  void _trimMemoryForBackground() {
+    final imageCache = PaintingBinding.instance.imageCache;
+    imageCache.clear();
+    imageCache.clearLiveImages();
   }
 
   void _handleIncomingMessage(String bareJid, ChatMessage message) {
@@ -491,6 +505,12 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
         autoRunOnBoot: false,
         allowWakeLock: true,
         allowWifiLock: true,
+        // If the OS (or an OEM battery manager) kills the service anyway,
+        // this schedules an AlarmManager-based watchdog that restarts it a
+        // few seconds later. This is the "timer to cause it to get
+        // restarted" mechanism; it is on by default but is made explicit
+        // here since it's load-bearing for background reliability.
+        allowAutoRestart: true,
       ),
     );
 
@@ -502,6 +522,34 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
         callback: startCallback,
       );
       if (result is ServiceRequestFailure) throw result.error;
+    }
+    unawaited(_maybeRequestIgnoreBatteryOptimizations());
+  }
+
+  /// Asks the user, once, to exclude Wimsy from battery optimization.
+  ///
+  /// Without this, many OEMs (and stock Android's App Standby Buckets) will
+  /// aggressively suspend or kill the background service even though it's a
+  /// proper foreground service, which is the main reason the connection
+  /// drops on physical phones. We only prompt once since the system dialog
+  /// is intrusive; if the user declines, the AlarmManager-based restart
+  /// watchdog (`allowAutoRestart`) is still the fallback that brings the
+  /// service back.
+  Future<void> _maybeRequestIgnoreBatteryOptimizations() async {
+    try {
+      if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        return;
+      }
+      if (_preferences.batteryOptimizationPromptShown) {
+        return;
+      }
+      await _preferences.setBatteryOptimizationPromptShown(true);
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    } catch (error) {
+      Log.w(
+        'WimsyApp',
+        'Failed to request battery optimization exemption: $error',
+      );
     }
   }
 

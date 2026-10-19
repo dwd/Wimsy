@@ -26,6 +26,8 @@ class PreferencesService {
   static const _audioInputKey = 'wimsy_audio_input';
   static const _videoInputKey = 'wimsy_video_input';
   static const _lowBandwidthModeKey = 'wimsy_low_bandwidth_mode';
+  static const _batteryOptimizationPromptShownKey =
+      'wimsy_battery_optimization_prompt_shown';
 
   // ── Sentry opt-in ──────────────────────────────────────────────────────────
 
@@ -63,6 +65,19 @@ class PreferencesService {
 
   Future<void> setLowBandwidthMode(bool value) =>
       _prefs.setBool(_lowBandwidthModeKey, value);
+
+  // ── Background service battery optimization prompt ────────────────────────
+  //
+  // Tracks whether we've already asked the user to exclude Wimsy from
+  // battery optimization, so we only ask once (the OS dialog shown by
+  // `requestIgnoreBatteryOptimization()` is intrusive and must not reappear
+  // on every app launch/service restart).
+
+  bool get batteryOptimizationPromptShown =>
+      _prefs.getBool(_batteryOptimizationPromptShownKey) ?? false;
+
+  Future<void> setBatteryOptimizationPromptShown(bool value) =>
+      _prefs.setBool(_batteryOptimizationPromptShownKey, value);
 
   // ── Keepalive/ping/reconnect timer tuning ─────────────────────────────────
   //
