@@ -442,7 +442,6 @@ class XmppService extends ChangeNotifier {
   final Map<String, _CallStatsTracker> _callStatsBySid = {};
   final CallQualityController _callQualityController =
       const CallQualityController();
-  final Map<String, Timer> _jmiFallbackTimers = {};
   final Map<String, Jid> _jmiProceedTargetBySid = {};
   final Set<String> _jmiIncomingPending = {};
   final Set<String> _jmiAutoAcceptBySid = {};
@@ -4673,7 +4672,18 @@ class XmppService extends ChangeNotifier {
             .toSet();
       }
       _sendJmiPropose(target, sid, descriptions);
-      _startJmiFallbackTimer(sid, target);
+      if (_peerKnownToLackJmiSupport(target)) {
+        // Disco#info caps show the peer supports raw Jingle calls but not
+        // Jingle Message Initiation (XEP-0353), so a `proceed` will never
+        // arrive. Fall back to a classic Jingle session-initiate right
+        // away instead of waiting for an answer that can't come.
+        unawaited(_sendPendingJingleInitiate(sid, Jid.fromFullJid(target)));
+      }
+      // Otherwise (JMI support confirmed, or simply unknown because no caps
+      // have been received yet) do NOT race a raw-Jingle fallback against
+      // the real JMI handshake: a `<ringing/>` is optional per XEP-0353, so
+      // its absence is not evidence the peer lacks JMI support. Let the
+      // normal outgoing call timeout give up if nothing ever arrives.
     }
     return null;
   }
@@ -4815,7 +4825,7 @@ class XmppService extends ChangeNotifier {
   }
 
   Future<void> endCall(CallSession session) async {
-    if (_jmiFallbackTimers.containsKey(session.sid)) {
+    if (_isJmiPendingOnly(session.sid)) {
       final target = Jid.fromFullJid(session.peerBareJid);
       _sendJmiRetract(target, session.sid);
       session.state = CallState.ended;
@@ -4855,7 +4865,7 @@ class XmppService extends ChangeNotifier {
         }
         session.state = CallState.declined;
       } else {
-        if (_jmiFallbackTimers.containsKey(sid)) {
+        if (_isJmiPendingOnly(sid)) {
           _sendJmiRetract(Jid.fromFullJid(session.peerBareJid), sid);
         } else {
           final toJid = _callPeerJidForSid(session.sid, session.peerBareJid);
@@ -4878,8 +4888,36 @@ class XmppService extends ChangeNotifier {
     if (session == null) {
       return;
     }
+    _notifyCallAbortedLocally(sid, session.peerBareJid);
     session.state = state;
     _removeCallSession(session);
+  }
+
+  /// Tells the peer a call is being abandoned on our own end, so it doesn't
+  /// sit forever as a half-open call on their side (e.g. Conversations'
+  /// incoming-call message never getting cleaned up). Uses a JMI `retract`
+  /// while we're still in the pure JMI propose/ringing phase (no Jingle
+  /// session-initiate sent yet), otherwise a Jingle `session-terminate`.
+  void _notifyCallAbortedLocally(String sid, String fallbackBareJid) {
+    if (_isJmiPendingOnly(sid)) {
+      _sendJmiRetract(Jid.fromFullJid(fallbackBareJid), sid);
+      return;
+    }
+    final full = _callPeerFullJidBySid[sid];
+    if (full == null || full.isEmpty) {
+      return;
+    }
+    unawaited(
+      _sendJingleTerminate(Jid.fromFullJid(full), sid, 'failed-application'),
+    );
+  }
+
+  /// Whether call [sid] is still only in the JMI propose/ringing phase: a
+  /// JMI `propose` was sent, but no Jingle `session-initiate` has gone out
+  /// yet (so the peer only knows about this call via JMI, not raw Jingle).
+  bool _isJmiPendingOnly(String sid) {
+    return _jmiProposedMediaBySid.containsKey(sid) &&
+        !_jingleInitiatedTargets.containsKey(sid);
   }
 
   void _startCallStatsTimer(String sid) {
@@ -5361,7 +5399,6 @@ class XmppService extends ChangeNotifier {
 
   void _removeCallSession(CallSession session) {
     _finishCallMessage(session);
-    _jmiFallbackTimers.remove(session.sid)?.cancel();
     _callTimeoutTimers.remove(session.sid)?.cancel();
     _callStatsTimers.remove(session.sid)?.cancel();
     _callStatsBySid.remove(session.sid);
@@ -5578,7 +5615,6 @@ class XmppService extends ChangeNotifier {
               '${fromJid.fullJid ?? fromJid.userAtDomain}.',
         );
         _storeCallPeerFullJid(sid, fromJid);
-        _jmiFallbackTimers.remove(sid)?.cancel();
         unawaited(_sendPendingJingleInitiate(sid, fromJid));
         return;
       case JmiAction.reject:
@@ -5603,10 +5639,8 @@ class XmppService extends ChangeNotifier {
         Log.d(
           'XmppService',
           'Call $sid received JMI ringing from '
-              '${fromJid.fullJid ?? fromJid.userAtDomain}; '
-              'cancelling IQ fallback.',
+              '${fromJid.fullJid ?? fromJid.userAtDomain}.',
         );
-        _jmiFallbackTimers.remove(sid)?.cancel();
         return;
     }
   }
@@ -5700,13 +5734,6 @@ class XmppService extends ChangeNotifier {
       ordered.add(entry.value);
     }
     return ordered;
-  }
-
-  void _startJmiFallbackTimer(String sid, String bareJid) {
-    _jmiFallbackTimers[sid]?.cancel();
-    _jmiFallbackTimers[sid] = Timer(const Duration(seconds: 5), () {
-      unawaited(_sendPendingJingleInitiate(sid, Jid.fromFullJid(bareJid)));
-    });
   }
 
   Future<void> _sendPendingJingleInitiate(String sid, Jid to) async {
@@ -6201,6 +6228,25 @@ class XmppService extends ChangeNotifier {
   bool _featuresSupportJingle(Set<String> features) {
     return features.contains(_jingleNamespace) ||
         features.contains(jmiNamespace) ||
+        features.contains(_jingleRtpNamespace);
+  }
+
+  /// Returns true only when disco#info caps for [bareJid] are already known
+  /// and positively show raw Jingle (XEP-0166/0167) support without Jingle
+  /// Message Initiation (XEP-0353) support — i.e. a legacy Jingle client
+  /// that will never answer a JMI `propose` with `proceed`. Returns false
+  /// when caps are unknown (not received yet) or when JMI is supported: in
+  /// both cases we must not race a raw-Jingle fallback against a real JMI
+  /// handshake that might still be in progress.
+  bool _peerKnownToLackJmiSupport(String bareJid) {
+    final features = _pepCapsManager?.featuresForBareJid(_bareJid(bareJid));
+    if (features == null || features.isEmpty) {
+      return false;
+    }
+    if (features.contains(jmiNamespace)) {
+      return false;
+    }
+    return features.contains(_jingleNamespace) ||
         features.contains(_jingleRtpNamespace);
   }
 
