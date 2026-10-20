@@ -186,11 +186,13 @@ class XmppService extends ChangeNotifier {
   Timer? _mucSelfPingTimer;
   final Map<String, String> _pendingMucSelfPings = {};
   final Map<String, Timer> _mucSelfPingTimeouts = {};
+
   // ignore: unused_field
   // Hot-reload compatibility for pre-consolidation closures that still
   // reference this field name.
   final Map<String, DateTime> _pendingPings = {};
   String? _carbonsRequestId;
+
   // All adjustable keepalive/ping/reconnect/call timers live in a single
   // [KeepaliveTuning] instance so a settings control panel can read and
   // update every one of them consistently. See [keepaliveTuning] and
@@ -203,6 +205,7 @@ class XmppService extends ChangeNotifier {
   XmppStatus _status = XmppStatus.disconnected;
   String? _errorMessage;
   String? _currentUserBareJid;
+
   // A TLS certificate that failed standard CA validation (e.g. self-signed)
   // and is awaiting a trust decision from the user, or null when there is
   // none. Set from [XmppAccountSettings.onUntrustedCertificate] and cleared
@@ -218,18 +221,25 @@ class XmppService extends ChangeNotifier {
   Timer? _connectivityDebounceTimer;
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<ChatMessage>> _roomMessages = {};
+
   // XEP-0491: live hosted WebXDC sessions keyed by widget thread id.
   final Map<String, WebxdcSession> _webxdcSessions = {};
+
   // XEP-0491: chat bare JID each open session belongs to.
   final Map<String, String> _webxdcSessionChatBareJids = {};
+
   // XEP-0491: whether each open session's chat is a MUC room.
   final Map<String, bool> _webxdcSessionIsRoom = {};
+
   // XEP-0491: subscriptions on session.updates (local mini-app → XMPP).
   final Map<String, StreamSubscription<WebxdcUpdate>> _webxdcUpdateSubs = {};
+
   // XEP-0491: cached .xdc zip bytes keyed by thread id (and also by oob URL).
   final Map<String, Uint8List> _webxdcBytesCache = {};
+
   // XEP-0491: serials delivered from peers so we do not re-publish them.
   final Map<String, Set<int>> _webxdcPeerSerials = {};
+
   // XEP-0491: in-memory, session-lifetime log of every update seen for a
   // thread (both incoming and our own outgoing ones), in arrival order.
   // Used to replay the widget's full update history when reopening a
@@ -251,9 +261,11 @@ class XmppService extends ChangeNotifier {
   final Map<String, RoomEntry> _rooms = {};
   final Map<String, Set<String>> _roomOccupants = {};
   final Map<String, String> _roomOccupantRealJids = {};
+
   // Keyed by room bare JID, then occupant nick: tracks the richer
   // role/affiliation/status details used by the room occupant list panel.
   final Map<String, Map<String, RoomOccupant>> _roomOccupantDetails = {};
+
   // XEP-0421: our own occupant-id in each occupant-id-capable room we've
   // joined, keyed by room bare jid.
   final Map<String, String> _roomSelfOccupantIds = {};
@@ -283,12 +295,18 @@ class XmppService extends ChangeNotifier {
   static const int _maxQuicHistory = 60;
 
   List<int> get quicRttHistory => _quicRttHistory;
+
   List<int> get quicLossHistory => _quicLossHistory;
+
   List<int> get quicOutstandingHistory => _quicOutstandingHistory;
+
   List<int> get quicAcknowledgedHistory => _quicAcknowledgedHistory;
+
   double? get quicLossPercentage =>
       packetLossPercentage(_quicLossHistory, _quicSentHistory);
+
   ConnectionHealth get connectionHealth => _connectionHealth;
+
   bool get isDegraded => _connectionHealth == ConnectionHealth.degraded;
 
   void Function(String bareJid, ChatMessage message)? _incomingMessageHandler;
@@ -325,6 +343,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, Timer> _mamCatchUpTimers = {};
   DateTime? _lastGlobalMamSyncAt;
   StorageService? _storage;
+
   // XEP-0258: the security policies (SPIFs) known to this session, fetched
   // from the server's `urn:xmpp:sec-label:policy:0` IQHandler and/or seeded
   // from disk. Registering a policy here (via `Site.load`) is what lets
@@ -332,16 +351,19 @@ class XmppService extends ChangeNotifier {
   // `<label/>` into an actual display marking instead of falling back to
   // the server-supplied `<displaymarking/>`.
   final spiffing.Site _securityLabelSite = spiffing.Site();
+
   // XEP-0258 (policy extension): the SPIFs known to be loaded on the
   // server, in server-defined (primary policy first) order. Populated by
   // `_refreshSecurityLabelPolicies`. `Site` has no way to enumerate the
   // policies registered with it, so this is kept alongside it.
   List<SecurityLabelPolicyRef> _securityLabelPolicyRefs = [];
+
   // XEP-0258 (catalog extension): the security labels the user is allowed
   // to attach to an outgoing message, fetched once per session (without a
   // `to=` recipient, so not filtered by peer clearance - see
   // `security_label_catalog.dart`) and/or seeded from disk.
   List<SecurityLabelCatalogEntry> _securityLabelCatalog = [];
+
   // XEP-0258: a label staged by the user to be attached to their next
   // outgoing message in a given chat (keyed by the chat's bare JID - works
   // for both 1:1 chats and MUC rooms). Labels are per-outgoing-message,
@@ -352,12 +374,14 @@ class XmppService extends ChangeNotifier {
   String? _rosterVersion;
   final Map<String, String> _displayedStanzaIdByChat = {};
   final Map<String, DateTime> _displayedAtByChat = {};
+
   // R1.3: pending displayed-sync markers we received from MDS but could
   // not yet match to any locally cached message. Resolved as messages
   // with the matching stanza-id are appended (live or via MAM). Persisted
   // through `StorageService.storeDisplayedSyncPending` so the resolution
   // survives restarts.
   final Map<String, String> _displayedSyncPending = {};
+
   // R2.1: globally newest MAM id ingested from the account (DM) archive.
   // Persisted via `StorageService.storeLastMamIdSeen` so future sessions
   // can issue a single unified catch-up query (`afterId=` this anchor)
@@ -475,7 +499,9 @@ class XmppService extends ChangeNotifier {
   static const int _maxRecentReactionEmojis = 10;
 
   XmppStatus get status => _status;
+
   String? get errorMessage => _errorMessage;
+
   String? get currentUserBareJid => _currentUserBareJid;
 
   /// A TLS certificate awaiting a trust decision from the user, or null.
@@ -496,8 +522,11 @@ class XmppService extends ChangeNotifier {
 
   List<String> get recentReactionEmojis =>
       List.unmodifiable(_recentReactionEmojis);
+
   XmppConnectionState? get lastConnectionState => _lastConnectionState;
+
   bool get hasConnectedSession => _hasConnectedSession;
+
   List<ContactEntry> get contacts {
     final combined = <ContactEntry>[..._bookmarks, ..._contacts];
     combined.sort(_contactSort);
@@ -505,12 +534,14 @@ class XmppService extends ChangeNotifier {
   }
 
   String? get activeChatBareJid => _activeChatBareJid;
+
   String reactionSenderForChat(String bareJid, {required bool isRoom}) {
     final normalized = _bareJid(bareJid);
     return isRoom ? _roomNickFor(normalized) : (_currentUserBareJid ?? '');
   }
 
   RoomEntry? roomFor(String bareJid) => _rooms[_bareJid(bareJid)];
+
   String? roomOccupantRealJid(String roomJid, String nick) {
     return _roomOccupantRealJids['${_bareJid(roomJid)}/$nick'];
   }
@@ -538,9 +569,13 @@ class XmppService extends ChangeNotifier {
   }
 
   Duration? get lastPingLatency => _lastPingLatency;
+
   DateTime? get lastPingAt => _lastPingAt;
+
   bool get carbonsEnabled => _carbonsEnabled;
+
   bool isBlocked(String bareJid) => _blockedJids.contains(_bareJid(bareJid));
+
   CallSession? callSessionFor(String bareJid) {
     final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
     if (key == null) {
@@ -737,6 +772,7 @@ class XmppService extends ChangeNotifier {
   }
 
   String? get preferredAudioInputId => _preferredAudioInputId;
+
   String? get preferredVideoInputId => _preferredVideoInputId;
 
   Future<void> toggleSpeakerphone() async {
@@ -1196,10 +1232,15 @@ class XmppService extends ChangeNotifier {
   }
 
   bool get isConnected => _status == XmppStatus.connected;
+
   bool get isConnecting => _status == XmppStatus.connecting;
+
   bool get isBackgroundMode => _backgroundMode;
+
   bool get isCsiInactive => _csiInactive;
+
   CsiOverrideMode get csiOverrideMode => _csiOverrideMode;
+
   bool get lowBandwidthMode => _lowBandwidthMode;
 
   /// Keeps CSI inactive and suppresses avatar lookups while retaining cached
@@ -5669,13 +5710,17 @@ class XmppService extends ChangeNotifier {
     if (descriptions.isEmpty) {
       return;
     }
+    // Deliberately no fallback <body>/<fallback> here (unlike the XEP-0428
+    // pattern used elsewhere): some receiving clients (e.g. Conversations)
+    // only route a message into their Jingle Message Initiation handling
+    // when it has no visible body, and their XEP-0428 fallback detection
+    // does not recognize a fallback scoped to urn:xmpp:jingle-message:0.
+    // Adding a body here causes those clients to treat the whole stanza as
+    // a plain chat message and never ring. XEP-0353's own example likewise
+    // sends `propose` without a body.
     _sendJmiMessage(
       to,
       buildJmiProposeElement(sid: sid, descriptions: descriptions),
-      fallbackBody:
-          descriptions.any((description) => description.media == 'video')
-          ? 'Incoming video call'
-          : 'Incoming voice call',
     );
   }
 
