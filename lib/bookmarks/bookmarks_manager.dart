@@ -353,9 +353,22 @@ class BookmarksManager {
     item.addChild(_buildConference(bookmark));
     publish.addChild(item);
     pubsub.addChild(publish);
-    pubsub.addChild(buildPrivatePepPublishOptions());
+    pubsub.addChild(buildPrivatePepPublishOptions(
+      serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+    ));
     iqStanza.addChild(pubsub);
     connection.writeStanza(iqStanza);
+  }
+
+  /// Whether the connected server advertises [pubsubConfigNodeMaxFeature],
+  /// i.e. whether it honors the literal string `"max"` for `pubsub#max_items`.
+  /// This is an OPTIONAL XEP-0060 feature; when unsupported we fall back to
+  /// [pubsubMaxItemsFallback] so the bookmarks node reconfiguration doesn't
+  /// loop forever against servers that reject the `max` keyword.
+  bool _serverSupportsConfigNodeMax() {
+    return connection
+        .getSupportedFeatures()
+        .any((feature) => feature.xmppVar == pubsubConfigNodeMaxFeature);
   }
 
   Future<void> _retractBookmark(String roomJid) async {

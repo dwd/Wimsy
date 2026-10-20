@@ -8396,6 +8396,7 @@ class XmppService extends ChangeNotifier {
         itemId: 'recent',
         payload: recent,
         selfBareJid: selfBareJid,
+        serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
       );
     }
 
@@ -10402,6 +10403,22 @@ class XmppService extends ChangeNotifier {
     }
   }
 
+  /// Whether the connected server advertises [pubsubConfigNodeMaxFeature],
+  /// i.e. whether it honors the literal string `"max"` for `pubsub#max_items`
+  /// (and similar node-configuration fields). This is an OPTIONAL XEP-0060
+  /// feature, so callers must not assume `max` works without checking it;
+  /// when unsupported we fall back to [pubsubMaxItemsFallback] to avoid an
+  /// endless reconfigure/precondition-not-met loop.
+  bool _serverSupportsConfigNodeMax() {
+    final connection = _connection;
+    if (connection == null) {
+      return false;
+    }
+    return connection
+        .getSupportedFeatures()
+        .any((feature) => feature.xmppVar == pubsubConfigNodeMaxFeature);
+  }
+
   /// Generic helper that publishes to a private PEP node and automatically
   /// recovers from a `<precondition-not-met/>` error (XEP-0060 §7.1.3.3).
   ///
@@ -10412,7 +10429,10 @@ class XmppService extends ChangeNotifier {
   /// retrying [publishIqBuilder] once.
   ///
   /// [publishIqBuilder] is called twice (initial attempt + retry) so it must
-  /// produce a fresh IQ each time (with a new stanza id).
+  /// produce a fresh IQ each time (with a new stanza id). It must use the
+  /// same `pubsub#max_items` value (`max` or the numeric fallback) as the
+  /// `<configure/>` IQ this helper sends on `precondition-not-met`, so
+  /// callers should derive both from [_serverSupportsConfigNodeMax].
   Future<bool> _doPrivatePepPublish({
     required IqStanza Function() publishIqBuilder,
     required String node,
@@ -10454,7 +10474,11 @@ class XmppService extends ChangeNotifier {
         'PEP node $node misconfigured (precondition-not-met); reconfiguring and retrying',
       );
       final reconfigure = _sendIqAndAwait(
-        buildPrivatePepConfigureIq(node: node, selfBareJid: selfBareJid),
+        buildPrivatePepConfigureIq(
+          node: node,
+          selfBareJid: selfBareJid,
+          serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+        ),
       );
       _pepNodeReconfigureInFlight[node] = reconfigure.then((_) {});
       try {
@@ -10498,6 +10522,7 @@ class XmppService extends ChangeNotifier {
           stanzaId: stanzaId,
           byValue: byValue,
           selfBareJid: selfBareJid,
+          serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
         );
         final id = iq.id;
         if (id != null && id.isNotEmpty) {

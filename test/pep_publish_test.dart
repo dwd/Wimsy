@@ -44,6 +44,37 @@ void main() {
       _expectField(fields, 'pubsub#send_last_published_item', 'never');
       _expectField(fields, 'pubsub#max_items', 'max');
     });
+
+    test('falls back to a numeric max_items when the server does not '
+        'support "max" (config-node-max not advertised)', () {
+      final opts = buildPrivatePepPublishOptions(
+        serverSupportsConfigNodeMax: false,
+      );
+      final fields = opts
+              .getChild('x')
+              ?.children
+              .where((c) => c.name == 'field')
+              .toList() ??
+          [];
+      _expectField(fields, 'pubsub#max_items', pubsubMaxItemsFallback);
+    });
+  });
+
+  group('resolveMaxItemsValue', () {
+    test('returns "max" when the server supports config-node-max', () {
+      expect(
+        resolveMaxItemsValue(serverSupportsConfigNodeMax: true),
+        'max',
+      );
+    });
+
+    test('returns the numeric fallback when the server does not support '
+        'config-node-max', () {
+      expect(
+        resolveMaxItemsValue(serverSupportsConfigNodeMax: false),
+        pubsubMaxItemsFallback,
+      );
+    });
   });
 
   group('buildPrivatePepConfigureIq', () {
@@ -97,6 +128,19 @@ void main() {
       _expectField(fields, 'pubsub#access_model', 'whitelist');
       _expectField(fields, 'pubsub#send_last_published_item', 'never');
       _expectField(fields, 'pubsub#max_items', 'max');
+    });
+
+    test('falls back to a numeric max_items when the server does not '
+        'support "max" (config-node-max not advertised)', () {
+      final iq = buildPrivatePepConfigureIq(
+        node: 'urn:example:node',
+        selfBareJid: 'user@example.com',
+        serverSupportsConfigNodeMax: false,
+      );
+      final x =
+          iq.getChild('pubsub')?.getChild('configure')?.getChild('x');
+      final fields = x?.children.where((c) => c.name == 'field').toList() ?? [];
+      _expectField(fields, 'pubsub#max_items', pubsubMaxItemsFallback);
     });
   });
 
@@ -171,6 +215,22 @@ void main() {
       final fields = x?.children.where((c) => c.name == 'field').toList() ?? [];
       _expectField(fields, 'pubsub#access_model', 'whitelist');
       _expectField(fields, 'pubsub#persist_items', 'true');
+    });
+
+    test('publish-options use a numeric max_items fallback when the server '
+        'does not support "max"', () {
+      final payload = XmppElement()..name = 'data';
+      final iq = buildPrivatePepPublishIq(
+        node: 'urn:example:node',
+        itemId: 'item1',
+        payload: payload,
+        selfBareJid: 'user@example.com',
+        serverSupportsConfigNodeMax: false,
+      );
+      final publishOptions = iq.getChild('pubsub')?.getChild('publish-options');
+      final x = publishOptions?.getChild('x');
+      final fields = x?.children.where((c) => c.name == 'field').toList() ?? [];
+      _expectField(fields, 'pubsub#max_items', pubsubMaxItemsFallback);
     });
 
     test('each call produces a different IQ id', () {
