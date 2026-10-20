@@ -579,6 +579,74 @@ void main() {
       expect(result.successful, isTrue);
       expect(connection.bind2Completed, isTrue);
       expect(connection.fullJid.resource, equals('wimsy-server-assigned'));
+
+      // Regression test: account.resource (the user's originally configured
+      // resource) must never be overwritten with the server-granted
+      // resource. Otherwise the next reconnect would request the previous
+      // grant as the new preferred resource via the Bind 2 <tag>, and a
+      // server that disambiguates by appending a suffix would make the
+      // resource grow without bound across repeated reconnects.
+      expect(account.resource, equals('wimsy'));
+    });
+
+    test(
+        'requested resource stays stable across reconnects after a '
+        'server-assigned resource was granted', () async {
+      // Regression test for unbounded resource growth: a previous bind
+      // grants a server-assigned resource (e.g. because the server could
+      // not use the client's requested tag as-is). On the next connection
+      // attempt, the client must still request its originally configured
+      // resource, not the resource granted last time.
+      final account =
+          XmppAccountSettings.fromJid('alice@example.com', 'secret');
+      account
+        ..resource = 'wimsy'
+        ..sasl2SendUserAgent = false
+        ..useBind2 = true;
+      final connection = Connection(account);
+      connection.setSasl2InlineFeatures({
+        'urn:xmpp:bind:0': XmppElement()
+          ..name = 'bind'
+          ..addAttribute(XmppAttribute('xmlns', 'urn:xmpp:bind:0')),
+      });
+      var socket = _RecordingSocket();
+      connection.socket = socket;
+
+      var handler =
+          Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      var resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "<bound xmlns='urn:xmpp:bind:0'>"
+        '<jid>alice@example.com/wimsy/ff21225aee3bb25f</jid>'
+        '</bound>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
+      expect(connection.fullJid.resource, equals('wimsy/ff21225aee3bb25f'));
+      expect(account.resource, equals('wimsy'));
+
+      // Simulate a reconnect: a fresh auth handler builds a new <bind>
+      // request from the current account settings.
+      socket = _RecordingSocket();
+      connection.socket = socket;
+      handler = Sasl2AuthHandler(connection, 'secret', SaslMechanism.PLAIN);
+      resultFuture = handler.start();
+      await Future<void>.delayed(Duration.zero);
+
+      final authXml = xml.XmlDocument.parse(socket.writes.first).rootElement;
+      final auth = Nonza.parse(authXml);
+      final bind = auth.getChild('bind');
+      expect(bind?.getChild('tag')?.textValue, equals('wimsy'));
+
+      connection.handleResponse(
+        "<xmpp_stone><success xmlns='urn:xmpp:sasl:2'>"
+        '<authorization-identifier>alice@example.com</authorization-identifier>'
+        "</success></xmpp_stone>",
+      );
+      await resultFuture;
     });
 
     test(

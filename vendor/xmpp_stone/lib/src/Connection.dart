@@ -120,6 +120,19 @@ class Connection {
   String? errorMessage;
   String? _authorizationIdentifier;
   Jid? _authorizedBareJid;
+
+  /// The resource actually granted by the server for the current binding,
+  /// as reported via Bind 2 (XEP-0386) or legacy resource binding. This is
+  /// kept separate from [XmppAccountSettings.resource] so that the user's
+  /// originally configured resource is never overwritten with a
+  /// server-generated resource. Without this separation, a server that
+  /// disambiguates re-requested resources by appending a suffix (rather
+  /// than rejecting or reusing the previous binding) would cause the
+  /// requested resource to grow without bound across reconnects, since
+  /// each reconnect would otherwise feed the previously granted resource
+  /// back in as the next requested resource (the `<tag>` in Bind 2 / the
+  /// legacy `<resource>` element).
+  String? _boundResource;
   Map<String, XmppElement> _sasl2InlineFeatures = {};
   List<XmppElement> _sasl2SuccessElements = [];
   XmppElement? _iapConfigVersion;
@@ -205,7 +218,8 @@ class Connection {
     if (authorized == null) {
       return account.fullJid;
     }
-    return Jid(authorized.local, authorized.domain, account.resource);
+    return Jid(authorized.local, authorized.domain,
+        _boundResource ?? account.resource);
   }
 
   late ConnectionNegotiatorManager connectionNegotatiorManager;
@@ -213,7 +227,11 @@ class Connection {
   void fullJidRetrieved(Jid jid) {
     _authorizedBareJid = Jid(jid.local, jid.domain, '');
     _authorizationIdentifier = _authorizedBareJid!.userAtDomain;
-    account.resource = jid.resource;
+    // Track the server-granted resource separately from account.resource so
+    // that the next connection attempt still requests the user's originally
+    // configured resource, rather than the (potentially server-mangled)
+    // resource granted for the previous session.
+    _boundResource = jid.resource;
     _resourceBound = true;
   }
 
@@ -608,6 +626,7 @@ class Connection {
     _deferredPostAuthFeatureElement = null;
     _bind2Completed = false;
     _resourceBound = false;
+    _boundResource = null;
     _carbons2EnabledInline = false;
     final iapScheme = account.iapConfigVersionScheme?.trim();
     final iapValue = account.iapConfigVersionValue?.trim();
