@@ -8127,21 +8127,70 @@ class XmppService extends ChangeNotifier {
   void _replayControlMessageOutbox() {
     for (final operation in _controlMessageOutbox.pending) {
       if (operation.kind == ControlMessageKind.mds) {
-        final selfBareJid = _currentUserBareJid;
-        if (selfBareJid != null && selfBareJid.isNotEmpty) {
-          unawaited(
-            _doPublishMdsDisplayed(
-              chatJid: operation.toJid,
-              stanzaId: operation.referencedId,
-              byValue: operation.byValue ?? '',
-              selfBareJid: selfBareJid,
-            ),
-          );
-        }
+        _retryPendingMdsPublish(operation);
       } else {
         _writeControlMessage(operation);
       }
     }
+  }
+
+  /// Retries a previously-failed XEP-0490 "displayed" publish for
+  /// [operation.toJid] on reconnect.
+  ///
+  /// Crucially, this does **not** blindly resend the frozen
+  /// `operation.referencedId` that was cached in the outbox whenever the
+  /// original publish was queued - possibly a long time ago, for a chat
+  /// that hasn't been reopened since. The MDS node is a single, per-user
+  /// PEP item per chat shared by every one of the account's devices, so
+  /// republishing a stale snapshot risks asserting a *regressed* "displayed"
+  /// position the moment we reconnect - making an already-read chat look
+  /// unread again on other devices (see the "Message Displayed Sync"
+  /// investigation).
+  ///
+  /// Instead, we only retry once this chat's MAM history is known to be
+  /// fully caught up (so the local message list is authoritative, not
+  /// behind what other devices may have already advanced to), and even
+  /// then we recompute the "displayed" stanza-id fresh from the current
+  /// local message list rather than trusting the cached value.
+  void _retryPendingMdsPublish(ControlMessageOperation operation) {
+    final selfBareJid = _currentUserBareJid;
+    if (selfBareJid == null || selfBareJid.isEmpty) {
+      return;
+    }
+    final bareJid = operation.toJid;
+    final isRoom = _roomMessages.containsKey(bareJid) || isBookmark(bareJid);
+    if (!_isMamCatchUpComplete(bareJid, isRoom: isRoom)) {
+      // Local history for this chat isn't confirmed current yet - leave the
+      // operation pending rather than publish a possibly-stale position.
+      // It will be retried on a later reconnect once catch-up completes, or
+      // superseded as soon as the chat is opened or a new message arrives.
+      return;
+    }
+    final list = isRoom ? _roomMessages[bareJid] : _messages[bareJid];
+    if (list == null || list.isEmpty) {
+      return;
+    }
+    ChatMessage? latest;
+    for (final message in list.reversed) {
+      if (!message.outgoing &&
+          message.stanzaId != null &&
+          message.stanzaId!.isNotEmpty) {
+        latest = message;
+        break;
+      }
+    }
+    if (latest == null) {
+      return;
+    }
+    final byValue = isRoom ? bareJid : selfBareJid;
+    unawaited(
+      _doPublishMdsDisplayed(
+        chatJid: bareJid,
+        stanzaId: latest.stanzaId!,
+        byValue: byValue,
+        selfBareJid: selfBareJid,
+      ),
+    );
   }
 
   void _setupPresence() {
