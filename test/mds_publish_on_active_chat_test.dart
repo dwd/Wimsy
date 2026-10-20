@@ -7,14 +7,22 @@ import 'package:flutter_test/flutter_test.dart';
 //
 // The production code lives in xmpp_service.dart:
 //   - `selectChat()` calls `_publishDisplayedState(bareJid)` once, when the
-//     chat is first opened in the UI.
-//   - `_addMessage()` (DMs) and `_addRoomMessage()` (MUC) now also call
-//     `_publishDisplayedState(bareJid)` whenever a *live* incoming message
-//     (not a MAM-replayed/backfilled one) arrives for whichever chat is
-//     currently `_activeChatBareJid`. Without this, the MDS state on the
-//     server would only ever record a single "displayed" marker per chat —
-//     the one sent the moment the chat was opened — and would never advance
-//     as further messages arrived while the chat stayed open.
+//     chat is first opened in the UI. This runs *before* any MAM catch-up
+//     response for that chat can possibly have arrived.
+//   - `_addMessage()` (DMs) and `_addRoomMessage()` (MUC) call
+//     `_publishDisplayedState(bareJid)` whenever *any* incoming message
+//     (live, or delivered later by a MAM catch-up page) arrives for
+//     whichever chat is currently `_activeChatBareJid`. Without this, a
+//     device that opens a chat while behind on history would publish a
+//     stale marker for the pre-catch-up state and never advance it once the
+//     missing messages actually arrived — leaving that chat shown as
+//     unread on other devices/desktop even though it had genuinely been
+//     opened and viewed (see the "Message Displayed Sync" investigation).
+//   - The separate `incomingMessageHandler`/`incomingRoomMessageHandler`
+//     notification callbacks are still gated on `!hasMamId && catchUpComplete`
+//     (and `shouldNotifyRoom` for MUC) — we don't want to pop a "new
+//     message" notification for backfilled history — but that gating must
+//     not also suppress the displayed-state republish.
 //   - `_publishDisplayedState` itself is idempotent: it tracks the last
 //     stanza-id it published per chat and skips re-publishing when nothing
 //     changed.
@@ -24,6 +32,7 @@ class _DisplayedStateModel {
   String? activeChatBareJid;
   final Map<String, String> lastPublishedStanzaIdByChat = {};
   final List<String> publishCalls = [];
+  final List<String> notificationCalls = [];
 
   void selectChat(String? bareJid) {
     activeChatBareJid = bareJid;
@@ -32,17 +41,25 @@ class _DisplayedStateModel {
     }
   }
 
-  /// Mirrors the live-message branch added to `_addMessage`/
-  /// `_addRoomMessage`: only live (non-MAM-backfill) incoming messages for
-  /// the currently active chat trigger a fresh publish.
-  void receiveLiveIncomingMessage(
+  /// Mirrors the incoming-message branches in `_addMessage`/
+  /// `_addRoomMessage`: the notification handler is only invoked for live
+  /// (non-MAM-backfill, caught-up) messages, but the displayed-state publish
+  /// fires for *any* incoming message — live or MAM-backfilled — as long as
+  /// the chat is the one currently active.
+  void receiveIncomingMessage(
     String bareJid, {
     required String stanzaId,
     bool outgoing = false,
     bool hasMamId = false,
     bool catchUpComplete = true,
   }) {
-    if (!outgoing && !hasMamId && catchUpComplete && bareJid == activeChatBareJid) {
+    if (outgoing) {
+      return;
+    }
+    if (!hasMamId && catchUpComplete) {
+      notificationCalls.add('$bareJid:$stanzaId');
+    }
+    if (bareJid == activeChatBareJid) {
       _publishDisplayedState(bareJid, latestStanzaId: stanzaId);
     }
   }
@@ -73,7 +90,7 @@ void main() {
         final model = _DisplayedStateModel();
         model.selectChat('alice@example.com');
 
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'alice@example.com',
           stanzaId: 'live-stanza-1',
         );
@@ -92,7 +109,7 @@ void main() {
         final model = _DisplayedStateModel();
         model.selectChat('alice@example.com');
 
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'bob@example.com',
           stanzaId: 'live-stanza-1',
         );
@@ -105,7 +122,7 @@ void main() {
       final model = _DisplayedStateModel();
       model.selectChat('alice@example.com');
 
-      model.receiveLiveIncomingMessage(
+      model.receiveIncomingMessage(
         'alice@example.com',
         stanzaId: 'live-stanza-1',
         outgoing: true,
@@ -115,21 +132,44 @@ void main() {
     });
 
     test(
-      'MAM-backfilled messages (not yet caught up, or carrying a mam id) do '
-      'not trigger a publish even for the active chat',
+      'MAM-backfilled messages for the active chat still republish the '
+      'displayed marker, even though they do not fire the notification '
+      'handler',
       () {
         final model = _DisplayedStateModel();
         model.selectChat('alice@example.com');
 
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'alice@example.com',
           stanzaId: 'mam-stanza-1',
           hasMamId: true,
         );
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'alice@example.com',
           stanzaId: 'catchup-stanza-1',
           catchUpComplete: false,
+        );
+
+        expect(model.publishCalls, [
+          'alice@example.com:seed-stanza-id',
+          'alice@example.com:mam-stanza-1',
+          'alice@example.com:catchup-stanza-1',
+        ]);
+        expect(model.notificationCalls, isEmpty);
+      },
+    );
+
+    test(
+      'a MAM-backfilled message for a chat that is not currently active '
+      'does not publish',
+      () {
+        final model = _DisplayedStateModel();
+        model.selectChat('alice@example.com');
+
+        model.receiveIncomingMessage(
+          'bob@example.com',
+          stanzaId: 'mam-stanza-1',
+          hasMamId: true,
         );
 
         expect(model.publishCalls, ['alice@example.com:seed-stanza-id']);
@@ -143,15 +183,15 @@ void main() {
         final model = _DisplayedStateModel();
         model.selectChat('alice@example.com');
 
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'alice@example.com',
           stanzaId: 'live-stanza-1',
         );
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'alice@example.com',
           stanzaId: 'live-stanza-1',
         );
-        model.receiveLiveIncomingMessage(
+        model.receiveIncomingMessage(
           'alice@example.com',
           stanzaId: 'live-stanza-2',
         );

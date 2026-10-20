@@ -9621,19 +9621,23 @@ class XmppService extends ChangeNotifier {
         'messageId=$messageId',
       );
       _incomingMessageHandler?.call(normalized, newMessage);
-      // R1.4: if the chat is already open while this live message arrives,
-      // the user is implicitly displaying it — keep the XEP-0490 MDS state
-      // (and the XEP-0333 marker sent to the peer) current instead of only
-      // publishing once when the chat was first opened via selectChat().
-      if (normalized == _activeChatBareJid) {
-        _sendDisplayedForChat(normalized);
-        _publishDisplayedState(normalized);
-      }
     } else if (!outgoing) {
       debugPrint(
         'NewMsg[DM] suppressing incomingMessageHandler for chat=$normalized: '
         'outgoing=$outgoing hasMamId=$hasMamId catchUpComplete=$catchUpComplete',
       );
+    }
+    // R6: if the chat is already open while this message arrives — whether
+    // it's a genuinely live message or one delivered by a MAM catch-up page
+    // that just backfilled history for the chat we're actively looking at —
+    // the user is implicitly displaying it. Keep the XEP-0490 MDS state (and
+    // the XEP-0333 marker sent to the peer) current instead of only
+    // publishing once when the chat was first opened via selectChat(),
+    // which runs *before* any catch-up response has arrived and would
+    // otherwise leave later, caught-up messages marked unread forever.
+    if (!outgoing && normalized == _activeChatBareJid) {
+      _sendDisplayedForChat(normalized);
+      _publishDisplayedState(normalized);
     }
   }
 
@@ -9906,13 +9910,14 @@ class XmppService extends ChangeNotifier {
       );
       _incomingRoomMessageHandler?.call(normalized, newMessage);
     }
-    // R1.4: keep the XEP-0490 MDS marker current while the room is open and
-    // new live messages keep arriving, instead of only publishing once when
-    // the room was first opened via selectChat().
-    if (!outgoing &&
-        !hasMamIdRoom &&
-        catchUpCompleteRoom &&
-        normalized == _activeChatBareJid) {
+    // R1.4/R6: keep the XEP-0490 MDS marker current while the room is open,
+    // for both live messages and ones delivered via a MAM catch-up page that
+    // just backfilled history for the room we're actively looking at —
+    // instead of only publishing once when the room was first opened via
+    // selectChat(), which runs *before* any catch-up response has arrived
+    // and would otherwise leave later, caught-up messages marked unread
+    // forever.
+    if (!outgoing && normalized == _activeChatBareJid) {
       _publishDisplayedState(normalized);
     }
     if (!outgoing &&
