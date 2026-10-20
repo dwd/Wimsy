@@ -165,6 +165,16 @@ class XmppService extends ChangeNotifier {
   late final MessageIntentBuilder _messageIntentBuilder;
   late final MamCoordinator _mamCoordinator;
   late final ControlMessageOutbox _controlMessageOutbox;
+
+  // Tracks an in-flight `pubsub#owner` reconfigure IQ per private PEP node
+  // (e.g. the XEP-0490 MDS node). Several publishes to the same node can be
+  // kicked off concurrently (e.g. [_replayControlMessageOutbox] replaying one
+  // pending "displayed" marker per chat after a reconnect); without this
+  // guard every one of them would independently observe the same
+  // `<precondition-not-met/>` error and send its own redundant reconfigure
+  // IQ. Instead, the first caller performs the reconfigure and the rest
+  // await the same [Future] before retrying their own publish.
+  final Map<String, Future<void>> _pepNodeReconfigureInFlight = {};
   Connection? _connection;
   ChatManager? _chatManager;
   StreamSubscription<XmppConnectionState>? _connectionStateSubscription;
@@ -10375,13 +10385,35 @@ class XmppService extends ChangeNotifier {
     }
     // The node exists but its configuration does not match our publish-options.
     // Reconfigure the node to the required settings, then retry once.
-    Log.w(
-      'XmppService',
-      'PEP node $node misconfigured (precondition-not-met); reconfiguring and retrying',
-    );
-    await _sendIqAndAwait(
-      buildPrivatePepConfigureIq(node: node, selfBareJid: selfBareJid),
-    );
+    //
+    // Several publishes to the same node can race in here concurrently (e.g.
+    // [_replayControlMessageOutbox] kicks off one MDS publish per chat with
+    // a pending "displayed" marker). Only the first caller actually sends
+    // the reconfigure IQ; the rest await that same in-flight reconfigure
+    // instead of each sending their own redundant one.
+    final existingReconfigure = _pepNodeReconfigureInFlight[node];
+    if (existingReconfigure != null) {
+      Log.w(
+        'XmppService',
+        'PEP node $node misconfigured (precondition-not-met); '
+            'awaiting in-flight reconfigure and retrying',
+      );
+      await existingReconfigure;
+    } else {
+      Log.w(
+        'XmppService',
+        'PEP node $node misconfigured (precondition-not-met); reconfiguring and retrying',
+      );
+      final reconfigure = _sendIqAndAwait(
+        buildPrivatePepConfigureIq(node: node, selfBareJid: selfBareJid),
+      );
+      _pepNodeReconfigureInFlight[node] = reconfigure.then((_) {});
+      try {
+        await reconfigure;
+      } finally {
+        _pepNodeReconfigureInFlight.remove(node);
+      }
+    }
     final retryResult = await _sendIqAndAwait(publishIqBuilder());
     if (retryResult != null && retryResult.type == IqStanzaType.ERROR) {
       final retryCondition = _iqErrorCondition(retryResult);
