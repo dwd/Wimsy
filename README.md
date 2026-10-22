@@ -40,6 +40,19 @@ Builds, but untested on:
 - Native notifications for incoming messages (desktop + Android)
 - Console protocol traces for send/receive (when enabled)
 
+## Screenshots
+
+| | |
+|---|---|
+| ![QUIC connection-quality minigraphs](maestro/marketing-screenshots/00_quic_minigraphs.png) QUIC (XEP-0467) connection-quality sparklines (RTT/loss/bytes) | ![Home roster](maestro/marketing-screenshots/01_home_roster.png) Home roster |
+| ![Message context menu](maestro/marketing-screenshots/01_message_context_menu.png) Message context menu | ![Security label editor](maestro/marketing-screenshots/02_security_label_editor.png) Security label editor (XEP-0258) |
+| ![Reaction picker](maestro/marketing-screenshots/02_reaction_picker.png) Reaction picker (XEP-0444) | ![Message with reaction](maestro/marketing-screenshots/03_message_with_reaction.png) Message with reaction |
+| ![Reply composer](maestro/marketing-screenshots/04_reply_composer.png) Reply composer | ![Reply and reaction combined](maestro/marketing-screenshots/05_reply_and_reaction.png) Reply and reaction combined |
+
+These screenshots were captured from an Android emulator running against the
+`maestro/` test Openfire setup; see `maestro/README.md` for how to reproduce
+the environment used to take them.
+
 ## Notes
 
 - `xmpp_stone` is vendored locally in `vendor/xmpp_stone` to enforce StartTLS
