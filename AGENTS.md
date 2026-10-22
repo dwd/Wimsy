@@ -5,6 +5,8 @@
   - `flutter analyze`, `flutter test`, and the dart tests for vendored dependencies
   - Run Maestro flows against the Android emulator to test end-to-end functionality.
 - Always consider the possibility for adding additional tests, both to new and existing code.
-- Commit code when it's ready, but never push.
-- In commit messages, use a clear headline but also include a more detailed description, and how the changes were tested. Include details of new tests added.
+- Commit code after each self-contained change, but never push.
+  - Prefer multiple commits where changes can be broken down. 
+  - In commit messages, use a clear headline but also include a more detailed description, and how the changes were tested. Include details of new tests added.
 - When adding new features, ensure they are well-documented with comments and clear variable names. Follow the existing coding style and conventions.
+- Once each new session, confirm you've read and will follow these instructions.
