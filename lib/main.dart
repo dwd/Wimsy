@@ -4120,10 +4120,10 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Muji call active', style: theme.textTheme.labelLarge),
+                  Text('Muji room joined', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 2),
                   Text(
-                    'Other participants can join from the room.',
+                    'Participant list only; call signaling is not implemented yet.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

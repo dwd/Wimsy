@@ -25,7 +25,6 @@ Builds, but untested on:
 - MAM history sync and paging (XEP-0313 + XEP-0059)
 - MUC join/leave + bookmarks (XEP-0045 + XEP-0048/Bookmarks 2)
 - Audio/video calling over WebRTC (Jingle XEP-0166/0167 + JMI XEP-0353)
-- MUJI group calls (XEP-0272)
 - Chat states, receipts, and chat markers (XEP-0085, XEP-0184, XEP-0333)
 - Message carbons (XEP-0280)
 - Message corrections (XEP-0308)

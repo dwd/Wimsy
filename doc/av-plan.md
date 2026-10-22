@@ -113,7 +113,8 @@ Deliverables:
 
 Deliverables:
 - [x] Muji session state scaffold.
-- [x] Muji join/leave and signaling coordination.
+- [x] Muji room join/leave (MUC only; no per-participant Jingle signaling yet).
+- [ ] Per-participant Jingle session fan-out (actual call signaling).
 - [ ] Multi-party UX (participant list, mute states, speaker indication).
 
 ## Testing Plan
