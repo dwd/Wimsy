@@ -1201,10 +1201,14 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
               Row(
                 children: [
                   Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _showAddByJidDialog,
-                      icon: const Icon(Icons.person_search),
-                      label: const Text('New Chat'),
+                    child: Semantics(
+                      identifier: 'new-chat-button',
+                      child: FilledButton.icon(
+                        key: const Key('new-chat-button'),
+                        onPressed: _showAddByJidDialog,
+                        icon: const Icon(Icons.person_search),
+                        label: const Text('New Chat'),
+                      ),
                     ),
                   ),
                 ],
@@ -7659,14 +7663,18 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
           key: const Key('add-by-jid-address-fields'),
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: _jidController,
-              decoration: InputDecoration(
-                labelText: 'JID',
-                hintText: 'user@example.com',
-                errorText: _jidError,
+            Semantics(
+              identifier: 'add-by-jid-jid-field',
+              child: TextField(
+                key: const Key('add-by-jid-jid-field'),
+                controller: _jidController,
+                decoration: InputDecoration(
+                  labelText: 'JID',
+                  hintText: 'user@example.com',
+                  errorText: _jidError,
+                ),
+                autofocus: true,
               ),
-              autofocus: true,
             ),
             if (visibleSuggestions.isNotEmpty)
               ...visibleSuggestions.map(
@@ -7781,31 +7789,43 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
             ),
             if (isRoom) ...[
               const SizedBox(height: 12),
-              TextField(
-                controller: _nickController,
-                decoration: InputDecoration(
-                  labelText: 'Nickname',
-                  errorText: _nickError,
+              Semantics(
+                identifier: 'add-by-jid-nick-field',
+                child: TextField(
+                  key: const Key('add-by-jid-nick-field'),
+                  controller: _nickController,
+                  decoration: InputDecoration(
+                    labelText: 'Nickname',
+                    errorText: _nickError,
+                  ),
+                  onChanged: (_) {
+                    if (_nickError != null) {
+                      setState(() => _nickError = null);
+                    }
+                  },
                 ),
-                onChanged: (_) {
-                  if (_nickError != null) {
-                    setState(() => _nickError = null);
-                  }
-                },
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password (optional)',
+              Semantics(
+                identifier: 'add-by-jid-password-field',
+                child: TextField(
+                  key: const Key('add-by-jid-password-field'),
+                  controller: _passwordController,
+                  decoration: const InputDecoration(
+                    labelText: 'Password (optional)',
+                  ),
+                  obscureText: true,
                 ),
-                obscureText: true,
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _roomNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Room name (optional)',
+              Semantics(
+                identifier: 'add-by-jid-room-name-field',
+                child: TextField(
+                  key: const Key('add-by-jid-room-name-field'),
+                  controller: _roomNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Room name (optional)',
+                  ),
                 ),
               ),
             ],
@@ -7854,14 +7874,18 @@ class _AddByJidDialogState extends State<_AddByJidDialog> {
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Cancel'),
             ),
-            FilledButton(
-              onPressed: _selectedType == null ? null : _submit,
-              child: Text(
-                _selectedType == null
-                    ? 'Select a type'
-                    : isRoom
-                    ? 'Join room'
-                    : 'Add contact',
+            Semantics(
+              identifier: 'add-by-jid-submit-button',
+              child: FilledButton(
+                key: const Key('add-by-jid-submit-button'),
+                onPressed: _selectedType == null ? null : _submit,
+                child: Text(
+                  _selectedType == null
+                      ? 'Select a type'
+                      : isRoom
+                      ? 'Join room'
+                      : 'Add contact',
+                ),
               ),
             ),
           ],

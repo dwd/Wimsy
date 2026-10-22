@@ -1,0 +1,68 @@
+# Verifies that a room bookmark survives a full local data wipe: the app is
+# force-stopped and relaunched with `clearState: true` (an Android "cold
+# start" with all app storage erased - distinct from warm_restart_reconnect
+# .yaml's warm restart, which keeps local storage), then Alice logs back in
+# from scratch. Because add_bookmark.yaml's bookmark was published to
+# Alice's private PEP bookmarks node (not just stored locally), it's
+# expected to come back from the server even though every local trace of it
+# was just wiped, confirming bookmarks are durable across reinstalls/device
+# changes and not merely cached app state.
+#
+# Intended to be chained directly after add_bookmark.yaml (which itself
+# chains after login_alice.yaml), so that there's a bookmark on the server
+# to verify against.
+appId: im.cridland.wimsy
+---
+- stopApp
+- launchApp:
+    clearState: true
+# A fresh install with clearState always lands on the one-time "Set a PIN"
+# screen before the login screen; skip it since we don't need a PIN for
+# these tests (see login_alice.yaml).
+- tapOn:
+    id: "pin-setup-continue-without-pin-button"
+- tapOn:
+    id: "login-jid-field"
+- inputText: "alice@localhost"
+- tapOn:
+    id: "login-password-field"
+- inputText: "alice123"
+- tapOn:
+    id: "manual-connection-toggle"
+- tapOn:
+    id: "login-host-field"
+- inputText: "localhost"
+- tapOn:
+    id: "login-port-field"
+# Deliberately skips hideKeyboard here: on some emulator images it causes
+# the app to exit to the home screen instead of just dismissing the
+# keyboard (a known quirk of this test environment, unrelated to the app
+# itself), so login-connect-button is tapped directly instead.
+- eraseText
+- inputText: "15222"
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    id: "login-connect-button"
+- tapOn:
+    id: "certificate-trust-trust-button"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: "Signed in as alice@localhost"
+    timeout: 20000
+# The bookmark is fetched from the server's pubsub#event push (or an
+# explicit bookmarks fetch) once logged in; it should reappear with the
+# same room name that was saved before the wipe.
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Maestro Bookmark Room.*"
+    timeout: 20000
+# A bookmark with auto-join enabled (the default set by add_bookmark.yaml)
+# is expected to already be joined by this point, not merely listed: opening
+# it should land straight in the room's chat view with a usable composer,
+# rather than showing an unjoined room with a "Join" button.
+- tapOn: "(?s)Maestro Bookmark Room.*"
+- assertVisible:
+    id: "message-composer-input"

@@ -186,6 +186,32 @@ flows specifically so that each scenario's warm-restart check can
 reconnect with just "Connect" (see `warm_restart_reconnect.yaml`) instead
 of retyping the password, which isn't otherwise remembered across restarts.
 
+## 6. Bookmarks surviving a data wipe
+
+`add_bookmark.yaml` and `bookmark_survives_data_wipe.yaml` together verify
+that a room bookmark isn't just local app state: it's published to the
+user's private PEP bookmarks node (XEP-0402), so it comes back even after
+every local trace of it has been wiped. Chain them directly after
+`login_alice.yaml`:
+
+```sh
+maestro test --debug-output .maestro-output maestro/flows/login_alice.yaml
+maestro test --debug-output .maestro-output maestro/flows/add_bookmark.yaml
+maestro test --debug-output .maestro-output maestro/flows/bookmark_survives_data_wipe.yaml
+```
+
+`add_bookmark.yaml` uses the "New Chat" dialog (Add by JID) to bookmark
+`maestro-bookmark@conference.localhost` - Openfire's default conference
+service for the `localhost` domain - under the room name
+"Maestro Bookmark Room", and asserts it shows up in the roster right away
+(bookmarks auto-join by default). `bookmark_survives_data_wipe.yaml` then
+force-stops the app, relaunches it with `clearState: true` (wiping all
+local storage - a harsher reset than `warm_restart_reconnect.yaml`'s warm
+restart), logs back in from scratch, and asserts the same bookmark
+reappears and is already joined (its chat opens straight to a usable
+message composer, rather than showing an unjoined room with a "Join"
+button).
+
 ## Flows
 
 - `login_alice.yaml` — logs in as `alice@localhost` via the manual-connection
@@ -251,6 +277,16 @@ of retyping the password, which isn't otherwise remembered across restarts.
   badge/preview appears *before* the chat is opened, including
   `receive_message_while_app_not_running.yaml`'s message, which arrives
   entirely while the app process is dead.
+- `add_bookmark.yaml` — does *not* `launchApp`; it continues from whatever
+  state Alice's app is already in (same style as `open_bob_chat.yaml`) and
+  adds a room bookmark named "Maestro Bookmark Room" via the "New Chat"
+  dialog, for `bookmark_survives_data_wipe.yaml` - see "6. Bookmarks
+  surviving a data wipe" above.
+- `bookmark_survives_data_wipe.yaml` — force-stops the app, wipes its
+  storage, logs back in from scratch, and asserts the bookmark created by
+  `add_bookmark.yaml` reappears and is already joined, proving bookmarks
+  are durable server-side state rather than cached app state - see "6.
+  Bookmarks surviving a data wipe" above.
 
 ## Running in CI
 
@@ -269,8 +305,9 @@ release tags, since those don't build a debug APK). The job:
    `receive_message.yaml` (see "4. Receiving a message" above, this relies
    on Alice's session still being connected/foregrounded from
    `login_alice.yaml`), then the three read/unread scenarios (see "5.
-   Checking read/unread state" above), then `send_message.yaml` and
-   `security_label_self_message.yaml` on the emulator.
+   Checking read/unread state" above), then `send_message.yaml`,
+   `security_label_self_message.yaml`, and the bookmark data-wipe scenario
+   (see "6. Bookmarks surviving a data wipe" above) on the emulator.
 5. Tears down the Openfire container (and its volume) afterwards.
 
 To reproduce the CI job locally, follow steps 1-3 above manually (start
@@ -295,10 +332,19 @@ Openfire, `adb reverse`, install the APK on your own emulator) and then run
   `login-connect-button`, `certificate-trust-trust-button`,
   `certificate-trust-reject-button`, `message-composer-input`,
   `message-send-button`, `pin-setup-continue-without-pin-button`,
-  `chat-back-button`) and a
+  `chat-back-button`, `new-chat-button`, `add-by-jid-jid-field`,
+  `add-by-jid-nick-field`, `add-by-jid-password-field`,
+  `add-by-jid-room-name-field`, `add-by-jid-submit-button`) and a
   matching `Key`. Maestro reads the Semantics tree (not Flutter `Key`s, which
   aren't exposed to it) for its `id:` selectors, while the `Key`s remain for
   the existing Flutter widget tests.
+- Unlike `login-connect-button` and the other fields on the login screen,
+  the "New Chat" dialog's room/person type toggle (`add-by-jid-type-toggle`)
+  auto-selects itself once JID-kind detection finishes (see
+  `_AddByJidDialogState`'s discovery callback in `lib/main.dart`) - flows
+  should wait for the "Detected: ..." message instead of tapping the
+  toggle directly, since `SegmentedButton` deselects on a second tap of an
+  already-selected segment.
 - Roster entries merge the contact's name, presence and last-message
   preview into a single accessibility node (e.g. `"Bob\noffline"`, or
   `"Bob\noffline\n<preview>"` once there's a message), with the unread

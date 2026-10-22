@@ -598,6 +598,14 @@ jobs:
             maestro test maestro/flows/receive_message_while_app_not_running.yaml
             maestro test maestro/flows/send_message.yaml
             maestro test maestro/flows/security_label_self_message.yaml
+            # Verifies a room bookmark is published to the user's private
+            # PEP bookmarks node (XEP-0402) rather than only stored locally:
+            # add one, then wipe all local storage and confirm it reappears
+            # already joined after logging back in. See maestro/README.md
+            # ("6. Bookmarks surviving a data wipe").
+            maestro test maestro/flows/login_alice.yaml
+            maestro test maestro/flows/add_bookmark.yaml
+            maestro test maestro/flows/bookmark_survives_data_wipe.yaml
       - name: Stop Openfire
         if: always()
         working-directory: maestro

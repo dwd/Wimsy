@@ -4,13 +4,16 @@
 /// All private PEP nodes in Wimsy use the same "whitelist" node configuration:
 ///   - persist_items = true
 ///   - access_model = whitelist
-///   - send_last_published_item = never
+///   - send_last_published_item = never (only when the node supports it;
+///     see [pubsubSendLastPublishedItemField])
 ///   - max_items = max
 ///
 /// When a publish returns `<precondition-not-met/>` (XEP-0060 §7.1.3.3),
 /// the server node must be reconfigured before retrying. The helper
 /// [buildPrivatePepConfigureIq] produces the corrective configure IQ.
 library;
+
+import 'dart:async';
 
 import 'package:xmpp_stone/xmpp_stone.dart';
 
@@ -43,6 +46,38 @@ const pubsubMaxItemsFallback = '50';
 String resolveMaxItemsValue({required bool serverSupportsConfigNodeMax}) =>
     serverSupportsConfigNodeMax ? 'max' : pubsubMaxItemsFallback;
 
+/// The `var` name of the `pubsub#send_last_published_item` config field.
+///
+/// Support for this field is OPTIONAL per a node's advertised configuration
+/// form (XEP-0060 §4.3): some pubsub nodes (observed in the wild for
+/// XEP-0490 MDS nodes) simply don't expose it at all. When that happens the
+/// field is *unknown* to the node rather than merely mismatched, so
+/// including it in `<publish-options>`/`<configure>` forms makes the server
+/// reject the request with `<precondition-not-met/>` on every attempt, even
+/// after reconfiguring — there's nothing to reconfigure. Callers should omit
+/// this field whenever the node's own configuration form (received via a
+/// `#configuration` PEP event or a `pubsub#owner get configure` request)
+/// doesn't list it; see [extractNodeConfigFieldVars].
+const pubsubSendLastPublishedItemField = 'pubsub#send_last_published_item';
+
+/// Extracts the set of `var` names declared in a node-configuration data
+/// form [configForm] (the `<x xmlns='jabber:x:data'>` child of a `#configuration`
+/// PEP event, or of a `pubsub#owner configure` IQ result).
+///
+/// Used to learn which config fields a given pubsub node actually supports,
+/// so callers can avoid asserting preconditions for fields the node doesn't
+/// expose at all (see [pubsubSendLastPublishedItemField]).
+Set<String> extractNodeConfigFieldVars(XmppElement configForm) {
+  final result = <String>{};
+  for (final field in configForm.children.where((c) => c.name == 'field')) {
+    final varName = field.getAttribute('var')?.value;
+    if (varName != null && varName.isNotEmpty) {
+      result.add(varName);
+    }
+  }
+  return result;
+}
+
 /// Builds a data-form `<field>` element with [varName] and [value].
 /// Optionally sets a [type] attribute (e.g. `'hidden'`).
 XmppElement buildFormField(String varName, String value, {String? type}) {
@@ -69,8 +104,17 @@ XmppElement buildFormField(String varName, String value, {String? type}) {
 /// advertises [pubsubConfigNodeMaxFeature] via disco#info; it defaults to
 /// `true` so callers that haven't performed the discovery check yet keep the
 /// previous optimistic behavior.
+///
+/// [supportedConfigFields], when known (see [extractNodeConfigFieldVars]),
+/// is the set of `var` names the target node's own configuration form
+/// advertises. When it is non-null and doesn't contain
+/// [pubsubSendLastPublishedItemField], that field is omitted entirely rather
+/// than asserted as a precondition the node can never satisfy. When `null`
+/// (field support not yet known), the field is included optimistically, as
+/// before.
 XmppElement buildPrivatePepPublishOptions({
   bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) {
   final publishOptions = XmppElement()..name = 'publish-options';
   final optForm = XmppElement()..name = 'x';
@@ -83,7 +127,10 @@ XmppElement buildPrivatePepPublishOptions({
   ));
   optForm.addChild(buildFormField('pubsub#persist_items', 'true'));
   optForm.addChild(buildFormField('pubsub#access_model', 'whitelist'));
-  optForm.addChild(buildFormField('pubsub#send_last_published_item', 'never'));
+  if (supportedConfigFields == null ||
+      supportedConfigFields.contains(pubsubSendLastPublishedItemField)) {
+    optForm.addChild(buildFormField(pubsubSendLastPublishedItemField, 'never'));
+  }
   optForm.addChild(buildFormField(
     'pubsub#max_items',
     resolveMaxItemsValue(serverSupportsConfigNodeMax: serverSupportsConfigNodeMax),
@@ -98,10 +145,19 @@ XmppElement buildPrivatePepPublishOptions({
 /// Called when the server responds with `<precondition-not-met/>` (XEP-0060
 /// §7.1.3.3), meaning the node's current configuration doesn't match the
 /// `<publish-options>` we sent. After calling this, retry the original publish.
+///
+/// [supportedConfigFields], when known (see [extractNodeConfigFieldVars]),
+/// is the set of `var` names the target node's own configuration form
+/// advertises. When it is non-null and doesn't contain
+/// [pubsubSendLastPublishedItemField], that field is omitted entirely, since
+/// asserting a value for a field the node doesn't support would just trigger
+/// another `precondition-not-met` loop. When `null` (field support not yet
+/// known), the field is included optimistically, as before.
 IqStanza buildPrivatePepConfigureIq({
   required String node,
   required String selfBareJid,
   bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) {
   final id = AbstractStanza.getRandomId();
   final iq = IqStanza(id, IqStanzaType.SET);
@@ -120,7 +176,10 @@ IqStanza buildPrivatePepConfigureIq({
   ));
   configForm.addChild(buildFormField('pubsub#persist_items', 'true'));
   configForm.addChild(buildFormField('pubsub#access_model', 'whitelist'));
-  configForm.addChild(buildFormField('pubsub#send_last_published_item', 'never'));
+  if (supportedConfigFields == null ||
+      supportedConfigFields.contains(pubsubSendLastPublishedItemField)) {
+    configForm.addChild(buildFormField(pubsubSendLastPublishedItemField, 'never'));
+  }
   configForm.addChild(buildFormField(
     'pubsub#max_items',
     resolveMaxItemsValue(serverSupportsConfigNodeMax: serverSupportsConfigNodeMax),
@@ -142,6 +201,7 @@ IqStanza buildPrivatePepPublishIq({
   required XmppElement payload,
   required String selfBareJid,
   bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) {
   final id = AbstractStanza.getRandomId();
   final iqStanza = IqStanza(id, IqStanzaType.SET);
@@ -157,9 +217,187 @@ IqStanza buildPrivatePepPublishIq({
   pubsub.addChild(publish);
   pubsub.addChild(buildPrivatePepPublishOptions(
     serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+    supportedConfigFields: supportedConfigFields,
   ));
   iqStanza.addChild(pubsub);
   return iqStanza;
+}
+
+/// Extracts the set of `var` names a node advertises from a PEP
+/// `#configuration` event [stanza], if it is one for [node]; returns `null`
+/// if [stanza] isn't a matching `#configuration` event, or the event's form
+/// has no fields (i.e. field support for the node is still unknown).
+///
+/// This is a convenience wrapper around [extractNodeConfigFieldVars] for
+/// callers (like [BookmarksManager]-style publishers outside
+/// `xmpp_service.dart`) that only listen for events relevant to a single
+/// node and don't maintain a per-node cache keyed by node name.
+Set<String>? extractConfigFieldsFromConfigurationEvent(
+  AbstractStanza stanza,
+  String node,
+) {
+  if (stanza is! MessageStanza) {
+    return null;
+  }
+  final event = stanza.children.firstWhere(
+    (child) =>
+        child.name == 'event' &&
+        child.getAttribute('xmlns')?.value ==
+            'http://jabber.org/protocol/pubsub#event',
+    orElse: () => XmppElement(),
+  );
+  if (event.name != 'event') {
+    return null;
+  }
+  final configuration = event.getChild('configuration');
+  if (configuration == null ||
+      configuration.getAttribute('node')?.value != node) {
+    return null;
+  }
+  final configForm = configuration.getChild('x');
+  if (configForm == null) {
+    return null;
+  }
+  final fields = extractNodeConfigFieldVars(configForm);
+  return fields.isEmpty ? null : fields;
+}
+
+/// Sends [stanza] via [connection] and awaits a matching response through
+/// [IqRouter], resolving to `null` on timeout or if [stanza] has no `id`.
+Future<IqStanza?> sendIqAndAwaitResponse(
+  Connection connection,
+  IqStanza stanza, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final id = stanza.id;
+  if (id == null || id.isEmpty) {
+    return null;
+  }
+  final router = IqRouter.getInstance(connection);
+  final completer = Completer<IqStanza?>();
+  Timer? timer;
+  timer = Timer(timeout, () {
+    router.unregisterResponseHandler(id);
+    if (!completer.isCompleted) {
+      completer.complete(null);
+    }
+  });
+  router.registerResponseHandler(id, (response) {
+    timer?.cancel();
+    if (!completer.isCompleted) {
+      completer.complete(response);
+    }
+  });
+  connection.writeStanza(stanza);
+  return completer.future;
+}
+
+/// Extracts the `urn:ietf:params:xml:ns:xmpp-stanzas` error condition name
+/// from an error [stanza] (e.g. `'conflict'`), or `null` if none is present.
+String? iqErrorCondition(IqStanza stanza) {
+  final error = stanza.getChild('error');
+  if (error == null) {
+    return null;
+  }
+  for (final child in error.children) {
+    if (child.getAttribute('xmlns')?.value ==
+        'urn:ietf:params:xml:ns:xmpp-stanzas') {
+      return child.name;
+    }
+  }
+  return null;
+}
+
+/// Extracts the `http://jabber.org/protocol/pubsub#errors` error condition
+/// name from an error [stanza] (e.g. `'precondition-not-met'`), or `null`
+/// if none is present.
+String? iqPubsubErrorCondition(IqStanza stanza) {
+  final error = stanza.getChild('error');
+  if (error == null) {
+    return null;
+  }
+  for (final child in error.children) {
+    if (child.getAttribute('xmlns')?.value ==
+        'http://jabber.org/protocol/pubsub#errors') {
+      return child.name;
+    }
+  }
+  return null;
+}
+
+/// Publishes to a private PEP [node] via [publishIqBuilder] and
+/// automatically recovers from a `<precondition-not-met/>` error (XEP-0060
+/// §7.1.3.3) by reconfiguring the node (see [buildPrivatePepConfigureIq])
+/// and retrying once - the same pattern `XmppService._doPrivatePepPublish`
+/// implements, factored out here so simpler callers (that don't need its
+/// in-flight-reconfigure de-duplication across concurrent publishes) can
+/// reuse it instead of hand-rolling their own publish/no-retry logic.
+///
+/// [publishIqBuilder] is called twice (initial attempt + retry) so it must
+/// produce a fresh IQ each time (with a new stanza id). It must use the same
+/// `pubsub#max_items` value and [supportedConfigFields] as this call, so
+/// that the retry matches the `<configure/>` IQ sent on `precondition-not-met`.
+///
+/// [onWarning], when provided, is invoked with a human-readable message for
+/// every failure (including the final failure after a retry), mirroring
+/// `XmppService._doPrivatePepPublish`'s logging.
+Future<bool> publishToPrivatePepNodeWithRetry({
+  required Connection connection,
+  required IqStanza Function() publishIqBuilder,
+  required String node,
+  required String selfBareJid,
+  bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
+  void Function(String message)? onWarning,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  final result = await sendIqAndAwaitResponse(
+    connection,
+    publishIqBuilder(),
+    timeout: timeout,
+  );
+  if (result == null) {
+    return false;
+  }
+  if (result.type != IqStanzaType.ERROR) {
+    return true;
+  }
+  final condition = iqErrorCondition(result);
+  final pubsubError = iqPubsubErrorCondition(result);
+  if (pubsubError != 'precondition-not-met') {
+    onWarning?.call('PEP publish to $node failed: $condition / $pubsubError');
+    return false;
+  }
+  // The node exists but its configuration does not match our publish-options.
+  // Reconfigure the node to the required settings, then retry once.
+  onWarning?.call(
+    'PEP node $node misconfigured (precondition-not-met); reconfiguring and retrying',
+  );
+  await sendIqAndAwaitResponse(
+    connection,
+    buildPrivatePepConfigureIq(
+      node: node,
+      selfBareJid: selfBareJid,
+      serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
+    ),
+    timeout: timeout,
+  );
+  final retryResult = await sendIqAndAwaitResponse(
+    connection,
+    publishIqBuilder(),
+    timeout: timeout,
+  );
+  if (retryResult != null && retryResult.type == IqStanzaType.ERROR) {
+    final retryCondition = iqErrorCondition(retryResult);
+    final retryPubsubError = iqPubsubErrorCondition(retryResult);
+    onWarning?.call(
+      'PEP publish to $node still failed after reconfiguring: '
+      '$retryCondition / $retryPubsubError',
+    );
+    return false;
+  }
+  return retryResult != null;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +416,7 @@ IqStanza buildMdsPublishIq({
   required String byValue,
   required String selfBareJid,
   bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) {
   final displayed = XmppElement()..name = 'displayed';
   displayed.addAttribute(XmppAttribute('xmlns', mdsNodeName));
@@ -194,6 +433,7 @@ IqStanza buildMdsPublishIq({
     payload: displayed,
     selfBareJid: selfBareJid,
     serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+    supportedConfigFields: supportedConfigFields,
   );
 }
 
@@ -202,11 +442,13 @@ IqStanza buildMdsPublishIq({
 IqStanza buildMdsNodeConfigureIq({
   required String selfBareJid,
   bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) =>
     buildPrivatePepConfigureIq(
       node: mdsNodeName,
       selfBareJid: selfBareJid,
       serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
     );
 
 // ---------------------------------------------------------------------------
@@ -214,7 +456,11 @@ IqStanza buildMdsNodeConfigureIq({
 // ---------------------------------------------------------------------------
 
 /// Alias for [buildPrivatePepPublishOptions].
-XmppElement buildMdsPublishOptions({bool serverSupportsConfigNodeMax = true}) =>
+XmppElement buildMdsPublishOptions({
+  bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
+}) =>
     buildPrivatePepPublishOptions(
       serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
     );

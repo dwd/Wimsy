@@ -1,0 +1,46 @@
+# Adds a room bookmark via the "New Chat" dialog (Add by JID, with the
+# "Room" type selected), joining "maestro-bookmark@conference.localhost" -
+# the default conference service Openfire exposes for its seeded "localhost"
+# domain (see maestro/openfire/openfire.xml) - under the nickname "alice"
+# and the explicit room name "Maestro Bookmark Room" (so later flows have a
+# predictable, human-readable label to assert against instead of the raw
+# JID). Joining and bookmarking both go through XmppService.upsertBookmark,
+# which publishes the bookmark via the user's private PEP bookmarks node, so
+# the bookmark isn't just local app state - see
+# bookmark_survives_data_wipe.yaml, which relies on that to verify the
+# bookmark survives a full local data wipe.
+#
+# Does *not* launchApp - it continues from whatever state Alice's app is
+# already in (same style as open_bob_chat.yaml), so it's intended to be
+# chained directly after login_alice.yaml.
+appId: im.cridland.wimsy
+---
+- tapOn:
+    id: "new-chat-button"
+- tapOn:
+    id: "add-by-jid-jid-field"
+- inputText: "maestro-bookmark@conference.localhost"
+# JID-kind detection (disco#info) runs on a debounce after typing stops and
+# then auto-selects the "Room" segment itself (see _AddByJidDialogState's
+# discovery callback in lib/main.dart), revealing the nickname/room-name
+# fields; explicitly tapping "Room" here would just toggle that selection
+# back off (SegmentedButton's single-select deselects on re-tap), so just
+# wait for detection to finish instead.
+- extendedWaitUntil:
+    visible:
+      text: "Detected: Room"
+    timeout: 10000
+- tapOn:
+    id: "add-by-jid-nick-field"
+- inputText: "alice"
+- tapOn:
+    id: "add-by-jid-room-name-field"
+- inputText: "Maestro Bookmark Room"
+- tapOn:
+    id: "add-by-jid-submit-button"
+# A freshly-created bookmark auto-joins immediately (see _showAddByJidDialog
+# in lib/main.dart), so the roster should show it right away.
+- extendedWaitUntil:
+    visible:
+      text: "(?s)Maestro Bookmark Room.*"
+    timeout: 20000

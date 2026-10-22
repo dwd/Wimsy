@@ -58,6 +58,54 @@ void main() {
           [];
       _expectField(fields, 'pubsub#max_items', pubsubMaxItemsFallback);
     });
+
+    test('includes send_last_published_item when supportedConfigFields is '
+        'null (field support not yet known)', () {
+      final opts = buildPrivatePepPublishOptions(supportedConfigFields: null);
+      final fields =
+          opts.getChild('x')?.children.where((c) => c.name == 'field').toList() ??
+              [];
+      _expectField(fields, 'pubsub#send_last_published_item', 'never');
+    });
+
+    test('includes send_last_published_item when the node is known to '
+        'support it', () {
+      final opts = buildPrivatePepPublishOptions(
+        supportedConfigFields: {
+          'pubsub#persist_items',
+          'pubsub#access_model',
+          'pubsub#send_last_published_item',
+          'pubsub#max_items',
+        },
+      );
+      final fields =
+          opts.getChild('x')?.children.where((c) => c.name == 'field').toList() ??
+              [];
+      _expectField(fields, 'pubsub#send_last_published_item', 'never');
+    });
+
+    test('omits send_last_published_item when the node is known not to '
+        'support it (e.g. an MDS node that never exposes this field)', () {
+      final opts = buildPrivatePepPublishOptions(
+        supportedConfigFields: {
+          'pubsub#persist_items',
+          'pubsub#access_model',
+          'pubsub#max_items',
+        },
+      );
+      final fields =
+          opts.getChild('x')?.children.where((c) => c.name == 'field').toList() ??
+              [];
+      expect(
+        fields.any(
+          (f) => f.getAttribute('var')?.value == 'pubsub#send_last_published_item',
+        ),
+        isFalse,
+      );
+      // The other fields are still present.
+      _expectField(fields, 'pubsub#persist_items', 'true');
+      _expectField(fields, 'pubsub#access_model', 'whitelist');
+    });
   });
 
   group('resolveMaxItemsValue', () {
@@ -141,6 +189,27 @@ void main() {
           iq.getChild('pubsub')?.getChild('configure')?.getChild('x');
       final fields = x?.children.where((c) => c.name == 'field').toList() ?? [];
       _expectField(fields, 'pubsub#max_items', pubsubMaxItemsFallback);
+    });
+
+    test('omits send_last_published_item when the node does not support it, '
+        'avoiding an endless precondition-not-met reconfigure loop', () {
+      final iq = buildPrivatePepConfigureIq(
+        node: 'urn:xmpp:mds:displayed:0',
+        selfBareJid: 'user@example.com',
+        supportedConfigFields: {
+          'pubsub#persist_items',
+          'pubsub#access_model',
+          'pubsub#max_items',
+        },
+      );
+      final x = iq.getChild('pubsub')?.getChild('configure')?.getChild('x');
+      final fields = x?.children.where((c) => c.name == 'field').toList() ?? [];
+      expect(
+        fields.any(
+          (f) => f.getAttribute('var')?.value == 'pubsub#send_last_published_item',
+        ),
+        isFalse,
+      );
     });
   });
 
@@ -336,6 +405,77 @@ void main() {
       );
       final publishOptions = iq.getChild('pubsub')?.getChild('publish-options');
       expect(publishOptions, isNotNull);
+    });
+  });
+
+  group('extractNodeConfigFieldVars', () {
+    test('returns the var names of all field children', () {
+      final x = XmppElement()..name = 'x';
+      x.addChild(buildFormField('FORM_TYPE',
+          'http://jabber.org/protocol/pubsub#node_config',
+          type: 'hidden'));
+      x.addChild(buildFormField('pubsub#persist_items', '1'));
+      x.addChild(buildFormField('pubsub#access_model', 'whitelist'));
+      final vars = extractNodeConfigFieldVars(x);
+      expect(vars, {
+        'FORM_TYPE',
+        'pubsub#persist_items',
+        'pubsub#access_model',
+      });
+    });
+
+    test('does not include pubsub#send_last_published_item for a node '
+        'config form that never advertises it (matches the real MDS node '
+        'config form observed from the field report)', () {
+      final x = XmppElement()..name = 'x';
+      for (final varName in [
+        'FORM_TYPE',
+        'pubsub#title',
+        'pubsub#description',
+        'pubsub#node_type',
+        'pubsub#subscribe',
+        'pubsub#subscription_required',
+        'pubsub#deliver_payloads',
+        'pubsub#notify_config',
+        'pubsub#notify_delete',
+        'pubsub#notify_retract',
+        'pubsub#presence_based_delivery',
+        'pubsub#type',
+        'pubsub#body_xslt',
+        'pubsub#dataform_xslt',
+        'pubsub#access_model',
+        'pubsub#publish_model',
+        'pubsub#roster_groups_allowed',
+        'pubsub#contact',
+        'pubsub#language',
+        'pubsub#owner',
+        'pubsub#publisher',
+        'pubsub#itemreply',
+        'pubsub#replyroom',
+        'pubsub#replyto',
+        'pubsub#send_item_subscribe',
+        'pubsub#persist_items',
+        'pubsub#max_items',
+        'pubsub#max_payload_size',
+      ]) {
+        x.addChild(buildFormField(varName, ''));
+      }
+      final vars = extractNodeConfigFieldVars(x);
+      expect(vars.contains('pubsub#send_last_published_item'), isFalse);
+      expect(vars.contains('pubsub#persist_items'), isTrue);
+      expect(vars.contains('pubsub#max_items'), isTrue);
+    });
+
+    test('returns an empty set for a form with no field children', () {
+      final x = XmppElement()..name = 'x';
+      expect(extractNodeConfigFieldVars(x), isEmpty);
+    });
+
+    test('ignores fields with an empty var attribute', () {
+      final x = XmppElement()..name = 'x';
+      x.addChild(buildFormField('', 'value'));
+      x.addChild(buildFormField('pubsub#access_model', 'whitelist'));
+      expect(extractNodeConfigFieldVars(x), {'pubsub#access_model'});
     });
   });
 

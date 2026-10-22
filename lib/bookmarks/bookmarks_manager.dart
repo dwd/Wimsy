@@ -26,6 +26,15 @@ class BookmarksManager {
   String? _bookmarks2RequestId;
   String? _legacyRequestId;
 
+  // Learned set of `pubsub#*` config field `var` names the bookmarks node's
+  // own configuration form advertises, populated from `#configuration` PEP
+  // events (see [_handleEventMessage]). `null` means "not yet known", in
+  // which case publishes include every field optimistically; see
+  // [pubsubSendLastPublishedItemField] for why some servers never expose
+  // `pubsub#send_last_published_item` for this node, which would otherwise
+  // make every publish loop forever on `precondition-not-met`.
+  Set<String>? _supportedConfigFields;
+
   List<ContactEntry> get bookmarks => List.unmodifiable(_bookmarksByJid.values);
 
   void seedBookmarks(List<ContactEntry> bookmarks) {
@@ -141,6 +150,13 @@ class BookmarksManager {
   }
 
   void _handleEventMessage(MessageStanza stanza) {
+    final learnedFields = extractConfigFieldsFromConfigurationEvent(
+      stanza,
+      _bookmarksNode,
+    );
+    if (learnedFields != null) {
+      _supportedConfigFields = learnedFields;
+    }
     final event = stanza.children.firstWhere(
       (child) => child.name == 'event' && child.getAttribute('xmlns')?.value == _pubsubEventNs,
       orElse: () => XmppElement(),
@@ -340,7 +356,32 @@ class BookmarksManager {
     return result;
   }
 
+  /// Publishes [bookmark] to the private PEP bookmarks node, automatically
+  /// recovering from `<precondition-not-met/>` (XEP-0060 §7.1.3.3) by
+  /// reconfiguring the node and retrying once - see
+  /// [publishToPrivatePepNodeWithRetry]. Without this, a node that doesn't
+  /// support one of our asserted publish-options preconditions (e.g. some
+  /// servers never expose `pubsub#send_last_published_item` for this node)
+  /// would silently drop every bookmark publish forever.
   Future<void> _publishBookmark(ContactEntry bookmark) async {
+    final succeeded = await publishToPrivatePepNodeWithRetry(
+      connection: connection,
+      publishIqBuilder: () => _buildBookmarkPublishIq(bookmark),
+      node: _bookmarksNode,
+      selfBareJid: selfBareJid,
+      serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+      supportedConfigFields: _supportedConfigFields,
+      onWarning: (message) => Log.w('BookmarksManager', message),
+    );
+    if (!succeeded) {
+      Log.w(
+        'BookmarksManager',
+        'Failed to publish bookmark ${bookmark.jid} to $_bookmarksNode',
+      );
+    }
+  }
+
+  IqStanza _buildBookmarkPublishIq(ContactEntry bookmark) {
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.SET);
     iqStanza.toJid = Jid.fromFullJid(selfBareJid);
@@ -355,9 +396,10 @@ class BookmarksManager {
     pubsub.addChild(publish);
     pubsub.addChild(buildPrivatePepPublishOptions(
       serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+      supportedConfigFields: _supportedConfigFields,
     ));
     iqStanza.addChild(pubsub);
-    connection.writeStanza(iqStanza);
+    return iqStanza;
   }
 
   /// Whether the connected server advertises [pubsubConfigNodeMaxFeature],

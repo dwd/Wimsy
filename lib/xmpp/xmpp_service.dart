@@ -166,6 +166,16 @@ class XmppService extends ChangeNotifier {
   late final MamCoordinator _mamCoordinator;
   late final ControlMessageOutbox _controlMessageOutbox;
 
+  // Learned set of `pubsub#*` config field `var` names each private PEP
+  // node's own configuration form advertises, keyed by node name. Populated
+  // from `#configuration` PEP events (see [_handlePepNodeConfigurationStanza])
+  // so that [buildPrivatePepPublishOptions]/[buildPrivatePepConfigureIq] can
+  // omit fields a node doesn't support at all (e.g. some servers never
+  // expose `pubsub#send_last_published_item` for XEP-0490 MDS nodes), which
+  // would otherwise loop forever on `precondition-not-met`. Absent entries
+  // mean "not yet known", in which case callers include fields optimistically.
+  final Map<String, Set<String>> _pepNodeConfigFields = {};
+
   // Tracks an in-flight `pubsub#owner` reconfigure IQ per private PEP node
   // (e.g. the XEP-0490 MDS node). Several publishes to the same node can be
   // kicked off concurrently (e.g. [_replayControlMessageOutbox] replaying one
@@ -8281,6 +8291,7 @@ class XmppService extends ChangeNotifier {
       }
       _handleDisplayedSyncStanza(stanza);
       _handleRecentReactionsStanza(stanza);
+      _handlePepNodeConfigurationStanza(stanza);
       _pepManager?.handleStanza(stanza);
       _pepCapsManager?.handleStanza(stanza);
       _bookmarksManager?.handleStanza(stanza);
@@ -8397,6 +8408,7 @@ class XmppService extends ChangeNotifier {
         payload: recent,
         selfBareJid: selfBareJid,
         serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+        supportedConfigFields: _pepNodeConfigFields[_recentReactionsNode],
       );
     }
 
@@ -8417,6 +8429,47 @@ class XmppService extends ChangeNotifier {
     if (stanza is IqStanza) {
       _handleRecentReactionsResult(stanza);
     }
+  }
+
+  /// Handles a PEP `#configuration` event (XEP-0060 §4.3), which a server
+  /// pushes when a node's configuration changes (or, for some servers, on
+  /// initial subscription). The event's `<x xmlns='jabber:x:data'>` form
+  /// lists every `pubsub#*` field the node actually supports, which we cache
+  /// in [_pepNodeConfigFields] so future publishes/reconfigures to that node
+  /// can omit fields the node doesn't expose (see
+  /// [pubsubSendLastPublishedItemField]) instead of looping forever on
+  /// `precondition-not-met`.
+  void _handlePepNodeConfigurationStanza(AbstractStanza stanza) {
+    if (stanza is! MessageStanza) {
+      return;
+    }
+    final event = stanza.children.firstWhere(
+      (child) =>
+          child.name == 'event' &&
+          child.getAttribute('xmlns')?.value ==
+              'http://jabber.org/protocol/pubsub#event',
+      orElse: () => XmppElement(),
+    );
+    if (event.name != 'event') {
+      return;
+    }
+    final configuration = event.getChild('configuration');
+    if (configuration == null) {
+      return;
+    }
+    final node = configuration.getAttribute('node')?.value;
+    if (node == null || node.isEmpty) {
+      return;
+    }
+    final configForm = configuration.getChild('x');
+    if (configForm == null) {
+      return;
+    }
+    final fields = extractNodeConfigFieldVars(configForm);
+    if (fields.isEmpty) {
+      return;
+    }
+    _pepNodeConfigFields[node] = fields;
   }
 
   void _handleRecentReactionsEvent(MessageStanza stanza) {
@@ -10478,6 +10531,7 @@ class XmppService extends ChangeNotifier {
           node: node,
           selfBareJid: selfBareJid,
           serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+          supportedConfigFields: _pepNodeConfigFields[node],
         ),
       );
       _pepNodeReconfigureInFlight[node] = reconfigure.then((_) {});
@@ -10523,6 +10577,7 @@ class XmppService extends ChangeNotifier {
           byValue: byValue,
           selfBareJid: selfBareJid,
           serverSupportsConfigNodeMax: _serverSupportsConfigNodeMax(),
+          supportedConfigFields: _pepNodeConfigFields[mdsNodeName],
         );
         final id = iq.id;
         if (id != null && id.isNotEmpty) {
