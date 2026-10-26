@@ -2014,8 +2014,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                           final canAddOccupantToRoster =
                               occupantRosterJid != null &&
                               occupantRosterJid != service.currentUserBareJid;
-                          return MessageBubble(
-                            key: messageKey,
+                          final bubble = MessageBubble(
                             message: message,
                             senderName: senderName,
                             timestamp: timestamp,
@@ -2100,6 +2099,38 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                 ? () => _fallbackFileTransfer(message)
                                 : null,
                             onOpenWebxdc: _openWebxdcPanel,
+                          );
+                          // `messageKey` must not be attached directly to
+                          // `MessageBubble` itself: that widget's subtree
+                          // contains `SelectableText`, which relies on an
+                          // `OverlayPortal` for its selection handles. As
+                          // the visible message window slides forward with
+                          // each new message, nearly every row's index
+                          // shifts by one, and a `GlobalKey` attached
+                          // directly to that subtree forces Flutter to
+                          // deactivate/reactivate the `OverlayPortal`
+                          // while the list is still laying out -- tripping
+                          // framework assertions (e.g. "mutated during
+                          // performLayout") that then cascade into a flood
+                          // of unrelated-looking rendering/semantics
+                          // assertion failures for the rest of the run.
+                          // Keeping the key on a zero-size sibling marker
+                          // instead still lets `_scrollToMessageById` find
+                          // a usable `BuildContext` for `ensureVisible`,
+                          // without ever reparenting the selectable text.
+                          if (messageKey == null) {
+                            return bubble;
+                          }
+                          return Stack(
+                            children: [
+                              bubble,
+                              Positioned(
+                                key: messageKey,
+                                width: 0,
+                                height: 0,
+                                child: const SizedBox.shrink(),
+                              ),
+                            ],
                           );
                         },
                       ),
