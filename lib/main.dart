@@ -85,7 +85,7 @@ Future<void> _startApp({
     await SentryFlutter.init(
       (options) {
         options.dsn =
-            'https://7d58998fe2d0e488aa5f11020778c9f6@sentry.cridland.io/8';
+            'https://219316339c6509b49beabd73621d1ad7@o576085.ingest.us.sentry.io/4512323601629184';
         options.tracesSampleRate = 1.0;
       },
       appRunner: () {
