@@ -23,7 +23,9 @@ configure<ApplicationExtension> {
         applicationId = "im.cridland.wimsy"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // sentry_flutter 10.x requires Android minSdk 26 (up from Flutter's
+        // default of 24), so it is pinned explicitly here.
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

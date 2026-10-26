@@ -28,7 +28,7 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
-  sentry_flutter: ^9.13.0
+  sentry_flutter: ^10.2.0
   flutter:
     sdk: flutter
 
@@ -97,7 +97,7 @@ dependencies:
       ref: f7afa65
 
 dev_dependencies:
-  sentry_dart_plugin: ^3.2.1
+  sentry_dart_plugin: ^3.4.0
   msix: ^3.16.8
   fake_async: ^1.3.2
   flutter_test:
