@@ -10830,7 +10830,72 @@ class XmppService extends ChangeNotifier {
           );
         }
       });
+      return;
     }
+
+    // For forward/catch-up page requests (after != null or afterId != null),
+    // trust the server's explicit <fin complete=.../> answer instead of the
+    // local-store heuristic in _runMamCatchUpStep. Relying only on whether
+    // the locally-known "latest" id advanced is unreliable: a page whose
+    // messages are all already known locally (e.g. re-synced after a
+    // restart) never advances that heuristic, even though the server's fin
+    // explicitly says more history remains — silently truncating catch-up
+    // far short of the real archive size (see gajim MUC catch-up stopping
+    // after a single 50-message page out of a 50k+ message archive).
+    final isForwardCatchUpPage =
+        (after != null && after.isNotEmpty) ||
+        (afterId != null && afterId.isNotEmpty);
+    if (!isForwardCatchUpPage) {
+      return;
+    }
+    final router = IqRouter.getInstance(connection);
+    router.registerResponseHandler(iqId, (response) {
+      if (response.type != IqStanzaType.RESULT) {
+        return;
+      }
+      final fin = response.children.firstWhere(
+        (child) =>
+            child.name == 'fin' &&
+            child.getAttribute('xmlns')?.value == 'urn:xmpp:mam:2',
+        orElse: () => XmppElement(),
+      );
+      if (fin.name != 'fin') {
+        return;
+      }
+      final completeAttr = fin.getAttribute('complete')?.value;
+      final complete = completeAttr == 'true' || completeAttr == '1';
+      final rsmSet = fin.children.firstWhere(
+        (child) => child.name == 'set',
+        orElse: () => XmppElement(),
+      );
+      final lastId = rsmSet.name == 'set'
+          ? rsmSet.getChild('last')?.textValue?.trim()
+          : null;
+      final scopeKey = _mamScopeKey(jid, isRoom: isRoom);
+      // We now have the server's authoritative answer for this page, so the
+      // 2-second local-store heuristic timer is no longer needed — cancel it
+      // to avoid a redundant/duplicate continuation request.
+      _mamCatchUpTimers.remove(scopeKey)?.cancel();
+      if (!complete && lastId != null && lastId.isNotEmpty) {
+        Log.d(
+          'XmppService',
+          'MAM catch-up continuing for $jid (fin complete=false, last=$lastId)',
+        );
+        _dispatchMamPlan(
+          isRoom: isRoom,
+          jid: jid,
+          plan: MamQueryPlan(
+            max: plan.max,
+            after: supportsMamExtended ? null : lastId,
+            afterId: supportsMamExtended ? lastId : null,
+            useWithJid: plan.useWithJid,
+          ),
+        );
+        return;
+      }
+      _recoverUnacknowledgedMessages(onlyJid: jid, onlyRooms: isRoom);
+      _finishMamSyncIfIdle();
+    });
   }
 
   bool _supportsMamExtendedQuery(
