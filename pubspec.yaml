@@ -68,18 +68,18 @@ dependencies:
   spiffing:
     git:
       url: https://github.com/dwd/spiffing-dart.git
-      ref: 43347a4
+      ref: a883226
   # XEP-0258: Flutter widgets (label editor/picker) for the `spiffing`
   # SPIF/Label/Clearance model above. Now pinned to a specific commit on
   # its public GitHub repository rather than a local path dependency.
   flutter_spiffing:
     git:
       url: https://github.com/dwd/flutter_spiffing.git
-      ref: bfee025827be3b5db06d55e840b3bb4950f73a0
+      ref: ab107a98633c86d5b230aac562dd29a465cf8f1
   # Used directly (not just transitively via spiffing/xmpp_stone) to
   # round-trip a persisted/staged XEP-0258 <securitylabel/> element
   # between its XML text form and an XmppElement tree.
-  xml: ^7.0.1
+  xml: ^7.1.0
   # XEP-0491: hosts WebXDC (webxdc.org) mini-app widgets shared in chats.
   # Pinned to a specific commit on its public GitHub repository (the
   # federated platform packages - flutter_webxdc_platform_interface,
@@ -111,11 +111,6 @@ dev_dependencies:
 
 dependency_overrides:
   flutter_rust_bridge: 2.11.1
-  # spiffing-dart constrains xml to ^6.5.0, but our vendored xmpp_stone
-  # needs xml ^7.0.1; override to the version xmpp_stone needs since
-  # spiffing-dart's usage (XmlDocument.parse/XmlBuilder) is unaffected by
-  # the 6->7 changes.
-  xml: ^7.0.1
   # The published flutter_inappwebview_forge_linux 1.0.8 release on pub.dev
   # fails to build against the system WPE WebKit dev packages (stale
   # post-fork PLUGIN_NAME/header directory, calls to nonexistent WPE

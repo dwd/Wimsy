@@ -498,8 +498,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: bfee025827be3b5db06d55e840b3bb4950f73a0
-      resolved-ref: bfee025827be3b5db06d55e840b3bb4950f73a03
+      ref: ab107a98633c86d5b230aac562dd29a465cf8f1
+      resolved-ref: ab107a98633c86d5b230aac562dd29a465cf8f18
       url: "https://github.com/dwd/flutter_spiffing.git"
     source: git
     version: "0.0.1"
@@ -995,10 +995,10 @@ packages:
     dependency: transitive
     description:
       name: petitparser
-      sha256: "91bd59303e9f769f108f8df05e371341b15d59e995e6806aefab827b58336675"
+      sha256: "2f1564aadb14215e478563b5406cb80729d022158c01dc50c96013c2f7eb4790"
       url: "https://pub.dev"
     source: hosted
-    version: "7.0.2"
+    version: "7.1.0"
   platform:
     dependency: transitive
     description:
@@ -1176,8 +1176,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "43347a4"
-      resolved-ref: "43347a4fc570282ada7de83ba1d841f75fb0874a"
+      ref: a883226
+      resolved-ref: a88322645fedc86bab6ec45073324c883713af80
       url: "https://github.com/dwd/spiffing-dart.git"
     source: git
     version: "0.1.0"
@@ -1425,10 +1425,10 @@ packages:
     dependency: "direct main"
     description:
       name: xml
-      sha256: "67f0aff7be013d107995e9b75bf4e7f2c3ef2dfdb2c8e68024bba0a7fd5756a4"
+      sha256: "0fe8cc98946def31cbcbc8734aa4067031e6f65ea3a78a508060bfed2200bfeb"
       url: "https://pub.dev"
     source: hosted
-    version: "7.0.1"
+    version: "7.1.0"
   xmpp_stone:
     dependency: "direct main"
     description:
@@ -1445,5 +1445,5 @@ packages:
     source: hosted
     version: "3.1.4"
 sdks:
-  dart: ">=3.12.2 <4.0.0"
+  dart: ">=3.13.0 <4.0.0"
   flutter: ">=3.44.0"
