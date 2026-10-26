@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allows cleartext (plain HTTP) traffic to the local loopback address only.
+
+  flutter_webxdc's WebView-based host (flutter_webxdc_webview /
+  WebxdcLocalServer) serves each extracted `.xdc` mini-app over a per-instance
+  loopback HTTP server at http://127.0.0.1:<port>/ instead of embedding it
+  directly, so it can apply a Content-Security-Policy response header (see
+  flutter_webxdc's doc/design.md). Since Android 9 (API 28), cleartext
+  traffic is blocked by default for all destinations, which breaks that
+  loopback request with ERR_CLEARTEXT_NOT_PERMITTED unless explicitly
+  allow-listed here. All other (non-loopback) cleartext traffic remains
+  blocked, matching the platform default.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
