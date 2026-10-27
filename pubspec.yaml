@@ -146,6 +146,25 @@ dependency_overrides:
   # above for the same class of fork rename bug.
   flutter_inappwebview_forge_windows:
     path: vendor/flutter_inappwebview_forge_windows
+  # The published flutter_inappwebview_forge_macos 1.1.10 release on
+  # pub.dev fails to build on macOS with several genuine Swift compile
+  # errors:
+  #  - InAppWebView.swift assigns an NSDirectionalEdgeInsets value to the
+  #    obscuredContentInsets property, whose type on macOS is actually
+  #    NSEdgeInsets (unlike the iOS/UIKit equivalent).
+  #  - InAppWebViewSettings.swift reads the .leading/.trailing members of
+  #    that same NSEdgeInsets value, which only has .left/.right.
+  #  - InAppWebViewFlutterPlugin.swift declares the containerManager
+  #    property with the concrete (but macOS 14.0-only) ContainerManager
+  #    type, instead of Any? like the other macOS-14-gated managers.
+  #  - MyCookieManager.swift references its internal static
+  #    httpCookieStore property as a default argument value in several
+  #    public static functions, which Swift disallows.
+  # Vendor a locally patched copy (all four issues fixed) rather than
+  # waiting on an upstream release, mirroring the Linux and Windows
+  # overrides above for the same plugin family.
+  flutter_inappwebview_forge_macos:
+    path: vendor/flutter_inappwebview_forge_macos
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
