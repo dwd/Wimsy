@@ -53,6 +53,11 @@ namespace flutter_inappwebview_plugin
   inline std::shared_ptr<PluginScript> DISABLE_AUTOCORRECTION_JS_PLUGIN_SCRIPT(
       const std::optional<std::vector<std::string>>& allowedOriginRules,
       bool forMainFrameOnly) {
+    // NOTE (Wimsy fix): the upstream source passed a stray 8th argument
+    // (an empty std::vector<std::string>{}) here, but PluginScript's
+    // constructor (see types/plugin_script.h) only takes 7 parameters.
+    // MSVC rejected this with "no overloaded function takes 8 arguments";
+    // drop the extra argument to match the real constructor.
     return std::make_shared<PluginScript>(
         DISABLE_AUTOCORRECTION_JS_PLUGIN_SCRIPT_GROUP_NAME,
         DISABLE_AUTOCORRECTION_JS_SOURCE(),
@@ -60,8 +65,7 @@ namespace flutter_inappwebview_plugin
         forMainFrameOnly,
         allowedOriginRules,
         nullptr,
-        true,
-        std::vector<std::string>{});
+        true);
   }
 }
 

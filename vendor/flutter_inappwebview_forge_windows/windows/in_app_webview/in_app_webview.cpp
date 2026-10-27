@@ -252,11 +252,17 @@ namespace flutter_inappwebview_plugin
         if (initialSettings->proxyBypassRules.has_value() &&
             !initialSettings->proxyBypassRules->empty()) {
           proxyArguments += " --proxy-bypass-list=";
-          for (size_t i = 0; i < initialSettings->proxyBypassRules->value().size(); ++i) {
+          // NOTE (Wimsy fix): the upstream source called ->value() on the
+          // *dereferenced* optional (operator-> on
+          // std::optional<std::vector<std::string>> already yields the
+          // vector), so it tried to call a nonexistent
+          // std::vector<std::string>::value(), failing with MSVC error
+          // C2039. Use the vector directly via -> / dereference instead.
+          for (size_t i = 0; i < initialSettings->proxyBypassRules->size(); ++i) {
             if (i > 0) {
               proxyArguments += ";";
             }
-            proxyArguments += initialSettings->proxyBypassRules->value()[i];
+            proxyArguments += (*initialSettings->proxyBypassRules)[i];
           }
         }
         environmentOptions->put_AdditionalBrowserArguments(
@@ -416,8 +422,14 @@ namespace flutter_inappwebview_plugin
 
     if (userContentController) {
       if (settings->disableAutocorrection) {
+        // NOTE (Wimsy fix): DISABLE_AUTOCORRECTION_JS_PLUGIN_SCRIPT is a
+        // free function in the flutter_inappwebview_plugin namespace (see
+        // plugin_scripts_js/plugin_scripts_util.h), not a member of a
+        // "PluginScriptsUtil" class/namespace as the upstream source
+        // called it; MSVC rejected that with C2653 "is not a class or
+        // namespace name". Call it unqualified instead.
         userContentController->addPluginScript(
-            PluginScriptsUtil::DISABLE_AUTOCORRECTION_JS_PLUGIN_SCRIPT(
+            DISABLE_AUTOCORRECTION_JS_PLUGIN_SCRIPT(
                 settings->pluginScriptsOriginAllowList,
                 settings->pluginScriptsForMainFrameOnly));
       }
