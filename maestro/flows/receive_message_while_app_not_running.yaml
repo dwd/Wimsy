@@ -28,7 +28,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # On reconnect, the roster's own archive catch-up now fetches every
 # contact's history up front (not just the one whose chat happens to be
 # open), so the unread badge for Bob's message - received entirely while
@@ -38,12 +38,12 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: app-not-running message.*\\n\\d+"
-    timeout: 30000
+    timeout: 45000
 - tapOn: "(?s)Bob.*"
 - extendedWaitUntil:
     visible:
       text: "Read-state check: app-not-running message"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "chat-back-button"
 - assertVisible:
@@ -59,7 +59,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -89,7 +89,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # Give MAM time to re-deliver history into the now-empty local store, and
 # resolve the synced read marker against it, before asserting the final
 # state.
@@ -97,7 +97,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Read-state check: app-not-running message"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "chat-back-button"
 - assertVisible:

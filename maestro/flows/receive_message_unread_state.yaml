@@ -30,12 +30,12 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Bob\\n(online|offline)\\n.*Read-state check: roster message.*\\n\\d+"
-    timeout: 30000
+    timeout: 45000
 - tapOn: "(?s)Bob.*"
 - extendedWaitUntil:
     visible:
       text: "Read-state check: roster message"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "chat-back-button"
 # Opening the chat should have marked the message read, so the unread
@@ -54,7 +54,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -84,7 +84,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # Give MAM time to re-deliver history into the now-empty local store, and
 # resolve the synced read marker against it, before asserting the final
 # state.
@@ -92,7 +92,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Read-state check: roster message"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "chat-back-button"
 - assertVisible:

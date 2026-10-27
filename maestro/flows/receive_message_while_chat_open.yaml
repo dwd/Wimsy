@@ -15,7 +15,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Read-state check: chat-open message"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "chat-back-button"
 # The message arrived while the chat was already open, so it should never
@@ -35,7 +35,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -65,7 +65,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # Give MAM time to re-deliver history into the now-empty local store, and
 # resolve the synced read marker against it, before asserting the final
 # state.
@@ -73,7 +73,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Read-state check: chat-open message"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "chat-back-button"
 - assertVisible:

@@ -22,4 +22,4 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000

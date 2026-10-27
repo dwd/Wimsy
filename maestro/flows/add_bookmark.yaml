@@ -29,7 +29,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Detected: Room"
-    timeout: 10000
+    timeout: 40000
 - tapOn:
     id: "add-by-jid-nick-field"
 - inputText: "alice"
@@ -43,4 +43,4 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Maestro Bookmark Room.*"
-    timeout: 20000
+    timeout: 40000

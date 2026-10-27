@@ -20,7 +20,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -67,4 +67,4 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000

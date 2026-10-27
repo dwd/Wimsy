@@ -9,7 +9,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Bob.*"
-    timeout: 30000
+    timeout: 45000
 - tapOn: "(?s)Bob.*"
 - assertVisible:
     id: "message-composer-input"

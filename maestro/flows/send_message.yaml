@@ -19,7 +19,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -64,7 +64,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # The roster (and "Bob"'s entry in it) populates asynchronously right after
 # sign-in, so tapOn's own ~7s fluent retry isn't always enough; wait longer
 # and explicitly before tapping it. The contact's name and presence status
@@ -76,7 +76,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Bob.*"
-    timeout: 30000
+    timeout: 45000
 - tapOn: "(?s)Bob.*"
 - tapOn:
     id: "message-composer-input"

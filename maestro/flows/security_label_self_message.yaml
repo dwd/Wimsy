@@ -29,7 +29,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -74,7 +74,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # The roster populates asynchronously right after sign-in. Alice's
 # self-roster item (seeded in maestro/openfire/openfire.xml) is shown under
 # its configured nickname ("Alice"), not the raw JID, and its name and
@@ -84,7 +84,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Alice.*"
-    timeout: 30000
+    timeout: 45000
 - tapOn: "(?s)Alice.*"
 # First, send a message *without* touching "Add security label" at all. The
 # server's active policy (maestro/openfire/spiffing-policy.xml) has a

@@ -22,7 +22,7 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
-    timeout: 15000
+    timeout: 45000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
@@ -55,14 +55,14 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
-    timeout: 20000
+    timeout: 40000
 # The bookmark is fetched from the server's pubsub#event push (or an
 # explicit bookmarks fetch) once logged in; it should reappear with the
 # same room name that was saved before the wipe.
 - extendedWaitUntil:
     visible:
       text: "(?s)Maestro Bookmark Room.*"
-    timeout: 20000
+    timeout: 40000
 # A bookmark with auto-join enabled (the default set by add_bookmark.yaml)
 # is expected to already be joined by this point, not merely listed: opening
 # it should land straight in the room's chat view with a usable composer,

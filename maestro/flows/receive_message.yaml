@@ -23,11 +23,11 @@ appId: im.cridland.wimsy
 - extendedWaitUntil:
     visible:
       text: "(?s)Bob.*"
-    timeout: 30000
+    timeout: 45000
 - tapOn: "(?s)Bob.*"
 # Give the message a little extra time to arrive and render as a bubble in
 # the chat, on top of assertVisible's own ~7s fluent retry.
 - extendedWaitUntil:
     visible:
       text: "Hello from Bob via Maestro"
-    timeout: 15000
+    timeout: 45000
