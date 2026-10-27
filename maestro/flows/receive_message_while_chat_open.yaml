@@ -32,6 +32,10 @@ appId: im.cridland.wimsy
 # steps as login_alice.yaml.
 - clearState
 - launchApp
+- extendedWaitUntil:
+    visible:
+      id: "pin-setup-continue-without-pin-button"
+    timeout: 15000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:

@@ -18,6 +18,10 @@ appId: im.cridland.wimsy
 # A fresh install with clearState always lands on the one-time "Set a PIN"
 # screen before the login screen; skip it since we don't need a PIN for
 # these tests.
+- extendedWaitUntil:
+    visible:
+      id: "pin-setup-continue-without-pin-button"
+    timeout: 15000
 - tapOn:
     id: "pin-setup-continue-without-pin-button"
 - tapOn:
