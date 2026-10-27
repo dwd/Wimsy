@@ -368,12 +368,11 @@ packages:
     source: hosted
     version: "1.0.4"
   flutter_inappwebview_forge_windows:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: flutter_inappwebview_forge_windows
-      sha256: ad1c8da5386822a1f1eea644f8abb5e70d64a58ce509728889b207dcc67d6bb4
-      url: "https://pub.dev"
-    source: hosted
+      path: "vendor/flutter_inappwebview_forge_windows"
+      relative: true
+    source: path
     version: "1.0.15"
   flutter_lints:
     dependency: "direct dev"

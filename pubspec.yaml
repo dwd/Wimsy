@@ -126,6 +126,24 @@ dependency_overrides:
       url: https://github.com/dwd/flutter_webxdc.git
       ref: f7afa65
       path: flutter_inappwebview_forge_linux
+  # The published flutter_inappwebview_forge_windows 1.0.15 release on
+  # pub.dev is a stale post-fork copy whose windows/CMakeLists.txt still
+  # names its CMake library target "flutter_inappwebview_windows_plugin"
+  # (and its bundled-libraries variable
+  # "flutter_inappwebview_windows_bundled_libraries") instead of the
+  # package-name-derived "flutter_inappwebview_forge_windows_plugin" /
+  # "flutter_inappwebview_forge_windows_bundled_libraries" that Flutter's
+  # generated windows/flutter/generated_plugins.cmake looks up for a
+  # plugin named flutter_inappwebview_forge_windows. That mismatch makes
+  # `flutter build windows` fail with "No target
+  # flutter_inappwebview_forge_windows_plugin" while evaluating
+  # $<TARGET_FILE:...>, after a preceding (harmless) CMP0175 dev warning
+  # about the plugin's NuGet-restore add_custom_command. Vendor a locally
+  # patched copy (CMakeLists.txt target/variable names corrected) rather
+  # than waiting on an upstream release, mirroring the Linux override
+  # above for the same class of fork rename bug.
+  flutter_inappwebview_forge_windows:
+    path: vendor/flutter_inappwebview_forge_windows
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
