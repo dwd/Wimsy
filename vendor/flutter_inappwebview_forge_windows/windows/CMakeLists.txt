@@ -270,8 +270,16 @@ list(APPEND PLUGIN_SOURCES
 
 # Define the plugin library target. Its name must not be changed (see comment
 # on PLUGIN_NAME above).
+# NOTE (Wimsy fix): the public header below lives under
+# include/flutter_inappwebview_forge_windows/ rather than the upstream
+# pre-fork include/flutter_inappwebview_windows/ directory. Flutter's
+# generated windows/flutter/generated_plugin_registrant.cc derives the
+# #include path from the *package* name (flutter_inappwebview_forge_windows),
+# so the header must live in a matching subdirectory or the Windows build
+# fails with "Cannot open include file". See the PLUGIN_NAME fix above for
+# the full explanation of the fork rename bug this works around.
 add_library(${PLUGIN_NAME} SHARED
-  "include/flutter_inappwebview_windows/flutter_inappwebview_windows_plugin_c_api.h"
+  "include/flutter_inappwebview_forge_windows/flutter_inappwebview_windows_plugin_c_api.h"
   "flutter_inappwebview_windows_plugin_c_api.cpp"
   ${PLUGIN_SOURCES}
 )
