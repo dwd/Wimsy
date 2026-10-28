@@ -6518,6 +6518,37 @@ class XmppService extends ChangeNotifier {
   int get pendingMessageCountForTesting => _pendingMessages.length;
 
   @visibleForTesting
+  void applyReceiptForTesting(String bareJid, String messageId) {
+    _applyReceipt(bareJid, messageId);
+  }
+
+  /// Test-only seam that appends a second outgoing message sharing
+  /// [messageId] with an existing one in [bareJid]'s chat, mirroring the
+  /// duplicate that [UnackedMessageRecovery] could previously produce under
+  /// a resend-on-reconnect race. Used to verify that a receipt/ack arriving
+  /// afterwards reconciles every copy, not just the most recent one.
+  @visibleForTesting
+  void seedDuplicateOutgoingMessageForTesting({
+    required String bareJid,
+    required String messageId,
+    required String body,
+  }) {
+    final normalized = _bareJid(bareJid);
+    final list = _messages.putIfAbsent(normalized, () => <ChatMessage>[]);
+    list.add(
+      ChatMessage(
+        from: _currentUserBareJid ?? '',
+        to: normalized,
+        body: body,
+        timestamp: DateTime.now(),
+        outgoing: true,
+        messageId: messageId,
+        reactions: const {},
+      ),
+    );
+  }
+
+  @visibleForTesting
   List<MessageIntent> buildMessageIntentsForTesting(MessageStanza stanza) {
     return _buildMessageIntents(stanza);
   }
@@ -10391,29 +10422,41 @@ class XmppService extends ChangeNotifier {
     if (list == null || list.isEmpty) {
       return false;
     }
+    // A XEP-0184 receipt/ack/marker is scoped only by message id, but a
+    // stream hiccup can occasionally leave more than one outgoing message
+    // sharing the same id in this chat (e.g. a resend-on-reconnect that
+    // raced with the original's own confirmation). Apply the update to
+    // every matching copy rather than stopping at the first one found, so
+    // a late confirmation can never leave a duplicate permanently looking
+    // unacknowledged and primed for yet another resend.
+    var matched = false;
+    var changed = false;
     for (var i = list.length - 1; i >= 0; i--) {
       final existing = list[i];
       if (!existing.outgoing || existing.messageId != messageId) {
         continue;
       }
+      matched = true;
       final nextAcked = acked ?? existing.acked;
       final nextReceipt = receiptReceived ?? existing.receiptReceived;
       final nextDisplayed = displayed ?? existing.displayed;
       if (nextAcked == existing.acked &&
           nextReceipt == existing.receiptReceived &&
           nextDisplayed == existing.displayed) {
-        return true;
+        continue;
       }
+      changed = true;
       list[i] = existing.copyWith(
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
       );
+    }
+    if (changed) {
       notifyListeners();
       _messagePersistor?.call(bareJid, List.unmodifiable(list));
-      return true;
     }
-    return false;
+    return matched;
   }
 
   bool _updateOutgoingRoomStatus(
@@ -10428,29 +10471,38 @@ class XmppService extends ChangeNotifier {
     if (list == null || list.isEmpty) {
       return false;
     }
+    // See _updateOutgoingStatus: apply the update to every outgoing message
+    // sharing this id in the room, not just the first one found, so a late
+    // confirmation can never leave a duplicate copy permanently looking
+    // unacknowledged.
+    var matched = false;
+    var changed = false;
     for (var i = list.length - 1; i >= 0; i--) {
       final existing = list[i];
       if (!existing.outgoing || existing.messageId != messageId) {
         continue;
       }
+      matched = true;
       final nextAcked = acked ?? existing.acked;
       final nextReceipt = receiptReceived ?? existing.receiptReceived;
       final nextDisplayed = displayed ?? existing.displayed;
       if (nextAcked == existing.acked &&
           nextReceipt == existing.receiptReceived &&
           nextDisplayed == existing.displayed) {
-        return true;
+        continue;
       }
+      changed = true;
       list[i] = existing.copyWith(
         acked: nextAcked,
         receiptReceived: nextReceipt,
         displayed: nextDisplayed,
       );
+    }
+    if (changed) {
       notifyListeners();
       _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
-      return true;
     }
-    return false;
+    return matched;
   }
 
   void _sendDisplayedForChat(String bareJid) {
