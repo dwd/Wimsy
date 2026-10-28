@@ -8,6 +8,7 @@ ChatMessage _outgoing(
   bool received = false,
   String? mamId,
   DateTime? timestamp,
+  bool locallyOriginated = true,
 }) {
   return ChatMessage(
     from: 'me@example.com',
@@ -19,6 +20,7 @@ ChatMessage _outgoing(
     acked: acked,
     receiptReceived: received,
     mamId: mamId,
+    locallyOriginated: locallyOriginated,
   );
 }
 
@@ -98,4 +100,33 @@ void main() {
     expect(first.single.message.messageId, 'one');
     expect(second.single.message.messageId, 'two');
   });
+
+  test(
+    'a carbon-mirrored message from another resource is never resent',
+    () {
+      // Regression test: a message that only reached this device via a
+      // XEP-0280 carbon (reflecting a send performed by a different
+      // resource of the same account) can never gain a transport-level
+      // [acked] confirmation on this device, so it must be excluded from
+      // resend candidacy entirely - otherwise it gets duplicated under the
+      // same stanza id if the carbon's own receipt/MAM id is delayed past
+      // this device's reconnect window.
+      final recovery = UnackedMessageRecovery();
+      final messages = <String, List<ChatMessage>>{
+        'you@example.com': [
+          _outgoing('carbon-echo', locallyOriginated: false),
+        ],
+      };
+      recovery.capture(messages, const {});
+
+      expect(
+        recovery.reconcile(
+          directMessages: messages,
+          roomMessages: const {},
+          now: DateTime.now,
+        ),
+        isEmpty,
+      );
+    },
+  );
 }

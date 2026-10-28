@@ -13,6 +13,7 @@ class UnackedMessageRecovery {
         for (final message in entry.value) {
           final id = message.messageId;
           if (message.outgoing &&
+              message.locallyOriginated &&
               !message.acked &&
               !message.receiptReceived &&
               (message.mamId == null || message.mamId!.isEmpty) &&

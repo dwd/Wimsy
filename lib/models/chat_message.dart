@@ -37,6 +37,7 @@ class ChatMessage {
     this.readByMe = false,
     this.markerSent = false,
     this.receiptSent = false,
+    this.locallyOriginated = false,
     this.securityLabelText,
     this.securityLabelFgColor,
     this.securityLabelBgColor,
@@ -88,6 +89,14 @@ class ChatMessage {
   final bool markerSent;
   // Whether a XEP-0184 delivery receipt has been sent for this message.
   final bool receiptSent;
+  // Whether this exact device/session wrote the outgoing stanza itself (as
+  // opposed to merely observing it, e.g. via a XEP-0280 carbon reflecting a
+  // send performed by another of the user's resources). Only locally
+  // originated messages can ever gain a QUIC/XEP-0198 [acked] confirmation
+  // on this device, so only those are safe candidates for
+  // [UnackedMessageRecovery] resend-on-reconnect; a carbon-mirrored message
+  // can never become [acked] here and must never be resent by this device.
+  final bool locallyOriginated;
   // XEP-0258: the display marking text of this message's security label,
   // and its suggested foreground/background colours, or null if the
   // message carries no security label. When [securityLabelIsFallback] is
@@ -157,6 +166,7 @@ class ChatMessage {
     bool? readByMe,
     bool? markerSent,
     bool? receiptSent,
+    bool? locallyOriginated,
     Object? securityLabelText = _absent,
     Object? securityLabelFgColor = _absent,
     Object? securityLabelBgColor = _absent,
@@ -245,6 +255,7 @@ class ChatMessage {
       readByMe: readByMe ?? this.readByMe,
       markerSent: markerSent ?? this.markerSent,
       receiptSent: receiptSent ?? this.receiptSent,
+      locallyOriginated: locallyOriginated ?? this.locallyOriginated,
       securityLabelText: identical(securityLabelText, _absent)
           ? this.securityLabelText
           : securityLabelText as String?,
@@ -311,6 +322,7 @@ class ChatMessage {
       'readByMe': readByMe,
       'markerSent': markerSent,
       'receiptSent': receiptSent,
+      'locallyOriginated': locallyOriginated,
       'securityLabelText': securityLabelText,
       'securityLabelFgColor': securityLabelFgColor,
       'securityLabelBgColor': securityLabelBgColor,
@@ -371,6 +383,14 @@ class ChatMessage {
     final readByMe = map['readByMe'] == true;
     final markerSent = map['markerSent'] == true;
     final receiptSent = map['receiptSent'] == true;
+    // Older cache records predate this flag. A restored outgoing message
+    // with no recorded value can't be proven to be a carbon reflection, so
+    // default it to [outgoing] to preserve the pre-existing resend
+    // behaviour for genuinely own messages persisted before this field
+    // existed.
+    final locallyOriginated = map.containsKey('locallyOriginated')
+        ? map['locallyOriginated'] == true
+        : outgoing;
     final securityLabelText = map['securityLabelText']?.toString();
     final securityLabelFgColor = map['securityLabelFgColor']?.toString();
     final securityLabelBgColor = map['securityLabelBgColor']?.toString();
@@ -445,6 +465,7 @@ class ChatMessage {
       readByMe: readByMe,
       markerSent: markerSent,
       receiptSent: receiptSent,
+      locallyOriginated: locallyOriginated,
       securityLabelText: securityLabelText,
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,

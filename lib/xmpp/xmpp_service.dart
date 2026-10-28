@@ -2549,6 +2549,7 @@ class XmppService extends ChangeNotifier {
         securityLabelFgColor: pendingLabel?.info.fgColor,
         securityLabelBgColor: pendingLabel?.info.bgColor,
         securityLabelIsFallback: false,
+        locallyOriginated: true,
       );
     }
     final chatManager = _chatManager;
@@ -2967,6 +2968,7 @@ class XmppService extends ChangeNotifier {
       securityLabelFgColor: pendingLabel?.info.fgColor,
       securityLabelBgColor: pendingLabel?.info.bgColor,
       securityLabelIsFallback: false,
+      locallyOriginated: true,
     );
   }
 
@@ -3046,6 +3048,7 @@ class XmppService extends ChangeNotifier {
       inviteRoomJid: normalizedRoom,
       inviteReason: inviteReason,
       invitePassword: invitePassword,
+      locallyOriginated: true,
     );
 
     final roomEntry = _rooms[normalizedRoom];
@@ -3257,6 +3260,7 @@ class XmppService extends ChangeNotifier {
         messageId: messageId,
         oobUrl: url,
         oobDescription: description.isEmpty ? null : description,
+        locallyOriginated: true,
       );
       return null;
     }
@@ -3278,6 +3282,7 @@ class XmppService extends ChangeNotifier {
       outgoing: true,
       timestamp: now,
       messageId: messageId,
+      locallyOriginated: true,
     );
     chat.myState = ChatState.ACTIVE;
     return null;
@@ -3359,6 +3364,7 @@ class XmppService extends ChangeNotifier {
         oobDescription: description.isEmpty ? null : description,
         webxdcThreadId: threadId,
         isWebxdcWidget: true,
+        locallyOriginated: true,
       );
       return null;
     }
@@ -3381,6 +3387,7 @@ class XmppService extends ChangeNotifier {
       messageId: messageId,
       webxdcThreadId: threadId,
       isWebxdcWidget: true,
+      locallyOriginated: true,
     );
     chat.myState = ChatState.ACTIVE;
     return null;
@@ -7470,6 +7477,7 @@ class XmppService extends ChangeNotifier {
         outgoing: true,
         timestamp: now,
         messageId: messageId,
+        locallyOriginated: true,
       );
     } else {
       _addMessage(
@@ -7481,6 +7489,7 @@ class XmppService extends ChangeNotifier {
         outgoing: true,
         timestamp: now,
         messageId: messageId,
+        locallyOriginated: true,
       );
     }
     _applyWebxdcUpdateToChat(
@@ -9450,6 +9459,7 @@ class XmppService extends ChangeNotifier {
     String? webxdcDocument,
     String? webxdcSummary,
     String? webxdcJsonPayload,
+    bool locallyOriginated = false,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -9532,6 +9542,12 @@ class XmppService extends ChangeNotifier {
             (webxdcJsonPayload != null && webxdcJsonPayload.isNotEmpty)
             ? webxdcJsonPayload
             : existing.webxdcJsonPayload;
+        // A message is locally originated if any observation of it (this
+        // device's own send, or a later carbon/MAM echo of the same id) was
+        // locally originated - once true it must never be downgraded back
+        // to false by a later merge.
+        final nextLocallyOriginated =
+            locallyOriginated || existing.locallyOriginated;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
@@ -9551,7 +9567,8 @@ class XmppService extends ChangeNotifier {
             nextIsWebxdcWidget != existing.isWebxdcWidget ||
             nextWebxdcDocument != existing.webxdcDocument ||
             nextWebxdcSummary != existing.webxdcSummary ||
-            nextWebxdcJsonPayload != existing.webxdcJsonPayload) {
+            nextWebxdcJsonPayload != existing.webxdcJsonPayload ||
+            nextLocallyOriginated != existing.locallyOriginated) {
           list[existingIndex] = existing.copyWith(
             mamId: nextMamId,
             stanzaId: nextStanzaId,
@@ -9573,6 +9590,7 @@ class XmppService extends ChangeNotifier {
             webxdcDocument: nextWebxdcDocument,
             webxdcSummary: nextWebxdcSummary,
             webxdcJsonPayload: nextWebxdcJsonPayload,
+            locallyOriginated: nextLocallyOriginated,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -9671,6 +9689,7 @@ class XmppService extends ChangeNotifier {
           webxdcDocument: webxdcDocument,
           webxdcSummary: webxdcSummary,
           webxdcJsonPayload: webxdcJsonPayload,
+          locallyOriginated: locallyOriginated,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -9779,6 +9798,7 @@ class XmppService extends ChangeNotifier {
     String? webxdcDocument,
     String? webxdcSummary,
     String? webxdcJsonPayload,
+    bool locallyOriginated = false,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
@@ -9855,6 +9875,10 @@ class XmppService extends ChangeNotifier {
             (webxdcJsonPayload != null && webxdcJsonPayload.isNotEmpty)
             ? webxdcJsonPayload
             : existing.webxdcJsonPayload;
+        // See _addMessage: once locally originated it must never be
+        // downgraded back to false by a later (e.g. room reflection) merge.
+        final nextLocallyOriginated =
+            locallyOriginated || existing.locallyOriginated;
         if (nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextReceiptReceived != existing.receiptReceived ||
@@ -9873,7 +9897,8 @@ class XmppService extends ChangeNotifier {
             nextIsWebxdcWidget != existing.isWebxdcWidget ||
             nextWebxdcDocument != existing.webxdcDocument ||
             nextWebxdcSummary != existing.webxdcSummary ||
-            nextWebxdcJsonPayload != existing.webxdcJsonPayload) {
+            nextWebxdcJsonPayload != existing.webxdcJsonPayload ||
+            nextLocallyOriginated != existing.locallyOriginated) {
           final updated = existing.copyWith(
             timestamp: nextTimestamp,
             mamId: nextMamId,
@@ -9894,6 +9919,7 @@ class XmppService extends ChangeNotifier {
             webxdcDocument: nextWebxdcDocument,
             webxdcSummary: nextWebxdcSummary,
             webxdcJsonPayload: nextWebxdcJsonPayload,
+            locallyOriginated: nextLocallyOriginated,
           );
           if (firstReflection) {
             list.removeAt(existingIndex);
@@ -9949,6 +9975,7 @@ class XmppService extends ChangeNotifier {
           webxdcDocument: webxdcDocument,
           webxdcSummary: webxdcSummary,
           webxdcJsonPayload: webxdcJsonPayload,
+          locallyOriginated: locallyOriginated,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -9999,6 +10026,7 @@ class XmppService extends ChangeNotifier {
       webxdcDocument: webxdcDocument,
       webxdcSummary: webxdcSummary,
       webxdcJsonPayload: webxdcJsonPayload,
+      locallyOriginated: locallyOriginated,
     );
     _insertMessageOrdered(list, newMessage);
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
