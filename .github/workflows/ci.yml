@@ -569,9 +569,17 @@ jobs:
           disable-animations: true
           script: |
             set -euo pipefail
+            # Captures screenshots, maestro.log, and the hierarchy/commands
+            # for every flow below into a single directory inside the
+            # workspace (rather than Maestro's default ~/.maestro/tests),
+            # so the "Upload Maestro debug output" step after this one can
+            # find and upload it as a build artifact. Without this, a
+            # failing assertion (even one preceded by a takeScreenshot step)
+            # left no visual evidence reachable from the Actions run.
+            export MAESTRO_CLI_ARGS="--test-output-dir=${GITHUB_WORKSPACE}/maestro-debug-output"
             adb reverse tcp:15222 tcp:15222
             adb install -r build/app/outputs/flutter-apk/app-debug.apk
-            maestro test maestro/flows/login_alice.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/login_alice.yaml
             # Exercises an incoming message while Alice's session is still
             # connected/foregrounded from login_alice.yaml above (which ends
             # on the signed-in roster screen, same as receive_message.yaml
@@ -580,7 +588,7 @@ jobs:
             # receive_message.yaml asserts it arrived. See maestro/README.md
             # ("4. Receiving a message").
             dart run maestro/send_as_bob.dart
-            maestro test maestro/flows/receive_message.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/receive_message.yaml
             # Exercises the full read/unread lifecycle (unread badge, marking
             # read, surviving a warm restart, surviving a cold restart) for
             # each of the three ways a message can arrive: while the roster
@@ -590,26 +598,38 @@ jobs:
             # that the warm-restart leg of each flow can reconnect with just
             # "Connect" (password remembered) instead of retyping it. See
             # maestro/README.md ("Checking read/unread state").
-            maestro test maestro/flows/login_alice_remember.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/login_alice_remember.yaml
             dart run maestro/send_as_bob.dart "Read-state check: roster message"
-            maestro test maestro/flows/receive_message_unread_state.yaml
-            maestro test maestro/flows/open_bob_chat.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/receive_message_unread_state.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/open_bob_chat.yaml
             dart run maestro/send_as_bob.dart "Read-state check: chat-open message"
-            maestro test maestro/flows/receive_message_while_chat_open.yaml
-            maestro test maestro/flows/login_alice_remember.yaml
-            maestro test maestro/flows/stop_app.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/receive_message_while_chat_open.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/login_alice_remember.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/stop_app.yaml
             dart run maestro/send_as_bob.dart "Read-state check: app-not-running message"
-            maestro test maestro/flows/receive_message_while_app_not_running.yaml
-            maestro test maestro/flows/send_message.yaml
-            maestro test maestro/flows/security_label_self_message.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/receive_message_while_app_not_running.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/send_message.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/security_label_self_message.yaml
             # Verifies a room bookmark is published to the user's private
             # PEP bookmarks node (XEP-0402) rather than only stored locally:
             # add one, then wipe all local storage and confirm it reappears
             # already joined after logging back in. See maestro/README.md
             # ("6. Bookmarks surviving a data wipe").
-            maestro test maestro/flows/login_alice.yaml
-            maestro test maestro/flows/add_bookmark.yaml
-            maestro test maestro/flows/bookmark_survives_data_wipe.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/login_alice.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/add_bookmark.yaml
+            maestro test $MAESTRO_CLI_ARGS maestro/flows/bookmark_survives_data_wipe.yaml
+      - name: Upload Maestro debug output
+        # Runs even if the flows above failed, so that screenshots (incl.
+        # the "pre-signin-assert-state" shot taken right before the final
+        # sign-in assertion), maestro.log, and view hierarchy dumps for
+        # every flow are available as a downloadable artifact instead of
+        # being discarded with the ephemeral emulator-runner VM.
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: maestro-debug-output
+          path: maestro-debug-output
+          if-no-files-found: ignore
       - name: Stop Openfire
         if: always()
         working-directory: maestro
