@@ -13,6 +13,12 @@ appId: im.cridland.wimsy
 ---
 - stopApp
 - launchApp
+# The CI emulator is sometimes slow enough right after a fresh launch that
+# Android shows a "Pixel Launcher isn't responding" ANR dialog over the
+# app (see login_alice.yaml); dismiss it with "Wait" if it appears.
+- tapOn:
+    text: "Wait"
+    optional: true
 - tapOn:
     id: "login-connect-button"
     optional: true

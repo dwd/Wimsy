@@ -15,6 +15,15 @@ appId: im.cridland.wimsy
 ---
 - launchApp:
     clearState: true
+# The CI emulator is sometimes slow enough right after a fresh launch that
+# Android shows a "Pixel Launcher isn't responding" ANR dialog over the
+# app; it belongs to the launcher process, not this app, and dismissing it
+# with "Wait" lets the already-running app continue underneath. Without
+# this, the dialog covers the UI and every subsequent assertion in this
+# flow fails with "element not found" even though the app itself is fine.
+- tapOn:
+    text: "Wait"
+    optional: true
 # A fresh install with clearState always lands on the one-time "Set a PIN"
 # screen before the login screen; skip it since we don't need a PIN for
 # these tests.

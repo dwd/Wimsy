@@ -19,6 +19,12 @@ appId: im.cridland.wimsy
 # so reconnecting just needs "Connect" tapped again - same as
 # warm_restart_reconnect.yaml.
 - launchApp
+# The CI emulator is sometimes slow enough right after a fresh launch that
+# Android shows a "Pixel Launcher isn't responding" ANR dialog over the
+# app (see login_alice.yaml); dismiss it with "Wait" if it appears.
+- tapOn:
+    text: "Wait"
+    optional: true
 - tapOn:
     id: "login-connect-button"
     optional: true
@@ -56,6 +62,12 @@ appId: im.cridland.wimsy
 # steps as login_alice.yaml.
 - clearState
 - launchApp
+# The CI emulator is sometimes slow enough right after a fresh launch that
+# Android shows a "Pixel Launcher isn't responding" ANR dialog over the
+# app (see login_alice.yaml); dismiss it with "Wait" if it appears.
+- tapOn:
+    text: "Wait"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "pin-setup-continue-without-pin-button"
