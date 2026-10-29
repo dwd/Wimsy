@@ -977,18 +977,26 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                         const SizedBox(height: 12),
-                        Text(
-                          'Status: ${service.status.name} · $stateLabel',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                        Semantics(
+                          identifier: 'login-status-text',
+                          child: Text(
+                            key: const Key('login-status-text'),
+                            'Status: ${service.status.name} · $stateLabel',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ),
                         if (service.errorMessage != null) ...[
                           const SizedBox(height: 16),
-                          Text(
-                            service.errorMessage!,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.error,
+                          Semantics(
+                            identifier: 'login-error-message',
+                            child: Text(
+                              key: const Key('login-error-message'),
+                              service.errorMessage!,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.error,
+                              ),
                             ),
                           ),
                         ],

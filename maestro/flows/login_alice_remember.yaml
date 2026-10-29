@@ -63,6 +63,11 @@ appId: im.cridland.wimsy
 # long enough for Openfire to finish the handshake, so extendedWaitUntil is
 # used here to allow a longer, explicit timeout (timeout is not a valid
 # assertVisible property).
+# Capture a screenshot of the connection status/error text and the live
+# connection-log panel right before the final assertion, so that if sign-in
+# fails or times out, the debug artifacts show *why* (e.g. a handshake
+# error) instead of just a bare "element not found" failure.
+- takeScreenshot: pre-signin-assert-state
 - extendedWaitUntil:
     visible:
       text: "Signed in as alice@localhost"
