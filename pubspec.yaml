@@ -165,6 +165,21 @@ dependency_overrides:
   # overrides above for the same plugin family.
   flutter_inappwebview_forge_macos:
     path: vendor/flutter_inappwebview_forge_macos
+  # The published flutter_inappwebview_forge_ios 2.1.35 release on pub.dev
+  # fails to build for iOS devices with the same class of Swift compile
+  # errors as the macOS plugin above:
+  #  - InAppWebView.swift assigns an NSDirectionalEdgeInsets value to the
+  #    obscuredContentInsets property, whose type on iOS is actually
+  #    UIEdgeInsets (the NSDirectionalEdgeInsets variant only exists on
+  #    macOS/visionOS).
+  #  - InAppWebViewSettings.swift reads the .leading/.trailing members of
+  #    that same UIEdgeInsets value, which only has .left/.right.
+  # Vendor a locally patched copy (both call sites switched to
+  # UIEdgeInsets/.left/.right) rather than waiting on an upstream release,
+  # mirroring the Linux, Windows and macOS overrides above for the same
+  # plugin family.
+  flutter_inappwebview_forge_ios:
+    path: vendor/flutter_inappwebview_forge_ios
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
