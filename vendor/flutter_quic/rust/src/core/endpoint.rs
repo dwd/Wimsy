@@ -46,17 +46,19 @@ struct PinnedServerVerifier {
 }
 
 impl rustls::client::danger::ServerVerifier for PinnedServerVerifier {
-    fn verify_identity(
+    fn verify_identity<'a>(
         &self,
-        identity: &rustls::client::danger::ServerIdentity<'_>,
-    ) -> Result<rustls::client::danger::PeerVerified, rustls::Error> {
+        identity: &rustls::client::danger::ServerIdentity<'a, '_>,
+    ) -> Result<rustls::crypto::VerifiedIdentity<'a>, rustls::Error> {
         match self.inner.verify_identity(identity) {
             Ok(verified) => Ok(verified),
             Err(err) => {
                 if let rustls::crypto::Identity::X509(cert) = identity.identity {
                     let digest = ring::digest::digest(&ring::digest::SHA256, cert.end_entity.as_ref());
                     if digest.as_ref() == self.pinned_sha256 {
-                        return Ok(rustls::client::danger::PeerVerified::assertion());
+                        return Ok(rustls::crypto::VerifiedIdentity::assertion(
+                            identity.identity.clone(),
+                        ));
                     }
                 }
                 Err(err)

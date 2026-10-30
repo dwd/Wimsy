@@ -70,7 +70,7 @@ rustls-aws-lc-rs-fips = [
     "rustls-aws-lc-rs",
     "aws-lc-rs-fips",
 ]
-rustls-log = ["rustls?/log"]
+rustls-log = ["rustls?/tracing"]
 rustls-ring = [
     "dep:rustls",
     "dep:rustls-ring",
@@ -116,7 +116,7 @@ optional = true
 version = "2"
 
 [dependencies.rustls]
-version = "=0.24.0-dev.1"
+version = "=0.24.0-dev.2"
 features = ["webpki"]
 optional = true
 default-features = false
@@ -194,9 +194,9 @@ priority = 0
 check-cfg = ["cfg(fuzzing)"]
 
 [dependencies.rustls-ring]
-version = "=0.1.0-dev.1"
+version = "=0.24.0-dev.2"
 optional = true
 
 [dependencies.rustls-aws-lc-rs]
-version = "=0.1.0-dev.1"
+version = "=0.24.0-dev.2"
 optional = true

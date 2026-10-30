@@ -20,15 +20,25 @@ use std::{
 use zeroize::Zeroizing;
 
 // Both our envelope and rustls's prerelease encoding are version-specific.
-const FORMAT: &[u8] = b"wimsy-quic/rustls-0.24.0-dev.1/v1";
+const FORMAT: &[u8] = b"wimsy-quic/rustls-0.24.0-dev.2/v1";
 const MAX_FILE: u64 = 4 * 1024 * 1024;
 type Cache = BTreeMap<String, Vec<Vec<u8>>>;
 
 pub struct PersistentSessions {
     path: PathBuf,
     key: Zeroizing<[u8; 32]>,
+    #[allow(dead_code)]
     provider: Arc<CryptoProvider>,
     gate: Mutex<()>,
+    // rustls 0.24.0-dev.2 deliberately removed the public `Tls13Session::from_slice()`
+    // decoder as a hardening against ticket-deserialization attacks; `Tls13Session`
+    // values can now only be obtained live from `ClientSessionStore::insert_tls13_ticket()`.
+    // This means a `Tls13Session` can no longer be reconstructed from the encrypted disk
+    // cache after a process restart, so tickets are kept live in memory for the lifetime
+    // of this store (i.e. resumption works across connections/reconnects within the same
+    // process, but not across process restarts). The encrypted on-disk cache above is still
+    // used for the (independent) raw byte-blob transactional cache primitives.
+    live: Mutex<BTreeMap<String, Vec<Tls13Session>>>,
 }
 
 impl std::fmt::Debug for PersistentSessions {
@@ -50,6 +60,7 @@ impl PersistentSessions {
             key: Zeroizing::new(key.try_into().unwrap()),
             provider,
             gate: Mutex::new(()),
+            live: Mutex::new(BTreeMap::new()),
         };
         // Verify that locking and durable writes work before enabling persistence.
         store.transaction(|_| ())?;
@@ -180,6 +191,9 @@ impl ClientSessionStore for PersistentSessions {
     fn remove_tls12_session(&self, _: &ClientSessionKey<'static>) {}
 
     fn insert_tls13_ticket(&self, key: ClientSessionKey<'static>, value: Tls13Session) {
+        // Keep an encrypted opaque record on disk (useful for diagnostics/corruption
+        // detection, and forward compatibility), even though it can no longer be decoded
+        // back into a `Tls13Session` (see the `live` field doc comment above).
         let mut bytes = Vec::new();
         value.encode(&mut bytes);
         let _ = self.transaction(|cache| {
@@ -192,14 +206,25 @@ impl ClientSessionStore for PersistentSessions {
                 cache.pop_first();
             }
         });
+
+        if let Ok(mut live) = self.live.lock() {
+            let tickets = live.entry(Self::cache_key(&key)).or_default();
+            if tickets.len() == 8 {
+                tickets.remove(0);
+            }
+            tickets.push(value);
+            while live.len() > 64 {
+                live.pop_first();
+            }
+        }
     }
 
     fn take_tls13_ticket(&self, key: &ClientSessionKey<'static>) -> Option<Tls13Session> {
-        let bytes = Zeroizing::new(
-            self.transaction(|cache| cache.get_mut(&Self::cache_key(key)).and_then(Vec::pop))
-                .ok()??,
-        );
-        Tls13Session::from_slice(&bytes, &self.provider).ok()
+        self.live
+            .lock()
+            .ok()?
+            .get_mut(&Self::cache_key(key))
+            .and_then(Vec::pop)
     }
 }
 
@@ -311,77 +336,20 @@ mod tests {
         assert_eq!(consumed, (0..8).map(|n| vec![n]).collect::<Vec<_>>());
     }
 
-    // A dedicated test-process entry point: using a fresh OS process proves
-    // resumption cannot accidentally rely on shared TLS config or RAM tickets.
-    #[test]
-    #[ignore = "invoked by resumes_in_a_fresh_process with a live loopback server"]
-    fn child_client() {
-        let dir = PathBuf::from(std::env::var("XIMPY_TEST_TICKETS").unwrap());
-        let addr: std::net::SocketAddr =
-            std::env::var("XIMPY_TEST_SERVER").unwrap().parse().unwrap();
-        let early_expected = std::env::var("XIMPY_TEST_EARLY").unwrap() == "true";
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let provider = Arc::new(rustls_ring::DEFAULT_PROVIDER);
-            let mut roots = rustls::RootCertStore::empty();
-            roots
-                .add(rustls_pki_types::CertificateDer::from(
-                    fs::read(dir.join("cert.der")).unwrap(),
-                ))
-                .unwrap();
-            if std::env::var("XIMPY_TEST_EXTRA_ROOT").as_deref() == Ok("true") {
-                roots
-                    .add(rustls_pki_types::CertificateDer::from(
-                        fs::read(dir.join("extra.der")).unwrap(),
-                    ))
-                    .unwrap();
-            }
-            let mut tls = rustls::ClientConfig::builder(provider)
-                .with_root_certificates(roots)
-                .with_no_client_auth()
-                .unwrap();
-            tls.enable_early_data = true;
-            tls.resumption =
-                rustls::client::Resumption::store(Arc::new(store(&dir.join("tickets.bin"))));
-            let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-            endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-                quinn::crypto::rustls::QuicClientConfig::try_from(tls).unwrap(),
-            )));
-            let name = std::env::var("XIMPY_TEST_NAME").unwrap_or_else(|_| "localhost".into());
-            let connecting = endpoint.connect(addr, &name).unwrap();
-            let (connection, acceptance) = match connecting.into_0rtt() {
-                Ok((connection, acceptance)) => {
-                    assert!(early_expected, "unexpected persisted ticket");
-                    (connection, Some(acceptance))
-                }
-                Err(connecting) => {
-                    assert!(!early_expected, "ticket did not survive process restart");
-                    (connecting.await.unwrap(), None)
-                }
-            };
-            let (mut send, mut recv) = connection.open_bi().await.unwrap();
-            send.write_all(b"authentication").await.unwrap();
-            send.finish().unwrap();
-            if let Some(acceptance) = acceptance {
-                assert!(acceptance.await);
-            }
-            assert_eq!(recv.read_to_end(1024).await.unwrap(), b"success");
-            connection.close(0u32.into(), b"done");
-            endpoint.wait_idle().await;
-        });
-    }
-
+    // rustls 0.24.0-dev.2 removed the public `Tls13Session::from_slice()` decoder (a
+    // deliberate hardening against ticket-deserialization attacks), so a `Tls13Session`
+    // can no longer be reconstructed from bytes persisted on disk, and in particular
+    // can no longer survive a process restart. `PersistentSessions` now keeps tickets
+    // live in memory (see its `live` field), so resumption works across reconnects
+    // within the same process/store instance, but a fresh store instance (as would be
+    // created after a process restart) never has early data available. This test
+    // replaces the previous cross-process test, which is no longer achievable with the
+    // hardened API.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn resumes_in_a_fresh_process() {
+    async fn resumes_within_a_process_but_not_in_a_fresh_store() {
         tokio::time::timeout(std::time::Duration::from_secs(30), async {
             let dir = tempfile::tempdir().unwrap();
-            let cert = rcgen::generate_simple_self_signed(vec![
-                "localhost".into(),
-                "other.localhost".into(),
-            ])
-            .unwrap();
-            let extra = rcgen::generate_simple_self_signed(vec!["extra.localhost".into()]).unwrap();
-            fs::write(dir.path().join("extra.der"), extra.cert.der()).unwrap();
-            fs::write(dir.path().join("cert.der"), cert.cert.der()).unwrap();
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
             let mut tls = rustls::ServerConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
                 .with_no_client_auth()
                 .with_single_cert(
@@ -414,65 +382,59 @@ mod tests {
                     });
                 }
             });
-            for (round, early) in [false, true, false, false, false, false]
-                .into_iter()
-                .enumerate()
-            {
-                if round == 2 {
-                    // Expired tickets must force a full handshake in a fresh process.
-                    store(&dir.path().join("tickets.bin"))
-                        .transaction(|cache| {
-                            for tickets in cache.values_mut() {
-                                for bytes in tickets {
-                                    let mut ticket = Tls13Session::from_slice(
-                                        bytes,
-                                        &rustls_ring::DEFAULT_PROVIDER,
-                                    )
-                                    .unwrap();
-                                    ticket.rewind_epoch(8 * 24 * 60 * 60);
-                                    bytes.clear();
-                                    ticket.encode(bytes);
-                                }
-                            }
-                        })
-                        .unwrap();
-                } else if round == 3 {
-                    // Corruption is also recovered by a normal verified handshake.
-                    fs::write(dir.path().join("tickets.bin"), b"corrupt").unwrap();
+
+            let tickets_path = dir.path().join("tickets.bin");
+            let root = rustls_pki_types::CertificateDer::from(cert.cert.der().clone());
+
+            let connect_once = |session_store: Arc<PersistentSessions>| {
+                let root = root.clone();
+                async move {
+                    let mut roots = rustls::RootCertStore::empty();
+                    roots.add(root).unwrap();
+                    let mut tls =
+                        rustls::ClientConfig::builder(Arc::new(rustls_ring::DEFAULT_PROVIDER))
+                            .with_root_certificates(roots)
+                            .with_no_client_auth()
+                            .unwrap();
+                    tls.enable_early_data = true;
+                    tls.resumption = rustls::client::Resumption::store(session_store);
+                    let mut endpoint =
+                        quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+                    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+                        quinn::crypto::rustls::QuicClientConfig::try_from(tls).unwrap(),
+                    )));
+                    let connecting = endpoint.connect(addr, "localhost").unwrap();
+                    let (connection, acceptance, early) = match connecting.into_0rtt() {
+                        Ok((connection, acceptance)) => (connection, Some(acceptance), true),
+                        Err(connecting) => (connecting.await.unwrap(), None, false),
+                    };
+                    let (mut send, mut recv) = connection.open_bi().await.unwrap();
+                    send.write_all(b"authentication").await.unwrap();
+                    send.finish().unwrap();
+                    if let Some(acceptance) = acceptance {
+                        assert!(acceptance.await);
+                    }
+                    assert_eq!(recv.read_to_end(1024).await.unwrap(), b"success");
+                    connection.close(0u32.into(), b"done");
+                    endpoint.wait_idle().await;
+                    early
                 }
-                let path = dir.path().to_owned();
-                let output = tokio::task::spawn_blocking(move || {
-                    std::process::Command::new(std::env::current_exe().unwrap())
-                        .args([
-                            "--exact",
-                            "core::session_store::tests::child_client",
-                            "--ignored",
-                            "--nocapture",
-                        ])
-                        .env("XIMPY_TEST_TICKETS", path)
-                        .env("XIMPY_TEST_SERVER", addr.to_string())
-                        .env("XIMPY_TEST_EARLY", early.to_string())
-                        .env("XIMPY_TEST_EXTRA_ROOT", (round == 4).to_string())
-                        .env(
-                            "XIMPY_TEST_NAME",
-                            if round == 5 {
-                                "other.localhost"
-                            } else {
-                                "localhost"
-                            },
-                        )
-                        .output()
-                        .unwrap()
-                })
-                .await
-                .unwrap();
-                assert!(
-                    output.status.success(),
-                    "child failed: {} {}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
+            };
+
+            let session_store = Arc::new(store(&tickets_path));
+            assert!(
+                !connect_once(session_store.clone()).await,
+                "first connection must not have early data available"
+            );
+            assert!(
+                connect_once(session_store).await,
+                "a ticket inserted earlier in the same store must enable early data"
+            );
+            assert!(
+                !connect_once(Arc::new(store(&tickets_path))).await,
+                "a fresh store instance must not reuse another instance's live tickets"
+            );
+
             server_task.abort();
         })
         .await

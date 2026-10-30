@@ -1,4 +1,3 @@
-use rustls::quic::Connection as QuicConnectionTrait;
 use std::{any::Any, collections::VecDeque, io, str, sync::Arc};
 
 #[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
@@ -14,7 +13,8 @@ use rustls::{
     client::danger::ServerVerifier as ServerCertVerifier,
     crypto::CipherSuite,
     pki_types::{CertificateDer, PrivateKeyDer, ServerName},
-    quic::{HeaderProtectionKey, KeyChange, PacketKey, QuicEvent, Secrets, Suite, Version},
+    quic::{HeaderProtectionKey, KeyChange, PacketKey, QuicEvent, Quic, Secrets, Suite, Version},
+    ClientSide, ServerSide,
 };
 
 use crate::{
@@ -34,10 +34,11 @@ impl From<Side> for rustls::quic::Side {
     }
 }
 
-// rustls 0.24 exposes separate connection types rather than a client/server enum.
+// rustls 0.24 exposes a single generic `Connection<Side, Protocol>` type rather than a
+// client/server enum, so we wrap both sides with the QUIC protocol fixed.
 enum Connection {
-    Client(rustls::quic::ClientConnection),
-    Server(rustls::quic::ServerConnection),
+    Client(rustls::Connection<ClientSide, Quic>),
+    Server(rustls::Connection<ServerSide, Quic>),
 }
 
 macro_rules! dispatch {
@@ -100,9 +101,10 @@ impl crypto::Session for TlsSession {
             protocol: dispatch!(&self.inner, c => c.alpn_protocol().map(|x| x.as_ref().to_vec())),
             server_name: match self.inner {
                 Connection::Client(_) => None,
-                Connection::Server(ref session) => {
-                    session.server_name().map(|x| x.as_ref().to_string())
-                }
+                Connection::Server(ref session) => session
+                    .side()
+                    .server_name()
+                    .map(|x| x.as_ref().to_string()),
             },
             #[cfg(feature = "__rustls-post-quantum-test")]
             negotiated_key_exchange_group:
@@ -114,14 +116,16 @@ impl crypto::Session for TlsSession {
 
     /// For the rustls `TlsSession`, the `Any` type is `Vec<rustls::pki_types::CertificateDer>`
     fn peer_identity(&self) -> Option<Box<dyn Any>> {
-        dispatch!(&self.inner, c => c.peer_identity()).and_then(|identity| match identity {
-            rustls::crypto::Identity::X509(chain) => Some(Box::new(
-                std::iter::once(chain.end_entity.clone())
-                    .chain(chain.intermediates.iter().cloned())
-                    .collect::<Vec<_>>(),
-            ) as Box<dyn Any>),
-            _ => None,
-        })
+        dispatch!(&self.inner, c => c.peer_identity())
+            .map(|verified| verified.identity())
+            .and_then(|identity| match identity {
+                rustls::crypto::Identity::X509(chain) => Some(Box::new(
+                    std::iter::once(chain.end_entity.clone())
+                        .chain(chain.intermediates.iter().cloned())
+                        .collect::<Vec<_>>(),
+                ) as Box<dyn Any>),
+                _ => None,
+            })
     }
 
     fn early_crypto(&self) -> Option<(Box<dyn HeaderKey>, Box<dyn crypto::PacketKey>)> {
@@ -131,7 +135,7 @@ impl crypto::Session for TlsSession {
 
     fn early_data_accepted(&self) -> Option<bool> {
         match self.inner {
-            Connection::Client(ref session) => Some(session.is_early_data_accepted()),
+            Connection::Client(ref session) => Some(session.side().is_early_data_accepted()),
             _ => None,
         }
     }
@@ -161,7 +165,7 @@ impl crypto::Session for TlsSession {
             // connections.
             let have_server_name = match self.inner {
                 Connection::Client(_) => false,
-                Connection::Server(ref session) => session.server_name().is_some(),
+                Connection::Server(ref session) => session.side().server_name().is_some(),
             };
             if dispatch!(&self.inner, c => c.alpn_protocol().is_some())
                 || have_server_name
@@ -386,7 +390,7 @@ impl QuicClientConfig {
         inner: Arc<rustls::ClientConfig>,
         initial: Suite,
     ) -> Result<Self, NoInitialCipherSuite> {
-        match initial.suite.common.suite {
+        match initial.inner.common.suite {
             CipherSuite::TLS13_AES_128_GCM_SHA256 => Ok(Self { inner, initial }),
             _ => Err(NoInitialCipherSuite { specific: true }),
         }
@@ -418,15 +422,14 @@ impl crypto::ClientConfig for QuicClientConfig {
             got_handshake_data: false,
             next_secrets: None,
             inner: Connection::Client(
-                rustls::quic::ClientConnection::new(
-                    self.inner.clone(),
-                    version,
-                    ServerName::try_from(server_name)
-                        .map_err(|_| ConnectError::InvalidServerName(server_name.into()))?
-                        .to_owned(),
-                    to_vec(params),
-                )
-                .unwrap(),
+                self.inner
+                    .connect(
+                        ServerName::try_from(server_name)
+                            .map_err(|_| ConnectError::InvalidServerName(server_name.into()))?
+                            .to_owned(),
+                    )
+                    .build_quic(version, to_vec(params))
+                    .unwrap(),
             ),
             suite: self.initial,
             input: HandshakeInput::default(),
@@ -518,7 +521,7 @@ impl QuicServerConfig {
         inner: Arc<rustls::ServerConfig>,
         initial: Suite,
     ) -> Result<Self, NoInitialCipherSuite> {
-        match initial.suite.common.suite {
+        match initial.inner.common.suite {
             CipherSuite::TLS13_AES_128_GCM_SHA256 => Ok(Self { inner, initial }),
             _ => Err(NoInitialCipherSuite { specific: true }),
         }
@@ -578,8 +581,12 @@ impl crypto::ServerConfig for QuicServerConfig {
             got_handshake_data: false,
             next_secrets: None,
             inner: Connection::Server(
-                rustls::quic::ServerConnection::new(self.inner.clone(), version, to_vec(params))
-                    .unwrap(),
+                rustls::Connection::<ServerSide, Quic>::new_quic(
+                    self.inner.clone(),
+                    version,
+                    to_vec(params),
+                )
+                .unwrap(),
             ),
             suite: self.initial,
             input: HandshakeInput::default(),
@@ -628,7 +635,7 @@ pub(crate) fn initial_suite_from_provider(
 ) -> Option<Suite> {
     provider.tls13_cipher_suites.iter().find_map(|suite| {
         (suite.common.suite == CipherSuite::TLS13_AES_128_GCM_SHA256)
-            .then(|| suite.quic_suite())
+            .then(|| Suite::try_from(*suite).ok())
             .flatten()
     })
 }
