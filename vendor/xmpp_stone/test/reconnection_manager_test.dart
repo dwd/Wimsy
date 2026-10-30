@@ -162,6 +162,33 @@ void main() {
     expect(delay.inMilliseconds, lessThanOrEqualTo(1250));
   });
 
+  test(
+      'simulateForcefulClose while Closing still reaches ForcefullyClosed and reconnects',
+      () async {
+    // Regression test: the connection/phase acquisition deadline timers call
+    // simulateForcefulClose() unconditionally. If the connection happened to
+    // be mid-teardown (state == Closing) when the deadline fired — e.g. the
+    // SASL2 "already completed" stream error path — simulateForcefulClose()
+    // used to delegate to handleCloseState(), which treats `Closing` as a
+    // sign that a *deliberate* close() is finishing and settles on plain
+    // `Closed` instead of `ForcefullyClosed`. That silently stranded the
+    // connection forever, since ReconnectionManager only schedules retries
+    // on a transition to `ForcefullyClosed`.
+    connection.setState(XmppConnectionState.Closing);
+
+    final phases = <ReconnectionPhase>[];
+    final sub =
+        connection.reconnectStateStream.listen((s) => phases.add(s.phase));
+
+    connection.simulateForcefulClose();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+
+    expect(connection.state, XmppConnectionState.Reconnecting);
+    expect(connection.reconnectCalls, greaterThan(0));
+    expect(phases, containsAll([ReconnectionPhase.scheduled]));
+    await sub.cancel();
+  });
+
   test('backoff resets only after Ready remains stable', () async {
     connection.setReconnectPolicy(
       const ReconnectionPolicy(

@@ -1662,7 +1662,23 @@ class Connection {
     } catch (_) {
       // Ignore socket close errors during simulation.
     }
-    handleCloseState();
+    // Always land on ForcefullyClosed (unless already closed) rather than
+    // delegating to handleCloseState(). handleCloseState() treats a current
+    // state of `Closing` as a signal that a *deliberate* close() is
+    // completing, and deliberately settles on plain `Closed` so the
+    // ReconnectionManager does not auto-reconnect after an intentional
+    // disconnect. But simulateForcefulClose() is also invoked from failure
+    // paths (e.g. the connection/phase acquisition deadline timers, or a
+    // reconnect request while mid-teardown) where the connection can
+    // legitimately be in `Closing` at the time the deadline fires. Routing
+    // those cases through handleCloseState() stranded the connection in
+    // `Closed` forever: ReconnectionManager only schedules a retry when it
+    // observes a transition to `ForcefullyClosed`, so a plain `Closed` here
+    // silently disabled all future reconnect attempts.
+    if (state != XmppConnectionState.ForcefullyClosed &&
+        state != XmppConnectionState.Closed) {
+      setState(XmppConnectionState.ForcefullyClosed);
+    }
   }
 
   void handleCloseState() {
