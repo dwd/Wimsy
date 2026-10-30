@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.85"
 name = "quinn"
-version = "0.11.9"
+version = "0.11.12"
 build = "build.rs"
 autolib = false
 autobins = false
@@ -43,6 +43,10 @@ features = [
 ]
 
 [features]
+__rustls-post-quantum-test = [
+    "rustls-aws-lc-rs",
+    "proto/__rustls-post-quantum-test",
+]
 aws-lc-rs = ["proto/aws-lc-rs"]
 aws-lc-rs-fips = ["proto/aws-lc-rs-fips"]
 bloom = ["proto/bloom"]
@@ -84,7 +88,6 @@ rustls-aws-lc-rs = [
     "proto/aws-lc-rs",
 ]
 rustls-aws-lc-rs-fips = [
-    "dep:rustls-aws-lc-rs",
     "dep:rustls",
     "aws-lc-rs-fips",
     "proto/rustls-aws-lc-rs-fips",
@@ -132,6 +135,11 @@ required-features = ["rustls-ring"]
 name = "many_connections"
 path = "tests/many_connections.rs"
 
+[[test]]
+name = "post_quantum"
+path = "tests/post_quantum.rs"
+required-features = ["__rustls-post-quantum-test"]
+
 [[bench]]
 name = "bench"
 path = "benches/bench.rs"
@@ -157,7 +165,7 @@ optional = true
 version = "0.2"
 
 [dependencies.proto]
-version = "0.11.12"
+version = "0.11.19"
 default-features = false
 package = "quinn-proto"
 
@@ -169,6 +177,14 @@ version = "=0.24.0-dev.2"
 features = ["webpki"]
 optional = true
 default-features = false
+
+[dependencies.rustls-ring]
+version = "=0.24.0-dev.2"
+optional = true
+
+[dependencies.rustls-aws-lc-rs]
+version = "=0.24.0-dev.2"
+optional = true
 
 [dependencies.smol]
 version = "2"
@@ -209,13 +225,10 @@ version = "3"
 version = "2"
 
 [dev-dependencies.rand]
-version = "0.9"
+version = "0.10.1"
 
 [dev-dependencies.rcgen]
 version = "0.14"
-
-[dev-dependencies.rustls-pemfile]
-version = "2"
 
 [dev-dependencies.tokio]
 version = "1.28.1"
@@ -254,11 +267,3 @@ version = "1"
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies.socket2]
 version = ">=0.5, <0.7"
-
-[dependencies.rustls-ring]
-version = "=0.24.0-dev.2"
-optional = true
-
-[dependencies.rustls-aws-lc-rs]
-version = "=0.24.0-dev.2"
-optional = true

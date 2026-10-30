@@ -136,11 +136,19 @@ impl std::fmt::Debug for FrameStats {
 pub struct PathStats {
     /// Current best estimate of this connection's latency (round-trip-time)
     pub rtt: Duration,
+    /// Minimum RTT seen on this path, ignoring ack delay
+    pub min_rtt: Duration,
     /// Current congestion window of the connection
     pub cwnd: u64,
     /// Retransmittable packet bytes that have not been acknowledged or lost.
+    ///
+    /// Local patch: restores a field removed upstream in a later 0.11.x release, kept for
+    /// compatibility with flutter_quic's `QuicPathStats` application-facing API.
     pub bytes_in_flight: u64,
     /// Outstanding packets containing ACK-eliciting frames.
+    ///
+    /// Local patch: restores a field removed upstream in a later 0.11.x release, kept for
+    /// compatibility with flutter_quic's `QuicPathStats` application-facing API.
     pub ack_eliciting_packets_in_flight: u64,
     /// Congestion events on the connection
     pub congestion_events: u64,

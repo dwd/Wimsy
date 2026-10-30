@@ -273,7 +273,10 @@ impl SendStream {
         self.stream
     }
 
-    /// Snapshot the stream byte offsets used to track logical writes.
+    /// Returns application bytes accepted, the contiguous acknowledged watermark, and bytes not
+    /// yet acknowledged for this stream.
+    ///
+    /// Local patch: exposed for `flutter_quic`'s `QuicSendStream::stats()`.
     pub fn write_stats(&self) -> Result<(u64, u64, u64), ClosedStream> {
         let mut conn = self.conn.state.lock("SendStream::write_stats");
         conn.inner.send_stream(self.stream).write_stats()

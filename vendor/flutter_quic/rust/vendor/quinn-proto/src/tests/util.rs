@@ -14,6 +14,7 @@ use assert_matches::assert_matches;
 use bytes::BytesMut;
 use lazy_static::lazy_static;
 use rustls::{
+    KeyLogFile,
     client::WebPkiServerVerifier,
     pki_types::{CertificateDer, PrivateKeyDer},
 };
@@ -217,7 +218,11 @@ impl Pair {
         client_ch
     }
 
-    fn finish_connect(&mut self, client_ch: ConnectionHandle, server_ch: ConnectionHandle) {
+    pub(super) fn finish_connect(
+        &mut self,
+        client_ch: ConnectionHandle,
+        server_ch: ConnectionHandle,
+    ) {
         assert_matches!(
             self.client_conn_mut(client_ch).poll(),
             Some(Event::HandshakeDataReady)
@@ -609,7 +614,7 @@ fn server_crypto_inner(
 
     let mut config = QuicServerConfig::inner(vec![cert], key).unwrap();
     if let Some(alpn) = alpn {
-        config.alpn_protocols = alpn.into_iter().map(Into::into).collect();
+        config.alpn_protocols = alpn;
     }
 
     config.try_into().unwrap()
@@ -649,12 +654,13 @@ fn client_crypto_inner(
     }
 
     let mut inner = QuicClientConfig::inner(
-        Arc::new(WebPkiServerVerifier::builder(Arc::new(roots), &configured_provider())
+        WebPkiServerVerifier::builder_with_provider(Arc::new(roots), configured_provider())
             .build()
-            .unwrap()),
+            .unwrap(),
     );
+    inner.key_log = Arc::new(KeyLogFile::new());
     if let Some(alpn) = alpn {
-        inner.alpn_protocols = alpn.into_iter().map(Into::into).collect();
+        inner.alpn_protocols = alpn;
     }
 
     inner.try_into().unwrap()

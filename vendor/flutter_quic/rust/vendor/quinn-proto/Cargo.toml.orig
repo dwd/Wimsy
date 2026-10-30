@@ -1,6 +1,6 @@
 [package]
 name = "quinn-proto"
-version = "0.11.15"
+version = "0.11.19"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -32,7 +32,7 @@ platform-verifier = ["dep:rustls-native-certs"]
 # Configure `tracing` to log events via `log` if no `tracing` subscriber exists.
 log = ["tracing/log"]
 # Enable rustls logging
-rustls-log = ["rustls?/log"]
+rustls-log = ["rustls?/tracing"]
 # Enable qlog support
 qlog = ["dep:qlog"]
 
@@ -50,10 +50,11 @@ lru-slab = { workspace = true }
 qlog = { workspace = true, optional = true }
 rustc-hash = { workspace = true }
 rand = { workspace = true }
+rand_pcg = "0.10"
 ring = { workspace = true, optional = true }
-rustls = { version = "=0.24.0-dev.1", default-features = false, features = ["webpki"], optional = true }
-rustls-ring = { version = "=0.1.0-dev.1", optional = true }
-rustls-aws-lc-rs = { version = "=0.1.0-dev.1", optional = true }
+rustls = { version = "=0.24.0-dev.2", default-features = false, features = ["webpki"], optional = true }
+rustls-ring = { version = "=0.24.0-dev.2", optional = true }
+rustls-aws-lc-rs = { version = "=0.24.0-dev.2", optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 slab = { workspace = true }
 thiserror = { workspace = true }
@@ -71,7 +72,6 @@ web-time = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 hex-literal = { workspace = true  }
-rand_pcg = "0.9"
 rcgen = { workspace = true }
 tracing-subscriber = { workspace = true }
 lazy_static = "1"
