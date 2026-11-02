@@ -468,6 +468,7 @@ class XmppService extends ChangeNotifier {
   final Set<String> _callAcceptingBySid = {};
   final Set<String> _callLoggedIceQueueBySid = {};
   final Map<String, String> _callSelectedCandidateSummaryBySid = {};
+  final Map<String, String> _callCandidatePairSummaryBySid = {};
   final Map<String, String> _callPeerFullJidBySid = {};
   ISentrySpan? _connectTransaction;
   ISentrySpan? _connectAwaitSpan;
@@ -5004,6 +5005,7 @@ class XmppService extends ChangeNotifier {
     }
     final reports = await pc.getStats();
     final candidateReports = <String, Map<dynamic, dynamic>>{};
+    final candidatePairStateCounts = <String, int>{};
     Map<dynamic, dynamic>? selectedPairValues;
     String? selectedPairId;
     int? outboundBytes;
@@ -5088,7 +5090,9 @@ class XmppService extends ChangeNotifier {
         }
       }
       if (type == 'candidate-pair') {
-        final state = _statString(values, 'state');
+        final state = _statString(values, 'state') ?? 'unknown';
+        candidatePairStateCounts[state] =
+            (candidatePairStateCounts[state] ?? 0) + 1;
         final nominated =
             values['nominated'] == true || values['selected'] == true;
         if (state == 'succeeded' && nominated) {
@@ -5108,6 +5112,19 @@ class XmppService extends ChangeNotifier {
       values: selectedPairValues,
       candidateReports: candidateReports,
     );
+    // No succeeded/nominated pair yet: log the raw candidate-pair state
+    // counts so we can see whether the ICE agent even started connectivity
+    // checks (e.g. all pairs stuck at "waiting"/"frozen" means checks never
+    // ran), or whether checks are happening but never succeeding.
+    if (selectedPairValues == null && candidatePairStateCounts.isNotEmpty) {
+      final summary = candidatePairStateCounts.entries
+          .map((entry) => '${entry.key}=${entry.value}')
+          .join(', ');
+      if (_callCandidatePairSummaryBySid[sid] != summary) {
+        _callCandidatePairSummaryBySid[sid] = summary;
+        Log.d('XmppService', 'Call $sid candidate-pair states: $summary');
+      }
+    }
 
     final tracker = _callStatsBySid[sid] ?? _CallStatsTracker();
     final now = DateTime.now();
@@ -5476,6 +5493,7 @@ class XmppService extends ChangeNotifier {
     _callAcceptingBySid.remove(session.sid);
     _callLoggedIceQueueBySid.remove(session.sid);
     _callSelectedCandidateSummaryBySid.remove(session.sid);
+    _callCandidatePairSummaryBySid.remove(session.sid);
     final jingleSpan = _jingleSetupTransactions.remove(session.sid);
     if (jingleSpan != null) {
       final status = switch (session.state) {
@@ -5982,7 +6000,27 @@ class XmppService extends ChangeNotifier {
             'comp=${candidate.component} content=$contentName',
       );
       final candidateLine = buildCandidateLine(candidate);
-      pc.addCandidate(RTCIceCandidate(candidateLine, mid, null));
+      unawaited(
+        pc
+            .addCandidate(RTCIceCandidate(candidateLine, mid, null))
+            .then((_) {
+              Log.d(
+                'XmppService',
+                'Call ${event.sid} addCandidate succeeded for '
+                    '${candidate.type} ${candidate.protocol} '
+                    '${candidate.ip}:${candidate.port} content=$contentName',
+              );
+            })
+            .catchError((Object error) {
+              Log.w(
+                'XmppService',
+                'Call ${event.sid} addCandidate FAILED for '
+                    '${candidate.type} ${candidate.protocol} '
+                    '${candidate.ip}:${candidate.port} content=$contentName: '
+                    '$error',
+              );
+            }),
+      );
     }
   }
 
