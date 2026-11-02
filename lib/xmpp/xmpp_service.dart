@@ -8727,13 +8727,18 @@ class XmppService extends ChangeNotifier {
     }
     ChatMessage? matched;
     for (final message in list) {
-      if (message.stanzaId == stanzaId) {
+      // R1.3: the MDS marker's stanza-id is assigned `by` the archiving
+      // entity (the room, for MUCs). Some MUC services don't duplicate
+      // that id into a <stanza-id> child on every archived message — it's
+      // only guaranteed to equal the message's MAM archive id (XEP-0313)
+      // — so match against either field rather than stanzaId alone.
+      if (message.stanzaId == stanzaId || message.mamId == stanzaId) {
         matched = message;
       }
     }
     if (matched == null) {
       final knownStanzaIds = list
-          .map((message) => message.stanzaId)
+          .map((message) => message.stanzaId ?? message.mamId)
           .where((id) => id != null && id.isNotEmpty)
           .cast<String>()
           .take(5)
@@ -8801,13 +8806,21 @@ class XmppService extends ChangeNotifier {
   /// message with a known [stanzaId] to [bareJid]'s list. If the stanza-id
   /// matches the chat's pending displayed-sync marker, kick the marker
   /// resolution path. Cheap O(1) lookup; safe to call unconditionally.
-  void _resolveDisplayedSyncPending(String bareJid, String? stanzaId) {
-    if (stanzaId == null || stanzaId.isEmpty) {
-      return;
-    }
+  void _resolveDisplayedSyncPending(
+    String bareJid,
+    String? stanzaId, [
+    String? mamId,
+  ]) {
     final normalized = _bareJid(bareJid);
     final pending = _displayedSyncPending[normalized];
-    if (pending == null || pending != stanzaId) {
+    if (pending == null) {
+      return;
+    }
+    // R1.3: the pending marker may reference either the message's
+    // <stanza-id> or its MAM archive id — see `_applyDisplayedStateForChat`.
+    final hasStanzaMatch = stanzaId != null && stanzaId.isNotEmpty && pending == stanzaId;
+    final hasMamMatch = mamId != null && mamId.isNotEmpty && pending == mamId;
+    if (!hasStanzaMatch && !hasMamMatch) {
       return;
     }
     // Re-run the matcher; on success it clears the pending entry, sets the
@@ -9765,7 +9778,7 @@ class XmppService extends ChangeNotifier {
     }
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
     // that _displayedAtByChat is populated before the UI reads unread counts.
-    _resolveDisplayedSyncPending(normalized, stanzaId);
+    _resolveDisplayedSyncPending(normalized, stanzaId, mamId);
     notifyListeners();
     _messagePersistor?.call(normalized, List.unmodifiable(list));
     // R2.1: bump the global MAM-id anchor.
@@ -10062,7 +10075,7 @@ class XmppService extends ChangeNotifier {
     _insertMessageOrdered(list, newMessage);
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
     // that _displayedAtByChat is populated before the UI reads unread counts.
-    _resolveDisplayedSyncPending(normalized, stanzaId);
+    _resolveDisplayedSyncPending(normalized, stanzaId, mamId);
     notifyListeners();
     _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
     final hasMamIdRoom = mamId != null && mamId.isNotEmpty;
