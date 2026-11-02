@@ -113,6 +113,13 @@ class StreamManagementModule extends Negotiator {
   Duration get pendingAckRequestDelay => _pendingAckRequestDelay;
   Duration get keepaliveMaxTimeout => _keepaliveMaxTimeout;
 
+  /// The keepalive probe interval actually in effect right now, i.e. the
+  /// configured SM-ack/ping cadence after capping it to the server's
+  /// advertised `<idle-seconds>` (XEP-0478), if any. Exposed so a control
+  /// panel can show the real cadence rather than just the raw configured
+  /// value.
+  Duration get effectiveProbeInterval => _currentProbeInterval();
+
   /// Overrides keepalive/ping cadence at runtime. Any parameter left `null`
   /// keeps its current value. Passing no arguments is a no-op. The active
   /// keepalive timer is restarted so a new foreground/background interval
@@ -512,12 +519,34 @@ class StreamManagementModule extends Negotiator {
   }
 
   Duration _currentProbeInterval() {
-    if (_isSmEnabled()) {
-      return _backgroundMode
-          ? _smAckIntervalBackground
-          : _smAckIntervalForeground;
+    final configured = _isSmEnabled()
+        ? (_backgroundMode ? _smAckIntervalBackground : _smAckIntervalForeground)
+        : (_backgroundMode ? _pingIntervalBackground : _pingIntervalForeground);
+    return _capToIdleTimeout(configured);
+  }
+
+  /// Caps [configured] so the keepalive probe always fires well before the
+  /// server's advertised `<idle-seconds>` (XEP-0478) elapses.
+  ///
+  /// Without this, a configured interval close to (or larger than) the
+  /// server's idle timeout means the server can tear down the stream for
+  /// inactivity before our next scheduled probe even goes out, which the
+  /// client then observes as a keepalive timeout and reconnects — triggering
+  /// a full stream re-setup (bind, roster, bookmarks, MUC rejoins, and a
+  /// burst of vCard/avatar re-fetches) that a timely probe would have
+  /// avoided entirely. We use half of the advertised idle timeout, which
+  /// mirrors the margin already used for the QUIC transport-level PING
+  /// timer in XmppService.
+  Duration _capToIdleTimeout(Duration configured) {
+    final idleSeconds = _connection.xmppIdleSeconds;
+    if (idleSeconds == null || idleSeconds <= 0) {
+      return configured;
     }
-    return _backgroundMode ? _pingIntervalBackground : _pingIntervalForeground;
+    final halfIdle = Duration(milliseconds: (idleSeconds * 1000) ~/ 2);
+    if (configured <= halfIdle) {
+      return configured;
+    }
+    return halfIdle;
   }
 
   bool _isSmEnabled() {

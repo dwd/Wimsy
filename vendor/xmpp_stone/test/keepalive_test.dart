@@ -308,4 +308,29 @@ void main() {
       returnsNormally,
     );
   });
+
+  test(
+      'effectiveProbeInterval is capped to half the advertised idle-seconds '
+      'limit', () {
+    final setup = _newConnection();
+    final module = StreamManagementModule.getInstance(setup.connection);
+    module.streamState.streamManagementEnabled = true;
+
+    // Configured foreground SM-ack cadence (1 minute) is well below the
+    // server's advertised idle timeout, so it should be used as-is.
+    setup.connection.xmppIdleSeconds = 360;
+    expect(module.effectiveProbeInterval, const Duration(minutes: 1));
+
+    // A configured cadence close to (or above) the idle timeout must be
+    // capped to half the idle timeout, so a probe always fires with margin
+    // to spare before the server would consider the stream dead. This is
+    // the fix for the reconnect storm seen when idle-seconds is small.
+    module.configure(smAckIntervalForeground: const Duration(seconds: 300));
+    setup.connection.xmppIdleSeconds = 360;
+    expect(module.effectiveProbeInterval, const Duration(seconds: 180));
+
+    // No advertised idle timeout: fall back to the configured value.
+    setup.connection.xmppIdleSeconds = null;
+    expect(module.effectiveProbeInterval, const Duration(seconds: 300));
+  });
 }
