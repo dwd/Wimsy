@@ -5997,10 +5997,12 @@ class XmppService extends ChangeNotifier {
         ? transport
         : mergeIceTransports(existing, transport);
     _callRemoteTransportsBySid[event.sid] = remoteTransports;
+    // Note: a peer connection may not exist yet at this point (e.g. the
+    // remote side can start trickling candidates immediately after
+    // session-initiate, well before Wimsy finishes creating the answerer's
+    // RTCPeerConnection and media session). Candidates are queued below in
+    // that case too, instead of being dropped, so no media/content is lost.
     final pc = _callPeerConnections[event.sid];
-    if (pc == null) {
-      return;
-    }
     final mid = contentName;
     for (final candidate in transport.candidates) {
       Log.d(
@@ -6011,12 +6013,12 @@ class XmppService extends ChangeNotifier {
       );
       final candidateLine = buildCandidateLine(candidate);
       final rtcCandidate = RTCIceCandidate(candidateLine, mid, null);
-      if (!_callRemoteDescriptionSetBySid.contains(event.sid)) {
-        // The remote SDP hasn't been applied to this peer connection yet.
-        // Calling addCandidate() now can race with setRemoteDescription() on
-        // some WebRTC backends and silently fail to wire the candidate into
-        // the ICE agent, so queue it and flush once the remote description
-        // is set.
+      if (pc == null || !_callRemoteDescriptionSetBySid.contains(event.sid)) {
+        // Either there's no peer connection yet, or the remote SDP hasn't
+        // been applied to it yet. Calling addCandidate() too early can race
+        // with setRemoteDescription() on some WebRTC backends and silently
+        // fail to wire the candidate into the ICE agent, so queue it and
+        // flush once the remote description is set.
         _pendingRemoteCandidatesBySid
             .putIfAbsent(event.sid, () => [])
             .add(rtcCandidate);
