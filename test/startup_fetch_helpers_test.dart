@@ -2,7 +2,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wimsy/xmpp/startup_fetch_helpers.dart';
 
 void main() {
-  group('shouldFetchDisplayedSyncBootstrap (R1.1)', () {
+  group('shouldFetchDisplayedSyncBootstrap (R1.1, reverted)', () {
+    // R1.1 used to skip this IQ whenever the on-disk cache was non-empty,
+    // relying on PEP +notify to keep it live. That's unsafe: +notify only
+    // delivers publishes made while this device is online/subscribed, so a
+    // device that was offline (e.g. desktop over a weekend while the user
+    // read messages on mobile) would keep a stale marker forever — see
+    // wimsy2.log, where gajim@conference.gajim.org and xsf@muc.xmpp.org
+    // messages already cached and already read elsewhere kept showing as
+    // unread. The bootstrap IQ is now always sent on connect.
     test('empty cache → fetch', () {
       expect(
         shouldFetchDisplayedSyncBootstrap(hasCachedDisplayedSync: false),
@@ -10,14 +18,15 @@ void main() {
       );
     });
 
-    test('cache populated from disk → skip the bootstrap IQ', () {
+    test('cache populated from disk → still fetch (do not trust a stale '
+        'on-disk marker after being offline)', () {
       expect(
         shouldFetchDisplayedSyncBootstrap(hasCachedDisplayedSync: true),
-        isFalse,
+        isTrue,
       );
     });
 
-    test('force=true overrides the cache check', () {
+    test('force=true still fetches (idempotent, cache populated)', () {
       expect(
         shouldFetchDisplayedSyncBootstrap(
           hasCachedDisplayedSync: true,

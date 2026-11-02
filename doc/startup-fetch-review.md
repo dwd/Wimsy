@@ -396,12 +396,22 @@ Tackling in roughly priority order:
    `avatarHashFor` treat sentinel entries as "no avatar". Real metadata
    events overwrite the sentinel. New tests in
    `test/pep_manager_test.dart` cover all four code paths.
-3. **R1.1 — DONE.** `_setupDisplayedSync` now early-returns when the
-   in-memory `_displayedStanzaIdByChat` map was successfully restored
-   from disk. The decision lives in `shouldFetchDisplayedSyncBootstrap`
-   (`lib/xmpp/startup_fetch_helpers.dart`) and is exercised by
-   `test/startup_fetch_helpers_test.dart`. A `force` flag preserves the
-   ability to manually re-pull the entire MDS state when desired.
+3. **R1.1 — DONE, then REVERTED (see `wimsy2.log`).** `_setupDisplayedSync`
+   used to early-return when the in-memory `_displayedStanzaIdByChat` map
+   was restored from disk, on the assumption that PEP `+notify` would keep
+   it live thereafter. That assumption only holds while the device stays
+   online: a device that disconnects (e.g. desktop idle over a weekend
+   while the user reads on mobile) never receives the `+notify` publishes
+   that happened in the meantime, so the stale on-disk marker was never
+   refreshed — `gajim@conference.gajim.org` and `xsf@muc.xmpp.org` in
+   `wimsy2.log` kept an ancient stanza-id and their already-cached,
+   already-read messages showed up as unread on every subsequent restart.
+   `shouldFetchDisplayedSyncBootstrap`
+   (`lib/xmpp/startup_fetch_helpers.dart`) now unconditionally returns
+   `true` so the bootstrap IQ is always sent on connect; the
+   `hasCachedDisplayedSync` / `force` parameters are kept only so a future,
+   genuinely gap-aware skip (e.g. keyed off last-connected time) can be
+   reintroduced safely. Updated in `test/startup_fetch_helpers_test.dart`.
 4. **R1.2 — DONE.** On audit it turned out
    `urn:xmpp:mds:displayed:0+notify` was already present in
    `vendor/xmpp_stone/lib/src/features/servicediscovery/ServiceDiscoverySupport.dart`

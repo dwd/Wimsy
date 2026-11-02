@@ -7,28 +7,34 @@
 /// production code calls into them from `xmpp_service.dart`.
 library;
 
-/// R1.1 — skip the bootstrap `urn:xmpp:mds:displayed:0` PubSub items GET
-/// when the in-memory map of displayed stanza ids was successfully restored
-/// from disk on startup.
+/// R1.1 (REVERTED — see wimsy2.log "already-read messages shown unread"
+/// bug): this used to skip the bootstrap `urn:xmpp:mds:displayed:0`
+/// PubSub items GET whenever the in-memory map of displayed stanza ids was
+/// restored from disk on startup, on the assumption that PEP `+notify`
+/// pushes would keep the cache live thereafter.
 ///
-/// PEP +notify pushes (already handled by the existing event handler) keep
-/// the cache live thereafter, so the IQ is only required on a true cold
-/// start (no persisted MDS state for this account).
+/// That assumption is false for a device that was offline (e.g. the
+/// desktop client over a weekend while the user read messages on mobile):
+/// `+notify` only delivers *live* publishes to currently-subscribed,
+/// online resources. There is no XEP-0060/XEP-0163 mechanism in use here
+/// to replay MDS items published while this device was disconnected, so
+/// skipping the bootstrap IQ left `_displayedStanzaIdByChat` pinned to a
+/// stale, possibly weeks-old marker forever — reproduced in
+/// `wimsy2.log`, where `gajim@conference.gajim.org` and
+/// `xsf@muc.xmpp.org` kept a stanza-id far older than the already-cached,
+/// already-read local messages, making them reappear as unread on every
+/// restart.
 ///
-/// [hasCachedDisplayedSync] should be true when the in-memory
-/// `_displayedStanzaIdByChat` map is non-empty after disk seeding.
-///
-/// [force] is provided for completeness — callers that genuinely want to
-/// re-pull MDS regardless of cache (e.g. a manual "resync" command in the
-/// UI) can pass true.
+/// The bootstrap IQ is a single cheap PubSub items GET, so we now always
+/// issue it on connect regardless of cache state. [hasCachedDisplayedSync]
+/// and [force] are kept for API/test compatibility (and so a future,
+/// genuinely gap-aware skip — e.g. based on last-connected time — can be
+/// reintroduced safely), but the function unconditionally returns true.
 bool shouldFetchDisplayedSyncBootstrap({
   required bool hasCachedDisplayedSync,
   bool force = false,
 }) {
-  if (force) {
-    return true;
-  }
-  return !hasCachedDisplayedSync;
+  return true;
 }
 
 /// R2.2 — skip the per-chat MAM catch-up `<query/>` when the displayed
