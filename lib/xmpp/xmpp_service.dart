@@ -469,6 +469,12 @@ class XmppService extends ChangeNotifier {
   final Set<String> _callLoggedIceQueueBySid = {};
   final Map<String, String> _callSelectedCandidateSummaryBySid = {};
   final Map<String, String> _callCandidatePairSummaryBySid = {};
+  // Remote ICE candidates received before the remote SDP has been applied
+  // to the peer connection, keyed by call sid. Applying addCandidate() too
+  // early can race with setRemoteDescription() on some WebRTC backends, so
+  // these are queued and flushed once the remote description is set.
+  final Set<String> _callRemoteDescriptionSetBySid = {};
+  final Map<String, List<RTCIceCandidate>> _pendingRemoteCandidatesBySid = {};
   final Map<String, String> _callPeerFullJidBySid = {};
   ISentrySpan? _connectTransaction;
   ISentrySpan? _connectAwaitSpan;
@@ -4811,6 +4817,7 @@ class XmppService extends ChangeNotifier {
         bundle: bundle,
       );
       await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+      _markRemoteDescriptionSet(session.sid, pc);
     }
     final answer = await pc.createAnswer({
       'offerToReceiveAudio': true,
@@ -5494,6 +5501,8 @@ class XmppService extends ChangeNotifier {
     _callLoggedIceQueueBySid.remove(session.sid);
     _callSelectedCandidateSummaryBySid.remove(session.sid);
     _callCandidatePairSummaryBySid.remove(session.sid);
+    _callRemoteDescriptionSetBySid.remove(session.sid);
+    _pendingRemoteCandidatesBySid.remove(session.sid);
     final jingleSpan = _jingleSetupTransactions.remove(session.sid);
     if (jingleSpan != null) {
       final status = switch (session.state) {
@@ -5969,6 +5978,7 @@ class XmppService extends ChangeNotifier {
       bundle: _callRemoteBundleBySid[sid] ?? false,
     );
     await pc.setRemoteDescription(RTCSessionDescription(sdp, sdpType));
+    _markRemoteDescriptionSet(sid, pc);
   }
 
   void _handleJingleTransportInfo(JingleSessionEvent event) {
@@ -6000,28 +6010,69 @@ class XmppService extends ChangeNotifier {
             'comp=${candidate.component} content=$contentName',
       );
       final candidateLine = buildCandidateLine(candidate);
-      unawaited(
-        pc
-            .addCandidate(RTCIceCandidate(candidateLine, mid, null))
-            .then((_) {
-              Log.d(
-                'XmppService',
-                'Call ${event.sid} addCandidate succeeded for '
-                    '${candidate.type} ${candidate.protocol} '
-                    '${candidate.ip}:${candidate.port} content=$contentName',
-              );
-            })
-            .catchError((Object error) {
-              Log.w(
-                'XmppService',
-                'Call ${event.sid} addCandidate FAILED for '
-                    '${candidate.type} ${candidate.protocol} '
-                    '${candidate.ip}:${candidate.port} content=$contentName: '
-                    '$error',
-              );
-            }),
-      );
+      final rtcCandidate = RTCIceCandidate(candidateLine, mid, null);
+      if (!_callRemoteDescriptionSetBySid.contains(event.sid)) {
+        // The remote SDP hasn't been applied to this peer connection yet.
+        // Calling addCandidate() now can race with setRemoteDescription() on
+        // some WebRTC backends and silently fail to wire the candidate into
+        // the ICE agent, so queue it and flush once the remote description
+        // is set.
+        _pendingRemoteCandidatesBySid
+            .putIfAbsent(event.sid, () => [])
+            .add(rtcCandidate);
+        Log.d(
+          'XmppService',
+          'Call ${event.sid} queued remote ICE candidate for '
+              'content=$contentName until remote description is set.',
+        );
+        continue;
+      }
+      _applyRemoteIceCandidate(event.sid, pc, rtcCandidate, contentName);
     }
+  }
+
+  /// Marks the remote description as applied to [pc] for call [sid], and
+  /// flushes any remote ICE candidates that arrived before it was set.
+  void _markRemoteDescriptionSet(String sid, RTCPeerConnection pc) {
+    _callRemoteDescriptionSetBySid.add(sid);
+    final pending = _pendingRemoteCandidatesBySid.remove(sid);
+    if (pending == null || pending.isEmpty) {
+      return;
+    }
+    Log.d(
+      'XmppService',
+      'Call $sid flushing ${pending.length} queued remote ICE candidate(s) '
+          'now that remote description is set.',
+    );
+    for (final candidate in pending) {
+      _applyRemoteIceCandidate(sid, pc, candidate, candidate.sdpMid ?? '');
+    }
+  }
+
+  void _applyRemoteIceCandidate(
+    String sid,
+    RTCPeerConnection pc,
+    RTCIceCandidate candidate,
+    String contentName,
+  ) {
+    unawaited(
+      pc
+          .addCandidate(candidate)
+          .then((_) {
+            Log.d(
+              'XmppService',
+              'Call $sid addCandidate succeeded for content=$contentName '
+                  '(${candidate.candidate})',
+            );
+          })
+          .catchError((Object error) {
+            Log.w(
+              'XmppService',
+              'Call $sid addCandidate FAILED for content=$contentName '
+                  '(${candidate.candidate}): $error',
+            );
+          }),
+    );
   }
 
   Future<RTCPeerConnection?> _createPeerConnection({
