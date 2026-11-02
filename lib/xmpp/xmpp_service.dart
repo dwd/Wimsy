@@ -12192,9 +12192,20 @@ class XmppService extends ChangeNotifier {
     }
     // The centralised guard inside `_requestVcardDetails` (R4.1) handles the
     // "same hash & bytes already cached" case by short-circuiting. Pass the
-    // advertised hash *before* mutating cached state so the guard can compare
-    // it against the previously recorded hash and refetch when they differ.
-    _vcardRequests.remove(bareJid);
+    // advertised hash so the guard can compare it against the previously
+    // recorded hash and refetch when they differ.
+    //
+    // We only clear the in-flight dedup entry (`_vcardRequests`) when the
+    // advertised hash genuinely differs from what we already have recorded,
+    // i.e. when a fetch already in flight for the *old* hash would not
+    // satisfy this update anyway. A burst of presence stanzas advertising
+    // the *same* hash (e.g. every MUC occupant's presence resent after a
+    // reconnect) must not reset the guard, or each one would race past the
+    // "already requesting" check and fire a duplicate vCard GET for the
+    // same JID/hash within milliseconds of each other.
+    if (hash != existing) {
+      _vcardRequests.remove(bareJid);
+    }
     _requestVcardDetails(bareJid, preferName: false, advertisedHash: hash);
   }
 
