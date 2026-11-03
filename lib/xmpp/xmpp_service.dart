@@ -469,6 +469,11 @@ class XmppService extends ChangeNotifier {
   final Set<String> _callLoggedIceQueueBySid = {};
   final Map<String, String> _callSelectedCandidateSummaryBySid = {};
   final Map<String, String> _callCandidatePairSummaryBySid = {};
+  // Last known state per individual candidate-pair report id, keyed by call
+  // sid, so we can log precisely which pair transitioned and to what state
+  // (e.g. a single pair stuck at "in-progress" forever, or one that flips to
+  // "failed" while others stay "frozen"), rather than only aggregate counts.
+  final Map<String, Map<String, String>> _callCandidatePairStatesBySid = {};
   // Remote ICE candidates received before the remote SDP has been applied
   // to the peer connection, keyed by call sid. Applying addCandidate() too
   // early can race with setRemoteDescription() on some WebRTC backends, so
@@ -5013,6 +5018,7 @@ class XmppService extends ChangeNotifier {
     final reports = await pc.getStats();
     final candidateReports = <String, Map<dynamic, dynamic>>{};
     final candidatePairStateCounts = <String, int>{};
+    final candidatePairReports = <String, Map<dynamic, dynamic>>{};
     Map<dynamic, dynamic>? selectedPairValues;
     String? selectedPairId;
     int? outboundBytes;
@@ -5100,6 +5106,7 @@ class XmppService extends ChangeNotifier {
         final state = _statString(values, 'state') ?? 'unknown';
         candidatePairStateCounts[state] =
             (candidatePairStateCounts[state] ?? 0) + 1;
+        candidatePairReports[report.id] = values;
         final nominated =
             values['nominated'] == true || values['selected'] == true;
         if (state == 'succeeded' && nominated) {
@@ -5132,6 +5139,15 @@ class XmppService extends ChangeNotifier {
         Log.d('XmppService', 'Call $sid candidate-pair states: $summary');
       }
     }
+    // Log individual pair state transitions (e.g. "waiting" -> "in-progress"
+    // -> "failed") with the local/remote candidate they connect, so a pair
+    // that's permanently stuck (or one that fails while siblings succeed)
+    // can be pinpointed instead of only seeing aggregate counts change.
+    _logCandidatePairTransitions(
+      sid: sid,
+      candidatePairReports: candidatePairReports,
+      candidateReports: candidateReports,
+    );
 
     final tracker = _callStatsBySid[sid] ?? _CallStatsTracker();
     final now = DateTime.now();
@@ -5354,6 +5370,39 @@ class XmppService extends ChangeNotifier {
     Log.d('XmppService', 'Call $sid selected ICE $summary');
   }
 
+  void _logCandidatePairTransitions({
+    required String sid,
+    required Map<String, Map<dynamic, dynamic>> candidatePairReports,
+    required Map<String, Map<dynamic, dynamic>> candidateReports,
+  }) {
+    final lastStates = _callCandidatePairStatesBySid.putIfAbsent(
+      sid,
+      () => {},
+    );
+    for (final entry in candidatePairReports.entries) {
+      final pairId = entry.key;
+      final values = entry.value;
+      final state = _statString(values, 'state') ?? 'unknown';
+      if (lastStates[pairId] == state) {
+        continue;
+      }
+      lastStates[pairId] = state;
+      final localId = _statString(values, 'localCandidateId');
+      final remoteId = _statString(values, 'remoteCandidateId');
+      final local = localId == null ? null : candidateReports[localId];
+      final remote = remoteId == null ? null : candidateReports[remoteId];
+      final localDesc = local == null ? 'unknown' : _describeIceCandidate(local);
+      final remoteDesc = remote == null
+          ? 'unknown'
+          : _describeIceCandidate(remote);
+      Log.d(
+        'XmppService',
+        'Call $sid candidate-pair $pairId -> $state '
+            'local=[$localDesc] remote=[$remoteDesc]',
+      );
+    }
+  }
+
   String _describeIceCandidate(Map<dynamic, dynamic> values) {
     final type = _statString(values, 'candidateType') ?? 'unknown';
     final protocol = _statString(values, 'protocol') ?? 'unknown';
@@ -5501,6 +5550,7 @@ class XmppService extends ChangeNotifier {
     _callLoggedIceQueueBySid.remove(session.sid);
     _callSelectedCandidateSummaryBySid.remove(session.sid);
     _callCandidatePairSummaryBySid.remove(session.sid);
+    _callCandidatePairStatesBySid.remove(session.sid);
     _callRemoteDescriptionSetBySid.remove(session.sid);
     _pendingRemoteCandidatesBySid.remove(session.sid);
     final jingleSpan = _jingleSetupTransactions.remove(session.sid);
