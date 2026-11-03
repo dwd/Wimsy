@@ -89,6 +89,37 @@ List<String> bundleGroupNamesForContents(List<JingleContent> contents) {
   return names;
 }
 
+/// Reorders [localNames] to match [remoteOrder] whenever possible.
+///
+/// XEP-0338/RFC 8843 BUNDLE grouping doesn't strictly require an answer's
+/// `<group>` order to mirror the offer's, but some WebRTC implementations
+/// pick the "master" bundled transport based on the first mid listed in the
+/// group - if the answer lists contents in a different order than the
+/// offer, the remote ICE agent can fail to ever start connectivity checks.
+/// To stay maximally compatible, this mirrors the exact order the remote
+/// party used in its offer ([remoteOrder]) whenever it covers every name in
+/// [localNames], falling back to [localNames] unchanged otherwise (e.g. no
+/// remote order is known, such as for an outgoing call we initiated).
+List<String> reorderBundleGroupNamesToMatchRemote(
+  List<String> localNames,
+  List<String>? remoteOrder,
+) {
+  if (remoteOrder == null || remoteOrder.isEmpty) {
+    return localNames;
+  }
+  final localNameSet = localNames.toSet();
+  final ordered = remoteOrder
+      .where((name) => localNameSet.contains(name))
+      .toList(growable: false);
+  if (ordered.length != localNames.length) {
+    // Remote order didn't cover all of our local names (shouldn't normally
+    // happen); fall back to the original order rather than risk dropping a
+    // content from the group.
+    return localNames;
+  }
+  return ordered;
+}
+
 String? bundleTransportNameForMappings(List<JingleSdpMapping> mappings) {
   for (final mapping in mappings) {
     if (mapping.description.media.toLowerCase() == 'audio' &&

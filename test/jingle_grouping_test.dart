@@ -95,6 +95,49 @@ void main() {
     expect(names, ['audio0', 'video0']);
   });
 
+  test(
+    'reorderBundleGroupNamesToMatchRemote mirrors the remote offer order',
+    () {
+      // Our own heuristic order is audio-first, but the phone's offer
+      // listed video before audio - the answer must mirror the offer.
+      final names = reorderBundleGroupNamesToMatchRemote(
+        ['audio0', 'video0'],
+        ['video0', 'audio0'],
+      );
+      expect(names, ['video0', 'audio0']);
+    },
+  );
+
+  test(
+    'reorderBundleGroupNamesToMatchRemote falls back when remote order is '
+    'missing',
+    () {
+      final names = reorderBundleGroupNamesToMatchRemote(
+        ['audio0', 'video0'],
+        null,
+      );
+      expect(names, ['audio0', 'video0']);
+
+      final namesEmpty = reorderBundleGroupNamesToMatchRemote(
+        ['audio0', 'video0'],
+        [],
+      );
+      expect(namesEmpty, ['audio0', 'video0']);
+    },
+  );
+
+  test(
+    'reorderBundleGroupNamesToMatchRemote falls back when remote order does '
+    "not cover all of our local names",
+    () {
+      final names = reorderBundleGroupNamesToMatchRemote(
+        ['audio0', 'video0', 'data0'],
+        ['video0', 'audio0'],
+      );
+      expect(names, ['audio0', 'video0', 'data0']);
+    },
+  );
+
   test('attachBundleGroup adds group once and skips when existing', () {
     final iq = IqStanza('id2', IqStanzaType.SET);
     iq.addChild(XmppElement()..name = 'jingle');

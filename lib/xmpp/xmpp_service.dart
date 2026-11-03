@@ -457,6 +457,7 @@ class XmppService extends ChangeNotifier {
   final Map<String, bool> _callLocalBundleBySid = {};
   final Map<String, bool> _callRemoteBundleBySid = {};
   final Map<String, String> _callBundleTransportNameBySid = {};
+  final Map<String, List<String>> _callRemoteBundleGroupOrderBySid = {};
   final Map<String, bool> _callMutedBySid = {};
   final Map<String, bool> _callVideoEnabledBySid = {};
   final Map<String, bool> _callRemoteVideoEnabledBySid = {};
@@ -4367,10 +4368,12 @@ class XmppService extends ChangeNotifier {
         _callRemoteBundleBySid[event.sid] = true;
         _callLocalBundleBySid[event.sid] = true;
         _callBundleTransportNameBySid[event.sid] = bundleGroup.first;
+        _callRemoteBundleGroupOrderBySid[event.sid] = bundleGroup;
       } else {
         _callRemoteBundleBySid[event.sid] = false;
         _callLocalBundleBySid[event.sid] = false;
         _callBundleTransportNameBySid.remove(event.sid);
+        _callRemoteBundleGroupOrderBySid.remove(event.sid);
       }
       if (_callSessions.containsKey(event.sid)) {
         _storeRemoteCallContents(event.sid, rtpContents);
@@ -4888,7 +4891,7 @@ class XmppService extends ChangeNotifier {
     if (bundle) {
       attachBundleGroup(
         iq,
-        bundleGroupNamesForContents(localContents),
+        _bundleGroupNamesForAnswer(session.sid, localContents),
         groupingNamespace: _jingleGroupingNamespace,
         groupingBundle: _jingleGroupingBundle,
       );
@@ -4907,6 +4910,20 @@ class XmppService extends ChangeNotifier {
     _finishSpan(_jingleSetupTransactions.remove(session.sid));
     notifyListeners();
     await _mediaSession.start(audio: true, video: session.video);
+  }
+
+  /// Determines the BUNDLE group content-name order to use when answering
+  /// an incoming call via `session-accept`, mirroring the remote offer's
+  /// order whenever we captured one (see
+  /// [reorderBundleGroupNamesToMatchRemote]).
+  List<String> _bundleGroupNamesForAnswer(
+    String sid,
+    List<JingleContent> localContents,
+  ) {
+    return reorderBundleGroupNamesToMatchRemote(
+      bundleGroupNamesForContents(localContents),
+      _callRemoteBundleGroupOrderBySid[sid],
+    );
   }
 
   Future<void> declineCall(CallSession session) async {
@@ -5608,6 +5625,7 @@ class XmppService extends ChangeNotifier {
     _callLocalBundleBySid.remove(session.sid);
     _callRemoteBundleBySid.remove(session.sid);
     _callBundleTransportNameBySid.remove(session.sid);
+    _callRemoteBundleGroupOrderBySid.remove(session.sid);
     _callMutedBySid.remove(session.sid);
     _callVideoEnabledBySid.remove(session.sid);
     _callRemoteVideoEnabledBySid.remove(session.sid);
