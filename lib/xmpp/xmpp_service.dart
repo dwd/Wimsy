@@ -496,6 +496,9 @@ class XmppService extends ChangeNotifier {
   final Map<String, Timer> _callTimeoutTimers = {};
   final Map<String, Timer> _callStatsTimers = {};
   final Map<String, CallQualitySample> _callQualityBySid = {};
+  // Full human-readable WebRTC/ICE diagnostics text per call sid, refreshed
+  // each stats interval; backs the in-app call diagnostics overlay.
+  final Map<String, String> _callDiagnosticsTextBySid = {};
   final Map<String, _CallStatsTracker> _callStatsBySid = {};
   final CallQualityController _callQualityController =
       const CallQualityController();
@@ -659,6 +662,20 @@ class XmppService extends ChangeNotifier {
       return null;
     }
     return _callQualityBySid[key];
+  }
+
+  /// A full, human-readable snapshot of the current call's WebRTC/ICE
+  /// diagnostics for [bareJid] (candidate types including whether TURN/relay
+  /// is in use, candidate-pair states, bitrates, loss, jitter, RTT, etc.),
+  /// refreshed every stats interval (see [_collectCallStats]). Intended for
+  /// a debugging overlay; returns `null` if there's no active call or no
+  /// stats have been collected yet.
+  String? callDiagnosticsFor(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    if (key == null) {
+      return null;
+    }
+    return _callDiagnosticsTextBySid[key];
   }
 
   bool isCallMuted(String bareJid) {
@@ -1350,6 +1367,7 @@ class XmppService extends ChangeNotifier {
     _backgroundMode = enabled;
     Log.i('XmppService', 'Background mode changed to $enabled');
     _applyClientState();
+    _applyLivenessTuningToController();
     _connection?.setKeepaliveBackgroundMode(_backgroundMode);
     _connection?.setReconnectContext(
       networkOnline: _networkOnline,
@@ -5265,8 +5283,135 @@ class XmppService extends ChangeNotifier {
       remoteEnergy: remoteAudioEnergy,
       remoteDuration: remoteSamplesDuration,
     );
+    _callDiagnosticsTextBySid[sid] = _buildCallDiagnosticsText(
+      sid: sid,
+      candidateReports: candidateReports,
+      candidatePairReports: candidatePairReports,
+      candidatePairStateCounts: candidatePairStateCounts,
+      selectedPairId: selectedPairId,
+      selectedPairValues: selectedPairValues,
+      sample: sample,
+      packetsLost: packetsLost,
+      packetsReceived: packetsReceived,
+    );
     await _applyAdaptiveBitrate(sid, sample, tracker);
     notifyListeners();
+  }
+
+  /// Builds a full, human-readable text dump of the current call's WebRTC
+  /// diagnostics, intended for an in-app debugging overlay so the user can
+  /// see exactly what's happening without digging through logs: every
+  /// gathered local/remote ICE candidate (and whether any are TURN/relay),
+  /// the selected candidate pair if any, the state of every candidate pair,
+  /// and the latest media quality numbers.
+  String _buildCallDiagnosticsText({
+    required String sid,
+    required Map<String, Map<dynamic, dynamic>> candidateReports,
+    required Map<String, Map<dynamic, dynamic>> candidatePairReports,
+    required Map<String, int> candidatePairStateCounts,
+    required String? selectedPairId,
+    required Map<dynamic, dynamic>? selectedPairValues,
+    required CallQualitySample sample,
+    required int? packetsLost,
+    required int? packetsReceived,
+  }) {
+    final buffer = StringBuffer();
+    buffer.writeln('Call sid: $sid');
+    buffer.writeln('Updated: ${DateTime.now().toIso8601String()}');
+    buffer.writeln();
+
+    buffer.writeln('-- Selected candidate pair --');
+    if (selectedPairValues != null) {
+      final localId = _statString(selectedPairValues, 'localCandidateId');
+      final remoteId = _statString(selectedPairValues, 'remoteCandidateId');
+      final local = localId == null ? null : candidateReports[localId];
+      final remote = remoteId == null ? null : candidateReports[remoteId];
+      final usingRelay =
+          (local != null && _statString(local, 'candidateType') == 'relay') ||
+          (remote != null &&
+              _statString(remote, 'candidateType') == 'relay');
+      buffer.writeln('pair id: ${selectedPairId ?? 'unknown'}');
+      buffer.writeln(
+        'local:  ${local == null ? 'unknown' : _describeIceCandidate(local)}',
+      );
+      buffer.writeln(
+        'remote: ${remote == null ? 'unknown' : _describeIceCandidate(remote)}',
+      );
+      buffer.writeln('using TURN/relay: ${usingRelay ? 'yes' : 'no'}');
+    } else {
+      buffer.writeln('(none yet - no candidate pair has succeeded)');
+    }
+    buffer.writeln();
+
+    buffer.writeln('-- Candidate-pair states --');
+    if (candidatePairStateCounts.isEmpty) {
+      buffer.writeln('(no candidate pairs reported)');
+    } else {
+      for (final entry in candidatePairStateCounts.entries) {
+        buffer.writeln('${entry.key}: ${entry.value}');
+      }
+    }
+    buffer.writeln();
+
+    buffer.writeln('-- All candidate pairs --');
+    if (candidatePairReports.isEmpty) {
+      buffer.writeln('(none)');
+    } else {
+      for (final entry in candidatePairReports.entries) {
+        final values = entry.value;
+        final state = _statString(values, 'state') ?? 'unknown';
+        final localId = _statString(values, 'localCandidateId');
+        final remoteId = _statString(values, 'remoteCandidateId');
+        final local = localId == null ? null : candidateReports[localId];
+        final remote = remoteId == null ? null : candidateReports[remoteId];
+        final localDesc = local == null
+            ? 'unknown'
+            : _describeIceCandidate(local);
+        final remoteDesc = remote == null
+            ? 'unknown'
+            : _describeIceCandidate(remote);
+        buffer.writeln(
+          '${entry.key} [$state] local=[$localDesc] remote=[$remoteDesc]',
+        );
+      }
+    }
+    buffer.writeln();
+
+    buffer.writeln('-- All gathered candidates --');
+    if (candidateReports.isEmpty) {
+      buffer.writeln('(none)');
+    } else {
+      for (final entry in candidateReports.entries) {
+        buffer.writeln('${entry.key}: ${_describeIceCandidate(entry.value)}');
+      }
+    }
+    buffer.writeln();
+
+    buffer.writeln('-- Media quality --');
+    buffer.writeln(
+      'RTT: ${sample.rttMs == null ? '-' : '${sample.rttMs!.toStringAsFixed(1)} ms'}',
+    );
+    buffer.writeln(
+      'Outbound bitrate: '
+      '${sample.outboundKbps == null ? '-' : '${sample.outboundKbps!.toStringAsFixed(1)} kbps'}',
+    );
+    buffer.writeln(
+      'Inbound bitrate: '
+      '${sample.inboundKbps == null ? '-' : '${sample.inboundKbps!.toStringAsFixed(1)} kbps'}',
+    );
+    buffer.writeln(
+      'Jitter: ${sample.jitterMs == null ? '-' : '${sample.jitterMs!.toStringAsFixed(1)} ms'}',
+    );
+    buffer.writeln(
+      'Packet loss: '
+      '${sample.packetLoss == null ? '-' : '${(sample.packetLoss! * 100).toStringAsFixed(1)}%'} '
+      '(lost=${packetsLost ?? 0}, received=${packetsReceived ?? 0})',
+    );
+    buffer.writeln(
+      'Target video bitrate: '
+      '${sample.targetVideoBitrateBps == null ? '-' : '${sample.targetVideoBitrateBps} bps'}',
+    );
+    return buffer.toString().trimRight();
   }
 
   Future<void> _applyAdaptiveBitrate(
@@ -5598,6 +5743,7 @@ class XmppService extends ChangeNotifier {
     _callStatsTimers.remove(session.sid)?.cancel();
     _callStatsBySid.remove(session.sid);
     _callQualityBySid.remove(session.sid);
+    _callDiagnosticsTextBySid.remove(session.sid);
     _callPeerFullJidBySid.remove(session.sid);
     _callAcceptedBySid.remove(session.sid);
     _callAcceptingBySid.remove(session.sid);
@@ -9441,6 +9587,12 @@ class XmppService extends ChangeNotifier {
   void _setupLiveness(Connection connection) {
     _connectionHealth = ConnectionHealth.healthy;
     _livenessController = LivenessController(
+      minimumDeadline: _keepaliveTuning.livenessMinimumDeadline,
+      highLossDeadline: _keepaliveTuning.livenessHighLossDeadline,
+      maximumDeadline: _backgroundMode
+          ? _keepaliveTuning.livenessMaximumDeadlineBackground
+          : _keepaliveTuning.livenessMaximumDeadlineForeground,
+      failuresBeforeDead: _keepaliveTuning.livenessFailuresBeforeDead,
       onProbeRequested: () {
         final socket = connection.socket;
         if (socket is QuicCapableXmppSocket) {
@@ -9505,6 +9657,25 @@ class XmppService extends ChangeNotifier {
         maxDelay: _keepaliveTuning.reconnectMaxDelay,
         jitterRatio: _keepaliveTuning.reconnectJitterRatio,
       ),
+    );
+    _applyLivenessTuningToController();
+  }
+
+  /// Pushes the foreground or background liveness profile (per
+  /// [_backgroundMode]) into the active [_livenessController], if any.
+  ///
+  /// The minimum deadline stays tied to `smoothedRtt * 12` in both profiles;
+  /// only the ceiling (and the failure threshold) differ, so the background
+  /// profile can tolerate much longer silence windows without waking the
+  /// radio, while the foreground profile stays responsive.
+  void _applyLivenessTuningToController() {
+    _livenessController?.updateTuning(
+      minimumDeadline: _keepaliveTuning.livenessMinimumDeadline,
+      highLossDeadline: _keepaliveTuning.livenessHighLossDeadline,
+      maximumDeadline: _backgroundMode
+          ? _keepaliveTuning.livenessMaximumDeadlineBackground
+          : _keepaliveTuning.livenessMaximumDeadlineForeground,
+      failuresBeforeDead: _keepaliveTuning.livenessFailuresBeforeDead,
     );
   }
 

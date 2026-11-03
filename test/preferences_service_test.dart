@@ -123,6 +123,11 @@ void main() {
         outgoingCallTimeout: Duration(seconds: 30),
         incomingCallTimeout: Duration(seconds: 40),
         callStatsInterval: Duration(seconds: 2),
+        livenessMinimumDeadline: Duration(seconds: 20),
+        livenessHighLossDeadline: Duration(seconds: 40),
+        livenessMaximumDeadlineForeground: Duration(minutes: 1),
+        livenessMaximumDeadlineBackground: Duration(minutes: 7),
+        livenessFailuresBeforeDead: 4,
       );
 
       await prefs.setKeepaliveTuning(custom);

@@ -107,6 +107,16 @@ class PreferencesService {
   static const _outgoingCallTimeoutMsKey = 'keepalive_outgoing_call_timeout_ms';
   static const _incomingCallTimeoutMsKey = 'keepalive_incoming_call_timeout_ms';
   static const _callStatsIntervalMsKey = 'keepalive_call_stats_interval_ms';
+  static const _livenessMinimumDeadlineMsKey =
+      'keepalive_liveness_minimum_deadline_ms';
+  static const _livenessHighLossDeadlineMsKey =
+      'keepalive_liveness_high_loss_deadline_ms';
+  static const _livenessMaximumDeadlineForegroundMsKey =
+      'keepalive_liveness_maximum_deadline_fg_ms';
+  static const _livenessMaximumDeadlineBackgroundMsKey =
+      'keepalive_liveness_maximum_deadline_bg_ms';
+  static const _livenessFailuresBeforeDeadKey =
+      'keepalive_liveness_failures_before_dead';
 
   Duration _durationOrDefault(String key, Duration fallback) {
     final ms = _prefs.getInt(key);
@@ -189,6 +199,25 @@ class PreferencesService {
         _callStatsIntervalMsKey,
         d.callStatsInterval,
       ),
+      livenessMinimumDeadline: _durationOrDefault(
+        _livenessMinimumDeadlineMsKey,
+        d.livenessMinimumDeadline,
+      ),
+      livenessHighLossDeadline: _durationOrDefault(
+        _livenessHighLossDeadlineMsKey,
+        d.livenessHighLossDeadline,
+      ),
+      livenessMaximumDeadlineForeground: _durationOrDefault(
+        _livenessMaximumDeadlineForegroundMsKey,
+        d.livenessMaximumDeadlineForeground,
+      ),
+      livenessMaximumDeadlineBackground: _durationOrDefault(
+        _livenessMaximumDeadlineBackgroundMsKey,
+        d.livenessMaximumDeadlineBackground,
+      ),
+      livenessFailuresBeforeDead:
+          _prefs.getInt(_livenessFailuresBeforeDeadKey) ??
+          d.livenessFailuresBeforeDead,
     );
   }
 
@@ -264,6 +293,26 @@ class PreferencesService {
       _prefs.setInt(
         _callStatsIntervalMsKey,
         tuning.callStatsInterval.inMilliseconds,
+      ),
+      _prefs.setInt(
+        _livenessMinimumDeadlineMsKey,
+        tuning.livenessMinimumDeadline.inMilliseconds,
+      ),
+      _prefs.setInt(
+        _livenessHighLossDeadlineMsKey,
+        tuning.livenessHighLossDeadline.inMilliseconds,
+      ),
+      _prefs.setInt(
+        _livenessMaximumDeadlineForegroundMsKey,
+        tuning.livenessMaximumDeadlineForeground.inMilliseconds,
+      ),
+      _prefs.setInt(
+        _livenessMaximumDeadlineBackgroundMsKey,
+        tuning.livenessMaximumDeadlineBackground.inMilliseconds,
+      ),
+      _prefs.setInt(
+        _livenessFailuresBeforeDeadKey,
+        tuning.livenessFailuresBeforeDead,
       ),
     ]);
   }

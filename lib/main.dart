@@ -784,6 +784,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   int _messageViewportChangeGeneration = 0;
   int _displayMetricsLoadGeneration = 0;
   String? _callControlsVisibleSid;
+  String? _callDiagnosticsVisibleSid;
   final Map<String, double> _remoteVideoAspectBySid = {};
   final Map<String, double> _localVideoAspectBySid = {};
   bool _localVideoMirrored = true;
@@ -3451,6 +3452,20 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                               ],
                             ),
                           ),
+                          if (_callDiagnosticsVisibleSid == session.sid)
+                            Positioned(
+                              left: 8,
+                              top: 8,
+                              bottom: 8,
+                              width: (constraints.maxWidth * 0.42).clamp(
+                                220.0,
+                                360.0,
+                              ),
+                              child: _buildCallDiagnosticsPanel(
+                                service,
+                                bareJid,
+                              ),
+                            ),
                           if (isActive && controlsVisible)
                             Positioned(
                               left: 8,
@@ -3501,8 +3516,44 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 8),
               _buildCallControls(service, bareJid, session),
+              if (_callDiagnosticsVisibleSid == session.sid) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 240,
+                  child: _buildCallDiagnosticsPanel(service, bareJid),
+                ),
+              ],
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// A scrollable, monospace text panel showing the raw WebRTC/ICE
+  /// diagnostics for the call with [bareJid] (candidate pairs, whether
+  /// TURN/relay is in use, bitrates, loss, jitter, etc.), refreshed
+  /// automatically every stats interval via [XmppService.callDiagnosticsFor].
+  /// Shown/hidden via the diagnostics toggle button in [_buildCallControls].
+  Widget _buildCallDiagnosticsPanel(XmppService service, String bareJid) {
+    final theme = Theme.of(context);
+    final text =
+        service.callDiagnosticsFor(bareJid) ?? 'Collecting diagnostics...';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Scrollbar(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(8),
+          child: SelectableText(
+            text,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontFamily: 'monospace',
+            ),
+          ),
         ),
       ),
     );
@@ -3513,9 +3564,23 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     String bareJid,
     CallSession session,
   ) {
+    final diagnosticsVisible = _callDiagnosticsVisibleSid == session.sid;
     return Wrap(
       alignment: WrapAlignment.center,
       children: [
+        IconButton(
+          onPressed: () => setState(() {
+            _callDiagnosticsVisibleSid = diagnosticsVisible
+                ? null
+                : session.sid;
+          }),
+          icon: Icon(
+            diagnosticsVisible ? Icons.bug_report : Icons.bug_report_outlined,
+          ),
+          tooltip: diagnosticsVisible
+              ? 'Hide call diagnostics'
+              : 'Show call diagnostics',
+        ),
         IconButton(
           onPressed: () => service.toggleCallMute(bareJid),
           icon: Icon(service.isCallMuted(bareJid) ? Icons.mic_off : Icons.mic),

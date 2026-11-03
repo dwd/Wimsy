@@ -42,6 +42,10 @@ void main() {
     expect(probes, 1);
 
     controller.checkSilence(now: start.add(const Duration(seconds: 92)));
+    expect(controller.health, ConnectionHealth.degraded);
+    expect(probes, 2);
+
+    controller.checkSilence(now: start.add(const Duration(seconds: 138)));
     expect(controller.health, ConnectionHealth.dead);
     expect(states, [ConnectionHealth.degraded, ConnectionHealth.dead]);
   });
@@ -68,4 +72,40 @@ void main() {
     controller.reportDefinitiveClose();
     expect(controller.health, ConnectionHealth.dead);
   });
+
+  test(
+    'updateTuning retunes the maximum deadline and failure threshold in place',
+    () {
+      final start = DateTime.utc(2026);
+      final controller = LivenessController(
+        now: start,
+        onProbeRequested: () {},
+        onHealthChanged: (_) {},
+        maximumDeadline: const Duration(minutes: 3),
+        failuresBeforeDead: 2,
+      );
+      controller.updateMetrics(
+        smoothedRtt: const Duration(seconds: 30),
+        loss: 0.5,
+      );
+      expect(controller.currentDeadline, const Duration(minutes: 3));
+
+      controller.updateTuning(
+        maximumDeadline: const Duration(minutes: 10),
+        failuresBeforeDead: 3,
+      );
+
+      // rttBudget = 30s * 12 = 6 minutes, which is below the new 10-minute
+      // ceiling, so the deadline reflects the RTT-derived budget, not the
+      // ceiling itself.
+      expect(controller.currentDeadline, const Duration(minutes: 6));
+      expect(controller.failuresBeforeDead, 3);
+
+      controller.reportProbeFailure(now: start);
+      controller.reportProbeFailure(now: start.add(const Duration(seconds: 1)));
+      expect(controller.health, ConnectionHealth.degraded);
+      controller.reportProbeFailure(now: start.add(const Duration(seconds: 2)));
+      expect(controller.health, ConnectionHealth.dead);
+    },
+  );
 }

@@ -6,19 +6,53 @@ class LivenessController {
   LivenessController({
     required this.onProbeRequested,
     required this.onHealthChanged,
-    this.minimumDeadline = const Duration(seconds: 45),
-    this.highLossDeadline = const Duration(seconds: 90),
-    this.maximumDeadline = const Duration(minutes: 3),
-    this.failuresBeforeDead = 2,
+    Duration minimumDeadline = const Duration(seconds: 45),
+    Duration highLossDeadline = const Duration(seconds: 90),
+    Duration maximumDeadline = const Duration(minutes: 3),
+    int failuresBeforeDead = 3,
     DateTime? now,
-  }) : _lastProgressAt = now ?? DateTime.now();
+  }) : _minimumDeadline = minimumDeadline,
+       _highLossDeadline = highLossDeadline,
+       _maximumDeadline = maximumDeadline,
+       _failuresBeforeDead = failuresBeforeDead,
+       _lastProgressAt = now ?? DateTime.now();
 
   final void Function() onProbeRequested;
   final void Function(ConnectionHealth health) onHealthChanged;
-  final Duration minimumDeadline;
-  final Duration highLossDeadline;
-  final Duration maximumDeadline;
-  final int failuresBeforeDead;
+
+  // These are mutable (rather than `final`) so [updateTuning] can retune the
+  // liveness deadline/failure threshold at runtime -- e.g. switching between
+  // a tight foreground profile and a much more lenient background profile --
+  // without tearing down and recreating the controller (which would lose
+  // accumulated RTT/loss state and the in-flight probe bookkeeping).
+  Duration _minimumDeadline;
+  Duration _highLossDeadline;
+  Duration _maximumDeadline;
+  int _failuresBeforeDead;
+
+  Duration get minimumDeadline => _minimumDeadline;
+  Duration get highLossDeadline => _highLossDeadline;
+  Duration get maximumDeadline => _maximumDeadline;
+  int get failuresBeforeDead => _failuresBeforeDead;
+
+  /// Retunes the deadline/failure-threshold parameters in place.
+  ///
+  /// Used to switch between foreground and background liveness profiles as
+  /// the app's lifecycle state changes, keeping the minimum deadline tied to
+  /// `smoothedRtt * 12` while allowing the maximum (and how many consecutive
+  /// probe failures are tolerated before declaring the connection dead) to
+  /// differ considerably between the two profiles.
+  void updateTuning({
+    Duration? minimumDeadline,
+    Duration? highLossDeadline,
+    Duration? maximumDeadline,
+    int? failuresBeforeDead,
+  }) {
+    _minimumDeadline = minimumDeadline ?? _minimumDeadline;
+    _highLossDeadline = highLossDeadline ?? _highLossDeadline;
+    _maximumDeadline = maximumDeadline ?? _maximumDeadline;
+    _failuresBeforeDead = failuresBeforeDead ?? _failuresBeforeDead;
+  }
 
   DateTime _lastProgressAt;
   DateTime? _nextFailureAt;
@@ -32,9 +66,9 @@ class LivenessController {
   Duration get currentDeadline => adaptiveLivenessDeadline(
     smoothedRtt: _smoothedRtt,
     recentLoss: _recentLoss,
-    minimum: minimumDeadline,
-    highLossMinimum: highLossDeadline,
-    maximum: maximumDeadline,
+    minimum: _minimumDeadline,
+    highLossMinimum: _highLossDeadline,
+    maximum: _maximumDeadline,
   );
 
   void updateMetrics({required Duration smoothedRtt, required double loss}) {
@@ -67,7 +101,7 @@ class LivenessController {
     final current = now ?? DateTime.now();
     _consecutiveFailures++;
     _probeOutstanding = false;
-    if (_consecutiveFailures >= failuresBeforeDead) {
+    if (_consecutiveFailures >= _failuresBeforeDead) {
       _setHealth(ConnectionHealth.dead);
       return;
     }

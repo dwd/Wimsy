@@ -32,6 +32,11 @@ class KeepaliveTuning {
     required this.outgoingCallTimeout,
     required this.incomingCallTimeout,
     required this.callStatsInterval,
+    required this.livenessMinimumDeadline,
+    required this.livenessHighLossDeadline,
+    required this.livenessMaximumDeadlineForeground,
+    required this.livenessMaximumDeadlineBackground,
+    required this.livenessFailuresBeforeDead,
   });
 
   /// XEP-0198 Stream Management `<r/>` request cadence while the app is in
@@ -105,6 +110,30 @@ class KeepaliveTuning {
   /// How often call quality statistics are sampled during an active call.
   final Duration callStatsInterval;
 
+  /// Floor for [LivenessController]'s adaptive deadline, used whenever
+  /// `smoothedRtt * 12` is smaller than this. This stays the same in both
+  /// foreground and background, since it's purely RTT-derived.
+  final Duration livenessMinimumDeadline;
+
+  /// Floor applied instead of [livenessMinimumDeadline] once recent loss is
+  /// high, so a lossy path doesn't get declared dead purely from reordering.
+  final Duration livenessHighLossDeadline;
+
+  /// Ceiling applied to the adaptive liveness deadline while the app is in
+  /// the foreground. Kept tight so a dead connection is detected quickly
+  /// while the user is actively looking at the UI.
+  final Duration livenessMaximumDeadlineForeground;
+
+  /// Ceiling applied to the adaptive liveness deadline while the app is in
+  /// the background. Much higher than the foreground ceiling so idle devices
+  /// (especially mobile) don't wake the radio just to satisfy a short
+  /// liveness check.
+  final Duration livenessMaximumDeadlineBackground;
+
+  /// Number of consecutive failed liveness probes tolerated before the
+  /// connection is declared dead and a reconnect is forced.
+  final int livenessFailuresBeforeDead;
+
   /// The historical hard-coded values, reproduced exactly.
   static const KeepaliveTuning defaults = KeepaliveTuning(
     smAckIntervalForeground: Duration(minutes: 1),
@@ -126,6 +155,11 @@ class KeepaliveTuning {
     outgoingCallTimeout: Duration(seconds: 45),
     incomingCallTimeout: Duration(seconds: 60),
     callStatsInterval: Duration(seconds: 5),
+    livenessMinimumDeadline: Duration(seconds: 45),
+    livenessHighLossDeadline: Duration(seconds: 90),
+    livenessMaximumDeadlineForeground: Duration(minutes: 3),
+    livenessMaximumDeadlineBackground: Duration(minutes: 10),
+    livenessFailuresBeforeDead: 3,
   );
 
   KeepaliveTuning copyWith({
@@ -148,6 +182,11 @@ class KeepaliveTuning {
     Duration? outgoingCallTimeout,
     Duration? incomingCallTimeout,
     Duration? callStatsInterval,
+    Duration? livenessMinimumDeadline,
+    Duration? livenessHighLossDeadline,
+    Duration? livenessMaximumDeadlineForeground,
+    Duration? livenessMaximumDeadlineBackground,
+    int? livenessFailuresBeforeDead,
   }) {
     return KeepaliveTuning(
       smAckIntervalForeground:
@@ -177,6 +216,18 @@ class KeepaliveTuning {
       outgoingCallTimeout: outgoingCallTimeout ?? this.outgoingCallTimeout,
       incomingCallTimeout: incomingCallTimeout ?? this.incomingCallTimeout,
       callStatsInterval: callStatsInterval ?? this.callStatsInterval,
+      livenessMinimumDeadline:
+          livenessMinimumDeadline ?? this.livenessMinimumDeadline,
+      livenessHighLossDeadline:
+          livenessHighLossDeadline ?? this.livenessHighLossDeadline,
+      livenessMaximumDeadlineForeground:
+          livenessMaximumDeadlineForeground ??
+          this.livenessMaximumDeadlineForeground,
+      livenessMaximumDeadlineBackground:
+          livenessMaximumDeadlineBackground ??
+          this.livenessMaximumDeadlineBackground,
+      livenessFailuresBeforeDead:
+          livenessFailuresBeforeDead ?? this.livenessFailuresBeforeDead,
     );
   }
 
@@ -201,7 +252,14 @@ class KeepaliveTuning {
         other.quicPingIntervalMinFloor == quicPingIntervalMinFloor &&
         other.outgoingCallTimeout == outgoingCallTimeout &&
         other.incomingCallTimeout == incomingCallTimeout &&
-        other.callStatsInterval == callStatsInterval;
+        other.callStatsInterval == callStatsInterval &&
+        other.livenessMinimumDeadline == livenessMinimumDeadline &&
+        other.livenessHighLossDeadline == livenessHighLossDeadline &&
+        other.livenessMaximumDeadlineForeground ==
+            livenessMaximumDeadlineForeground &&
+        other.livenessMaximumDeadlineBackground ==
+            livenessMaximumDeadlineBackground &&
+        other.livenessFailuresBeforeDead == livenessFailuresBeforeDead;
   }
 
   @override
@@ -225,5 +283,10 @@ class KeepaliveTuning {
     outgoingCallTimeout,
     incomingCallTimeout,
     callStatsInterval,
+    livenessMinimumDeadline,
+    livenessHighLossDeadline,
+    livenessMaximumDeadlineForeground,
+    livenessMaximumDeadlineBackground,
+    livenessFailuresBeforeDead,
   ]);
 }
