@@ -1128,57 +1128,131 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     const SizedBox(width: 12),
                   ],
                 ),
-          body: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFFFDFBF7), Color(0xFFE8F1F2)],
-              ),
-            ),
-            child: isWide
-                ? Row(
-                    children: [
-                      SizedBox(
-                        width: 320,
-                        child: _buildRosterPane(
+          body: Column(
+            children: [
+              _buildGlobalIncomingCallBanner(service, activeChat),
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFFFDFBF7), Color(0xFFE8F1F2)],
+                    ),
+                  ),
+                  child: isWide
+                      ? Row(
+                          children: [
+                            SizedBox(
+                              width: 320,
+                              child: _buildRosterPane(
+                                context,
+                                service,
+                                isWide: true,
+                                showNewChatButton: true,
+                              ),
+                            ),
+                            const VerticalDivider(width: 1),
+                            Expanded(
+                              child: _buildChatPane(
+                                context,
+                                service,
+                                activeChat,
+                                showBack: false,
+                                showPresenceMenu: false,
+                                fullscreenComposerOnKeyboard: false,
+                              ),
+                            ),
+                          ],
+                        )
+                      : activeChat == null
+                      ? _buildRosterPane(
                           context,
                           service,
-                          isWide: true,
-                          showNewChatButton: true,
-                        ),
-                      ),
-                      const VerticalDivider(width: 1),
-                      Expanded(
-                        child: _buildChatPane(
+                          isWide: false,
+                          showNewChatButton: !isLandscapePhone,
+                        )
+                      : _buildChatPane(
                           context,
                           service,
                           activeChat,
-                          showBack: false,
-                          showPresenceMenu: false,
-                          fullscreenComposerOnKeyboard: false,
+                          showBack: true,
+                          showPresenceMenu: isLandscapePhone,
+                          fullscreenComposerOnKeyboard:
+                              fullscreenComposerOnKeyboard,
                         ),
-                      ),
-                    ],
-                  )
-                : activeChat == null
-                ? _buildRosterPane(
-                    context,
-                    service,
-                    isWide: false,
-                    showNewChatButton: !isLandscapePhone,
-                  )
-                : _buildChatPane(
-                    context,
-                    service,
-                    activeChat,
-                    showBack: true,
-                    showPresenceMenu: isLandscapePhone,
-                    fullscreenComposerOnKeyboard: fullscreenComposerOnKeyboard,
-                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
+    );
+  }
+
+  /// A thin banner shown across the top of the whole app (above the roster
+  /// and chat panes) whenever there's a ringing incoming call for a chat
+  /// other than the one currently open. The per-chat call banner
+  /// ([_buildCallBanner]) already covers the case where the incoming call
+  /// belongs to the open chat, so this only needs to handle the "elsewhere"
+  /// case - otherwise users could easily miss a call from someone other
+  /// than whoever they're currently chatting with.
+  Widget _buildGlobalIncomingCallBanner(
+    XmppService service,
+    String? activeChat,
+  ) {
+    final session = service.ringingIncomingCall;
+    if (session == null || session.peerBareJid == activeChat) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final displayName = service.displayNameFor(session.peerBareJid).trim();
+    final callerLabel = displayName.isNotEmpty
+        ? displayName
+        : session.peerBareJid;
+    final typeLabel = session.video ? 'video' : 'voice';
+    return SafeArea(
+      bottom: false,
+      child: Material(
+        color: theme.colorScheme.primaryContainer,
+        child: InkWell(
+          key: const Key('global-incoming-call-banner'),
+          onTap: () => service.selectChat(session.peerBareJid),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  session.video ? Icons.videocam : Icons.call,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Incoming $typeLabel call from $callerLabel',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  key: const Key('global-incoming-call-decline'),
+                  onPressed: () => _declineCall(session),
+                  child: const Text('Decline'),
+                ),
+                const SizedBox(width: 4),
+                FilledButton(
+                  key: const Key('global-incoming-call-accept'),
+                  onPressed: () => _acceptCall(session),
+                  child: const Text('Accept'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

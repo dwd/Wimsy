@@ -617,6 +617,21 @@ class XmppService extends ChangeNotifier {
     return _callSessions[key];
   }
 
+  /// The first incoming call that is still ringing (awaiting accept/decline),
+  /// if any. Used to surface a global "incoming call" banner across the app
+  /// when that call doesn't belong to the chat the user currently has open
+  /// (see [callSessionFor], which only returns a session for a specific
+  /// chat).
+  CallSession? get ringingIncomingCall {
+    for (final session in _callSessions.values) {
+      if (session.direction == CallDirection.incoming &&
+          session.state == CallState.ringing) {
+        return session;
+      }
+    }
+    return null;
+  }
+
   bool get hasOngoingCall => _callSessions.values.any(
     (session) =>
         session.state == CallState.ringing || session.state == CallState.active,
