@@ -6206,20 +6206,49 @@ class XmppService extends ChangeNotifier {
               '${parsed.ip}:${parsed.port} comp=${parsed.component}',
         );
       }
-      final transports = _callLocalTransportsBySid[sid];
-      if (transports == null || transports.isEmpty) {
-        _queueIceCandidate(sid, candidate);
+      void dispatch() {
+        final transports = _callLocalTransportsBySid[sid];
+        if (transports == null || transports.isEmpty) {
+          _queueIceCandidate(sid, candidate);
+          return;
+        }
+        _sendIceCandidate(
+          sid: sid,
+          candidate: candidate,
+          peerBareJid: peerBareJid,
+          defaultKind: kind,
+        );
+      }
+      // Docker/libvirt bridge addresses are plausible but usually a poor
+      // choice of candidate for a call between two other hosts. Rather
+      // than dropping them outright (some real networks legitimately use
+      // the same private ranges, e.g. aircraft/corporate Wi-Fi), just
+      // deprioritize them: delay sending them to the peer so trickle ICE
+      // gives candidates from other interfaces a head start to be tried
+      // first, without ever losing them as a fallback option.
+      if (parsed != null && isLikelyVirtualBridgeCandidate(parsed)) {
+        Log.d(
+          'XmppService',
+          'Call $sid deprioritizing likely virtualization-bridge candidate '
+              '${parsed.ip}:${parsed.port}; delaying send by '
+              '${_virtualBridgeCandidateDelay.inSeconds}s.',
+        );
+        Future.delayed(_virtualBridgeCandidateDelay, () {
+          if (_callPeerConnections.containsKey(sid)) {
+            dispatch();
+          }
+        });
         return;
       }
-      _sendIceCandidate(
-        sid: sid,
-        candidate: candidate,
-        peerBareJid: peerBareJid,
-        defaultKind: kind,
-      );
+      dispatch();
     };
     return pc;
   }
+
+  /// How long to delay sending likely Docker/libvirt bridge candidates to
+  /// the peer, relative to other candidates, so more promising candidates
+  /// (real LAN/public interfaces) get a head start during trickle ICE.
+  static const Duration _virtualBridgeCandidateDelay = Duration(seconds: 2);
 
   Future<void> _attachStreamlessRemoteTrack(
     String sid,

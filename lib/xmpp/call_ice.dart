@@ -103,6 +103,62 @@ JingleIceTransport transportInfoTransport(
   );
 }
 
+/// Default CIDR ranges used by common local virtualization/container bridge
+/// networks: Docker's default and custom bridge networks, and libvirt's
+/// default/secondary NAT networks. These same ranges are sometimes used by
+/// real production LANs too (e.g. some corporate/aircraft Wi-Fi networks),
+/// so candidates within them must never be dropped outright - they're only
+/// deprioritized (sent to the peer after a short delay) via
+/// [isLikelyVirtualBridgeCandidate], once candidates from other interfaces
+/// have already had a chance to be sent and tried first.
+const List<String> virtualBridgeCidrs = [
+  '172.16.0.0/12', // Docker default + custom bridge networks
+  '192.168.122.0/24', // libvirt default NAT network
+  '192.168.123.0/24', // libvirt secondary NAT network
+];
+
+/// Whether [candidate] looks like it came from a local Docker/libvirt bridge
+/// interface, based on [virtualBridgeCidrs]. Only `host` candidates are
+/// considered, since srflx/relay candidates reflect externally-visible
+/// addresses rather than the local bridge interface itself.
+bool isLikelyVirtualBridgeCandidate(JingleIceCandidate candidate) {
+  if (candidate.type != 'host') {
+    return false;
+  }
+  return virtualBridgeCidrs.any((cidr) => _ipv4InCidr(candidate.ip, cidr));
+}
+
+bool _ipv4InCidr(String ip, String cidr) {
+  final parts = cidr.split('/');
+  if (parts.length != 2) {
+    return false;
+  }
+  final maskBits = int.tryParse(parts[1]);
+  final ipInt = _ipv4ToInt(ip);
+  final netInt = _ipv4ToInt(parts[0]);
+  if (maskBits == null || ipInt == null || netInt == null) {
+    return false;
+  }
+  final mask = maskBits == 0 ? 0 : (0xFFFFFFFF << (32 - maskBits)) & 0xFFFFFFFF;
+  return (ipInt & mask) == (netInt & mask);
+}
+
+int? _ipv4ToInt(String ip) {
+  final segments = ip.split('.');
+  if (segments.length != 4) {
+    return null;
+  }
+  var result = 0;
+  for (final segment in segments) {
+    final value = int.tryParse(segment);
+    if (value == null || value < 0 || value > 255) {
+      return null;
+    }
+    result = (result << 8) | value;
+  }
+  return result;
+}
+
 String resolveCandidateContentName({
   required RTCIceCandidate candidate,
   required List<String>? contentNames,
