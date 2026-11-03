@@ -37,9 +37,57 @@ class WebRtcMediaSession {
 
   final MediaStreamFactory _createStream;
   MediaStreamHandle? _activeStream;
+  bool _warmedUp = false;
+  bool _warmingUp = false;
 
   MediaStreamHandle? get activeStream => _activeStream;
   bool get isActive => _activeStream != null;
+
+  /// Performs a one-time, best-effort "warm-up" of the camera/microphone
+  /// capture pipeline by briefly opening and immediately releasing a stream.
+  ///
+  /// On some platforms (notably Linux/V4L2), the first time a given camera
+  /// is opened in a process it has to negotiate supported formats/resolutions
+  /// with the driver, which can take several seconds. That cost previously
+  /// landed on the critical path of accepting/placing the very first call,
+  /// visibly delaying ICE/SDP negotiation. Calling this once, early in the
+  /// app session (e.g. right after the XMPP connection is established),
+  /// pays that cost up front instead.
+  ///
+  /// This intentionally releases the camera/mic immediately afterward so it
+  /// never holds the device open, avoiding any lasting conflict with other
+  /// applications (Slack, a browser, etc.) that may want to use the same
+  /// camera between warm-up and the next real call. It is a no-op if a real
+  /// call/stream is already active, if it already ran once this session, or
+  /// if capture isn't available/permitted yet (e.g. permissions not yet
+  /// granted) - in all of those cases it silently does nothing.
+  Future<void> warmUp({
+    required bool audio,
+    required bool video,
+    String? audioDeviceId,
+    String? videoDeviceId,
+  }) async {
+    if (_warmedUp || _warmingUp || _activeStream != null) {
+      return;
+    }
+    _warmingUp = true;
+    try {
+      final stream = await _createStream(
+        audio: audio,
+        video: video,
+        audioDeviceId: audioDeviceId,
+        videoDeviceId: videoDeviceId,
+      );
+      _warmedUp = true;
+      await stream.dispose();
+    } catch (_) {
+      // Best-effort only: a failure here (e.g. missing permissions, no
+      // device present) just means the real call will pay the full cost
+      // later, exactly as it did before this warm-up existed.
+    } finally {
+      _warmingUp = false;
+    }
+  }
 
   Future<MediaStreamHandle> start({
     required bool audio,

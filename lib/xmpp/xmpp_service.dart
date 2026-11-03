@@ -807,6 +807,27 @@ class XmppService extends ChangeNotifier {
 
   String? get preferredVideoInputId => _preferredVideoInputId;
 
+  /// Warms up the camera/microphone capture pipeline once per app session
+  /// so the first real call doesn't pay the (platform-dependent) cost of
+  /// the device's first-ever open. Runs in the background right after we
+  /// reach a fresh `Ready` session; it's a no-op if a call is already using
+  /// the camera/mic or if it already ran this session (see
+  /// [WebRtcMediaSession.warmUp]), and any failure (e.g. permissions not
+  /// yet granted) is swallowed so it can never affect connection or call
+  /// setup.
+  Future<void> _warmUpMediaSession() async {
+    try {
+      await _mediaSession.warmUp(
+        audio: true,
+        video: true,
+        audioDeviceId: _preferredAudioInputId,
+        videoDeviceId: _preferredVideoInputId,
+      );
+    } catch (error) {
+      Log.w('XmppService', 'Media session warm-up failed: $error');
+    }
+  }
+
   Future<void> toggleSpeakerphone() async {
     _speakerphoneOn = !_speakerphoneOn;
     await Helper.setSpeakerphoneOn(_speakerphoneOn);
@@ -1902,6 +1923,7 @@ class XmppService extends ChangeNotifier {
           _recoveryWork.reset();
           _recoveryWork.resume();
           notifyListeners();
+          unawaited(_warmUpMediaSession());
           _pepVcardConversionSupported = connection.getSupportedFeatures().any(
             (feature) => feature.xmppVar == 'urn:xmpp:pep-vcard-conversion:0',
           );
