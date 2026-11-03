@@ -749,11 +749,21 @@ class XmppService extends ChangeNotifier {
 
   Future<List<MediaDeviceInfo>> listVideoInputs() async {
     final devices = await navigator.mediaDevices.enumerateDevices();
-    return devices
-        .where(
-          (device) => device.kind == 'videoinput' || device.kind == 'video',
-        )
-        .toList();
+    final videoDevices = devices.where(
+      (device) => device.kind == 'videoinput' || device.kind == 'video',
+    );
+    // Some platforms/backends (observed on Linux with IR-capable webcams)
+    // report the exact same deviceId twice in enumerateDevices(). Keeping
+    // duplicates around makes the camera picker show the same entry twice
+    // and makes both appear "selected" at once, so collapse them here.
+    final seenDeviceIds = <String>{};
+    final deduped = <MediaDeviceInfo>[];
+    for (final device in videoDevices) {
+      if (seenDeviceIds.add(device.deviceId)) {
+        deduped.add(device);
+      }
+    }
+    return deduped;
   }
 
   Future<void> selectAudioOutput(String deviceId) async {

@@ -30,9 +30,26 @@ List<String> cameraDeviceLabels(
   }
 
   final seen = <CameraFacing, int>{};
-  return [
+  final labels = [
     for (var i = 0; i < devices.length; i++)
       _cameraDeviceLabel(devices[i], i, useFacingLabels, totals, seen),
+  ];
+
+  // Some webcams (notably IR-capable ones used for face unlock) expose
+  // multiple distinct device nodes/ids that share the exact same plain
+  // label, e.g. two "HD Camera" entries. Disambiguate those with a trailing
+  // counter so the picker never shows indistinguishable duplicate entries.
+  final labelCounts = <String, int>{};
+  for (final label in labels) {
+    labelCounts[label] = (labelCounts[label] ?? 0) + 1;
+  }
+  final labelSeen = <String, int>{};
+  return [
+    for (final label in labels)
+      if ((labelCounts[label] ?? 0) > 1)
+        '$label (${(labelSeen[label] = (labelSeen[label] ?? 0) + 1)})'
+      else
+        label,
   ];
 }
 

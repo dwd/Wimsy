@@ -38,4 +38,17 @@ void main() {
 
     expect(labels, ['USB Camera', 'Camera 2']);
   });
+
+  test(
+    'disambiguates identically-labeled non-Android cameras (e.g. IR-capable webcams)',
+    () {
+      final labels = cameraDeviceLabels([
+        camera('a', 'HD Camera'),
+        camera('b', 'HD Camera'),
+        camera('c', 'USB Camera'),
+      ], useFacingLabels: false);
+
+      expect(labels, ['HD Camera (1)', 'HD Camera (2)', 'USB Camera']);
+    },
+  );
 }
