@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart' show KeyPairType;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omemo_dart/omemo_dart.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
+import 'package:wimsy/encryption/xeddsa.dart';
 import 'package:wimsy/xmpp/omemo_pep.dart';
 
 /// Mirrors the `TestConnection` pattern used by `bookmarks_manager_test.dart`:
@@ -228,6 +230,104 @@ void main() {
         expect(fetched, isNotNull);
         expect(fetched!.ikEncoded, rawBundle.ikEncoded);
         expect(fetched.spkEncoded, rawBundle.spkEncoded);
+      },
+    );
+
+    test(
+      'full wire+crypto round trip: a genuinely XEdDSA-signed X25519 '
+      'bundle, published and re-fetched purely through the production '
+      'OmemoPep wire code (no test-side re-implementation of the DJB-byte '
+      'or Montgomery->Edwards transforms), verifies successfully via '
+      'x3dhFromBundle',
+      () async {
+        // This closes the gap left by the unit tests above (which only
+        // check field-level wire preservation) and by
+        // `test/omemo_backend_test.dart`'s x3dhFromBundle test (which
+        // signs with a genuine Ed25519 key, not a real client's XEdDSA-
+        // over-X25519 scheme) and its FakeOmemoPep-based session tests
+        // (which manually mirror the DJB-byte transform instead of going
+        // through this file's real `_legacyBundleToElement`/
+        // `_legacyBundleFromElement`). Here we build a bundle exactly as
+        // `OmemoBackend._generateNewLegacyDevice`/`_legacyBundleFromDevice`
+        // do (genuine X25519 identity key, SPK signed via [xeddsaSign]
+        // over the DJB-type-prefixed SPK bytes), push it through the real
+        // publish/fetch wire round trip, and then feed the result into the
+        // real `x3dhFromBundle` signature-verification/session-setup code
+        // -- true end-to-end cryptographic validation.
+        final ik = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+        final spk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+        final opk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+
+        final rawSpkBytes = await spk.pk.getBytes();
+        final djbPrefixedSpkBytes = [0x05, ...rawSpkBytes];
+        final signature = xeddsaSign(
+          await ik.sk.getBytes(),
+          djbPrefixedSpkBytes,
+        );
+
+        final rawBundle = OmemoBundle(
+          'user2@example.com',
+          1,
+          base64Encode(rawSpkBytes),
+          55,
+          base64Encode(signature),
+          base64Encode(await ik.pk.getBytes()),
+          {7: base64Encode(await opk.pk.getBytes())},
+          spkSignatureMessageEncoded: base64Encode(djbPrefixedSpkBytes),
+        );
+
+        // Publish via the real `OmemoPep` (exercises `_legacyBundleToElement`,
+        // which prepends the libsignal DJB type byte to ik/spk/opk).
+        await pep.publishLegacyBundle(rawBundle);
+        final publishIq = connection.written.last as IqStanza;
+        final publishedBundleElement = publishIq
+            .getChild('pubsub')!
+            .getChild('publish')!
+            .getChild('item')!
+            .getChild('bundle')!;
+
+        // Simulate a server echoing that exact same wire element back on
+        // fetch, and fetch it via the real `OmemoPep` (exercises
+        // `_legacyBundleFromElement`, which strips the DJB type byte and
+        // sets `ikIsX25519`/`spkSignatureMessageEncoded` for us).
+        connection.respond = (request) {
+          final result = IqStanza(request.id, IqStanzaType.RESULT);
+          final pubsub = XmppElement()..name = 'pubsub';
+          pubsub.addAttribute(
+            XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+          );
+          final items = XmppElement()..name = 'items';
+          final item = XmppElement()..name = 'item';
+          item.addChild(publishedBundleElement);
+          items.addChild(item);
+          pubsub.addChild(items);
+          result.addChild(pubsub);
+          return result;
+        };
+
+        final fetchedBundle = await pep.fetchLegacyBundle(
+          'user2@example.com',
+          1,
+        );
+        expect(fetchedBundle, isNotNull);
+        expect(fetchedBundle!.ikIsX25519, isTrue);
+
+        // Genuine end-to-end crypto check: a different real contact
+        // initiating a session to this bundle must find the SPK signature
+        // valid.
+        final initiatorIk = await OmemoKeyPair.generateNewPair(
+          KeyPairType.x25519,
+        );
+        final result = await x3dhFromBundle(fetchedBundle, initiatorIk);
+        expect(
+          result.isType<InvalidKeyExchangeSignatureError>(),
+          isFalse,
+          reason:
+              'a genuinely XEdDSA-signed, real-world-shaped legacy-OMEMO '
+              'bundle, round-tripped purely through the production publish/'
+              'fetch wire code, must verify successfully',
+        );
+        expect(result.isType<X3DHAliceResult>(), isTrue);
       },
     );
   });
