@@ -379,7 +379,9 @@ class OmemoBackend implements EncryptionBackend {
     final device = await _omemoManager.getDevice();
     final header = XmppElement()..name = 'header';
     header.addAttribute(XmppAttribute('sid', device.id.toString()));
-    final keysForJid = result.encryptedKeys[toBareJid] ?? const [];
+    final keysForJid = (result.encryptedKeys[toBareJid] ?? const [])
+        .map(_fixOutgoingKexKey)
+        .toList();
     for (final key in keysForJid) {
       final keyElement = XmppElement()..name = 'key';
       keyElement.addAttribute(XmppAttribute('rid', key.rid.toString()));
@@ -409,6 +411,75 @@ class OmemoBackend implements EncryptionBackend {
           '(https://xmpp.org/extensions/attic/xep-0384-0.3.0.html) but '
           'your client does not support it.',
     );
+  }
+
+  /// The libsignal "DJB type" byte (`0x05`, indicating a Curve25519/DJB
+  /// public key) that real legacy-OMEMO clients (Conversations/Gajim/Dino)
+  /// prepend not only to the public keys in their PEP `<bundle/>` (see
+  /// `lib/xmpp/omemo_pep.dart`'s `_addDjbKeyType`/`_stripDjbKeyType`), but
+  /// also to the `ik`/`ek` fields of the `OMEMOKeyExchange` protobuf
+  /// embedded in a `<key kex='true'>` element used to establish a new
+  /// X3DH session. `omemo_dart`'s own schema (shared with OMEMO2, which
+  /// never adds this prefix) expects the raw 32-byte form, so we must
+  /// strip/add it ourselves on this protobuf too -- see
+  /// [_fixIncomingKexKey]/[_fixOutgoingKexKey].
+  static const int _djbKeyType = 0x05;
+
+  static List<int> _stripDjbKeyTypeBytes(List<int> bytes) {
+    if (bytes.length == 33) {
+      return bytes.sublist(1);
+    }
+    return bytes;
+  }
+
+  static List<int> _addDjbKeyTypeBytes(List<int> bytes) {
+    if (bytes.length == 32) {
+      return [_djbKeyType, ...bytes];
+    }
+    return bytes;
+  }
+
+  /// Prepends the libsignal DJB-type byte to the `ik`/`ek` fields of an
+  /// outgoing `<key kex='true'>` element's embedded `OMEMOKeyExchange`
+  /// protobuf, so real legacy-OMEMO clients can parse our key exchange
+  /// (otherwise they fail to recognise the message as encrypted for their
+  /// device, e.g. Conversations' "Message was not encrypted for this
+  /// device"). A no-op for non-kex (plain ratchet message) keys, and
+  /// defensive against malformed protobuf data (falls back to the
+  /// original key unchanged).
+  static EncryptedKey _fixOutgoingKexKey(EncryptedKey key) {
+    if (!key.kex) {
+      return key;
+    }
+    try {
+      final kex = OMEMOKeyExchange.fromBuffer(key.data);
+      kex.ik = _addDjbKeyTypeBytes(kex.ik);
+      kex.ek = _addDjbKeyTypeBytes(kex.ek);
+      return EncryptedKey(key.rid, base64Encode(kex.writeToBuffer()), key.kex);
+    } catch (_) {
+      return key;
+    }
+  }
+
+  /// Strips a leading libsignal DJB-type byte from the `ik`/`ek` fields of
+  /// an incoming `<key kex='true'>` element's embedded `OMEMOKeyExchange`
+  /// protobuf, if present, before handing it to `OmemoManager` (which
+  /// expects the raw 32-byte form and otherwise throws "Algorithm ed25519
+  /// expects a public key with 32 bytes, but got: 33 bytes"). A no-op for
+  /// non-kex keys, and defensive against malformed protobuf data (falls
+  /// back to the original key unchanged).
+  static EncryptedKey _fixIncomingKexKey(EncryptedKey key) {
+    if (!key.kex) {
+      return key;
+    }
+    try {
+      final kex = OMEMOKeyExchange.fromBuffer(key.data);
+      kex.ik = _stripDjbKeyTypeBytes(kex.ik);
+      kex.ek = _stripDjbKeyTypeBytes(kex.ek);
+      return EncryptedKey(key.rid, base64Encode(kex.writeToBuffer()), key.kex);
+    } catch (_) {
+      return key;
+    }
   }
 
   @override
@@ -450,6 +521,7 @@ class OmemoBackend implements EncryptionBackend {
             child.getAttribute('kex')?.value == 'true',
           ),
     ]..removeWhere((key) => key.rid == -1 || key.value.isEmpty);
+    final fixedKeys = keys.map(_fixIncomingKexKey).toList();
     final payload = encrypted.getChild('payload')?.textValue?.trim();
     final ivBase64 = header?.getChild('iv')?.textValue?.trim();
 
@@ -462,7 +534,7 @@ class OmemoBackend implements EncryptionBackend {
       OmemoIncomingStanza(
         bareSenderJid,
         sid,
-        keys,
+        fixedKeys,
         payload,
         false,
         skipPayloadDecryption: true,

@@ -32,3 +32,55 @@ Use at your own risk, and track upstream for security-relevant fixes.
   unlike OMEMO2/XEP-0420). None of the new parameters are used by
   `lib/encryption/omemo2_backend.dart`, which keeps relying on the default
   AES-256-CBC+HMAC-SHA-256 behavior unmodified.
+- `lib/omemo_dart.dart`: Added `export 'src/protobuf/schema.pb.dart';` so
+  `lib/encryption/omemo_backend.dart` can decode/re-encode the
+  `OMEMOKeyExchange` protobuf via a public import instead of an
+  `implementation_imports`-flagged `package:omemo_dart/src/...` import. See
+  the libsignal DJB-type-byte fix below for why it needs to.
+
+### libsignal DJB-type-byte fix for legacy OMEMO's `<key kex="true">` exchange
+
+Real legacy-OMEMO clients (Conversations/Gajim/Dino, all libsignal-based)
+serialize the `ik`/`ek` fields of the `OMEMOKeyExchange` protobuf embedded
+in a `<key kex="true">` element using libsignal's DJB-type-prefixed public
+key format (a leading `0x05` byte + 32 raw bytes = 33 bytes), not the raw
+32-byte form `omemo_dart`'s own schema expects. Unpatched, this causes:
+
+- Incoming: `Algorithm ed25519 expects a public key with 32 bytes, but
+  got: 33 bytes` when establishing a new session from such a client's
+  prekey message (`OmemoPublicKey.fromBytes(kexMessage.ik, ...)` in
+  `lib/src/omemo/omemo.dart`).
+- Outgoing: Conversations/Gajim/Dino report "Message was not encrypted for
+  this device" because they can't parse our un-prefixed `ik`/`ek` fields.
+
+This is **not** patched in the vendored library itself (since OMEMO2 never
+uses this prefix and must not be affected); instead
+`lib/encryption/omemo_backend.dart`'s `_fixOutgoingKexKey`/
+`_fixIncomingKexKey` decode/re-encode the `OMEMOKeyExchange` protobuf
+directly to add/strip the byte for legacy OMEMO only, and
+`lib/encryption/omemo2_serialization.dart`'s `omemoPublicKeyFromJson`
+defensively strips a stray 33rd byte when loading a previously-persisted
+ratchet session (whose `ik` may have been baked in with the bug before
+this fix existed, and which is never otherwise re-derived). This mirrors
+the identical, already-existing fix for PEP-published bundles in
+`lib/xmpp/omemo_pep.dart`.
+
+## Upstream clone with our patches as real commits
+
+This directory (`vendor/omemo_dart/`) is a flat copy (no `.git`), so our local
+patches above aren't visible as actual git history. For that, a full clone of
+the upstream repository exists at `vendor/omemo_dart-upstream-clone/`
+(git-ignored by Wimsy's own repo — see `.gitignore` — since it's a separate
+git history, not part of Wimsy's):
+
+- Cloned from `https://github.com/PapaTutuWawa/omemo_dart.git`.
+- Checked out at the same vendored commit, `124c997fa3f0792fa50ff66b80f43c3b71382f89`.
+- Branch `wimsy/local-patches` contains one commit applying the exact same
+  changes described above to `lib/src/omemo/stanza.dart`,
+  `lib/src/omemo/decryption_result.dart`, and `lib/src/omemo/omemo.dart`.
+
+Use this clone to rebase our patch onto a newer upstream release, or to open
+a pull request upstream (e.g. by pushing the branch to a fork and opening a
+PR against `PapaTutuWawa/omemo_dart`). After rebasing, copy the three patched
+files back into this flat `vendor/omemo_dart/` directory and update the
+"Vendored commit" note above accordingly.

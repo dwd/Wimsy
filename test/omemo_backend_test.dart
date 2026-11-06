@@ -8,6 +8,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/encryption/encryption_backend.dart';
 import 'package:wimsy/encryption/omemo_backend.dart';
+import 'package:wimsy/encryption/omemo2_serialization.dart';
 import 'package:wimsy/storage/storage_service.dart';
 
 /// In-memory fake [StorageService]. We override only the legacy-OMEMO
@@ -234,6 +235,96 @@ void main() {
       // storage (see the class doc on OmemoBackend): the legacy device id
       // persisted here should not collide with any `omemo2dl:`-style key.
       expect(aliceStorage.deviceLists.containsKey(aliceJid), isTrue);
+    },
+  );
+
+  test(
+    'OmemoBackend: outgoing <key kex="true"> embeds libsignal '
+    'DJB-type-prefixed ik/ek for interop with real legacy-OMEMO clients',
+    () async {
+      // Regression test for the "Message was not encrypted for this
+      // device" / "Algorithm ed25519 expects a public key with 32 bytes,
+      // but got: 33 bytes" bugs: real legacy-OMEMO clients
+      // (Conversations/Gajim/Dino) serialize the `ik`/`ek` fields of the
+      // `OMEMOKeyExchange` protobuf embedded in a <key kex='true'>
+      // element using libsignal's DJB-type-prefixed format (leading 0x05
+      // byte + 32 raw bytes = 33 bytes total), not the raw 32-byte form
+      // `omemo_dart`'s own schema expects. We must do the same when
+      // publishing a brand-new session's key exchange, or those clients
+      // fail to recognise our message as encrypted for their device.
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+      await bobBackend.publishIdentity();
+
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello from alice',
+      );
+      final header = payload.element.getChild('header')!;
+      final kexKeyElement = header.children.firstWhere(
+        (c) => c.name == 'key' && c.getAttribute('kex')?.value == 'true',
+      );
+      final kex = OMEMOKeyExchange.fromBuffer(
+        base64Decode(kexKeyElement.textValue!.trim()),
+      );
+      expect(kex.ik.length, 33);
+      expect(kex.ik.first, 0x05);
+      expect(kex.ek.length, 33);
+      expect(kex.ek.first, 0x05);
+
+      // And the receiving side must still be able to decrypt it (i.e. the
+      // DJB-type byte is correctly stripped again before being handed to
+      // `OmemoManager`).
+      final message = MessageStanza(
+        AbstractStanza.getRandomId(),
+        MessageStanzaType.CHAT,
+      );
+      message.fromJid = Jid.fromFullJid('$aliceJid/device1');
+      message.addChild(payload.element);
+      final result = await bobBackend.decryptIncoming(message);
+      expect(result.error, isNull);
+      expect(result.plaintext, 'hello from alice');
+    },
+  );
+
+  test(
+    'omemoPublicKeyFromJson strips a stale 33-byte DJB-type-prefixed '
+    'remote identity key baked into an already-persisted ratchet session',
+    () async {
+      // Regression test: a ratchet session established with a
+      // legacy-OMEMO contact *before* the DJB-type-byte fix (see
+      // OmemoBackend's _stripDjbKeyTypeBytes) may have persisted a
+      // 33-byte remote identity key as part of its on-disk JSON state.
+      // Unlike a cached bundle, such a ratchet is never re-created from
+      // scratch -- it's loaded as-is -- so without this defensive strip
+      // it would keep reproducing "Algorithm ed25519 expects a public
+      // key with 32 bytes, but got: 33 bytes" on every encrypt/decrypt.
+      final rawKey = List<int>.generate(32, (i) => i);
+      final staleJson = {
+        'type': 'ed25519',
+        'pk': base64Encode([0x05, ...rawKey]),
+      };
+      final key = omemoPublicKeyFromJson(staleJson);
+      expect(key.type, KeyPairType.ed25519);
+      // Should not throw, and should recover the original 32-byte key.
+      expect(await key.getBytes(), rawKey);
+
+      // A key that was never type-prefixed (OMEMO2, or an already-fixed
+      // legacy-OMEMO session) must pass through unchanged.
+      final freshJson = {'type': 'ed25519', 'pk': base64Encode(rawKey)};
+      expect(await omemoPublicKeyFromJson(freshJson).getBytes(), rawKey);
     },
   );
 

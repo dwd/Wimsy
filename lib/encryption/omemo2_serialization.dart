@@ -200,7 +200,23 @@ OmemoPublicKey omemoPublicKeyFromJson(Map<dynamic, dynamic> json) {
   final type = json['type'] == 'ed25519'
       ? KeyPairType.ed25519
       : KeyPairType.x25519;
-  return OmemoPublicKey.fromBytes(base64Decode(json['pk'] as String), type);
+  var bytes = base64Decode(json['pk'] as String);
+  // Defensive: a ratchet session established with a legacy-OMEMO contact
+  // before the libsignal DJB-type-byte fix (see
+  // `lib/encryption/omemo_backend.dart`'s `_stripDjbKeyTypeBytes`) may
+  // have persisted a 33-byte (type-byte-prefixed) remote identity key as
+  // part of its `OmemoDoubleRatchet.ik`/`KeyExchangeData.ik` state. Such a
+  // ratchet is never re-created on its own (it's loaded from storage, not
+  // re-derived via X3DH), so it would otherwise keep reproducing
+  // "Algorithm ed25519 expects a public key with 32 bytes, but got: 33
+  // bytes" on every encrypt/decrypt indefinitely. Both `omemo_dart` key
+  // types are always exactly 32 raw bytes, so stripping a stray leading
+  // byte here is always safe (and a no-op for OMEMO2, which never adds
+  // one).
+  if (bytes.length == 33) {
+    bytes = bytes.sublist(1);
+  }
+  return OmemoPublicKey.fromBytes(bytes, type);
 }
 
 /// Serialises an [OmemoDoubleRatchet] session's state to a JSON-compatible
