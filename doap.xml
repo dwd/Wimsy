@@ -242,6 +242,27 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0373.html"/>
+        <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">OpenPGP for XMPP (OX): per-account OpenPGP key pair generated via the vendored dart_pg library, with the public key published to the urn:xmpp:openpgp:0:public-keys:&lt;fingerprint&gt; and urn:xmpp:openpgp:0:metadata PEP nodes; the private key is stored only in secure storage, never in the Hive database.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0374.html"/>
+        <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">OpenPGP for XMPP: Instant Messaging. Outgoing 1:1 messages are wrapped in an &lt;openpgp xmlns='urn:xmpp:openpgp:0'/&gt; element whose base64 content is an OpenPGP message encrypted to the recipient's (and the sender's own) public key and signed with the sender's private key, carrying an XML envelope/payload/body document; selectable per-conversation alongside OMEMO/OMEMO2.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0384.html"/>
+        <xmpp:status>complete</xmpp:status>
+        <xmpp:note xml:lang="en">OMEMO. Supports both the legacy eu.siacs.conversations.axolotl namespace (pinned to XEP-0384 v0.3.0, as deployed by Conversations/Gajim/Dino) and the modern urn:xmpp:omemo:2 namespace ("OMEMO2"), selectable per 1:1 conversation. Both share X3DH/Double Ratchet session establishment via the vendored omemo_dart library; device lists/bundles are published and fetched via PEP under each namespace's own node names. Trust is tracked per-device (TOFU by default, promotable to verified via manual fingerprint comparison) and surfaced as a padlock indicator in the chat header. Known limitation: the legacy-namespace payload cipher currently reuses OMEMO2's AES-256-CBC+HMAC-SHA-256 rather than the AES-128-GCM specified by XEP-0384 v0.3.0, so wire-level interop with real legacy-only clients is unverified.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0386.html"/>
         <xmpp:status>complete</xmpp:status>
         <xmpp:note xml:lang="en">Bind 2 inline resource binding via SASL2. Sends bind element with tag in authenticate, parses bound JID from success, skips legacy IQ bind when Bind 2 completes. Also recognizes resource binding when the server conveys the bound resource solely via a full-JID authorization-identifier (XEP-0388) with an empty &lt;bound/&gt; element.</xmpp:note>

@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
-import 'package:wimsy/encryption/encryption_backend.dart';
 import 'package:wimsy/encryption/encryption_manager.dart';
 import 'package:wimsy/storage/storage_service.dart';
 

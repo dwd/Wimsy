@@ -39,6 +39,10 @@ Builds, but untested on:
 - Presence state + custom status message
 - Native notifications for incoming messages (desktop + Android)
 - Console protocol traces for send/receive (when enabled)
+- End-to-end encryption for 1:1 chats: legacy OMEMO and OMEMO2 (XEP-0384,
+  both namespaces) and OX/OpenPGP (XEP-0373/XEP-0374), selectable per
+  conversation, with TOFU device/key trust and manual fingerprint
+  verification
 
 ## Screenshots
 
@@ -59,6 +63,13 @@ the environment used to take them.
   and surface XML traffic during debugging.
 - macOS builds that use `flutter_secure_storage` require the `keychain-access-groups`
   entitlement (not `com.apple.security.keychain-access-groups`) to avoid `-34018`.
+- OMEMO/OMEMO2 encryption (`lib/encryption/omemo_backend.dart`,
+  `lib/encryption/omemo2_backend.dart`) is built on `omemo_dart`, vendored
+  locally in `vendor/omemo_dart` (MIT licensed; see `VENDORING.md` there).
+  As disclosed by upstream, **this library has not been audited for its
+  security** — use at your own risk. OX encryption
+  (`lib/encryption/ox_backend.dart`) uses `dart_pg` (BSD-3-Clause), a
+  regular pub.dev dependency, for OpenPGP operations.
 
 ## End-to-end testing
 
