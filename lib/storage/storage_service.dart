@@ -89,6 +89,21 @@ class StorageService {
   // CA validation (e.g. self-signed certificates), keyed by `host:port`, so
   // the user is only prompted once per server certificate.
   static const _trustedCertPrefix = 'trustedcert:';
+  // OMEMO2 (urn:xmpp:omemo:2, see lib/encryption/omemo2_backend.dart): the
+  // per-contact device list, keyed by bare JID.
+  static const _omemo2DeviceListPrefix = 'omemo2dl:';
+  // OMEMO2: cached peer device key bundles, keyed by 'bareJid:deviceId'.
+  static const _omemo2BundlePrefix = 'omemo2bundle:';
+  // OMEMO2: serialised Double Ratchet session state, keyed by
+  // 'bareJid:deviceId'.
+  static const _omemo2RatchetPrefix = 'omemo2rk:';
+  // OMEMO2: Blind-Trust-Before-Verification trust decisions, keyed by
+  // 'bareJid:deviceId'.
+  static const _omemo2TrustPrefix = 'omemo2trust:';
+  // OMEMO2: secure-store key prefix for a local account's identity key
+  // material (the `OmemoDevice`, including private keys). Never stored in
+  // the (unencrypted-at-rest) Hive box.
+  static const _omemo2IdentitySecureKeyPrefix = 'omemo2_identity:';
 
   /// The maximum number of messages loaded or retained in the local cache per
   /// conversation.
@@ -1258,6 +1273,213 @@ class StorageService {
     }
     await _deleteKeysWithPrefix(_vcardAvatarPrefix);
     await box.put(_vcardAvatarStateKey, <String, dynamic>{});
+  }
+
+  // -------------------------------------------------------------------
+  // OMEMO2 (urn:xmpp:omemo:2) storage.
+  //
+  // Session/ratchet state, cached peer bundles and device lists live in
+  // the (encrypted-at-rest) Hive box, following the same per-record-key
+  // pattern as the avatar/caps caches above. The local identity key
+  // (including private key material) instead goes through [SecureStore],
+  // mirroring how the PIN salt is handled.
+  // -------------------------------------------------------------------
+
+  /// Stores the serialised local OMEMO2 identity (`OmemoDevice`, see
+  /// `lib/encryption/omemo2_serialization.dart`) for [bareJid] in the
+  /// platform secure store.
+  Future<void> storeOmemo2Identity(
+    String bareJid,
+    Map<String, dynamic> deviceJson,
+  ) async {
+    if (bareJid.isEmpty) {
+      return;
+    }
+    await _secureStorage.write(
+      key: '$_omemo2IdentitySecureKeyPrefix$bareJid',
+      value: jsonEncode(deviceJson),
+    );
+  }
+
+  /// Loads the serialised local OMEMO2 identity for [bareJid], or `null`
+  /// if none has been generated/persisted yet.
+  Future<Map<String, dynamic>?> loadOmemo2Identity(String bareJid) async {
+    if (bareJid.isEmpty) {
+      return null;
+    }
+    final raw = await _secureStorage.read(
+      key: '$_omemo2IdentitySecureKeyPrefix$bareJid',
+    );
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    final decoded = jsonDecode(raw);
+    return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+  }
+
+  /// Deletes the local OMEMO2 identity for [bareJid] (e.g. "forget
+  /// account" flows).
+  Future<void> removeOmemo2Identity(String bareJid) async {
+    if (bareJid.isEmpty) {
+      return;
+    }
+    await _secureStorage.delete(key: '$_omemo2IdentitySecureKeyPrefix$bareJid');
+  }
+
+  /// Persists the known OMEMO2 device list for [bareJid].
+  Future<void> storeOmemo2DeviceList(
+    String bareJid,
+    List<int> deviceIds,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemo2DeviceListPrefix$bareJid', deviceIds);
+    _afterHotWrite();
+  }
+
+  /// Loads the cached OMEMO2 device list for [bareJid], or `null` if none
+  /// is cached.
+  List<int>? loadOmemo2DeviceList(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_omemo2DeviceListPrefix$bareJid');
+    if (data is List) {
+      return data.map((e) => e as int).toList();
+    }
+    return null;
+  }
+
+  /// Caches a peer's OMEMO2 key bundle so it does not need to be re-fetched
+  /// via PEP on every session establishment attempt.
+  Future<void> storeOmemo2Bundle(
+    String bareJid,
+    int deviceId,
+    Map<String, dynamic> bundleJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemo2BundlePrefix$bareJid:$deviceId', bundleJson);
+    _afterHotWrite();
+  }
+
+  Map<String, dynamic>? loadOmemo2Bundle(String bareJid, int deviceId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_omemo2BundlePrefix$bareJid:$deviceId');
+    return data is Map ? Map<String, dynamic>.from(data) : null;
+  }
+
+  /// Persists a single OMEMO2 Double Ratchet session (see
+  /// `lib/encryption/omemo2_serialization.dart` for the on-disk shape).
+  Future<void> storeOmemo2Ratchet(
+    String bareJid,
+    int deviceId,
+    Map<String, dynamic> ratchetJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemo2RatchetPrefix$bareJid:$deviceId', ratchetJson);
+    _afterHotWrite();
+  }
+
+  Map<String, dynamic>? loadOmemo2Ratchet(String bareJid, int deviceId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_omemo2RatchetPrefix$bareJid:$deviceId');
+    return data is Map ? Map<String, dynamic>.from(data) : null;
+  }
+
+  /// Loads every persisted ratchet belonging to [bareJid], keyed by device
+  /// id.
+  Map<int, Map<String, dynamic>> loadOmemo2RatchetsForJid(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final prefix = '$_omemo2RatchetPrefix$bareJid:';
+    final result = <int, Map<String, dynamic>>{};
+    for (final key in _keysWithPrefix(box, prefix)) {
+      final deviceId = int.tryParse(key.substring(prefix.length));
+      if (deviceId == null) {
+        continue;
+      }
+      final data = box.get(key);
+      if (data is Map) {
+        result[deviceId] = Map<String, dynamic>.from(data);
+      }
+    }
+    return result;
+  }
+
+  Future<void> removeOmemo2Ratchets(
+    List<MapEntry<String, int>> ratchetKeys,
+  ) async {
+    final box = _box;
+    if (box == null || ratchetKeys.isEmpty) {
+      return;
+    }
+    await box.deleteAll([
+      for (final entry in ratchetKeys)
+        '$_omemo2RatchetPrefix${entry.key}:${entry.value}',
+    ]);
+  }
+
+  /// Persists a Blind-Trust-Before-Verification trust decision for a single
+  /// device.
+  Future<void> storeOmemo2Trust(
+    String bareJid,
+    int deviceId,
+    Map<String, dynamic> trustJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemo2TrustPrefix$bareJid:$deviceId', trustJson);
+    _afterHotWrite();
+  }
+
+  /// Loads every persisted trust decision for [bareJid].
+  List<Map<String, dynamic>> loadOmemo2TrustForJid(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return const [];
+    }
+    final prefix = '$_omemo2TrustPrefix$bareJid:';
+    return [
+      for (final key in _keysWithPrefix(box, prefix))
+        if (box.get(key) is Map) Map<String, dynamic>.from(box.get(key) as Map),
+    ];
+  }
+
+  Future<void> removeOmemo2TrustForJid(String bareJid) async {
+    await _deleteKeysWithPrefix('$_omemo2TrustPrefix$bareJid:');
+  }
+
+  /// Wipes all local OMEMO2 state for [bareJid] (ratchets, cached bundles,
+  /// device list and trust decisions), e.g. for a "forget contact"/"reset
+  /// session" flow. Does not touch the local identity key.
+  Future<void> clearOmemo2StateForJid(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await _deleteKeysWithPrefix('$_omemo2RatchetPrefix$bareJid:');
+    await _deleteKeysWithPrefix('$_omemo2BundlePrefix$bareJid:');
+    await _deleteKeysWithPrefix('$_omemo2TrustPrefix$bareJid:');
+    await box.delete('$_omemo2DeviceListPrefix$bareJid');
   }
 
   Future<void> _openBoxWithPin(String pin, List<int> salt) async {
