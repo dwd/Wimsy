@@ -546,6 +546,12 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
       spkSignatureEncoded,
       _stripDjbKeyType(ikEncoded),
       opksEncoded,
+      // Real legacy-OMEMO clients sign the libsignal-serialized (DJB-type
+      // -prefixed) form of the SPK, not the raw 32-byte key we store in
+      // spkEncoded above (see OmemoBundle.spkSignatureMessageEncoded) --
+      // keep the exact bytes as received on the wire so signature
+      // verification checks against what was actually signed.
+      spkSignatureMessageEncoded: spkEncoded,
     );
   }
 }

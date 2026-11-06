@@ -166,6 +166,21 @@ void main() {
         // a public key with 32 bytes, but got: 33 bytes").
         expect(() => bundle.ik, returnsNormally);
         expect(() => bundle.spk, returnsNormally);
+
+        // Regression: real clients (libsignal's SignedPreKeyRecord) sign
+        // the *serialized*, type-byte-prefixed SPK, not the raw 32-byte
+        // key we strip above for X3DH/ECDH use. The bundle must retain
+        // the original 33-byte wire bytes separately so signature
+        // verification checks against what was actually signed, or every
+        // real-world legacy-OMEMO session fails with
+        // InvalidKeyExchangeSignatureError.
+        expect(
+          bundle.spkSignatureMessage,
+          [0x05, ...rawSpk],
+          reason:
+              'spkSignatureMessage must be the original DJB-type-prefixed '
+              'SPK bytes as received on the wire, not the stripped raw key',
+        );
       },
     );
 

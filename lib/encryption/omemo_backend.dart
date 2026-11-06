@@ -164,7 +164,16 @@ class OmemoBackend implements EncryptionBackend {
       },
       (jid, id) async {
         final cached = storage.loadOmemoBundle(jid, id);
-        if (cached != null) {
+        // Bundles cached before the SPK-signature-message fix (see
+        // OmemoBundle.spkSignatureMessageEncoded) don't carry the 'spksMsg'
+        // key below, so _bundleFromJson would fall back to verifying the
+        // signature against the already-stripped 32-byte key -- which
+        // fails with InvalidKeyExchangeSignatureError for any real
+        // legacy-OMEMO client whose signature covers the libsignal
+        // type-prefixed form. Treat such stale entries as a cache miss so
+        // they get refetched (and re-cached with the new field) instead of
+        // reproducing that failure forever.
+        if (cached != null && cached.containsKey('spksMsg')) {
           return _bundleFromJson(jid, id, cached);
         }
         final fetched = await pep.fetchLegacyBundle(jid, id);
@@ -284,6 +293,7 @@ class OmemoBackend implements EncryptionBackend {
       'spk': bundle.spkEncoded,
       'spkId': bundle.spkId,
       'spks': bundle.spkSignatureEncoded,
+      'spksMsg': bundle.spkSignatureMessageEncoded,
       'ik': bundle.ikEncoded,
       'opks': bundle.opksEncoded,
     };
@@ -308,6 +318,7 @@ class OmemoBackend implements EncryptionBackend {
             entry.value as String,
           ),
       },
+      spkSignatureMessageEncoded: json['spksMsg'] as String?,
     );
   }
 

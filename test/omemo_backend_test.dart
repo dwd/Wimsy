@@ -729,4 +729,73 @@ void main() {
       );
     },
   );
+
+  test(
+    'x3dhFromBundle: verifies the SPK signature against the libsignal '
+    'type-byte-prefixed bytes when OmemoBundle.spkSignatureMessageEncoded '
+    'is set, matching how real legacy-OMEMO clients (Conversations/Gajim/'
+    'Dino) sign their bundle',
+    () async {
+      // Reproduces the real-world "InvalidKeyExchangeSignatureError" bug:
+      // libsignal's SignedPreKeyRecord signs `publicKey.serialize()`,
+      // which is the 33-byte DJB-type-prefixed form (0x05 + 32 raw
+      // bytes), not the raw 32-byte key omemo_dart itself works with.
+      // `lib/xmpp/omemo_pep.dart` strips that type byte from the keys it
+      // hands to `omemo_dart` for X3DH/ECDH, but previously had no way to
+      // tell `x3dhFromBundle` that the *signature* still covers the
+      // original, longer bytes -- so verification always failed for any
+      // real contact's bundle. This asserts the dedicated
+      // `spkSignatureMessageEncoded` field fixes that, and that omitting
+      // it (the old behaviour) reproduces the original bug.
+      final ik = await OmemoKeyPair.generateNewPair(KeyPairType.ed25519);
+      final spk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+      final opk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+
+      final rawSpkBytes = await spk.pk.getBytes();
+      final djbPrefixedSpkBytes = [0x05, ...rawSpkBytes];
+      // What a real libsignal-based client actually signs.
+      final signature = await sig(ik, djbPrefixedSpkBytes);
+
+      final bundleWithFix = OmemoBundle(
+        bobJid,
+        1,
+        base64Encode(rawSpkBytes),
+        99,
+        base64Encode(signature),
+        base64Encode(await ik.pk.getBytes()),
+        {7: base64Encode(await opk.pk.getBytes())},
+        spkSignatureMessageEncoded: base64Encode(djbPrefixedSpkBytes),
+      );
+
+      final fixedResult = await x3dhFromBundle(bundleWithFix, ik);
+      expect(
+        fixedResult.isType<InvalidKeyExchangeSignatureError>(),
+        isFalse,
+        reason:
+            'with spkSignatureMessageEncoded set to the DJB-prefixed '
+            'bytes that were actually signed, verification must succeed',
+      );
+
+      // Without the fix (old behaviour: no spkSignatureMessageEncoded),
+      // the signature is checked against the raw, un-prefixed SPK bytes
+      // instead -- which never matches a real client's signature.
+      final bundleWithoutFix = OmemoBundle(
+        bobJid,
+        1,
+        base64Encode(rawSpkBytes),
+        99,
+        base64Encode(signature),
+        base64Encode(await ik.pk.getBytes()),
+        {7: base64Encode(await opk.pk.getBytes())},
+      );
+      final brokenResult = await x3dhFromBundle(bundleWithoutFix, ik);
+      expect(
+        brokenResult.isType<InvalidKeyExchangeSignatureError>(),
+        isTrue,
+        reason:
+            'reproduces the real-world bug: without the fix, a correctly '
+            'signed real-client bundle is wrongly rejected',
+      );
+    },
+  );
 }

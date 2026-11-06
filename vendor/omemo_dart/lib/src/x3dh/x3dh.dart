@@ -74,9 +74,12 @@ Future<Result<InvalidKeyExchangeSignatureError, X3DHAliceResult>>
   OmemoBundle bundle,
   OmemoKeyPair ik,
 ) async {
-  // Check the signature first
+  // Check the signature first. Note that the message being verified is
+  // *not* necessarily the same as the raw SPK bytes used for ECDH below:
+  // see OmemoBundle.spkSignatureMessage for why (legacy-OMEMO clients
+  // sign the libsignal-serialized, DJB-type-prefixed form of the SPK).
   final signatureValue = await Ed25519().verify(
-    await bundle.spk.getBytes(),
+    bundle.spkSignatureMessage,
     signature: Signature(
       bundle.spkSignature,
       publicKey: bundle.ik.asPublicKey(),

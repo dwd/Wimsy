@@ -65,6 +65,37 @@ this fix existed, and which is never otherwise re-derived). This mirrors
 the identical, already-existing fix for PEP-published bundles in
 `lib/xmpp/omemo_pep.dart`.
 
+### SPK-signature-message fix for legacy OMEMO's PEP `<bundle/>`
+
+Per the XEdDSA/libsignal convention (see
+https://signal.org/docs/specifications/xeddsa and libsignal's
+`SignedPreKeyRecord`, which signs `publicKey.serialize()`), real
+legacy-OMEMO clients (Conversations/Gajim/Dino) sign the *serialized*,
+DJB-type-prefixed form of their signed prekey (33 bytes: `0x05` + 32 raw
+bytes), not the raw 32-byte key. `lib/xmpp/omemo_pep.dart` strips that
+type byte from every key before handing it to `omemo_dart` for X3DH/ECDH
+(see the DJB-type-byte fix above), but `x3dhFromBundle` in
+`lib/src/x3dh/x3dh.dart` verified the signature against those same
+stripped bytes -- which never matches a real client's signature, so every
+session with a real contact failed with `InvalidKeyExchangeSignatureError`
+("Failed to prepare legacy OMEMO keys for ...").
+
+- `lib/src/omemo/bundle.dart`: added an optional
+  `spkSignatureMessageEncoded` field (and `spkSignatureMessage` getter) to
+  `OmemoBundle`, defaulting to `spkEncoded` when unset so OMEMO2 and any
+  other caller that doesn't set it is unaffected.
+- `lib/src/x3dh/x3dh.dart`: `x3dhFromBundle` now verifies the SPK
+  signature against `bundle.spkSignatureMessage` instead of
+  `await bundle.spk.getBytes()`.
+- `lib/xmpp/omemo_pep.dart`'s `_legacyBundleFromElement` sets
+  `spkSignatureMessageEncoded` to the original, un-stripped SPK bytes as
+  received on the wire.
+- `lib/encryption/omemo_backend.dart`'s bundle JSON cache
+  (`_bundleToJson`/`_bundleFromJson`) persists/loads this new field, and
+  treats a cached bundle written before this fix (missing the field) as a
+  cache miss so it gets refetched instead of reproducing the signature
+  failure forever.
+
 ## Upstream clone with our patches as real commits
 
 This directory (`vendor/omemo_dart/`) is a flat copy (no `.git`), so our local
