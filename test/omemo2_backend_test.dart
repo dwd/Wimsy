@@ -160,6 +160,49 @@ void main() {
   const bobJid = 'bob@example.org';
 
   test(
+    'Omemo2Backend: device-list fetch always consults PEP live instead of '
+    "getting stuck on a stale cached (e.g. empty) device list forever",
+    () async {
+      // Regression test mirroring the identical fix in OmemoBackend (see
+      // `test/omemo_backend_test.dart`): fetchDeviceListImpl must prefer a
+      // live PEP fetch over any cached device list, since OmemoManager
+      // only calls this callback once per JID for the process's lifetime.
+      final network = FakeOmemo2Network();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      // Simulate a stale cache: Alice previously looked Bob up when he had
+      // no OMEMO2 device at all.
+      aliceStorage.deviceLists[bobJid] = <int>[];
+
+      final aliceBackend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      final bobBackend = await Omemo2Backend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemo2Pep(network, bobJid),
+      );
+
+      // Bob now publishes his (new) device/bundle via PEP.
+      await bobBackend.publishIdentity();
+
+      // Despite the stale empty cache, Alice must discover Bob's device
+      // via a live fetch and successfully fetch/use his bundle.
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello from alice',
+      );
+      expect(payload.element.getChild('header'), isNotNull);
+
+      final fingerprints = await aliceBackend.deviceFingerprintsFor(bobJid);
+      expect(fingerprints, isNotEmpty);
+    },
+  );
+
+  test(
     'Omemo2Backend: session establishment and encrypt/decrypt round-trip',
     () async {
       final network = FakeOmemo2Network();

@@ -159,8 +159,19 @@ class OmemoBackend implements EncryptionBackend {
       trustManager,
       (result, recipientJid) async {},
       (jid) async {
-        return storage.loadOmemoDeviceList(jid) ??
-            await pep.fetchLegacyDeviceList(jid);
+        // Always prefer a live PEP fetch over any cached device list.
+        // `OmemoManager` only invokes this callback once per JID for the
+        // lifetime of the process (see its internal `_deviceListRequested`
+        // bookkeeping in `_fetchNewOmemoBundles`), so if we preferred the
+        // cache, a contact's newly-added device (e.g. them logging in with
+        // Conversations for the first time, or on another device) would
+        // never be discovered -- no bundle fetch would ever be attempted
+        // for it, and it would never show up in the "legacy OMEMO devices"
+        // list -- until the app is restarted. Fall back to the cached list
+        // only if the live fetch itself fails (e.g. we're offline or the
+        // contact has no PEP node at all).
+        return await pep.fetchLegacyDeviceList(jid) ??
+            storage.loadOmemoDeviceList(jid);
       },
       (jid, id) async {
         final cached = storage.loadOmemoBundle(jid, id);

@@ -164,6 +164,54 @@ void main() {
   const bobJid = 'bob@example.org';
 
   test(
+    'OmemoBackend: device-list fetch always consults PEP live instead of '
+    "getting stuck on a stale cached (e.g. empty) device list forever",
+    () async {
+      // Regression test: previously, the fetchDeviceListImpl callback
+      // preferred a cached `storage.loadOmemoDeviceList(jid)` over a live
+      // PEP fetch. Since `OmemoManager` only calls that callback once per
+      // JID for the lifetime of the process, a contact's newly-added
+      // device (e.g. logging in with Conversations for the first time,
+      // after we'd already cached an empty/stale device list for them)
+      // was never discovered -- no bundle fetch was ever attempted for
+      // it, and it never showed up in `deviceFingerprintsFor`/the "legacy
+      // OMEMO devices" UI list -- until the app restarted.
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      // Simulate a stale cache: Alice previously looked Bob up when he had
+      // no legacy-OMEMO device at all.
+      aliceStorage.deviceLists[bobJid] = <int>[];
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+
+      // Bob now publishes his (new) device/bundle via PEP.
+      await bobBackend.publishIdentity();
+
+      // Despite the stale empty cache, Alice must discover Bob's device
+      // via a live fetch and successfully fetch/use his bundle.
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello from alice',
+      );
+      expect(payload.element.getChild('header'), isNotNull);
+
+      final fingerprints = await aliceBackend.deviceFingerprintsFor(bobJid);
+      expect(fingerprints, isNotEmpty);
+    },
+  );
+
+  test(
     'OmemoBackend: session establishment and encrypt/decrypt round-trip',
     () async {
       final network = FakeOmemoNetwork();

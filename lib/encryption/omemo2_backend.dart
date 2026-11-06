@@ -145,7 +145,12 @@ class Omemo2Backend implements EncryptionBackend {
       // freshly-created ratchets; Step 1 doesn't send proactive heartbeats.
       (result, recipientJid) async {},
       (jid) async {
-        return storage.loadOmemo2DeviceList(jid) ?? await pep.fetchDeviceList(jid);
+        // Always prefer a live PEP fetch over any cached device list; see
+        // the identical comment in `OmemoBackend.create` for why -- in
+        // short, `OmemoManager` only calls this once per JID per process
+        // lifetime, so preferring the cache would mean a newly-added
+        // device of a contact is never discovered until the app restarts.
+        return await pep.fetchDeviceList(jid) ?? storage.loadOmemo2DeviceList(jid);
       },
       (jid, id) async {
         final cached = storage.loadOmemo2Bundle(jid, id);
