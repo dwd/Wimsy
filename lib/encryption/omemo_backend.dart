@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:omemo_dart/omemo_dart.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
@@ -47,25 +48,20 @@ abstract class OmemoPepTransport {
 ///    different device lists/namespaces and must be tracked as distinct
 ///    device-id entries.
 ///
-/// Known interop limitation: XEP-0384 v0.3.0's legacy wire format encrypts
-/// the `<payload>` with AES-128-GCM, whereas OMEMO2/XEP-0420 (and this
-/// vendored `omemo_dart`) use AES-256-CBC + HMAC-SHA-256. Properly
-/// emulating the legacy payload cipher would require transporting a
-/// separately-generated AES-128-GCM key through the Double Ratchet, but
-/// `omemo_dart`'s `OmemoManager.onOutgoingStanza`/`onIncomingStanza` only
-/// expose the ratchet-unwrapped per-device key indirectly, via decrypting
-/// a payload through its own built-in AES-256-CBC+HMAC-SHA-256 round-trip
-/// -- there is no public API to retrieve the raw unwrapped key bytes so a
-/// different cipher could be substituted, short of forking the vendored
-/// library's internals. This backend therefore reuses `OmemoManager`'s
-/// full encrypt/decrypt flow as-is (same cipher as [Omemo2Backend]) under
-/// the legacy XML envelope shape, which is wire-format-correct for the
-/// X3DH/Double-Ratchet session/key-exchange layer but NOT byte-for-byte
-/// compatible with real legacy-OMEMO clients (Conversations/Gajim/Dino) at
-/// the payload-cipher layer. Since no real external legacy-OMEMO client is
-/// available in this environment to validate against anyway, this has only
-/// been exercised via self-consistent round-trip tests (see
-/// `test/omemo_backend_test.dart`).
+/// Unlike [Omemo2Backend] (OMEMO2/XEP-0420, which negotiates its own
+/// ciphersuite and uses AES-256-CBC + HMAC-SHA-256), XEP-0384 v0.3.0 has no
+/// ciphersuite negotiation and mandates AES-128-GCM for the `<payload>`.
+/// This backend therefore does not use `OmemoManager.onOutgoingStanza`'s/
+/// `onIncomingStanza`'s built-in AES-256-CBC+HMAC-SHA-256 payload cipher;
+/// instead it supplies its own AES-128-GCM-encrypted payload and 32 bytes of
+/// raw key material (16-byte AES-128 key + 16-byte GCM tag) to be
+/// ratchet-wrapped/-unwrapped per-device, via the vendored `omemo_dart`
+/// library's `OmemoOutgoingStanza.rawKeyMaterial`/`ciphertext` and
+/// `OmemoIncomingStanza.skipPayloadDecryption`/`DecryptionResult.rawKeyMaterial`
+/// hooks (see `vendor/omemo_dart/VENDORING.md` for details of that local
+/// patch). The random IV used for AES-128-GCM is transported explicitly as
+/// an `<iv>` child of `<header>`, matching the wire format used by real
+/// legacy-OMEMO clients (Conversations/Gajim/Dino via `python-oldmemo`).
 class OmemoBackend implements EncryptionBackend {
   OmemoBackend._(
     this.selfBareJid,
@@ -91,6 +87,16 @@ class OmemoBackend implements EncryptionBackend {
 
   final OmemoManager _omemoManager;
   final BlindTrustBeforeVerificationTrustManager _trustManager;
+
+  /// XEP-0384 v0.3.0 mandates AES-128-GCM (with no ciphersuite negotiation)
+  /// for the `<payload>`, unlike OMEMO2/XEP-0420's AES-256-CBC+HMAC-SHA-256.
+  static final AesGcm _payloadCipher = AesGcm.with128bits();
+
+  /// Length, in bytes, of the AES-128-GCM authentication tag/MAC.
+  static const int _gcmMacLength = 16;
+
+  /// Length, in bytes, of the raw AES-128 key.
+  static const int _aes128KeyLength = 16;
 
   /// Creates (or restores, if a device was already persisted) an
   /// [OmemoBackend] for [selfBareJid].
@@ -282,13 +288,30 @@ class OmemoBackend implements EncryptionBackend {
     String toBareJid,
     String plaintext,
   ) async {
-    // See the class doc: the actual payload cipher here is `omemo_dart`'s
-    // built-in AES-256-CBC+HMAC-SHA-256 (not XEP-0384 v0.3.0's
-    // AES-128-GCM), since the vendored library does not expose a way to
-    // substitute the payload cipher while still using its X3DH/Double
-    // Ratchet session machinery for the per-device key wrapping.
+    // XEP-0384 v0.3.0 mandates AES-128-GCM for <payload>. We generate our
+    // own random AES-128 key/IV, encrypt with it ourselves, and only hand
+    // `OmemoManager` the resulting 32 bytes of raw key material (16-byte
+    // key + 16-byte GCM tag) to be ratchet-wrapped per-device alongside the
+    // already-encrypted ciphertext -- see the class doc.
+    final secretKey = await _payloadCipher.newSecretKey();
+    final nonce = _payloadCipher.newNonce();
+    final secretBox = await _payloadCipher.encrypt(
+      utf8.encode(plaintext),
+      secretKey: secretKey,
+      nonce: nonce,
+    );
+    final rawKeyMaterial = [
+      ...await secretKey.extractBytes(),
+      ...secretBox.mac.bytes,
+    ];
+
     final result = await _omemoManager.onOutgoingStanza(
-      OmemoOutgoingStanza([toBareJid], plaintext),
+      OmemoOutgoingStanza(
+        [toBareJid],
+        plaintext,
+        rawKeyMaterial: rawKeyMaterial,
+        ciphertext: secretBox.cipherText,
+      ),
     );
 
     final encrypted = XmppElement()..name = 'encrypted';
@@ -306,6 +329,11 @@ class OmemoBackend implements EncryptionBackend {
       keyElement.textValue = key.value;
       header.addChild(keyElement);
     }
+    // Legacy OMEMO's <header> transports the AES-128-GCM IV explicitly as
+    // an <iv> child, alongside the <key> elements (XEP-0384 v0.3.0).
+    final ivElement = XmppElement()..name = 'iv';
+    ivElement.textValue = base64Encode(nonce);
+    header.addChild(ivElement);
     encrypted.addChild(header);
 
     if (result.ciphertext != null) {
@@ -363,25 +391,80 @@ class OmemoBackend implements EncryptionBackend {
           ),
     ]..removeWhere((key) => key.rid == -1 || key.value.isEmpty);
     final payload = encrypted.getChild('payload')?.textValue?.trim();
+    final ivBase64 = header?.getChild('iv')?.textValue?.trim();
 
+    // XEP-0384 v0.3.0 mandates AES-128-GCM for <payload>: we don't let
+    // `OmemoManager` decrypt the payload itself (it would assume
+    // AES-256-CBC+HMAC-SHA-256); instead we get back the raw ratchet-
+    // unwrapped key material and decrypt/verify it ourselves -- see the
+    // class doc.
     final result = await _omemoManager.onIncomingStanza(
-      OmemoIncomingStanza(bareSenderJid, sid, keys, payload, false),
+      OmemoIncomingStanza(
+        bareSenderJid,
+        sid,
+        keys,
+        payload,
+        false,
+        skipPayloadDecryption: true,
+      ),
     );
 
-    if (result.error != null || result.payload == null) {
+    if (result.error != null) {
       return DecryptResult(
         plaintext: null,
         protocolId: protocolId,
         senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
-        error: result.error?.toString() ?? 'Empty legacy OMEMO message',
+        error: result.error.toString(),
       );
     }
 
-    return DecryptResult(
-      plaintext: result.payload,
-      protocolId: protocolId,
-      senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
-    );
+    final rawKeyMaterial = result.rawKeyMaterial;
+    if (payload == null || rawKeyMaterial == null) {
+      return DecryptResult(
+        plaintext: null,
+        protocolId: protocolId,
+        senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
+        error: 'Empty legacy OMEMO message',
+      );
+    }
+    if (ivBase64 == null ||
+        ivBase64.isEmpty ||
+        rawKeyMaterial.length != _aes128KeyLength + _gcmMacLength) {
+      return DecryptResult(
+        plaintext: null,
+        protocolId: protocolId,
+        senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
+        error: 'Missing <iv> or malformed key material on legacy OMEMO '
+            'message',
+      );
+    }
+
+    try {
+      final rawKey = rawKeyMaterial.sublist(0, _aes128KeyLength);
+      final mac = rawKeyMaterial.sublist(_aes128KeyLength);
+      final iv = base64Decode(ivBase64);
+      final secretBox = SecretBox(
+        base64Decode(payload),
+        nonce: iv,
+        mac: Mac(mac),
+      );
+      final plaintextBytes = await _payloadCipher.decrypt(
+        secretBox,
+        secretKey: SecretKey(rawKey),
+      );
+      return DecryptResult(
+        plaintext: utf8.decode(plaintextBytes),
+        protocolId: protocolId,
+        senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
+      );
+    } on Exception catch (e) {
+      return DecryptResult(
+        plaintext: null,
+        protocolId: protocolId,
+        senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
+        error: 'Failed to decrypt AES-128-GCM payload: $e',
+      );
+    }
   }
 
   /// Returns the known legacy-OMEMO device ids for [bareJid] that have an

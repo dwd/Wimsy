@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omemo_dart/omemo_dart.dart';
 import 'package:xml/xml.dart' as xml;
@@ -205,6 +208,12 @@ void main() {
       }
       expect(payload.element.getChild('payload'), isNotNull);
 
+      // XEP-0384 v0.3.0's <header> transports the AES-128-GCM IV
+      // explicitly as a direct <iv> child, alongside the <key> elements.
+      final ivElement = header.getChild('iv');
+      expect(ivElement, isNotNull);
+      expect(ivElement!.textValue, isNotEmpty);
+
       final message = MessageStanza(
         AbstractStanza.getRandomId(),
         MessageStanzaType.CHAT,
@@ -347,6 +356,7 @@ void main() {
     <header sid="1234">
       <key rid="5678">BASE64RATCHETKEYDATA==</key>
       <key rid="9012" kex="true">BASE64KEXKEYDATA==</key>
+      <iv>BASE64IVDATA==</iv>
     </header>
     <payload>BASE64CIPHERTEXTDATA==</payload>
   </encrypted>
@@ -365,8 +375,59 @@ void main() {
       expect(keyXmls[1].getAttribute('rid'), '9012');
       expect(keyXmls[1].getAttribute('kex'), 'true');
 
+      final ivXml = headerXml.findElements('iv').first;
+      expect(ivXml.innerText, 'BASE64IVDATA==');
+
       final payloadXml = encryptedXml.findElements('payload').first;
       expect(payloadXml.innerText, 'BASE64CIPHERTEXTDATA==');
+    },
+  );
+
+  test(
+    'AES-128-GCM payload cipher helper: round-trips plaintext and rejects '
+    'tampered ciphertext',
+    () async {
+      // Targeted unit test of the exact cipher/key-material convention used
+      // by OmemoBackend.encryptForSend/decryptIncoming (16-byte AES-128 key
+      // + 16-byte GCM tag as the 32-byte ratchet-wrapped key material, IV
+      // transported separately), independent of the OMEMO
+      // session/ratchet machinery.
+      final cipher = AesGcm.with128bits();
+      final secretKey = await cipher.newSecretKey();
+      final nonce = cipher.newNonce();
+      const plaintext = 'hello legacy OMEMO';
+
+      final secretBox = await cipher.encrypt(
+        utf8.encode(plaintext),
+        secretKey: secretKey,
+        nonce: nonce,
+      );
+      final rawKeyMaterial = [
+        ...await secretKey.extractBytes(),
+        ...secretBox.mac.bytes,
+      ];
+      expect(rawKeyMaterial.length, 32);
+      expect(secretBox.mac.bytes.length, 16);
+
+      final rawKey = rawKeyMaterial.sublist(0, 16);
+      final mac = rawKeyMaterial.sublist(16);
+      final decrypted = await cipher.decrypt(
+        SecretBox(secretBox.cipherText, nonce: nonce, mac: Mac(mac)),
+        secretKey: SecretKey(rawKey),
+      );
+      expect(utf8.decode(decrypted), plaintext);
+
+      // Tampering with the ciphertext must be rejected by GCM's
+      // authentication tag check.
+      final tamperedCiphertext = List<int>.of(secretBox.cipherText);
+      tamperedCiphertext[0] ^= 0xff;
+      await expectLater(
+        cipher.decrypt(
+          SecretBox(tamperedCiphertext, nonce: nonce, mac: Mac(mac)),
+          secretKey: SecretKey(rawKey),
+        ),
+        throwsA(isA<Exception>()),
+      );
     },
   );
 }

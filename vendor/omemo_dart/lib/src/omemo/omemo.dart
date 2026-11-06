@@ -460,7 +460,12 @@ class OmemoManager {
       }
 
       Result<OmemoError, String?> result;
-      if (stanza.payload != null) {
+      List<int>? rawKeyMaterial;
+      if (stanza.skipPayloadDecryption) {
+        result = const Result(null);
+        rawKeyMaterial =
+            stanza.payload != null ? keyAndHmac.get<List<int>>() : null;
+      } else if (stanza.payload != null) {
         result = await _decryptAndVerifyHmac(
           stanza.payload?.fromBase64(),
           keyAndHmac.get<List<int>>(),
@@ -488,7 +493,7 @@ class OmemoManager {
       );
 
       // If we received an empty OMEMO message, mark the ratchet as acknowledged
-      if (result.get<String?>() == null) {
+      if (stanza.payload == null) {
         if (!ratchet.acknowledged) {
           ratchet.acknowledged = true;
         }
@@ -534,6 +539,7 @@ class OmemoManager {
         ratchetAlreadyExists ? {} : newlyCreatedDevice,
         ratchetAlreadyExists ? newlyCreatedDevice : {},
         null,
+        rawKeyMaterial: rawKeyMaterial,
       );
     } else {
       // Check if we even have a ratchet
@@ -583,7 +589,12 @@ class OmemoManager {
       }
 
       Result<OmemoError, String?> result;
-      if (stanza.payload != null) {
+      List<int>? rawKeyMaterial;
+      if (stanza.skipPayloadDecryption) {
+        result = const Result(null);
+        rawKeyMaterial =
+            stanza.payload != null ? keyAndHmac.get<List<int>>() : null;
+      } else if (stanza.payload != null) {
         result = await _decryptAndVerifyHmac(
           stanza.payload?.fromBase64(),
           keyAndHmac.get<List<int>>(),
@@ -604,7 +615,7 @@ class OmemoManager {
       }
 
       // If we received an empty OMEMO message, mark the ratchet as acknowledged
-      if (result.get<String?>() == null) {
+      if (stanza.payload == null) {
         if (!ratchet.acknowledged) {
           ratchet.acknowledged = true;
         }
@@ -629,6 +640,7 @@ class OmemoManager {
         const {},
         const {},
         null,
+        rawKeyMaterial: rawKeyMaterial,
       );
     }
   }
@@ -649,7 +661,15 @@ class OmemoManager {
     // Encrypt the payload, if we have any
     final List<int> payloadKey;
     final List<int>? ciphertext;
-    if (stanza.payload != null) {
+    if (stanza.rawKeyMaterial != null) {
+      // The caller supplied its own key material and already-encrypted
+      // ciphertext (e.g. to use a payload cipher other than this library's
+      // built-in AES-256-CBC+HMAC-SHA-256, such as legacy OMEMO's
+      // AES-128-GCM). We only ratchet-wrap the given bytes; we neither
+      // generate a key nor encrypt anything ourselves here.
+      payloadKey = stanza.rawKeyMaterial!;
+      ciphertext = stanza.ciphertext;
+    } else if (stanza.payload != null) {
       // Generate the key and encrypt the plaintext
       final rawKey = generateRandomBytes(32);
       final keys = await deriveEncryptionKeys(rawKey, omemoPayloadInfoString);
