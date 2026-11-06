@@ -117,7 +117,39 @@ class EncryptionManager {
         encryptionProtocolId(protocol),
       );
     }
+    // Proactively kick off device discovery as soon as encryption is
+    // turned on for this conversation, rather than waiting for the first
+    // outgoing message to trigger `omemo_dart`'s own fetch-on-encrypt
+    // logic. Fire-and-forget: failures are logged and retried on the next
+    // call/send.
+    switch (protocol) {
+      case EncryptionProtocol.omemo2:
+        unawaited(ensureOmemo2DevicesKnown(bareJid));
+      case EncryptionProtocol.legacyOmemo:
+        unawaited(ensureLegacyOmemoDevicesKnown(bareJid));
+      case EncryptionProtocol.ox:
+      case EncryptionProtocol.none:
+        break;
+    }
     _onUpdate();
+  }
+
+  /// Proactively fetches/refreshes [bareJid]'s OMEMO2 device list/bundles
+  /// and subscribes to its device-list PEP node, instead of relying on
+  /// this happening only as a side effect of actually sending an
+  /// encrypted message. See `Omemo2Backend.ensureDevicesKnown`.
+  Future<void> ensureOmemo2DevicesKnown(String bareJid) async {
+    final backend = await _omemo2Backend();
+    await backend.ensureDevicesKnown(bareJid);
+  }
+
+  /// Proactively fetches/refreshes [bareJid]'s legacy-OMEMO device
+  /// list/bundles and subscribes to its device-list PEP node, instead of
+  /// relying on this happening only as a side effect of actually sending
+  /// an encrypted message. See `OmemoBackend.ensureDevicesKnown`.
+  Future<void> ensureLegacyOmemoDevicesKnown(String bareJid) async {
+    final backend = await _legacyOmemoBackend();
+    await backend.ensureDevicesKnown(bareJid);
   }
 
   /// Whether encryption is turned on for [bareJid] (i.e. its selected
@@ -306,6 +338,10 @@ class EncryptionManager {
     String bareJid,
   ) async {
     final backend = await _omemo2Backend();
+    // Make sure we've actually tried to discover this contact's devices
+    // before reading what's cached -- otherwise a contact we've never
+    // sent an encrypted message to always shows up with zero devices.
+    await backend.ensureDevicesKnown(bareJid);
     return backend.deviceFingerprintsFor(bareJid);
   }
 
@@ -346,6 +382,10 @@ class EncryptionManager {
     String bareJid,
   ) async {
     final backend = await _legacyOmemoBackend();
+    // Make sure we've actually tried to discover this contact's devices
+    // before reading what's cached -- otherwise a contact we've never
+    // sent an encrypted message to always shows up with zero devices.
+    await backend.ensureDevicesKnown(bareJid);
     return backend.deviceFingerprintsFor(bareJid);
   }
 

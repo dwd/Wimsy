@@ -19,6 +19,14 @@ const List<String> SERVICE_DISCOVERY_SUPPORT_LIST = [
   'urn:xmpp:mds:displayed:0+notify',
   'urn:xmpp:reply:0',
   'urn:xmpp:feature-fallback:0',
+  // OMEMO2 (XEP-0384 urn:xmpp:omemo:2) and legacy OMEMO (XEP-0384 v0.3.0,
+  // eu.siacs.conversations.axolotl) device-list PEP nodes: advertising
+  // "+notify" here is what makes contacts' clients (and ours) push PEP
+  // <event/> updates proactively instead of relying solely on an explicit
+  // IQ fetch, which is required for real-world interop (e.g. Conversations
+  // subscribing to/seeing updates to our device list, and vice versa).
+  'urn:xmpp:omemo:2:devices+notify',
+  'eu.siacs.conversations.axolotl.devicelist+notify',
 ];
 
 const List<Map<String, String>> SERVICE_DISCOVERY_IDENTITIES = [

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
@@ -56,10 +58,12 @@ class TestConnection extends Connection {
   TestConnection(super.account);
 
   AbstractStanza? lastWrittenStanza;
+  final List<AbstractStanza> writtenStanzas = [];
 
   @override
   void writeStanza(AbstractStanza stanza) {
     lastWrittenStanza = stanza;
+    writtenStanzas.add(stanza);
   }
 
   @override
@@ -249,6 +253,87 @@ void main() {
         'publish',
       );
       expect(publish, isNotNull);
+    },
+  );
+
+  test(
+    'turning on OMEMO2 for a conversation proactively fetches the '
+    "contact's device list instead of waiting for the first outgoing "
+    'message',
+    () async {
+      // Regression test: previously, Wimsy never fetched/subscribed to a
+      // contact's device list (or their bundles) until the user actually
+      // sent them an encrypted message -- so a newly-added contact (or
+      // one we'd never messaged yet) always showed zero devices in the
+      // fingerprint verification screen, with no IQ/subscription ever
+      // sent for their device-list PEP node.
+      final storage = FakeStorageService();
+      final connection = _buildConnection();
+      final manager = EncryptionManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      await manager.setProtocolFor(bobJid, EncryptionProtocol.omemo2);
+      // Device discovery is fired-and-forgotten; give the microtask
+      // queue a few turns to get past identity publish and reach the
+      // device-list fetch IQ (which then blocks forever awaiting a
+      // response nothing in this test ever sends).
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      final deviceListFetch = connection.writtenStanzas.whereType<IqStanza>().where((
+        iq,
+      ) {
+        final items = iq.getChild('pubsub')?.getChild('items');
+        return iq.toJid?.userAtDomain == bobJid &&
+            items?.getAttribute('node')?.value == 'urn:xmpp:omemo:2:devices';
+      });
+      expect(
+        deviceListFetch,
+        isNotEmpty,
+        reason:
+            'selecting OMEMO2 for $bobJid should have proactively sent a '
+            'device-list fetch IQ to them',
+      );
+    },
+  );
+
+  test(
+    'fetching OMEMO2 fingerprints for a contact proactively triggers '
+    'device discovery too',
+    () async {
+      final storage = FakeStorageService();
+      final connection = _buildConnection();
+      final manager = EncryptionManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      unawaited(manager.omemo2FingerprintsFor(bobJid));
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      final deviceListFetch = connection.writtenStanzas.whereType<IqStanza>().where((
+        iq,
+      ) {
+        final items = iq.getChild('pubsub')?.getChild('items');
+        return iq.toJid?.userAtDomain == bobJid &&
+            items?.getAttribute('node')?.value == 'urn:xmpp:omemo:2:devices';
+      });
+      expect(
+        deviceListFetch,
+        isNotEmpty,
+        reason:
+            'opening the fingerprint screen for $bobJid should have '
+            'proactively sent a device-list fetch IQ to them',
+      );
     },
   );
 

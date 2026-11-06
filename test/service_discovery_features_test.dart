@@ -44,6 +44,24 @@ void main() {
       }
     });
 
+    test(
+      'advertises +notify for both OMEMO2 and legacy-OMEMO device lists',
+      () {
+        // Without these, contacts' clients (and ours) never get PEP
+        // <event/> pushes for device-list changes, so their devices never
+        // show up unless/until we've already sent them an encrypted
+        // message (which triggers an explicit fetch as a side effect).
+        expect(
+          SERVICE_DISCOVERY_SUPPORT_LIST,
+          contains('urn:xmpp:omemo:2:devices+notify'),
+        );
+        expect(
+          SERVICE_DISCOVERY_SUPPORT_LIST,
+          contains('eu.siacs.conversations.axolotl.devicelist+notify'),
+        );
+      },
+    );
+
     test('contains chatstates, blocking, IBB, reply, fallback', () {
       const expected = [
         'http://jabber.org/protocol/chatstates',

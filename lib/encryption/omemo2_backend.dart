@@ -478,6 +478,31 @@ class Omemo2Backend implements EncryptionBackend {
     return device.id;
   }
 
+  /// Proactively fetches/refreshes [bareJid]'s `urn:xmpp:omemo:2:devices`
+  /// device list and any not-yet-known device bundles, and subscribes to
+  /// the device-list PEP node -- all three of which `omemo_dart` would
+  /// otherwise only do as a side effect of actually encrypting a message
+  /// to [bareJid] (see `OmemoManager._fetchNewOmemoBundles`/
+  /// `onOutgoingStanza`). Without this, a contact's devices never show up
+  /// in the fingerprint verification screen (and no bundle/devicelist IQs
+  /// or PEP subscribe requests are ever sent) until the user has already
+  /// sent them at least one encrypted message.
+  ///
+  /// Implemented via [OmemoManager.sendOmemoHeartbeat], which runs through
+  /// the exact same device-list-fetch/bundle-fetch/subscribe logic as a
+  /// real encrypt, but the heartbeat "send" itself is wired to a no-op
+  /// (see `create()` above), so nothing is written to the wire.
+  Future<void> ensureDevicesKnown(String bareJid) async {
+    try {
+      await _omemoManager.sendOmemoHeartbeat(bareJid);
+    } catch (e) {
+      Log.w(
+        'Omemo2Backend',
+        'Failed to proactively fetch OMEMO2 devices for $bareJid: $e',
+      );
+    }
+  }
+
   /// Returns every known OMEMO2 device of [bareJid] (that a session has
   /// been established with at least once) together with its fingerprint
   /// (when the device's bundle is cached) and current [TrustState], for
