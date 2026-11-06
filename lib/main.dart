@@ -4322,11 +4322,11 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     if (isBookmark && !(roomEntry?.joined ?? false)) {
       return;
     }
-    final selection = await FilePicker.pickFiles(withData: true);
-    if (selection == null || selection.files.isEmpty) {
+    final selection = await FilePicker.pickFiles();
+    if (selection.isEmpty) {
       return;
     }
-    final file = selection.files.first;
+    final file = selection.first;
     final bytes = await _readPickedFileBytes(file);
     if (bytes == null || bytes.isEmpty) {
       _showSnack('Unable to read file.');
@@ -4367,14 +4367,13 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
       return;
     }
     final selection = await FilePicker.pickFiles(
-      withData: true,
       type: FileType.custom,
       allowedExtensions: const ['xdc'],
     );
-    if (selection == null || selection.files.isEmpty) {
+    if (selection.isEmpty) {
       return;
     }
-    final file = selection.files.first;
+    final file = selection.first;
     final bytes = await _readPickedFileBytes(file);
     if (bytes == null || bytes.isEmpty) {
       _showSnack('Unable to read file.');
@@ -4405,10 +4404,18 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     final suggested = message.fileName?.isNotEmpty == true
         ? message.fileName!
         : 'file';
-    final path = await FilePicker.saveFile(
+    // The incoming file is streamed to disk as it arrives, so we need a
+    // destination path up front rather than file_picker's saveFile(), which
+    // now requires the bytes to already be in memory. Ask for a destination
+    // directory instead and build the save path from the suggested name.
+    final directory = await FilePicker.getDirectoryPath(
       dialogTitle: 'Save file',
-      fileName: suggested,
     );
+    final path = directory == null || directory.isEmpty
+        ? null
+        : (directory.endsWith(Platform.pathSeparator)
+              ? '$directory$suggested'
+              : '$directory${Platform.pathSeparator}$suggested');
     if (path == null || path.isEmpty) {
       await _declineFileTransfer(message);
       return;
@@ -8563,12 +8570,11 @@ class _PresenceMenu extends StatelessWidget {
                               : () async {
                                   final result = await FilePicker.pickFiles(
                                     type: FileType.image,
-                                    withData: true,
                                   );
-                                  if (result == null || result.files.isEmpty) {
+                                  if (result.isEmpty) {
                                     return;
                                   }
-                                  final file = result.files.first;
+                                  final file = result.first;
                                   final bytes = await _readPickedFileBytes(
                                     file,
                                   );
@@ -9313,8 +9319,10 @@ Future<Uint8List?> _cropPngBytes(
 }
 
 Future<Uint8List?> _readPickedFileBytes(PlatformFile file) async {
-  if (file.bytes != null) {
-    return file.bytes;
+  try {
+    return await file.readAsBytes();
+  } catch (_) {
+    // Fall through to the path-based read below.
   }
   final path = file.path;
   if (path == null || path.isEmpty) {

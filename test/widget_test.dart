@@ -5,6 +5,8 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:file_picker/file_picker.dart';
+import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +24,41 @@ import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
 import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
+
+// `flutter test` doesn't register a real platform plugin, so the default
+// FilePickerPlatform throws UnimplementedError on any call. Tests that
+// exercise attachment-picking UI install this fake, which behaves like the
+// user cancelling the picker (an empty selection), matching real behavior.
+class _FakeFilePickerPlatform extends FilePickerPlatform {
+  @override
+  Future<List<PlatformFile>> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    int compressionQuality = 0,
+    AndroidOptions androidOptions = const AndroidOptions(),
+    DarwinOptions darwinOptions = const DarwinOptions(),
+    WindowsOptions windowsOptions = const WindowsOptions(),
+    LinuxOptions linuxOptions = const LinuxOptions(),
+    WebOptions webOptions = const WebOptions(),
+  }) async {
+    return [];
+  }
+
+  @override
+  Future<String?> getDirectoryPath({
+    String? dialogTitle,
+    String? initialDirectory,
+    AndroidOptions androidOptions = const AndroidOptions(),
+    WindowsOptions windowsOptions = const WindowsOptions(),
+    LinuxOptions linuxOptions = const LinuxOptions(),
+    WebOptions webOptions = const WebOptions(),
+  }) async {
+    return null;
+  }
+}
 
 class _SuggestionXmppService extends XmppService {
   _SuggestionXmppService({this.unknownFallback = false, this.suggestions});
@@ -1562,6 +1599,10 @@ void main() {
   testWidgets(
     'portrait phone composer has expandable attachment button with options',
     (WidgetTester tester) async {
+      final previousFilePicker = FilePickerPlatform.instance;
+      FilePickerPlatform.instance = _FakeFilePickerPlatform();
+      addTearDown(() => FilePickerPlatform.instance = previousFilePicker);
+
       tester.view.physicalSize = const Size(412, 915);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
