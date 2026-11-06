@@ -174,6 +174,25 @@ class OmemoBackend implements EncryptionBackend {
             storage.loadOmemoDeviceList(jid);
       },
       (jid, id) async {
+        // Like fetchDeviceListImpl above, always try a live PEP fetch
+        // first rather than preferring whatever is cached in Hive.
+        // `OmemoManager` only calls this callback once per (jid, device)
+        // for the lifetime of the process (it skips devices already
+        // present in `_ratchetMap`), so if we preferred the cache here, a
+        // stale/incomplete bundle cached from an earlier session (e.g.
+        // from before a contact rotated their signed prekey, or before
+        // some earlier bugfix changed how we parse/store bundles) would
+        // never be refreshed by anything short of an app restart -- which
+        // is exactly how "we publish our bundle but never fetch theirs"
+        // was observed: a previously-cached bundle for the contact's
+        // device was served without ever sending a bundle-fetch IQ. Fall
+        // back to the cache only if the live fetch itself fails (e.g.
+        // we're offline or the contact has no bundle node at all).
+        final fetched = await pep.fetchLegacyBundle(jid, id);
+        if (fetched != null) {
+          await storage.storeOmemoBundle(jid, id, await _bundleToJson(fetched));
+          return fetched;
+        }
         final cached = storage.loadOmemoBundle(jid, id);
         // Bundles cached before the SPK-signature-message fix (see
         // OmemoBundle.spkSignatureMessageEncoded) don't carry the 'spksMsg'
@@ -181,17 +200,12 @@ class OmemoBackend implements EncryptionBackend {
         // signature against the already-stripped 32-byte key -- which
         // fails with InvalidKeyExchangeSignatureError for any real
         // legacy-OMEMO client whose signature covers the libsignal
-        // type-prefixed form. Treat such stale entries as a cache miss so
-        // they get refetched (and re-cached with the new field) instead of
-        // reproducing that failure forever.
+        // type-prefixed form. Treat such stale entries as unusable so they
+        // aren't resurrected as a fallback once the live fetch has failed.
         if (cached != null && cached.containsKey('spksMsg')) {
           return _bundleFromJson(jid, id, cached);
         }
-        final fetched = await pep.fetchLegacyBundle(jid, id);
-        if (fetched != null) {
-          await storage.storeOmemoBundle(jid, id, await _bundleToJson(fetched));
-        }
-        return fetched;
+        return null;
       },
       (jid) async => pep.subscribeToLegacyDeviceList(jid),
       (ownDevice) async => pep.publishLegacyBundle(await ownDevice.toBundle()),

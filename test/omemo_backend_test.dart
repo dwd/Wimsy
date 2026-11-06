@@ -212,6 +212,64 @@ void main() {
   );
 
   test(
+    'OmemoBackend: bundle fetch always consults PEP live instead of '
+    'getting stuck on a stale/broken cached bundle forever',
+    () async {
+      // Regression test: previously, fetchDeviceBundleImpl preferred a
+      // cached `storage.loadOmemoBundle(jid, id)` (when it carried the
+      // 'spksMsg' field) over a live PEP fetch. Since `OmemoManager` only
+      // calls that callback once per (jid, device) for the lifetime of
+      // the process (it skips devices it already has a ratchet for), a
+      // stale/broken bundle cached from an earlier session was never
+      // refreshed -- no bundle-fetch IQ was ever sent for that device
+      // again -- matching the observed symptom of Wimsy publishing its
+      // own bundle but never fetching a contact's.
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+      final bobDeviceId = await bobBackend.ownDeviceId();
+
+      // Simulate a stale/broken cached bundle for Bob's device: it has
+      // the 'spksMsg' field (so it would normally be treated as usable),
+      // but garbage key material that cannot possibly produce a valid
+      // session.
+      aliceStorage.bundles['$bobJid:$bobDeviceId'] = {
+        'jid': bobJid,
+        'id': bobDeviceId,
+        'ik': base64Encode(List<int>.filled(32, 0)),
+        'spk': base64Encode(List<int>.filled(32, 0)),
+        'spkId': 1,
+        'spks': base64Encode(List<int>.filled(64, 0)),
+        'spksMsg': base64Encode(List<int>.filled(33, 0)),
+        'opks': {'1': base64Encode(List<int>.filled(32, 0))},
+      };
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+
+      // Bob now publishes his real device/bundle via PEP.
+      await bobBackend.publishIdentity();
+
+      // Despite the stale/broken cached bundle, Alice must perform a live
+      // fetch and use Bob's real, current bundle to successfully encrypt.
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello from alice',
+      );
+      expect(payload.element.getChild('header'), isNotNull);
+    },
+  );
+
+  test(
     'OmemoBackend: session establishment and encrypt/decrypt round-trip',
     () async {
       final network = FakeOmemoNetwork();

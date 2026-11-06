@@ -153,15 +153,24 @@ class Omemo2Backend implements EncryptionBackend {
         return await pep.fetchDeviceList(jid) ?? storage.loadOmemo2DeviceList(jid);
       },
       (jid, id) async {
+        // Like fetchDeviceListImpl above, always try a live PEP fetch
+        // first rather than preferring whatever is cached in Hive; see
+        // the identical comment in `OmemoBackend.create` for why --
+        // `OmemoManager` only calls this once per (jid, device) for the
+        // process's lifetime, so a stale cached bundle would otherwise
+        // never be refreshed without an app restart, and no bundle-fetch
+        // IQ would ever be sent for that device again. Fall back to the
+        // cache only if the live fetch itself fails (e.g. we're offline).
+        final fetched = await pep.fetchBundle(jid, id);
+        if (fetched != null) {
+          await storage.storeOmemo2Bundle(jid, id, await _bundleToJson(fetched));
+          return fetched;
+        }
         final cached = storage.loadOmemo2Bundle(jid, id);
         if (cached != null) {
           return _bundleFromJson(jid, id, cached);
         }
-        final fetched = await pep.fetchBundle(jid, id);
-        if (fetched != null) {
-          await storage.storeOmemo2Bundle(jid, id, await _bundleToJson(fetched));
-        }
-        return fetched;
+        return null;
       },
       (jid) async => pep.subscribeToDeviceList(jid),
       (ownDevice) async => pep.publishBundle(await ownDevice.toBundle()),
