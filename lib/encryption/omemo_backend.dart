@@ -515,8 +515,19 @@ class OmemoBackend implements EncryptionBackend {
   Future<void> publishIdentity() async {
     final device = await _omemoManager.getDevice();
     await pep.publishLegacyBundle(await _legacyBundleFromDevice(device));
-    final knownDevices = storage.loadOmemoDeviceList(selfBareJid) ?? [];
-    final deviceIds = {...knownDevices, device.id}.toList();
+    // Wimsy only ever runs a single legacy-OMEMO device per account (no
+    // multi-install/multi-device support), so our own published
+    // device-list must contain *only* our current device id, never a
+    // union with whatever was previously cached. Merging with
+    // `storage.loadOmemoDeviceList` here used to leave a now-dead,
+    // pre-migration device id (e.g. from the Ed25519->X25519 identity
+    // migration, which regenerates a brand-new device id) permanently
+    // listed alongside the real one -- a contact's client (e.g.
+    // Conversations) could then keep targeting/displaying that stale,
+    // unusable device forever, producing `NotEncryptedForDeviceError` on
+    // our end and a fingerprint/device mismatch on theirs, since we never
+    // actually drop the old id from what we publish about ourselves.
+    final deviceIds = [device.id];
     await storage.storeOmemoDeviceList(selfBareJid, deviceIds);
     await pep.publishLegacyDeviceList(deviceIds);
   }

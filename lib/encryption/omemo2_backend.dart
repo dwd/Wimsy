@@ -315,8 +315,12 @@ class Omemo2Backend implements EncryptionBackend {
   Future<void> publishIdentity() async {
     final device = await _omemoManager.getDevice();
     await pep.publishBundle(await device.toBundle());
-    final knownDevices = storage.loadOmemo2DeviceList(selfBareJid) ?? [];
-    final deviceIds = {...knownDevices, device.id}.toList();
+    // Wimsy only ever runs a single OMEMO2 device per account (no
+    // multi-install/multi-device support), so our own published
+    // device-list must contain *only* our current device id, never a
+    // union with whatever was previously cached -- see the identical fix
+    // (and its rationale) in `OmemoBackend.publishIdentity`.
+    final deviceIds = [device.id];
     await storage.storeOmemo2DeviceList(selfBareJid, deviceIds);
     await pep.publishDeviceList(deviceIds);
   }

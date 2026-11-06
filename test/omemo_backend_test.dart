@@ -965,6 +965,45 @@ void main() {
   );
 
   test(
+    'OmemoBackend.publishIdentity: never republishes a stale/dead own '
+    'device id alongside the current one',
+    () async {
+      // Regression test for a real-world interop failure: Wimsy only ever
+      // runs a single legacy-OMEMO device per account, but
+      // `publishIdentity()` used to union the current device id with
+      // whatever was already cached in `storage.loadOmemoDeviceList`.
+      // When our own identity is regenerated (e.g. the Ed25519->X25519
+      // migration above, which creates a brand-new random device id), the
+      // old, now-unusable device id stayed in our own published
+      // device-list forever. A contact (e.g. Conversations) could then
+      // keep targeting/displaying that stale device -- producing
+      // `NotEncryptedForDeviceError` on our end and a fingerprint/device
+      // mismatch on theirs -- since we never actually stop advertising
+      // it.
+      final network = FakeOmemoNetwork();
+      final storage = FakeStorageService();
+
+      // Simulate a dead device id left over from a previous identity
+      // (e.g. pre-migration), already published/cached for ourselves.
+      const staleDeviceId = 123456789;
+      storage.deviceLists[aliceJid] = [staleDeviceId];
+
+      final backend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: storage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      await backend.publishIdentity();
+
+      final currentDeviceId = await backend.ownDeviceId();
+      expect(currentDeviceId, isNot(staleDeviceId));
+
+      expect(storage.deviceLists[aliceJid], [currentDeviceId]);
+      expect(network.deviceLists[aliceJid], [currentDeviceId]);
+    },
+  );
+
+  test(
     'x3dhFromBundle: verifies the SPK signature against the libsignal '
     'type-byte-prefixed bytes when OmemoBundle.spkSignatureMessageEncoded '
     'is set, matching how real legacy-OMEMO clients (Conversations/Gajim/'
