@@ -107,6 +107,12 @@ class StorageService {
   // EncryptionManager (lib/encryption/encryption_manager.dart): per-JID
   // selected E2EE protocol id for 1:1 conversations (e.g. 'omemo2').
   static const _encryptionProtocolPrefix = 'encproto:';
+  // TrustStore (lib/encryption/trust_store.dart): generic, protocol-agnostic
+  // trust decisions shared by every EncryptionBackend, keyed by
+  // 'bareJid:deviceOrKeyId'. Distinct from the OMEMO2-specific
+  // Blind-Trust-Before-Verification bookkeeping above, which drives
+  // omemo_dart's own session-enablement internals.
+  static const _trustStorePrefix = 'trust:';
 
   /// The maximum number of messages loaded or retained in the local cache per
   /// conversation.
@@ -1471,6 +1477,41 @@ class StorageService {
     await _deleteKeysWithPrefix('$_omemo2TrustPrefix$bareJid:');
   }
 
+  /// Persists the generic [TrustStore] trust-state value (the
+  /// `TrustState.name`, e.g. `'tofu'`/`'verified'`) for the device/key
+  /// [deviceOrKeyId] belonging to [bareJid]. Shared by every
+  /// [EncryptionBackend] (see `lib/encryption/trust_store.dart`), unlike
+  /// the OMEMO2-specific BTBV bookkeeping above.
+  Future<void> storeTrustState(
+    String bareJid,
+    String deviceOrKeyId,
+    String stateName,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty || deviceOrKeyId.isEmpty) {
+      return;
+    }
+    await box.put('$_trustStorePrefix$bareJid:$deviceOrKeyId', stateName);
+    _afterHotWrite();
+  }
+
+  /// Loads the persisted generic [TrustStore] trust-state value for
+  /// [bareJid]/[deviceOrKeyId], or `null` if none has been recorded yet.
+  String? loadTrustState(String bareJid, String deviceOrKeyId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_trustStorePrefix$bareJid:$deviceOrKeyId');
+    return data is String && data.isNotEmpty ? data : null;
+  }
+
+  /// Removes every persisted generic [TrustStore] trust-state value for
+  /// [bareJid] (e.g. "forget contact" flows).
+  Future<void> removeTrustStatesForJid(String bareJid) async {
+    await _deleteKeysWithPrefix('$_trustStorePrefix$bareJid:');
+  }
+
   /// Persists the selected end-to-end-encryption protocol id (e.g.
   /// `'omemo2'`, or `null`/absent for "none") for a 1:1 conversation with
   /// [bareJid]. See `lib/encryption/encryption_manager.dart`.
@@ -1514,6 +1555,7 @@ class StorageService {
     await _deleteKeysWithPrefix('$_omemo2RatchetPrefix$bareJid:');
     await _deleteKeysWithPrefix('$_omemo2BundlePrefix$bareJid:');
     await _deleteKeysWithPrefix('$_omemo2TrustPrefix$bareJid:');
+    await _deleteKeysWithPrefix('$_trustStorePrefix$bareJid:');
     await box.delete('$_omemo2DeviceListPrefix$bareJid');
   }
 

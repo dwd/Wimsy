@@ -7,6 +7,7 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import '../storage/storage_service.dart';
 import 'encryption_backend.dart';
 import 'omemo2_serialization.dart';
+import 'trust_store.dart';
 
 /// The `urn:xmpp:omemo:2` namespace, mirrored from
 /// `lib/xmpp/omemo_pep.dart` (kept as a local constant here to avoid this
@@ -24,6 +25,24 @@ abstract class Omemo2PepTransport {
   Future<OmemoBundle?> fetchBundle(String bareJid, int deviceId);
 }
 
+/// A single OMEMO2 device belonging to a contact, as surfaced to the
+/// fingerprint verification UI (see
+/// `lib/widgets/fingerprint_verification_screen.dart`): its device id, the
+/// human-readable hex fingerprint of its identity public key (`null` if
+/// the device's bundle hasn't been fetched/cached yet), and its current
+/// [TrustState].
+class Omemo2DeviceFingerprint {
+  Omemo2DeviceFingerprint({
+    required this.deviceId,
+    required this.fingerprint,
+    required this.trust,
+  });
+
+  final int deviceId;
+  final String? fingerprint;
+  final TrustState trust;
+}
+
 /// `urn:xmpp:omemo:2` (XEP-0384 "OMEMO2") [EncryptionBackend], wrapping
 /// `omemo_dart`'s [OmemoManager] (X3DH + Double Ratchet session
 /// management) and persisting its state via [StorageService] (Hive for
@@ -37,6 +56,7 @@ class Omemo2Backend implements EncryptionBackend {
     this.pep,
     this._omemoManager,
     this._trustManager,
+    this.trustStore,
   );
 
   @override
@@ -45,6 +65,15 @@ class Omemo2Backend implements EncryptionBackend {
   final String selfBareJid;
   final StorageService storage;
   final Omemo2PepTransport pep;
+
+  /// Generic, protocol-agnostic trust store (see
+  /// `lib/encryption/trust_store.dart`) that backs this backend's public
+  /// [trustStateFor]/[setTrust]. The internal [_trustManager] below is
+  /// kept purely for `omemo_dart`'s own session-enablement mechanics
+  /// (whether to encrypt for a given device), and is bridged to
+  /// [trustStore] via its `commit` callback so both stay in sync, e.g.
+  /// when `omemo_dart` auto-blind-trusts a freshly seen device.
+  final TrustStore trustStore;
 
   final OmemoManager _omemoManager;
   final BlindTrustBeforeVerificationTrustManager _trustManager;
@@ -55,8 +84,10 @@ class Omemo2Backend implements EncryptionBackend {
     required String selfBareJid,
     required StorageService storage,
     required Omemo2PepTransport pep,
+    TrustStore? trustStore,
   }) async {
     final device = await _loadOrGenerateDevice(selfBareJid, storage);
+    final sharedTrustStore = trustStore ?? TrustStore(storage);
 
     late final BlindTrustBeforeVerificationTrustManager trustManager;
     trustManager = BlindTrustBeforeVerificationTrustManager(
@@ -78,6 +109,15 @@ class Omemo2Backend implements EncryptionBackend {
           'state': data.state.value,
           'enabled': data.enabled,
         });
+        // Mirror into the shared TrustStore so UI-facing trust state (e.g.
+        // the fingerprint verification screen) reflects decisions made
+        // internally by omemo_dart (such as auto-blind-trusting a newly
+        // seen device), not just ones made through [setTrust].
+        await sharedTrustStore.setTrust(
+          data.jid,
+          '${data.device}',
+          _btbvToTrustState(data.state),
+        );
       },
       removeTrust: (jid) async {
         await storage.removeOmemo2TrustForJid(jid);
@@ -153,7 +193,22 @@ class Omemo2Backend implements EncryptionBackend {
       pep,
       omemoManager,
       trustManager,
+      sharedTrustStore,
     );
+  }
+
+  /// Maps `omemo_dart`'s internal [BTBVTrustState] to the generic
+  /// [TrustState] used by [TrustStore], for bridging BTBV's `commit`
+  /// callback into the shared trust store.
+  static TrustState _btbvToTrustState(BTBVTrustState state) {
+    switch (state) {
+      case BTBVTrustState.verified:
+        return TrustState.verified;
+      case BTBVTrustState.blindTrust:
+        return TrustState.tofu;
+      case BTBVTrustState.notTrusted:
+        return TrustState.untrusted;
+    }
   }
 
   static Future<OmemoDevice> _loadOrGenerateDevice(
@@ -359,36 +414,77 @@ class Omemo2Backend implements EncryptionBackend {
     }
   }
 
+  /// Returns the known OMEMO2 device ids for [bareJid] that have an entry
+  /// in the internal BTBV trust manager (i.e. a session has been
+  /// established at least once), used to discover which devices to
+  /// aggregate over in [trustStateFor] when no specific [deviceOrKeyId]
+  /// is given, and by the fingerprint verification UI.
+  Future<List<int>> knownDeviceIdsFor(String bareJid) async {
+    final devicesTrust = await _trustManager.getDevicesTrust(bareJid);
+    return devicesTrust.keys.toList();
+  }
+
+  /// Returns the human-readable hex fingerprint
+  /// (https://xmpp.org/extensions/xep-0384.html#security § 2) of our own
+  /// current device's identity key, for display (e.g. as a QR code) so a
+  /// contact can visually compare it against what their client shows for
+  /// us.
+  Future<String> ownFingerprint() async {
+    final device = await _omemoManager.getDevice();
+    return (await device.toBundle()).getFingerprint();
+  }
+
+  /// Returns every known OMEMO2 device of [bareJid] (that a session has
+  /// been established with at least once) together with its fingerprint
+  /// (when the device's bundle is cached) and current [TrustState], for
+  /// the fingerprint verification screen.
+  Future<List<Omemo2DeviceFingerprint>> deviceFingerprintsFor(
+    String bareJid,
+  ) async {
+    final deviceIds = await knownDeviceIdsFor(bareJid);
+    final result = <Omemo2DeviceFingerprint>[];
+    for (final deviceId in deviceIds) {
+      final cachedBundle = storage.loadOmemo2Bundle(bareJid, deviceId);
+      String? fingerprint;
+      if (cachedBundle != null) {
+        fingerprint = await _bundleFromJson(
+          bareJid,
+          deviceId,
+          cachedBundle,
+        ).getFingerprint();
+      }
+      final trust = await trustStateFor(bareJid, deviceOrKeyId: '$deviceId');
+      result.add(
+        Omemo2DeviceFingerprint(
+          deviceId: deviceId,
+          fingerprint: fingerprint,
+          trust: trust,
+        ),
+      );
+    }
+    return result;
+  }
+
   @override
   Future<TrustState> trustStateFor(
     String bareJid, {
     String? deviceOrKeyId,
   }) async {
-    final deviceId = deviceOrKeyId == null ? null : int.tryParse(deviceOrKeyId);
-    final devicesTrust = await _trustManager.getDevicesTrust(bareJid);
-    if (deviceId == null) {
-      if (devicesTrust.isEmpty) {
-        return TrustState.untrusted;
-      }
-      if (devicesTrust.values.any(
-        (data) => data.state == BTBVTrustState.verified,
-      )) {
-        return TrustState.verified;
-      }
-      return TrustState.tofu;
+    if (deviceOrKeyId != null) {
+      return trustStore.trustStateFor(bareJid, deviceOrKeyId);
     }
-    final data = devicesTrust[deviceId];
-    if (data == null) {
+    final deviceIds = await knownDeviceIdsFor(bareJid);
+    if (deviceIds.isEmpty) {
       return TrustState.untrusted;
     }
-    switch (data.state) {
-      case BTBVTrustState.verified:
-        return TrustState.verified;
-      case BTBVTrustState.blindTrust:
-        return TrustState.tofu;
-      case BTBVTrustState.notTrusted:
-        return TrustState.untrusted;
+    final states = [
+      for (final deviceId in deviceIds)
+        await trustStore.trustStateFor(bareJid, '$deviceId'),
+    ];
+    if (states.any((state) => state == TrustState.verified)) {
+      return TrustState.verified;
     }
+    return TrustState.tofu;
   }
 
   @override
@@ -408,5 +504,13 @@ class Omemo2Backend implements EncryptionBackend {
     if (state == TrustState.revoked) {
       await _trustManager.setEnabled(bareJid, deviceId, false);
     }
+    // A revoked device is surfaced to the UI/TrustStore as simply
+    // untrusted (mirroring the BTBV mapping above); [TrustState.revoked]
+    // itself is not a state TrustStore needs to distinguish from
+    // [TrustState.untrusted] for OMEMO2's purposes.
+    final storedState = state == TrustState.revoked
+        ? TrustState.untrusted
+        : state;
+    await trustStore.setTrust(bareJid, deviceOrKeyId, storedState);
   }
 }
