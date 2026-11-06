@@ -46,6 +46,7 @@ import 'utils/display_layout.dart';
 import 'utils/physical_display_size.dart';
 import 'utils/xep0392_color.dart';
 import 'widgets/avatar_with_presence.dart';
+import 'widgets/encryption_selector.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -1974,6 +1975,17 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                 : null,
                             icon: Icon(Icons.videocam, color: callIconColor),
                             tooltip: 'Start video call',
+                          ),
+                          EncryptionSelector(
+                            selected: service.encryptionProtocolFor(
+                              activeChat,
+                            ),
+                            onSelected: (protocol) {
+                              service.setEncryptionProtocolFor(
+                                activeChat,
+                                protocol,
+                              );
+                            },
                           ),
                         ],
                       );
@@ -5990,6 +6002,15 @@ class MessageBubble extends StatelessWidget {
                   ],
                   if (message.callSid != null)
                     const SizedBox.shrink()
+                  else if (message.encryptionError != null)
+                    SelectableText(
+                      'Undecryptable message '
+                      '(${message.encryptionError})',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: textColor,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
                   else if (_meCommandAction(message.body) != null)
                     SelectableText(
                       _formatMeCommand(
