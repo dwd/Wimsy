@@ -123,6 +123,16 @@ class StorageService {
   static const _omemoRatchetPrefix = 'omemork:';
   static const _omemoTrustPrefix = 'omemotrust:';
   static const _omemoIdentitySecureKeyPrefix = 'omemo_identity:';
+  // OX (urn:xmpp:openpgp:0, XEP-0373/XEP-0374, see
+  // lib/encryption/ox_backend.dart): secure-store key prefix for a local
+  // account's OpenPGP private key material. Never stored in the
+  // (unencrypted-at-rest) Hive box.
+  static const _oxIdentitySecureKeyPrefix = 'ox_identity:';
+  // OX: cached peer public keys (armored), keyed by 'bareJid:fingerprint'.
+  static const _oxPublicKeyPrefix = 'oxpubkey:';
+  // OX: cached list of known OpenPGP key fingerprints per contact, keyed by
+  // bare JID, mirroring the OMEMO2 per-contact device list.
+  static const _oxFingerprintListPrefix = 'oxfp:';
 
   /// The maximum number of messages loaded or retained in the local cache per
   /// conversation.
@@ -1343,6 +1353,89 @@ class StorageService {
       return;
     }
     await _secureStorage.delete(key: '$_omemo2IdentitySecureKeyPrefix$bareJid');
+  }
+
+  // -------------------------------------------------------------------
+  // OX (urn:xmpp:openpgp:0, see lib/encryption/ox_backend.dart) storage.
+  //
+  // Mirrors the OMEMO2 split above: the local OpenPGP private key goes
+  // through [SecureStore], while cached peer public keys/fingerprint
+  // lists live in the Hive box.
+  // -------------------------------------------------------------------
+
+  /// Stores the armored local OX (OpenPGP) private key for [bareJid] in the
+  /// platform secure store.
+  Future<void> storeOxIdentity(String bareJid, String armoredPrivateKey) async {
+    if (bareJid.isEmpty) {
+      return;
+    }
+    await _secureStorage.write(
+      key: '$_oxIdentitySecureKeyPrefix$bareJid',
+      value: armoredPrivateKey,
+    );
+  }
+
+  /// Loads the armored local OX private key for [bareJid], or `null` if
+  /// none has been generated/imported yet.
+  Future<String?> loadOxIdentity(String bareJid) async {
+    if (bareJid.isEmpty) {
+      return null;
+    }
+    final raw = await _secureStorage.read(key: '$_oxIdentitySecureKeyPrefix$bareJid');
+    return (raw == null || raw.isEmpty) ? null : raw;
+  }
+
+  /// Deletes the local OX identity for [bareJid] (e.g. "forget account"
+  /// flows).
+  Future<void> removeOxIdentity(String bareJid) async {
+    if (bareJid.isEmpty) {
+      return;
+    }
+    await _secureStorage.delete(key: '$_oxIdentitySecureKeyPrefix$bareJid');
+  }
+
+  /// Caches a peer's armored OX public key so it does not need to be
+  /// re-fetched via PEP on every encryption attempt.
+  Future<void> storeOxPublicKey(
+    String bareJid,
+    String fingerprint,
+    String armoredPublicKey,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_oxPublicKeyPrefix$bareJid:$fingerprint', armoredPublicKey);
+    final known = loadOxFingerprintList(bareJid) ?? [];
+    if (!known.contains(fingerprint)) {
+      await box.put('$_oxFingerprintListPrefix$bareJid', [...known, fingerprint]);
+    }
+    _afterHotWrite();
+  }
+
+  /// Loads a peer's cached armored OX public key for [fingerprint], or
+  /// `null` if not cached.
+  String? loadOxPublicKey(String bareJid, String fingerprint) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_oxPublicKeyPrefix$bareJid:$fingerprint');
+    return data is String ? data : null;
+  }
+
+  /// Loads the list of known OX key fingerprints cached for [bareJid], or
+  /// `null` if none are cached.
+  List<String>? loadOxFingerprintList(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_oxFingerprintListPrefix$bareJid');
+    if (data is List) {
+      return data.map((e) => e.toString()).toList();
+    }
+    return null;
   }
 
   /// Persists the known OMEMO2 device list for [bareJid].
