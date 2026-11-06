@@ -22,6 +22,7 @@ import '../bookmarks/bookmarks_manager.dart';
 import '../encryption/encryption_backend.dart';
 import '../encryption/encryption_manager.dart';
 import '../encryption/omemo2_backend.dart' show Omemo2DeviceFingerprint;
+import '../encryption/ox_backend.dart' show OxKeyFingerprint;
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/fast_token_record.dart';
@@ -8834,6 +8835,38 @@ class XmppService extends ChangeNotifier {
       return;
     }
     await manager.setOmemo2DeviceTrust(_bareJid(bareJid), deviceId, state);
+    notifyListeners();
+  }
+
+  /// Every known OX key fingerprint (and its trust state) of [bareJid].
+  /// See `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<List<OxKeyFingerprint>> oxFingerprintsFor(String bareJid) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return const [];
+    }
+    return manager.oxFingerprintsFor(_bareJid(bareJid));
+  }
+
+  /// Our own OX key's fingerprint, for display in the fingerprint
+  /// verification screen. Returns `null` before a connection has been
+  /// established.
+  Future<String?> oxOwnFingerprint() async {
+    return _encryptionManager?.oxOwnFingerprint();
+  }
+
+  /// Marks [fingerprint] of [bareJid] as [state] (e.g. [TrustState.verified]
+  /// after the user confirms an OX fingerprint match).
+  Future<void> setOxKeyTrust(
+    String bareJid,
+    String fingerprint,
+    TrustState state,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.setOxKeyTrust(_bareJid(bareJid), fingerprint, state);
     notifyListeners();
   }
 
