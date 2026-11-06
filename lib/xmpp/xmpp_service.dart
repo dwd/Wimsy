@@ -21,6 +21,7 @@ import '../models/room_occupant.dart';
 import '../bookmarks/bookmarks_manager.dart';
 import '../encryption/encryption_backend.dart';
 import '../encryption/encryption_manager.dart';
+import '../encryption/omemo2_backend.dart' show Omemo2DeviceFingerprint;
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/fast_token_record.dart';
@@ -8793,6 +8794,47 @@ class XmppService extends ChangeNotifier {
       return;
     }
     await manager.setProtocolFor(_bareJid(bareJid), protocol);
+  }
+
+  /// Aggregate trust state for the 1:1 conversation with [bareJid]'s
+  /// currently selected encryption protocol (e.g. for a chat-header trust
+  /// indicator), or `null` when encryption is off for that conversation.
+  Future<TrustState?> encryptionTrustSummaryFor(String bareJid) async {
+    return _encryptionManager?.trustSummaryFor(_bareJid(bareJid));
+  }
+
+  /// Every known OMEMO2 device (and its fingerprint/trust state) of
+  /// [bareJid]. See `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<List<Omemo2DeviceFingerprint>> omemo2FingerprintsFor(
+    String bareJid,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return const [];
+    }
+    return manager.omemo2FingerprintsFor(_bareJid(bareJid));
+  }
+
+  /// Our own OMEMO2 device's fingerprint, for display as a QR code in the
+  /// fingerprint verification screen. Returns `null` before a connection
+  /// has been established.
+  Future<String?> omemo2OwnFingerprint() async {
+    return _encryptionManager?.omemo2OwnFingerprint();
+  }
+
+  /// Marks [deviceId] of [bareJid] as [state] (e.g. [TrustState.verified]
+  /// after the user confirms a fingerprint match).
+  Future<void> setOmemo2DeviceTrust(
+    String bareJid,
+    int deviceId,
+    TrustState state,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.setOmemo2DeviceTrust(_bareJid(bareJid), deviceId, state);
+    notifyListeners();
   }
 
   void _setupPep() {

@@ -45,8 +45,11 @@ import 'utils/graph_statistics.dart';
 import 'utils/display_layout.dart';
 import 'utils/physical_display_size.dart';
 import 'utils/xep0392_color.dart';
+import 'encryption/encryption_backend.dart';
+import 'encryption/encryption_manager.dart';
 import 'widgets/avatar_with_presence.dart';
 import 'widgets/encryption_selector.dart';
+import 'widgets/fingerprint_verification_screen.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -1987,6 +1990,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                               );
                             },
                           ),
+                          if (service.encryptionProtocolFor(activeChat) !=
+                              EncryptionProtocol.none)
+                            _TrustIndicator(
+                              service: service,
+                              peerBareJid: activeChat,
+                            ),
                         ],
                       );
                     },
@@ -6769,6 +6778,76 @@ class MessageBubble extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// A small padlock/trust indicator shown in the chat header next to
+/// [EncryptionSelector] once encryption is turned on for a conversation,
+/// reflecting the aggregate [TrustState] of [peerBareJid]'s known OMEMO2
+/// devices (e.g. all verified vs. some still unverified/trust-on-first-use).
+/// Tapping it opens [FingerprintVerificationScreen] so the user can review
+/// and verify fingerprints.
+class _TrustIndicator extends StatefulWidget {
+  const _TrustIndicator({required this.service, required this.peerBareJid});
+
+  final XmppService service;
+  final String peerBareJid;
+
+  @override
+  State<_TrustIndicator> createState() => _TrustIndicatorState();
+}
+
+class _TrustIndicatorState extends State<_TrustIndicator> {
+  TrustState? _trust;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TrustIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.peerBareJid != widget.peerBareJid) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final trust = await widget.service.encryptionTrustSummaryFor(
+      widget.peerBareJid,
+    );
+    if (mounted) {
+      setState(() => _trust = trust);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final trust = _trust;
+    final verified = trust == TrustState.verified;
+    return IconButton(
+      key: const Key('trust-indicator'),
+      tooltip: verified
+          ? 'All known devices verified. Tap to review fingerprints.'
+          : 'Some devices unverified. Tap to verify fingerprints.',
+      icon: Icon(
+        verified ? Icons.verified_user : Icons.gpp_maybe,
+        color: verified ? Colors.green : Colors.orange,
+      ),
+      onPressed: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => FingerprintVerificationScreen(
+              service: widget.service,
+              peerBareJid: widget.peerBareJid,
+            ),
+          ),
+        );
+        _load();
+      },
     );
   }
 }

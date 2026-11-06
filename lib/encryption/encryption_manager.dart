@@ -197,4 +197,47 @@ class EncryptionManager {
     }
     return null;
   }
+
+  /// Aggregate trust state for the currently selected protocol's backend
+  /// for [bareJid] (e.g. for a chat-header trust indicator), or `null`
+  /// when encryption is off for that conversation. See
+  /// `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<TrustState?> trustSummaryFor(String bareJid) async {
+    final backend = await backendFor(protocolFor(bareJid));
+    if (backend == null) {
+      return null;
+    }
+    return backend.trustStateFor(bareJid);
+  }
+
+  /// Every known OMEMO2 device (and its fingerprint/trust state) of
+  /// [bareJid], for the fingerprint verification screen. Always uses the
+  /// OMEMO2 backend regardless of the currently selected protocol, since
+  /// the user may want to verify fingerprints before turning encryption
+  /// on for a conversation.
+  Future<List<Omemo2DeviceFingerprint>> omemo2FingerprintsFor(
+    String bareJid,
+  ) async {
+    final backend = await _omemo2Backend();
+    return backend.deviceFingerprintsFor(bareJid);
+  }
+
+  /// Our own OMEMO2 device's fingerprint, for display (e.g. as a QR code)
+  /// so a contact can visually compare it against their own view of us.
+  Future<String> omemo2OwnFingerprint() async {
+    final backend = await _omemo2Backend();
+    return backend.ownFingerprint();
+  }
+
+  /// Marks [deviceId] of [bareJid] as [TrustState.verified] via the OMEMO2
+  /// backend, e.g. after the user confirms a fingerprint match. See
+  /// `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<void> setOmemo2DeviceTrust(
+    String bareJid,
+    int deviceId,
+    TrustState state,
+  ) async {
+    final backend = await _omemo2Backend();
+    await backend.setTrust(bareJid, '$deviceId', state);
+  }
 }
