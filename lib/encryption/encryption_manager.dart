@@ -1,19 +1,19 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../storage/storage_service.dart';
-import '../xmpp/omemo_pep.dart' hide omemo2Namespace;
+import '../xmpp/omemo_pep.dart' hide omemo2Namespace, legacyOmemoNamespace;
 import 'encryption_backend.dart';
 import 'omemo2_backend.dart';
+import 'omemo_backend.dart';
 
 typedef EncryptionUpdateCallback = void Function();
 
 /// Identifies which end-to-end-encryption protocol (if any) is selected
 /// for a given 1:1 conversation.
 ///
-/// Only [none] and [omemo2] are implemented so far (Step 2 of the E2EE
-/// plan). [legacyOmemo] and [ox] are reserved here so a later step can
-/// introduce them without requiring call sites that already switch over
-/// this enum to be revisited/broken.
+/// [none], [omemo2], and [legacyOmemo] are implemented. [ox] is reserved
+/// here so a later step can introduce it without requiring call sites that
+/// already switch over this enum to be revisited/broken.
 enum EncryptionProtocol {
   /// No end-to-end encryption; messages are sent/received in plaintext.
   none,
@@ -21,8 +21,9 @@ enum EncryptionProtocol {
   /// `urn:xmpp:omemo:2` (XEP-0384 "OMEMO2").
   omemo2,
 
-  /// Legacy OMEMO (`eu.siacs.conversations.axolotl`). Not yet implemented;
-  /// reserved for a later plan step.
+  /// Legacy OMEMO (`eu.siacs.conversations.axolotl`, XEP-0384 v0.3.0), for
+  /// interop with legacy-OMEMO-only clients (e.g. Conversations, Gajim,
+  /// Dino). Dispatches to [OmemoBackend].
   legacyOmemo,
 
   /// OpenPGP for XMPP (XEP-0373/XEP-0374, "OX"). Not yet implemented;
@@ -87,6 +88,7 @@ class EncryptionManager {
 
   OmemoPep? _omemoPep;
   Future<Omemo2Backend>? _omemo2BackendFuture;
+  Future<OmemoBackend>? _legacyOmemoBackendFuture;
 
   /// Returns the currently selected [EncryptionProtocol] for [bareJid],
   /// loading it from persisted storage on first access.
@@ -129,6 +131,7 @@ class EncryptionManager {
       case EncryptionProtocol.omemo2:
         return _omemo2Backend();
       case EncryptionProtocol.legacyOmemo:
+        return _legacyOmemoBackend();
       case EncryptionProtocol.ox:
         // Not yet implemented (later plan steps).
         return null;
@@ -148,6 +151,23 @@ class EncryptionManager {
         pep: pep,
       );
       _backendsByProtocolId['omemo2'] = backend;
+      return backend;
+    }();
+  }
+
+  Future<OmemoBackend> _legacyOmemoBackend() {
+    final cached = _backendsByProtocolId['omemo'];
+    if (cached is OmemoBackend) {
+      return Future.value(cached);
+    }
+    return _legacyOmemoBackendFuture ??= () async {
+      final pep = _omemoPep ??= OmemoPep(connection);
+      final backend = await OmemoBackend.create(
+        selfBareJid: selfBareJid,
+        storage: storage,
+        pep: pep,
+      );
+      _backendsByProtocolId['omemo'] = backend;
       return backend;
     }();
   }
@@ -193,6 +213,10 @@ class EncryptionManager {
     final xmlns = encrypted?.getAttribute('xmlns')?.value;
     if (xmlns == omemo2Namespace) {
       final backend = await _omemo2Backend();
+      return backend.decryptIncoming(stanza);
+    }
+    if (xmlns == legacyOmemoNamespace) {
+      final backend = await _legacyOmemoBackend();
       return backend.decryptIncoming(stanza);
     }
     return null;

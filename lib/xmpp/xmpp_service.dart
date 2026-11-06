@@ -10052,9 +10052,11 @@ class XmppService extends ChangeNotifier {
 
   /// Thin wrapper around [_addMessage] for the live/historical 1:1 chat
   /// message pipeline: if [stanza] carries a top-level `<encrypted/>` child
-  /// (currently only `urn:xmpp:omemo:2` is understood), attempts to decrypt
-  /// it via [_encryptionManager] before adding the message, so downstream
-  /// code always sees plaintext (or an `encryptionError` placeholder).
+  /// (`urn:xmpp:omemo:2` or legacy OMEMO's `eu.siacs.conversations.axolotl`
+  /// are understood, see `EncryptionManager.decryptIncomingByNamespace`),
+  /// attempts to decrypt it via [_encryptionManager] before adding the
+  /// message, so downstream code always sees plaintext (or an
+  /// `encryptionError` placeholder).
   /// Plaintext/unencrypted stanzas are forwarded synchronously, unchanged.
   void _addIncomingDmMessage({
     required String bareJid,
