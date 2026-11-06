@@ -347,6 +347,50 @@ void main() {
   );
 
   test(
+    'Omemo2Backend.publishIdentity: adds our own device id without '
+    'removing any other device already published for this account',
+    () async {
+      // Regression test mirroring the identical fix in OmemoBackend (see
+      // `test/omemo_backend_test.dart`): publishing our own device-list
+      // must only *add* our device id if it's not already present, never
+      // drop other entries (XEP-0384 / XEP-0163 PEP semantics), since
+      // Wimsy isn't necessarily the only client active on this account.
+      final network = FakeOmemo2Network();
+      final storage = FakeStorageService();
+
+      const otherDeviceId = 123456789;
+      storage.deviceLists[aliceJid] = [otherDeviceId];
+      network.deviceLists[aliceJid] = [otherDeviceId];
+
+      final backend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: storage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      await backend.publishIdentity();
+
+      final currentDeviceId = await backend.ownDeviceId();
+      expect(currentDeviceId, isNot(otherDeviceId));
+
+      expect(
+        storage.deviceLists[aliceJid],
+        containsAll([otherDeviceId, currentDeviceId]),
+      );
+      expect(
+        network.deviceLists[aliceJid],
+        containsAll([otherDeviceId, currentDeviceId]),
+      );
+
+      // Publishing again must not duplicate our own id.
+      await backend.publishIdentity();
+      expect(
+        network.deviceLists[aliceJid]!.where((id) => id == currentDeviceId),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
     'Omemo2Backend: decryptIncoming reports an error for a non-OMEMO2 stanza',
     () async {
       final network = FakeOmemo2Network();

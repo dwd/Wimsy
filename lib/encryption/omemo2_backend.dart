@@ -315,12 +315,22 @@ class Omemo2Backend implements EncryptionBackend {
   Future<void> publishIdentity() async {
     final device = await _omemoManager.getDevice();
     await pep.publishBundle(await device.toBundle());
-    // Wimsy only ever runs a single OMEMO2 device per account (no
-    // multi-install/multi-device support), so our own published
-    // device-list must contain *only* our current device id, never a
-    // union with whatever was previously cached -- see the identical fix
-    // (and its rationale) in `OmemoBackend.publishIdentity`.
-    final deviceIds = [device.id];
+    // XEP-0384 (and XEP-0163 PEP semantics generally) require that
+    // publishing our own device-list only *adds* our device id if it's
+    // not already present -- it must never drop other entries, since
+    // Wimsy may not be the only client active on this account (other
+    // OMEMO2-capable clients/installs could be running concurrently). We
+    // fetch the live published list (falling back to the local cache if
+    // that fails, e.g. offline) and only append our own id when missing
+    // -- see the identical fix (and its rationale) in
+    // `OmemoBackend.publishIdentity`.
+    final existingDeviceIds =
+        await pep.fetchDeviceList(selfBareJid) ??
+        storage.loadOmemo2DeviceList(selfBareJid) ??
+        const <int>[];
+    final deviceIds = existingDeviceIds.contains(device.id)
+        ? existingDeviceIds
+        : [...existingDeviceIds, device.id];
     await storage.storeOmemo2DeviceList(selfBareJid, deviceIds);
     await pep.publishDeviceList(deviceIds);
   }

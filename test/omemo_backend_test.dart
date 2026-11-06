@@ -965,28 +965,26 @@ void main() {
   );
 
   test(
-    'OmemoBackend.publishIdentity: never republishes a stale/dead own '
-    'device id alongside the current one',
+    'OmemoBackend.publishIdentity: adds our own device id without '
+    'removing any other device already published for this account',
     () async {
-      // Regression test for a real-world interop failure: Wimsy only ever
-      // runs a single legacy-OMEMO device per account, but
-      // `publishIdentity()` used to union the current device id with
-      // whatever was already cached in `storage.loadOmemoDeviceList`.
-      // When our own identity is regenerated (e.g. the Ed25519->X25519
-      // migration above, which creates a brand-new random device id), the
-      // old, now-unusable device id stayed in our own published
-      // device-list forever. A contact (e.g. Conversations) could then
-      // keep targeting/displaying that stale device -- producing
-      // `NotEncryptedForDeviceError` on our end and a fingerprint/device
-      // mismatch on theirs -- since we never actually stop advertising
-      // it.
+      // Regression test for a real-world interop requirement (XEP-0384 /
+      // XEP-0163 PEP semantics): publishing our own device-list must only
+      // *add* our device id if it's not already present, never drop other
+      // entries. Wimsy isn't necessarily the only client active on this
+      // account -- other OMEMO-capable clients/installs may be running
+      // concurrently on the same JID -- so unconditionally replacing the
+      // list with just our own id would wrongly deregister those other,
+      // perfectly valid devices.
       final network = FakeOmemoNetwork();
       final storage = FakeStorageService();
 
-      // Simulate a dead device id left over from a previous identity
-      // (e.g. pre-migration), already published/cached for ourselves.
-      const staleDeviceId = 123456789;
-      storage.deviceLists[aliceJid] = [staleDeviceId];
+      // Simulate another device already published for this account (e.g.
+      // another client/install on the same JID), both in the live
+      // published list and the local cache.
+      const otherDeviceId = 123456789;
+      storage.deviceLists[aliceJid] = [otherDeviceId];
+      network.deviceLists[aliceJid] = [otherDeviceId];
 
       final backend = await OmemoBackend.create(
         selfBareJid: aliceJid,
@@ -996,10 +994,23 @@ void main() {
       await backend.publishIdentity();
 
       final currentDeviceId = await backend.ownDeviceId();
-      expect(currentDeviceId, isNot(staleDeviceId));
+      expect(currentDeviceId, isNot(otherDeviceId));
 
-      expect(storage.deviceLists[aliceJid], [currentDeviceId]);
-      expect(network.deviceLists[aliceJid], [currentDeviceId]);
+      expect(storage.deviceLists[aliceJid], containsAll([
+        otherDeviceId,
+        currentDeviceId,
+      ]));
+      expect(network.deviceLists[aliceJid], containsAll([
+        otherDeviceId,
+        currentDeviceId,
+      ]));
+
+      // Publishing again must not duplicate our own id.
+      await backend.publishIdentity();
+      expect(
+        network.deviceLists[aliceJid]!.where((id) => id == currentDeviceId),
+        hasLength(1),
+      );
     },
   );
 

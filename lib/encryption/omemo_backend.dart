@@ -515,19 +515,28 @@ class OmemoBackend implements EncryptionBackend {
   Future<void> publishIdentity() async {
     final device = await _omemoManager.getDevice();
     await pep.publishLegacyBundle(await _legacyBundleFromDevice(device));
-    // Wimsy only ever runs a single legacy-OMEMO device per account (no
-    // multi-install/multi-device support), so our own published
-    // device-list must contain *only* our current device id, never a
-    // union with whatever was previously cached. Merging with
-    // `storage.loadOmemoDeviceList` here used to leave a now-dead,
-    // pre-migration device id (e.g. from the Ed25519->X25519 identity
-    // migration, which regenerates a brand-new device id) permanently
-    // listed alongside the real one -- a contact's client (e.g.
-    // Conversations) could then keep targeting/displaying that stale,
-    // unusable device forever, producing `NotEncryptedForDeviceError` on
-    // our end and a fingerprint/device mismatch on theirs, since we never
-    // actually drop the old id from what we publish about ourselves.
-    final deviceIds = [device.id];
+    // XEP-0384 (and XEP-0163 PEP semantics generally) require that
+    // publishing our own device-list only *adds* our device id if it's
+    // not already present -- it must never drop other entries. Wimsy is
+    // not necessarily the only client active on this account (the user
+    // may run other OMEMO-capable clients concurrently on other
+    // installs/devices), so unconditionally replacing the list with just
+    // our own id would wrongly deregister those other, perfectly valid
+    // devices.
+    //
+    // We fetch the *live* published list (rather than trusting our local
+    // cache, which may be stale) so that a device id removed by a prior
+    // session's genuine cleanup/revocation isn't resurrected, while any
+    // device id we don't yet know about (ours or anyone else's) is left
+    // untouched. If the live fetch fails (e.g. offline, no PEP node yet),
+    // fall back to the local cache so we still publish something sane.
+    final existingDeviceIds =
+        await pep.fetchLegacyDeviceList(selfBareJid) ??
+        storage.loadOmemoDeviceList(selfBareJid) ??
+        const <int>[];
+    final deviceIds = existingDeviceIds.contains(device.id)
+        ? existingDeviceIds
+        : [...existingDeviceIds, device.id];
     await storage.storeOmemoDeviceList(selfBareJid, deviceIds);
     await pep.publishLegacyDeviceList(deviceIds);
   }
