@@ -652,6 +652,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.0"
+  hex:
+    dependency: transitive
+    description:
+      name: hex
+      sha256: "4e7cd54e4b59ba026432a6be2dd9d96e4c5205725194997193bf871703b82c4a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   hive:
     dependency: "direct main"
     description:
@@ -892,6 +900,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.0"
+  moxlib:
+    dependency: transitive
+    description:
+      name: moxlib
+      sha256: "2a76a632d23ea73906964cee4463352995e40199036162217ea323a6c3846e73"
+      url: "https://git.polynom.me/api/packages/Moxxy/pub/"
+    source: hosted
+    version: "0.2.0"
   msix:
     dependency: "direct dev"
     description:
@@ -916,6 +932,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "9.6.2"
+  omemo_dart:
+    dependency: "direct main"
+    description:
+      path: "vendor/omemo_dart"
+      relative: true
+    source: path
+    version: "0.6.0"
   package_config:
     dependency: transitive
     description:
@@ -1052,6 +1075,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.1.0"
+  pinenacl:
+    dependency: transitive
+    description:
+      name: pinenacl
+      sha256: "57e907beaacbc3c024a098910b6240758e899674de07d6949a67b52fd984cbdf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.0"
   platform:
     dependency: transitive
     description:
@@ -1092,6 +1123,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.1"
+  protobuf:
+    dependency: transitive
+    description:
+      name: protobuf
+      sha256: "68645b24e0716782e58948f8467fd42a880f255096a821f9e7d0ec625b00c84d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.0"
+  protoc_plugin:
+    dependency: transitive
+    description:
+      name: protoc_plugin
+      sha256: fb0554851c9eca30bd18405fbbfe81e39166d4a2f0e5b770606fd69da3da0b2f
+      url: "https://pub.dev"
+    source: hosted
+    version: "21.1.2"
   pub_semver:
     dependency: transitive
     description:
@@ -1406,10 +1453,10 @@ packages:
     dependency: transitive
     description:
       name: uuid
-      sha256: "9b129329f58692f6e6578329498a8fe9fbe98f090beb764ffbb8ee2eadd01dcd"
+      sha256: "648e103079f7c64a36dc7d39369cabb358d377078a051d6ae2ad3aa539519313"
       url: "https://pub.dev"
     source: hosted
-    version: "4.6.0"
+    version: "3.0.7"
   vector_math:
     dependency: transitive
     description:

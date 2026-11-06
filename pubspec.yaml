@@ -62,6 +62,12 @@ dependencies:
   qr_flutter: ^4.1.0
   flutter_quic:
     path: vendor/flutter_quic
+  # OMEMO2 (urn:xmpp:omemo:2) end-to-end encryption: X3DH key exchange and
+  # Double Ratchet session management. Vendored (not XMPP-library specific)
+  # because it isn't published on pub.dev; see vendor/omemo_dart/VENDORING.md
+  # for the vendored commit/version and provenance.
+  omemo_dart:
+    path: vendor/omemo_dart
   # XEP-0258: parses/renders security labels against a Security Policy
   # Information File (SPIF). Now pinned to a specific commit on its
   # public GitHub repository rather than a local path dependency.
