@@ -9,7 +9,11 @@ plugins {
 
 configure<ApplicationExtension> {
     namespace = "im.cridland.wimsy"
-    compileSdk = flutter.compileSdkVersion
+    // Flutter's own default compileSdkVersion (36) is lower than what some
+    // dependencies now require (e.g. androidx.core-ktx 1.19.0 needs API 37
+    // and Android Gradle Plugin 9.1.0+), so it is pinned explicitly here
+    // rather than deferring to flutter.compileSdkVersion.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
