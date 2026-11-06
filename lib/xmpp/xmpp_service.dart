@@ -8870,6 +8870,14 @@ class XmppService extends ChangeNotifier {
     return _encryptionManager?.omemo2OwnFingerprint();
   }
 
+  /// Our own OMEMO2 device id, paired with [omemo2OwnFingerprint] to build
+  /// a proper `xmpp:<jid>?omemo-sid-<id>=<fingerprint>` QR code that real
+  /// clients (e.g. Conversations) can actually scan. Returns `null` before
+  /// a connection has been established.
+  Future<int?> omemo2OwnDeviceId() async {
+    return _encryptionManager?.omemo2OwnDeviceId();
+  }
+
   /// Marks [deviceId] of [bareJid] as [state] (e.g. [TrustState.verified]
   /// after the user confirms a fingerprint match).
   Future<void> setOmemo2DeviceTrust(
@@ -8882,6 +8890,59 @@ class XmppService extends ChangeNotifier {
       return;
     }
     await manager.setOmemo2DeviceTrust(_bareJid(bareJid), deviceId, state);
+    notifyListeners();
+  }
+
+  /// Every known legacy-OMEMO (XEP-0384 v0.3.0,
+  /// `eu.siacs.conversations.axolotl`) device (and its fingerprint/trust
+  /// state) of [bareJid]. This is a *different* identity key from OMEMO2's
+  /// -- a contact speaking only legacy OMEMO (e.g. Conversations, Gajim,
+  /// Dino) must be verified against this fingerprint, not
+  /// [omemo2FingerprintsFor]'s. See
+  /// `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<List<Omemo2DeviceFingerprint>> legacyOmemoFingerprintsFor(
+    String bareJid,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return const [];
+    }
+    return manager.legacyOmemoFingerprintsFor(_bareJid(bareJid));
+  }
+
+  /// Our own legacy-OMEMO device's fingerprint, for display as a QR code
+  /// in the fingerprint verification screen. Distinct from
+  /// [omemo2OwnFingerprint]. Returns `null` before a connection has been
+  /// established.
+  Future<String?> legacyOmemoOwnFingerprint() async {
+    return _encryptionManager?.legacyOmemoOwnFingerprint();
+  }
+
+  /// Our own legacy-OMEMO device id, paired with
+  /// [legacyOmemoOwnFingerprint] to build a proper
+  /// `xmpp:<jid>?omemo-sid-<id>=<fingerprint>` QR code. Returns `null`
+  /// before a connection has been established.
+  Future<int?> legacyOmemoOwnDeviceId() async {
+    return _encryptionManager?.legacyOmemoOwnDeviceId();
+  }
+
+  /// Marks [deviceId] of [bareJid] as [state] via the legacy-OMEMO backend
+  /// (e.g. [TrustState.verified] after the user confirms a fingerprint
+  /// match).
+  Future<void> setLegacyOmemoDeviceTrust(
+    String bareJid,
+    int deviceId,
+    TrustState state,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.setLegacyOmemoDeviceTrust(
+      _bareJid(bareJid),
+      deviceId,
+      state,
+    );
     notifyListeners();
   }
 

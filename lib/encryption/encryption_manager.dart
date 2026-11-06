@@ -316,6 +316,13 @@ class EncryptionManager {
     return backend.ownFingerprint();
   }
 
+  /// Our own OMEMO2 device id, paired with [omemo2OwnFingerprint] to build
+  /// a proper `xmpp:<jid>?omemo-sid-<id>=<fingerprint>` QR code.
+  Future<int> omemo2OwnDeviceId() async {
+    final backend = await _omemo2Backend();
+    return backend.ownDeviceId();
+  }
+
   /// Marks [deviceId] of [bareJid] as [TrustState.verified] via the OMEMO2
   /// backend, e.g. after the user confirms a fingerprint match. See
   /// `lib/widgets/fingerprint_verification_screen.dart`.
@@ -325,6 +332,47 @@ class EncryptionManager {
     TrustState state,
   ) async {
     final backend = await _omemo2Backend();
+    await backend.setTrust(bareJid, '$deviceId', state);
+  }
+
+  /// Every known legacy-OMEMO (XEP-0384 v0.3.0,
+  /// `eu.siacs.conversations.axolotl`) device (and its fingerprint/trust
+  /// state) of [bareJid], for the fingerprint verification screen. This is
+  /// a distinct identity key from OMEMO2's -- the two protocols never
+  /// share a fingerprint, so a contact only using legacy OMEMO (e.g.
+  /// Conversations/Gajim/Dino) must be verified against *this* fingerprint,
+  /// not the OMEMO2 one.
+  Future<List<Omemo2DeviceFingerprint>> legacyOmemoFingerprintsFor(
+    String bareJid,
+  ) async {
+    final backend = await _legacyOmemoBackend();
+    return backend.deviceFingerprintsFor(bareJid);
+  }
+
+  /// Our own legacy-OMEMO device's fingerprint, for display (e.g. as a QR
+  /// code) so a contact can visually compare it against their own view of
+  /// us. Distinct from [omemo2OwnFingerprint].
+  Future<String> legacyOmemoOwnFingerprint() async {
+    final backend = await _legacyOmemoBackend();
+    return backend.ownFingerprint();
+  }
+
+  /// Our own legacy-OMEMO device id, paired with [legacyOmemoOwnFingerprint]
+  /// to build a proper `xmpp:<jid>?omemo-sid-<id>=<fingerprint>` QR code.
+  Future<int> legacyOmemoOwnDeviceId() async {
+    final backend = await _legacyOmemoBackend();
+    return backend.ownDeviceId();
+  }
+
+  /// Marks [deviceId] of [bareJid] as [TrustState.verified] via the
+  /// legacy-OMEMO backend, e.g. after the user confirms a fingerprint
+  /// match. See `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<void> setLegacyOmemoDeviceTrust(
+    String bareJid,
+    int deviceId,
+    TrustState state,
+  ) async {
+    final backend = await _legacyOmemoBackend();
     await backend.setTrust(bareJid, '$deviceId', state);
   }
 

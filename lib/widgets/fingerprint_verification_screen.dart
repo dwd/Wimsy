@@ -36,7 +36,11 @@ class FingerprintVerificationScreen extends StatefulWidget {
 class _FingerprintVerificationScreenState
     extends State<FingerprintVerificationScreen> {
   String? _ownFingerprint;
+  int? _ownDeviceId;
   List<Omemo2DeviceFingerprint> _peerDevices = const [];
+  String? _ownLegacyFingerprint;
+  int? _ownLegacyDeviceId;
+  List<Omemo2DeviceFingerprint> _peerLegacyDevices = const [];
   String? _ownOxFingerprint;
   List<OxKeyFingerprint> _peerOxKeys = const [];
   bool _loading = true;
@@ -55,7 +59,15 @@ class _FingerprintVerificationScreenState
     });
     try {
       final ownFingerprint = await widget.service.omemo2OwnFingerprint();
+      final ownDeviceId = await widget.service.omemo2OwnDeviceId();
       final peerDevices = await widget.service.omemo2FingerprintsFor(
+        widget.peerBareJid,
+      );
+      final ownLegacyFingerprint =
+          await widget.service.legacyOmemoOwnFingerprint();
+      final ownLegacyDeviceId =
+          await widget.service.legacyOmemoOwnDeviceId();
+      final peerLegacyDevices = await widget.service.legacyOmemoFingerprintsFor(
         widget.peerBareJid,
       );
       final ownOxFingerprint = await widget.service.oxOwnFingerprint();
@@ -67,7 +79,11 @@ class _FingerprintVerificationScreenState
       }
       setState(() {
         _ownFingerprint = ownFingerprint;
+        _ownDeviceId = ownDeviceId;
         _peerDevices = peerDevices;
+        _ownLegacyFingerprint = ownLegacyFingerprint;
+        _ownLegacyDeviceId = ownLegacyDeviceId;
+        _peerLegacyDevices = peerLegacyDevices;
         _ownOxFingerprint = ownOxFingerprint;
         _peerOxKeys = peerOxKeys;
         _loading = false;
@@ -90,6 +106,33 @@ class _FingerprintVerificationScreenState
       TrustState.verified,
     );
     await _load();
+  }
+
+  Future<void> _verifyLegacy(Omemo2DeviceFingerprint device) async {
+    await widget.service.setLegacyOmemoDeviceTrust(
+      widget.peerBareJid,
+      device.deviceId,
+      TrustState.verified,
+    );
+    await _load();
+  }
+
+  /// Builds the `xmpp:`-URI QR-code payload real OMEMO clients (e.g.
+  /// Conversations) expect for fingerprint verification by scanning, per
+  /// the convention documented at
+  /// https://xmpp.org/extensions/xep-0384.html and used by Conversations'
+  /// own "Share as XMPP URI" QR codes: `xmpp:<jid>?omemo-sid-<id>=<fp>`.
+  /// A bare hex fingerprint string (the previous behaviour here) is *not*
+  /// recognised by those clients' QR scanners, which show "Invalid QR
+  /// Code" even though the code itself scans fine.
+  String? _qrUriFor(String? ownBareJid, int? deviceId, String? fingerprint) {
+    if (ownBareJid == null || deviceId == null || fingerprint == null) {
+      return null;
+    }
+    final normalizedFingerprint = fingerprint
+        .replaceAll(RegExp(r'\s'), '')
+        .toLowerCase();
+    return 'xmpp:$ownBareJid?omemo-sid-$deviceId=$normalizedFingerprint';
   }
 
   Future<void> _verifyOxKey(OxKeyFingerprint key) async {
@@ -284,7 +327,13 @@ class _FingerprintVerificationScreenState
                   if (_ownFingerprint != null) ...[
                     Center(
                       child: QrImageView(
-                        data: _ownFingerprint!,
+                        data:
+                            _qrUriFor(
+                              widget.service.currentUserBareJid,
+                              _ownDeviceId,
+                              _ownFingerprint,
+                            ) ??
+                            _ownFingerprint!,
                         size: 180,
                         key: const Key('own-fingerprint-qr'),
                       ),
@@ -361,16 +410,41 @@ class _FingerprintVerificationScreenState
                     ),
                   const Divider(height: 32),
                   Text(
-                    'Your legacy OMEMO identity key',
+                    'Your legacy OMEMO fingerprint',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Back up the identity key used for legacy OMEMO (e.g. '
-                    'Conversations, Gajim, Dino) separately from your OMEMO2 '
-                    'identity key above.',
+                    'This is a *different* identity key from OMEMO2 above. '
+                    'Contacts using legacy OMEMO (e.g. Conversations, Gajim, '
+                    'Dino) must compare this fingerprint, not the OMEMO2 one '
+                    '-- they will never match, since the two protocols use '
+                    'separate identities.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  const SizedBox(height: 12),
+                  if (_ownLegacyFingerprint != null) ...[
+                    Center(
+                      child: QrImageView(
+                        data:
+                            _qrUriFor(
+                              widget.service.currentUserBareJid,
+                              _ownLegacyDeviceId,
+                              _ownLegacyFingerprint,
+                            ) ??
+                            _ownLegacyFingerprint!,
+                        size: 180,
+                        key: const Key('own-legacy-fingerprint-qr'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      _formatFingerprint(_ownLegacyFingerprint!),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontFamily: 'monospace'),
+                    ),
+                  ] else
+                    const Text('No local legacy-OMEMO identity yet.'),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -395,6 +469,46 @@ class _FingerprintVerificationScreenState
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "${widget.peerBareJid}'s legacy OMEMO devices",
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  if (_peerLegacyDevices.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'No known legacy-OMEMO devices for this contact yet.',
+                      ),
+                    ),
+                  for (final device in _peerLegacyDevices)
+                    Card(
+                      key: Key('peer-legacy-device-${device.deviceId}'),
+                      child: ListTile(
+                        leading: Icon(
+                          _trustIcon(device.trust),
+                          color: _trustColor(context, device.trust),
+                        ),
+                        title: Text('Device ${device.deviceId}'),
+                        subtitle: Text(
+                          device.fingerprint == null
+                              ? 'Fingerprint unknown (bundle not fetched yet)'
+                              : '${_formatFingerprint(device.fingerprint!)}\n'
+                                    '${_trustLabel(device.trust)}',
+                          style: const TextStyle(fontFamily: 'monospace'),
+                        ),
+                        isThreeLine: device.fingerprint != null,
+                        trailing: device.trust == TrustState.verified
+                            ? null
+                            : TextButton(
+                                onPressed: device.fingerprint == null
+                                    ? null
+                                    : () => _verifyLegacy(device),
+                                child: const Text('Mark verified'),
+                              ),
+                      ),
+                    ),
                   const Divider(height: 32),
                   Text(
                     'Your OX (OpenPGP) fingerprint',

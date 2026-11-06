@@ -692,6 +692,16 @@ class OmemoBackend implements EncryptionBackend {
     return (await device.toBundle()).getFingerprint();
   }
 
+  /// Our own current legacy-OMEMO device id, needed (together with
+  /// [ownFingerprint]) to build a proper `xmpp:`-URI QR code (see
+  /// `lib/widgets/fingerprint_verification_screen.dart`) -- scanning a
+  /// bare fingerprint hex string is not understood by other clients such
+  /// as Conversations, which expect `xmpp:<jid>?omemo-sid-<id>=<fp>`.
+  Future<int> ownDeviceId() async {
+    final device = await _omemoManager.getDevice();
+    return device.id;
+  }
+
   /// Every known legacy-OMEMO device of [bareJid] with its fingerprint
   /// (when cached) and current [TrustState], mirroring
   /// `Omemo2Backend.deviceFingerprintsFor`.
