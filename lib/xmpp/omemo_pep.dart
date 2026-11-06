@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:omemo_dart/omemo_dart.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
@@ -428,13 +429,20 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
   /// `<identityKey/>`, and a `<prekeys/>` list of `<preKeyPublic/>`
   /// elements (each with a `preKeyId` attribute) -- distinct element names
   /// from OMEMO2's `<spk/>`/`<spks/>`/`<ik/>`/`<prekeys>/<pk/>` shape.
+  ///
+  /// Real-world legacy-OMEMO clients (Conversations/Gajim/Dino) serialize
+  /// each public key here using libsignal's DJB-keytype-prefixed format:
+  /// a leading `0x05` byte followed by the raw 32-byte Curve25519 key, so
+  /// 33 bytes total. We must do the same when publishing our own bundle,
+  /// or those clients will fail to parse/mis-parse our keys. See
+  /// [_addDjbKeyType]/[_stripDjbKeyType].
   XmppElement _legacyBundleToElement(OmemoBundle bundle) {
     final bundleElement = XmppElement()..name = 'bundle';
     bundleElement.addAttribute(XmppAttribute('xmlns', legacyOmemoNamespace));
 
     final spk = XmppElement()..name = 'signedPreKeyPublic';
     spk.addAttribute(XmppAttribute('signedPreKeyId', bundle.spkId.toString()));
-    spk.textValue = bundle.spkEncoded;
+    spk.textValue = _addDjbKeyType(bundle.spkEncoded);
     bundleElement.addChild(spk);
 
     final spks = XmppElement()..name = 'signedPreKeySignature';
@@ -442,19 +450,53 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
     bundleElement.addChild(spks);
 
     final ik = XmppElement()..name = 'identityKey';
-    ik.textValue = bundle.ikEncoded;
+    ik.textValue = _addDjbKeyType(bundle.ikEncoded);
     bundleElement.addChild(ik);
 
     final prekeys = XmppElement()..name = 'prekeys';
     bundle.opksEncoded.forEach((opkId, opkEncoded) {
       final pk = XmppElement()..name = 'preKeyPublic';
       pk.addAttribute(XmppAttribute('preKeyId', opkId.toString()));
-      pk.textValue = opkEncoded;
+      pk.textValue = _addDjbKeyType(opkEncoded);
       prekeys.addChild(pk);
     });
     bundleElement.addChild(prekeys);
 
     return bundleElement;
+  }
+
+  /// The libsignal "DJB type" byte (`0x05`, indicating a Curve25519/DJB
+  /// public key) that real legacy-OMEMO clients prepend to every public
+  /// key (identity key, signed prekey, one-time prekeys) in their
+  /// `<bundle/>` publications. See [_addDjbKeyType]/[_stripDjbKeyType].
+  static const int _djbKeyType = 0x05;
+
+  /// Prepends the libsignal DJB-type byte to a base64-encoded raw 32-byte
+  /// public key, matching what Conversations/Gajim/Dino expect to parse.
+  /// Leaves the input unchanged if it's not exactly 32 bytes once decoded
+  /// (defensive: never make already-33-byte or otherwise-shaped data
+  /// worse).
+  static String _addDjbKeyType(String base64Encoded) {
+    final bytes = base64Decode(base64Encoded);
+    if (bytes.length != 32) {
+      return base64Encoded;
+    }
+    return base64Encode([_djbKeyType, ...bytes]);
+  }
+
+  /// Strips a leading libsignal DJB-type byte (`0x05`) from a
+  /// base64-encoded public key if present, so that keys published by
+  /// real-world legacy-OMEMO clients (33 bytes: 1-byte type + 32-byte
+  /// key) can be consumed by `omemo_dart`, which expects the raw 32-byte
+  /// key. Leaves 32-byte (already-raw) keys, as published by our own
+  /// `_legacyBundleToElement` prior to this fix or by other
+  /// non-type-prefixing clients, unchanged.
+  static String _stripDjbKeyType(String base64Encoded) {
+    final bytes = base64Decode(base64Encoded);
+    if (bytes.length == 33) {
+      return base64Encode(bytes.sublist(1));
+    }
+    return base64Encoded;
   }
 
   OmemoBundle? _legacyBundleFromElement(
@@ -492,17 +534,17 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
         final opkId = int.tryParse(pk.getAttribute('preKeyId')?.value ?? '');
         final opkEncoded = pk.textValue?.trim();
         if (opkId != null && opkEncoded != null && opkEncoded.isNotEmpty) {
-          opksEncoded[opkId] = opkEncoded;
+          opksEncoded[opkId] = _stripDjbKeyType(opkEncoded);
         }
       }
     }
     return OmemoBundle(
       bareJid,
       deviceId,
-      spkEncoded,
+      _stripDjbKeyType(spkEncoded),
       spkId,
       spkSignatureEncoded,
-      ikEncoded,
+      _stripDjbKeyType(ikEncoded),
       opksEncoded,
     );
   }
