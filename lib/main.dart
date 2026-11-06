@@ -5122,7 +5122,35 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
       if (_wasAtBottom) {
         _scrollToBottom();
       }
+      // When the visible history is too short to fill the viewport, the
+      // list never becomes scrollable, so the scroll-position listener
+      // that normally requests older messages near the top (see
+      // `_handleScrollPosition`) never fires. Explicitly re-check here
+      // after every message-count change so a short history still grows
+      // to fill the screen.
+      _fillScreenWithHistoryIfNeeded();
     });
+  }
+
+  /// If the message list isn't scrollable (i.e. there isn't enough history
+  /// to fill the viewport), proactively requests older messages exactly as
+  /// if the user had scrolled to the top. This ensures short histories
+  /// (e.g. a freshly joined MUC with only a handful of cached messages)
+  /// still get filled up to at least a screenful, instead of silently
+  /// stopping because no scroll ever occurs.
+  void _fillScreenWithHistoryIfNeeded() {
+    if (!mounted || _restoringMessageViewport) {
+      return;
+    }
+    if (!_messageScrollController.hasClients) {
+      return;
+    }
+    final position = _messageScrollController.position;
+    if (position.maxScrollExtent > 0) {
+      // There's already enough content to scroll; nothing to fill.
+      return;
+    }
+    _handleScrollPosition();
   }
 
   void _handleScrollPosition() {

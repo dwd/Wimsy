@@ -111,6 +111,19 @@ class _SuggestionXmppService extends XmppService {
   }
 }
 
+class _OlderMessagesTrackingXmppService extends XmppService {
+  int requestOlderMessagesCalls = 0;
+  final List<String> requestedBareJids = [];
+
+  @override
+  void requestOlderMessages(String bareJid) {
+    requestOlderMessagesCalls++;
+    requestedBareJids.add(bareJid);
+    // No live connection in tests; skip the super call, which would early
+    // return anyway (see `XmppService.requestOlderMessages`).
+  }
+}
+
 class _ConnectingXmppService extends XmppService {
   bool _connecting = true;
   bool disconnectCalled = false;
@@ -571,6 +584,87 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'a short room history keeps requesting older messages to fill the screen',
+    (WidgetTester tester) async {
+      // A tall viewport so a handful of messages clearly won't fill it.
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await PreferencesService.load();
+      const roomJid = 'xsf@muc.xmpp.org';
+      final room = RoomEntry(roomJid: roomJid, nick: 'tester', joined: true);
+      final service = _OlderMessagesTrackingXmppService()
+        ..seedConnectedRoomForTesting(room, name: 'xsf')
+        ..seedRoomMessages({
+          roomJid: [
+            ChatMessage(
+              from: '$roomJid/alice',
+              to: 'me@example.com',
+              body: 'Hello there',
+              timestamp: DateTime.utc(2026),
+              outgoing: false,
+              messageId: 'short-history-1',
+            ),
+            ChatMessage(
+              from: '$roomJid/bob',
+              to: 'me@example.com',
+              body: 'Hi!',
+              timestamp: DateTime.utc(2026),
+              outgoing: false,
+              messageId: 'short-history-2',
+            ),
+          ],
+        });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: WimsyHome(
+            service: service,
+            storage: StorageService(),
+            notifications: NotificationService(),
+            preferences: prefs,
+          ),
+        ),
+      );
+      await tester.pump();
+      // WimsyHome seeds its initially empty storage asynchronously; restore
+      // the in-memory room fixture after that first frame completes.
+      service.seedConnectedRoomForTesting(room, name: 'xsf');
+      service.seedRoomMessages({
+        roomJid: [
+          ChatMessage(
+            from: '$roomJid/alice',
+            to: 'me@example.com',
+            body: 'Hello there',
+            timestamp: DateTime.utc(2026),
+            outgoing: false,
+            messageId: 'short-history-1',
+          ),
+          ChatMessage(
+            from: '$roomJid/bob',
+            to: 'me@example.com',
+            body: 'Hi!',
+            timestamp: DateTime.utc(2026),
+            outgoing: false,
+            messageId: 'short-history-2',
+          ),
+        ],
+      });
+      await tester.pump();
+      await tester.pump();
+
+      // The short history doesn't fill the tall viewport, so it can never
+      // become scrollable; the fix should still have requested more history
+      // for this room rather than silently stopping at two messages.
+      expect(service.requestOlderMessagesCalls, greaterThan(0));
+      expect(service.requestedBareJids, contains(roomJid));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('reconnecting keeps chat open and queues composed messages', (
     WidgetTester tester,
