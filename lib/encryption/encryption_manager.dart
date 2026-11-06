@@ -2,18 +2,18 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../storage/storage_service.dart';
 import '../xmpp/omemo_pep.dart' hide omemo2Namespace, legacyOmemoNamespace;
+import '../xmpp/ox_pep.dart' hide oxNamespace;
 import 'encryption_backend.dart';
 import 'omemo2_backend.dart';
 import 'omemo_backend.dart';
+import 'ox_backend.dart';
 
 typedef EncryptionUpdateCallback = void Function();
 
 /// Identifies which end-to-end-encryption protocol (if any) is selected
 /// for a given 1:1 conversation.
 ///
-/// [none], [omemo2], and [legacyOmemo] are implemented. [ox] is reserved
-/// here so a later step can introduce it without requiring call sites that
-/// already switch over this enum to be revisited/broken.
+/// [none], [omemo2], [legacyOmemo], and [ox] are all implemented.
 enum EncryptionProtocol {
   /// No end-to-end encryption; messages are sent/received in plaintext.
   none,
@@ -26,8 +26,8 @@ enum EncryptionProtocol {
   /// Dino). Dispatches to [OmemoBackend].
   legacyOmemo,
 
-  /// OpenPGP for XMPP (XEP-0373/XEP-0374, "OX"). Not yet implemented;
-  /// reserved for a later plan step.
+  /// OpenPGP for XMPP (XEP-0373/XEP-0374, "OX"). Dispatches to
+  /// [OxBackend].
   ox,
 }
 
@@ -87,8 +87,10 @@ class EncryptionManager {
   final Map<String, EncryptionBackend> _backendsByProtocolId = {};
 
   OmemoPep? _omemoPep;
+  OxPep? _oxPep;
   Future<Omemo2Backend>? _omemo2BackendFuture;
   Future<OmemoBackend>? _legacyOmemoBackendFuture;
+  Future<OxBackend>? _oxBackendFuture;
 
   /// Returns the currently selected [EncryptionProtocol] for [bareJid],
   /// loading it from persisted storage on first access.
@@ -133,8 +135,7 @@ class EncryptionManager {
       case EncryptionProtocol.legacyOmemo:
         return _legacyOmemoBackend();
       case EncryptionProtocol.ox:
-        // Not yet implemented (later plan steps).
-        return null;
+        return _oxBackend();
     }
   }
 
@@ -168,6 +169,23 @@ class EncryptionManager {
         pep: pep,
       );
       _backendsByProtocolId['omemo'] = backend;
+      return backend;
+    }();
+  }
+
+  Future<OxBackend> _oxBackend() {
+    final cached = _backendsByProtocolId['ox'];
+    if (cached is OxBackend) {
+      return Future.value(cached);
+    }
+    return _oxBackendFuture ??= () async {
+      final pep = _oxPep ??= OxPep(connection);
+      final backend = await OxBackend.create(
+        selfBareJid: selfBareJid,
+        storage: storage,
+        pep: pep,
+      );
+      _backendsByProtocolId['ox'] = backend;
       return backend;
     }();
   }
@@ -219,6 +237,14 @@ class EncryptionManager {
       final backend = await _legacyOmemoBackend();
       return backend.decryptIncoming(stanza);
     }
+    // OX (XEP-0373/0374) uses a differently-named/-shaped top-level
+    // <openpgp/> element rather than <encrypted/>, so it is detected
+    // separately here.
+    final openpgp = stanza.getChild('openpgp');
+    if (openpgp?.getAttribute('xmlns')?.value == oxNamespace) {
+      final backend = await _oxBackend();
+      return backend.decryptIncoming(stanza);
+    }
     return null;
   }
 
@@ -263,5 +289,31 @@ class EncryptionManager {
   ) async {
     final backend = await _omemo2Backend();
     await backend.setTrust(bareJid, '$deviceId', state);
+  }
+
+  /// Every known OX key fingerprint (and its trust state) of [bareJid], for
+  /// the fingerprint verification screen. Always uses the OX backend
+  /// regardless of the currently selected protocol.
+  Future<List<OxKeyFingerprint>> oxFingerprintsFor(String bareJid) async {
+    final backend = await _oxBackend();
+    return backend.keyFingerprintsFor(bareJid);
+  }
+
+  /// Our own OX key's fingerprint, for display.
+  Future<String> oxOwnFingerprint() async {
+    final backend = await _oxBackend();
+    return backend.ownFingerprint;
+  }
+
+  /// Marks [fingerprint] of [bareJid] as [state] via the OX backend, e.g.
+  /// after the user confirms a fingerprint match. See
+  /// `lib/widgets/fingerprint_verification_screen.dart`.
+  Future<void> setOxKeyTrust(
+    String bareJid,
+    String fingerprint,
+    TrustState state,
+  ) async {
+    final backend = await _oxBackend();
+    await backend.setTrust(bareJid, fingerprint, state);
   }
 }
