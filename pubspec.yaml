@@ -103,6 +103,10 @@ dependencies:
     git:
       url: https://github.com/dwd/flutter_webxdc.git
       ref: 9935b7c
+  # OX (OpenPGP for XMPP, XEP-0373/XEP-0374) end-to-end encryption: pure-Dart
+  # OpenPGP implementation (key generation, encryption/signing). BSD-3-Clause
+  # licensed, see https://pub.dev/packages/dart_pg.
+  dart_pg: ^2.1.0
 
 dev_dependencies:
   sentry_dart_plugin: ^3.4.0

@@ -177,6 +177,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.0"
+  dart_pg:
+    dependency: "direct main"
+    description:
+      name: dart_pg
+      sha256: "9f4f5a41c8282ac5f6a32e816a1fe4a5f2d54ec6527b57ce11d1f328140eda0c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   dart_webrtc:
     dependency: transitive
     description:
@@ -1099,6 +1107,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  pointycastle:
+    dependency: transitive
+    description:
+      name: pointycastle
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
   posix:
     dependency: transitive
     description:
@@ -1203,6 +1219,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "10.3.0"
+  sha3:
+    dependency: transitive
+    description:
+      name: sha3
+      sha256: "6f78c8c1d873b0eef9c0fbc92da6470c46e84e1e3473ff6a2723fb93074119e5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.1"
   shared_preferences:
     dependency: "direct main"
     description:
@@ -1259,6 +1283,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.1"
+  sign_dart:
+    dependency: transitive
+    description:
+      name: sign_dart
+      sha256: ac9303a03c7cca834568f6502b11031e2a5b92141d764c9314d7b4b455780721
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   sky_engine:
     dependency: transitive
     description: flutter
