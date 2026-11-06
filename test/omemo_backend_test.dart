@@ -238,6 +238,69 @@ void main() {
   );
 
   test(
+    'OmemoBackend: encryptForSend tolerates a stale pre-fix cached bundle '
+    'carrying a 33-byte libsignal-DJB-type-prefixed key',
+    () async {
+      // Regression test: before the DJB-type-byte fix in
+      // lib/xmpp/omemo_pep.dart, fetched bundles from real legacy-OMEMO
+      // clients (Conversations/Gajim/Dino) were cached verbatim with a
+      // leading 0x05 byte on each key (33 bytes instead of 32), and that
+      // stale cache entry is never re-fetched once present. Simulate such
+      // a stale Hive cache entry directly in storage (bypassing the fixed
+      // fetch path entirely) and confirm OmemoBackend's cache-loading
+      // path (_bundleFromJson) now defensively strips it, instead of
+      // reproducing "Algorithm ed25519 expects a public key with 32
+      // bytes, but got: 33 bytes" indefinitely.
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+
+      await bobBackend.publishIdentity();
+      final bobDeviceId =
+          (await bobStorage.loadOmemoIdentity(bobJid))!['id'] as int;
+      final realBundle = network.bundles['$bobJid:$bobDeviceId']!;
+
+      String addDjbType(String base64Encoded) =>
+          base64Encode([0x05, ...base64Decode(base64Encoded)]);
+
+      // Pre-seed alice's bundle cache with a stale, pre-fix-style entry:
+      // same keys as bob's real bundle, but with the libsignal DJB-type
+      // byte still attached (33 bytes).
+      await aliceStorage.storeOmemoBundle(bobJid, bobDeviceId, {
+        'jid': bobJid,
+        'id': bobDeviceId,
+        'spk': addDjbType(realBundle.spkEncoded),
+        'spkId': realBundle.spkId,
+        'spks': realBundle.spkSignatureEncoded,
+        'ik': addDjbType(realBundle.ikEncoded),
+        'opks': {
+          for (final entry in realBundle.opksEncoded.entries)
+            entry.key.toString(): addDjbType(entry.value),
+        },
+      });
+
+      // Must not throw "Algorithm ed25519 expects a public key with 32
+      // bytes, but got: 33 bytes" despite the stale cache entry.
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello from alice',
+      );
+      expect(payload.element.name, 'encrypted');
+    },
+  );
+
+  test(
     'OmemoBackend: restores the same identity across restarts',
     () async {
       final network = FakeOmemoNetwork();

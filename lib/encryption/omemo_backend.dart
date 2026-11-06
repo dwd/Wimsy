@@ -298,15 +298,39 @@ class OmemoBackend implements EncryptionBackend {
     return OmemoBundle(
       jid,
       deviceId,
-      json['spk'] as String,
+      _stripDjbKeyType(json['spk'] as String),
       json['spkId'] as int,
       json['spks'] as String,
-      json['ik'] as String,
+      _stripDjbKeyType(json['ik'] as String),
       {
         for (final entry in opksRaw.entries)
-          int.parse(entry.key.toString()): entry.value as String,
+          int.parse(entry.key.toString()): _stripDjbKeyType(
+            entry.value as String,
+          ),
       },
     );
+  }
+
+  /// Defensively strips a leading libsignal DJB-type byte (`0x05`) from a
+  /// base64-encoded public key, if present (33 bytes -> 32 bytes).
+  ///
+  /// `lib/xmpp/omemo_pep.dart`'s `fetchLegacyBundle` already strips this
+  /// byte before a bundle is cached via `storeOmemoBundle`, but bundles
+  /// cached in Hive *before* that fix was applied still carry the raw
+  /// 33-byte libsignal-serialized key, and are never re-fetched once
+  /// cached -- so loading them here would otherwise keep reproducing the
+  /// `Algorithm ed25519 expects a public key with 32 bytes, but got: 33
+  /// bytes` encryption failure indefinitely, even after upgrading. This
+  /// mirrors `OmemoPep._stripDjbKeyType` so that both freshly-fetched and
+  /// previously-cached bundles end up normalized to the raw 32-byte form
+  /// `omemo_dart` expects. A no-op for already-32-byte (or otherwise
+  /// unexpectedly-shaped) keys.
+  static String _stripDjbKeyType(String base64Encoded) {
+    final bytes = base64Decode(base64Encoded);
+    if (bytes.length == 33) {
+      return base64Encode(bytes.sublist(1));
+    }
+    return base64Encoded;
   }
 
   @override
