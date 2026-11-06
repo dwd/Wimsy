@@ -41,7 +41,7 @@ dependencies:
   hive_flutter: ^1.1.0
   # Used to locate the Hive box file so its size can be monitored.
   path_provider: ^2.1.4
-  flutter_secure_storage: ^10.0.0
+  flutter_secure_storage: ^11.2.0
   cryptography: ^2.7.0
   # Used to compute SHA-256 certificate fingerprints for the TLS
   # trust-on-first-use flow (see lib/xmpp/certificate_trust.dart).
