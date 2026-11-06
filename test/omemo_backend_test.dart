@@ -430,4 +430,59 @@ void main() {
       );
     },
   );
+
+  test(
+    'OmemoBackend: exported identity key can be imported to restore the '
+    'same fingerprint',
+    () async {
+      final network = FakeOmemoNetwork();
+      final originalStorage = FakeStorageService();
+
+      final original = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: originalStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final exported = await original.exportIdentityKey();
+
+      expect(exported, startsWith('-----BEGIN OMEMO IDENTITY KEY-----'));
+      expect(exported, endsWith('-----END OMEMO IDENTITY KEY-----'));
+
+      // "Reinstall": a fresh, empty storage, restoring via the exported PEM.
+      final restoredStorage = FakeStorageService();
+      final restored = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: restoredStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+        importedIdentityKeyPem: exported,
+      );
+
+      expect(await restored.ownFingerprint(), await original.ownFingerprint());
+    },
+  );
+
+  test(
+    'OmemoBackend: importing an OMEMO2 export fails with a mismatched label',
+    () async {
+      final network = FakeOmemoNetwork();
+      final storage = FakeStorageService();
+      final backend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: storage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final exported = await backend.exportIdentityKey();
+      final tampered = exported.replaceAll('OMEMO ', 'OMEMO2 ');
+
+      await expectLater(
+        OmemoBackend.create(
+          selfBareJid: bobJid,
+          storage: FakeStorageService(),
+          pep: FakeOmemoPep(network, bobJid),
+          importedIdentityKeyPem: tampered,
+        ),
+        throwsFormatException,
+      );
+    },
+  );
 }

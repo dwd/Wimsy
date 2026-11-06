@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../encryption/encryption_backend.dart';
@@ -98,6 +99,95 @@ class _FingerprintVerificationScreenState
       TrustState.verified,
     );
     await _load();
+  }
+
+  /// Exports the identity key produced by [export] (either
+  /// `widget.service.exportOmemo2IdentityKey` or
+  /// `exportLegacyOmemoIdentityKey`), copies it to the clipboard, and shows
+  /// a confirmation so the user knows to paste it into a password manager.
+  Future<void> _exportIdentityKey(
+    Future<String?> Function() export,
+    String label,
+  ) async {
+    try {
+      final pem = await export();
+      if (pem == null) {
+        throw StateError('No local $label identity yet');
+      }
+      await Clipboard.setData(ClipboardData(text: pem));
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$label identity key copied to clipboard. Paste it into your '
+            'password manager to keep it safe.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to export $label identity key: $error')),
+      );
+    }
+  }
+
+  /// Prompts the user to paste a previously exported identity key and
+  /// restores it via [import] (either
+  /// `widget.service.importOmemo2IdentityKey` or
+  /// `importLegacyOmemoIdentityKey`).
+  Future<void> _importIdentityKey(
+    Future<void> Function(String) import,
+    String label,
+  ) async {
+    final controller = TextEditingController();
+    final pem = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Import $label identity key'),
+        content: TextField(
+          controller: controller,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            hintText: '-----BEGIN ... IDENTITY KEY-----',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    if (pem == null || pem.trim().isEmpty) {
+      return;
+    }
+    try {
+      await import(pem.trim());
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$label identity key imported.')),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to import $label identity key: $error')),
+      );
+    }
   }
 
   /// Groups hex characters into readable 4-character blocks, mirroring
@@ -207,6 +297,30 @@ class _FingerprintVerificationScreenState
                     ),
                   ] else
                     const Text('No local OMEMO2 identity yet.'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        key: const Key('export-omemo2-identity-key'),
+                        onPressed: () => _exportIdentityKey(
+                          widget.service.exportOmemo2IdentityKey,
+                          'OMEMO2',
+                        ),
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Export identity key'),
+                      ),
+                      OutlinedButton.icon(
+                        key: const Key('import-omemo2-identity-key'),
+                        onPressed: () => _importIdentityKey(
+                          widget.service.importOmemo2IdentityKey,
+                          'OMEMO2',
+                        ),
+                        icon: const Icon(Icons.paste),
+                        label: const Text('Import identity key'),
+                      ),
+                    ],
+                  ),
                   const Divider(height: 32),
                   Text(
                     "${widget.peerBareJid}'s devices",
@@ -245,6 +359,42 @@ class _FingerprintVerificationScreenState
                               ),
                       ),
                     ),
+                  const Divider(height: 32),
+                  Text(
+                    'Your legacy OMEMO identity key',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Back up the identity key used for legacy OMEMO (e.g. '
+                    'Conversations, Gajim, Dino) separately from your OMEMO2 '
+                    'identity key above.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        key: const Key('export-legacy-omemo-identity-key'),
+                        onPressed: () => _exportIdentityKey(
+                          widget.service.exportLegacyOmemoIdentityKey,
+                          'OMEMO',
+                        ),
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Export identity key'),
+                      ),
+                      OutlinedButton.icon(
+                        key: const Key('import-legacy-omemo-identity-key'),
+                        onPressed: () => _importIdentityKey(
+                          widget.service.importLegacyOmemoIdentityKey,
+                          'OMEMO',
+                        ),
+                        icon: const Icon(Icons.paste),
+                        label: const Text('Import identity key'),
+                      ),
+                    ],
+                  ),
                   const Divider(height: 32),
                   Text(
                     'Your OX (OpenPGP) fingerprint',

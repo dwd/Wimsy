@@ -5,6 +5,7 @@ import '../xmpp/omemo_pep.dart' hide omemo2Namespace, legacyOmemoNamespace;
 import '../xmpp/ox_pep.dart' hide oxNamespace;
 import 'encryption_backend.dart';
 import 'omemo2_backend.dart';
+import 'omemo2_serialization.dart';
 import 'omemo_backend.dart';
 import 'ox_backend.dart';
 
@@ -315,5 +316,54 @@ class EncryptionManager {
   ) async {
     final backend = await _oxBackend();
     await backend.setTrust(bareJid, fingerprint, state);
+  }
+
+  /// Exports our own OMEMO2 long-term identity key as a PEM-style block,
+  /// for the user to copy somewhere safe (e.g. a password manager). See
+  /// `Omemo2Backend.exportIdentityKey`.
+  Future<String> exportOmemo2IdentityKey() async {
+    final backend = await _omemo2Backend();
+    return backend.exportIdentityKey();
+  }
+
+  /// Exports our own legacy-OMEMO long-term identity key as a PEM-style
+  /// block, for the user to copy somewhere safe (e.g. a password manager).
+  /// See `OmemoBackend.exportIdentityKey`.
+  Future<String> exportLegacyOmemoIdentityKey() async {
+    final backend = await _legacyOmemoBackend();
+    return backend.exportIdentityKey();
+  }
+
+  /// Replaces our own OMEMO2 identity with one built from a previously
+  /// exported identity key [pem] (see [exportOmemo2IdentityKey]), so a
+  /// restored device keeps the same fingerprint as before. Drops any
+  /// already-created [Omemo2Backend] instance so the next use rebuilds it
+  /// from the newly-stored identity. Throws a [FormatException] if [pem]
+  /// isn't a valid OMEMO2 identity key export.
+  Future<void> importOmemo2IdentityKey(String pem) async {
+    final ik = identityKeyPairFromPem(pem, 'OMEMO2');
+    final device = await deviceFromIdentityKeyExport(selfBareJid, ik);
+    await storage.storeOmemo2Identity(
+      selfBareJid,
+      await omemoDeviceToJson(device),
+    );
+    _backendsByProtocolId.remove('omemo2');
+    _omemo2BackendFuture = null;
+  }
+
+  /// Replaces our own legacy-OMEMO identity with one built from a
+  /// previously exported identity key [pem] (see
+  /// [exportLegacyOmemoIdentityKey]). Mirrors [importOmemo2IdentityKey].
+  /// Throws a [FormatException] if [pem] isn't a valid legacy OMEMO
+  /// identity key export.
+  Future<void> importLegacyOmemoIdentityKey(String pem) async {
+    final ik = identityKeyPairFromPem(pem, 'OMEMO');
+    final device = await deviceFromIdentityKeyExport(selfBareJid, ik);
+    await storage.storeOmemoIdentity(
+      selfBareJid,
+      await omemoDeviceToJson(device),
+    );
+    _backendsByProtocolId.remove('omemo');
+    _legacyOmemoBackendFuture = null;
   }
 }

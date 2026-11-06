@@ -313,4 +313,77 @@ void main() {
       TrustState.untrusted,
     );
   });
+
+  test(
+    'Omemo2Backend: exported identity key can be imported to restore the '
+    'same fingerprint',
+    () async {
+      final network = FakeOmemo2Network();
+      final originalStorage = FakeStorageService();
+
+      final original = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: originalStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      final exported = await original.exportIdentityKey();
+
+      expect(exported, startsWith('-----BEGIN OMEMO2 IDENTITY KEY-----'));
+      expect(exported, endsWith('-----END OMEMO2 IDENTITY KEY-----'));
+
+      // "Reinstall": a fresh, empty storage, restoring via the exported PEM.
+      final restoredStorage = FakeStorageService();
+      final restored = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: restoredStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+        importedIdentityKeyPem: exported,
+      );
+
+      expect(await restored.ownFingerprint(), await original.ownFingerprint());
+
+      // Importing is only honored when no device has been persisted yet:
+      // reusing the import parameter against storage that already has an
+      // identity must leave that identity untouched.
+      final unaffected = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: restoredStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+        importedIdentityKeyPem: await (await Omemo2Backend.create(
+          selfBareJid: bobJid,
+          storage: FakeStorageService(),
+          pep: FakeOmemo2Pep(network, bobJid),
+        )).exportIdentityKey(),
+      );
+      expect(
+        await unaffected.ownFingerprint(),
+        await restored.ownFingerprint(),
+      );
+    },
+  );
+
+  test(
+    'Omemo2Backend: importing an OMEMO export fails with a legacy label',
+    () async {
+      final network = FakeOmemo2Network();
+      final storage = FakeStorageService();
+      final backend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: storage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      final exported = await backend.exportIdentityKey();
+      final tampered = exported.replaceAll('OMEMO2', 'OMEMO');
+
+      await expectLater(
+        Omemo2Backend.create(
+          selfBareJid: bobJid,
+          storage: FakeStorageService(),
+          pep: FakeOmemo2Pep(network, bobJid),
+          importedIdentityKeyPem: tampered,
+        ),
+        throwsFormatException,
+      );
+    },
+  );
 }

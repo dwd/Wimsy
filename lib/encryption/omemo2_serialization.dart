@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' show min;
 
 import 'package:cryptography/cryptography.dart';
 import 'package:omemo_dart/omemo_dart.dart';
@@ -90,6 +91,98 @@ Future<OmemoDevice> omemoDeviceFromJson(Map<dynamic, dynamic> json) async {
         ? null
         : omemoKeyPairFromJson((oldSpkJson as Map).cast<dynamic, dynamic>()),
     json['oldSpkId'] as int?,
+    opks,
+  );
+}
+
+/// Encodes an OMEMO/OMEMO2 long-term identity key pair (`OmemoDevice.ik`,
+/// an Ed25519 keypair) as a PEM-style block so it can be copied out of the
+/// app (e.g. into a password manager) and later restored with
+/// [identityKeyPairFromPem]/[deviceFromIdentityKeyExport]. This is *not*
+/// the Double Ratchet's per-session root key (`OmemoDoubleRatchet.rk`,
+/// which is ephemeral session state, not something worth backing up) --
+/// it's the single long-term key that anchors a device's fingerprint.
+///
+/// The body is the key pair's JSON representation (see
+/// [omemoKeyPairToJson]) base64-encoded and wrapped at 64 columns, matching
+/// the general shape of a PEM block (RFC 7468) even though the payload
+/// itself is JSON rather than DER.
+Future<String> identityKeyPairToPem(OmemoKeyPair ik, String label) async {
+  final json = await omemoKeyPairToJson(ik);
+  final payload = base64Encode(utf8.encode(jsonEncode(json)));
+  final buffer = StringBuffer('-----BEGIN $label IDENTITY KEY-----\n');
+  for (var i = 0; i < payload.length; i += 64) {
+    buffer
+      ..write(payload.substring(i, min(i + 64, payload.length)))
+      ..write('\n');
+  }
+  buffer.write('-----END $label IDENTITY KEY-----');
+  return buffer.toString();
+}
+
+/// Parses a PEM-style block produced by [identityKeyPairToPem] back into an
+/// [OmemoKeyPair]. Throws a [FormatException] if [pem] doesn't contain a
+/// `BEGIN $label IDENTITY KEY` / `END $label IDENTITY KEY` block (e.g.
+/// because the user pasted an OMEMO2 export into the legacy OMEMO import
+/// field, or vice-versa) or if its contents are malformed.
+OmemoKeyPair identityKeyPairFromPem(String pem, String label) {
+  final beginMarker = '-----BEGIN $label IDENTITY KEY-----';
+  final endMarker = '-----END $label IDENTITY KEY-----';
+  final beginIndex = pem.indexOf(beginMarker);
+  final endIndex = pem.indexOf(endMarker);
+  if (beginIndex == -1 || endIndex == -1 || endIndex < beginIndex) {
+    throw FormatException(
+      'Not a valid $label identity key export (missing $beginMarker / '
+      '$endMarker markers)',
+    );
+  }
+  final body = pem
+      .substring(beginIndex + beginMarker.length, endIndex)
+      .replaceAll(RegExp(r'\s+'), '');
+  if (body.isEmpty) {
+    throw const FormatException('Identity key export has an empty body');
+  }
+  final json = jsonDecode(utf8.decode(base64Decode(body)));
+  return omemoKeyPairFromJson((json as Map).cast<dynamic, dynamic>());
+}
+
+/// Builds a brand-new [OmemoDevice] for [jid] that reuses an imported
+/// identity key [ik] (e.g. from [identityKeyPairFromPem]) instead of
+/// generating a fresh one, so that a restored device keeps the same
+/// fingerprint it had before. Everything else (device id, signed prekey,
+/// its signature, and the one-time prekeys) is freshly generated, mirroring
+/// `OmemoDevice.generateNewDevice` -- the signed-prekey signature is
+/// recomputed against the imported [ik] since it must match.
+Future<OmemoDevice> deviceFromIdentityKeyExport(
+  String jid,
+  OmemoKeyPair ik, {
+  int opkAmount = 100,
+}) async {
+  final spk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+  final spkId = generateRandom32BitNumber();
+  final signature = await sig(ik, await spk.pk.getBytes());
+
+  final opks = <int, OmemoKeyPair>{};
+  for (var i = 0; i < opkAmount; i++) {
+    while (true) {
+      final opkId = generateRandom32BitNumber();
+      if (opks.containsKey(opkId)) {
+        continue;
+      }
+      opks[opkId] = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+      break;
+    }
+  }
+
+  return OmemoDevice(
+    jid,
+    generateRandom32BitNumber(),
+    ik,
+    spk,
+    spkId,
+    signature,
+    null,
+    null,
     opks,
   );
 }

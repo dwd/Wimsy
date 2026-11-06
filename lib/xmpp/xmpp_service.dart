@@ -8870,6 +8870,48 @@ class XmppService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Exports our own OMEMO2 long-term identity key as a PEM-style block
+  /// (see `Omemo2Backend.exportIdentityKey`), for the user to copy
+  /// somewhere safe (e.g. a password manager). Returns `null` before a
+  /// connection has been established.
+  Future<String?> exportOmemo2IdentityKey() async {
+    return _encryptionManager?.exportOmemo2IdentityKey();
+  }
+
+  /// Exports our own legacy-OMEMO long-term identity key as a PEM-style
+  /// block (see `OmemoBackend.exportIdentityKey`), for the user to copy
+  /// somewhere safe (e.g. a password manager). Returns `null` before a
+  /// connection has been established.
+  Future<String?> exportLegacyOmemoIdentityKey() async {
+    return _encryptionManager?.exportLegacyOmemoIdentityKey();
+  }
+
+  /// Restores our own OMEMO2 identity from a previously exported identity
+  /// key [pem] (see [exportOmemo2IdentityKey]), so it keeps the same
+  /// fingerprint it had before. Throws a [FormatException] if [pem] isn't
+  /// a valid OMEMO2 identity key export. No-op before a connection has
+  /// been established.
+  Future<void> importOmemo2IdentityKey(String pem) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.importOmemo2IdentityKey(pem);
+    notifyListeners();
+  }
+
+  /// Restores our own legacy-OMEMO identity from a previously exported
+  /// identity key [pem] (see [exportLegacyOmemoIdentityKey]). Mirrors
+  /// [importOmemo2IdentityKey].
+  Future<void> importLegacyOmemoIdentityKey(String pem) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.importLegacyOmemoIdentityKey(pem);
+    notifyListeners();
+  }
+
   void _setupPep() {
     final connection = _connection;
     final storage = _storage;

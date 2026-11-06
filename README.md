@@ -42,7 +42,9 @@ Builds, but untested on:
 - End-to-end encryption for 1:1 chats: legacy OMEMO and OMEMO2 (XEP-0384,
   both namespaces) and OX/OpenPGP (XEP-0373/XEP-0374), selectable per
   conversation, with TOFU device/key trust and manual fingerprint
-  verification
+  verification, plus exportable/importable OMEMO identity keys (PEM-style,
+  for backup in a password manager) from the fingerprint verification
+  screen
 
 ## Screenshots
 

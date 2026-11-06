@@ -80,13 +80,26 @@ class Omemo2Backend implements EncryptionBackend {
 
   /// Creates (or restores, if a device was already persisted) an
   /// [Omemo2Backend] for [selfBareJid].
+  ///
+  /// If no device has been persisted yet and [importedIdentityKeyPem] is
+  /// given (e.g. a value the user pasted in from a password manager, as
+  /// produced by [exportIdentityKey]), the new device reuses that identity
+  /// key instead of generating a fresh one, so it keeps the fingerprint of
+  /// a previously backed-up identity. Ignored once a device already exists
+  /// in [storage]: importing an identity key doesn't retroactively replace
+  /// the currently-active one.
   static Future<Omemo2Backend> create({
     required String selfBareJid,
     required StorageService storage,
     required Omemo2PepTransport pep,
     TrustStore? trustStore,
+    String? importedIdentityKeyPem,
   }) async {
-    final device = await _loadOrGenerateDevice(selfBareJid, storage);
+    final device = await _loadOrGenerateDevice(
+      selfBareJid,
+      storage,
+      importedIdentityKeyPem,
+    );
     final sharedTrustStore = trustStore ?? TrustStore(storage);
 
     late final BlindTrustBeforeVerificationTrustManager trustManager;
@@ -214,17 +227,38 @@ class Omemo2Backend implements EncryptionBackend {
   static Future<OmemoDevice> _loadOrGenerateDevice(
     String selfBareJid,
     StorageService storage,
+    String? importedIdentityKeyPem,
   ) async {
     final storedJson = await storage.loadOmemo2Identity(selfBareJid);
     if (storedJson != null) {
       return omemoDeviceFromJson(storedJson);
     }
-    final device = await OmemoDevice.generateNewDevice(selfBareJid);
+    final device = importedIdentityKeyPem != null
+        ? await deviceFromIdentityKeyExport(
+            selfBareJid,
+            identityKeyPairFromPem(importedIdentityKeyPem, _identityKeyLabel),
+          )
+        : await OmemoDevice.generateNewDevice(selfBareJid);
     await storage.storeOmemo2Identity(
       selfBareJid,
       await omemoDeviceToJson(device),
     );
     return device;
+  }
+
+  /// Label used in the `BEGIN`/`END` markers of this backend's exported
+  /// identity key, see [identityKeyPairToPem]/[identityKeyPairFromPem].
+  static const String _identityKeyLabel = 'OMEMO2';
+
+  /// Exports our own long-term identity key (not the Double Ratchet's
+  /// per-session root key -- see [identityKeyPairToPem]) as a PEM-style
+  /// block, so the user can copy it somewhere safe (e.g. a password
+  /// manager) and later restore it via [create]'s
+  /// `importedIdentityKeyPem` parameter to keep the same OMEMO2
+  /// fingerprint across a reinstall.
+  Future<String> exportIdentityKey() async {
+    final device = await _omemoManager.getDevice();
+    return identityKeyPairToPem(device.ik, _identityKeyLabel);
   }
 
   static Future<Map<String, dynamic>> _bundleToJson(
