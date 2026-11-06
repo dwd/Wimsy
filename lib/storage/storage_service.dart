@@ -113,6 +113,16 @@ class StorageService {
   // Blind-Trust-Before-Verification bookkeeping above, which drives
   // omemo_dart's own session-enablement internals.
   static const _trustStorePrefix = 'trust:';
+  // Legacy OMEMO (eu.siacs.conversations.axolotl, see
+  // lib/encryption/omemo_backend.dart): mirrors the OMEMO2 prefixes above
+  // one-for-one, but kept under distinct keys since legacy-OMEMO and
+  // OMEMO2 devices for the same contact are different device
+  // lists/namespaces that must be tracked independently.
+  static const _omemoDeviceListPrefix = 'omemodl:';
+  static const _omemoBundlePrefix = 'omemobundle:';
+  static const _omemoRatchetPrefix = 'omemork:';
+  static const _omemoTrustPrefix = 'omemotrust:';
+  static const _omemoIdentitySecureKeyPrefix = 'omemo_identity:';
 
   /// The maximum number of messages loaded or retained in the local cache per
   /// conversation.
@@ -1475,6 +1485,194 @@ class StorageService {
 
   Future<void> removeOmemo2TrustForJid(String bareJid) async {
     await _deleteKeysWithPrefix('$_omemo2TrustPrefix$bareJid:');
+  }
+
+  // -------------------------------------------------------------------
+  // Legacy OMEMO (eu.siacs.conversations.axolotl) storage.
+  //
+  // Mirrors the OMEMO2 storage above exactly, one-for-one, but under
+  // distinct keys/prefixes (see lib/encryption/omemo_backend.dart).
+  // -------------------------------------------------------------------
+
+  /// Stores the serialised local legacy-OMEMO identity (`OmemoDevice`) for
+  /// [bareJid] in the platform secure store.
+  Future<void> storeOmemoIdentity(
+    String bareJid,
+    Map<String, dynamic> deviceJson,
+  ) async {
+    if (bareJid.isEmpty) {
+      return;
+    }
+    await _secureStorage.write(
+      key: '$_omemoIdentitySecureKeyPrefix$bareJid',
+      value: jsonEncode(deviceJson),
+    );
+  }
+
+  /// Loads the serialised local legacy-OMEMO identity for [bareJid], or
+  /// `null` if none has been generated/persisted yet.
+  Future<Map<String, dynamic>?> loadOmemoIdentity(String bareJid) async {
+    if (bareJid.isEmpty) {
+      return null;
+    }
+    final raw = await _secureStorage.read(
+      key: '$_omemoIdentitySecureKeyPrefix$bareJid',
+    );
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    final decoded = jsonDecode(raw);
+    return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+  }
+
+  /// Deletes the local legacy-OMEMO identity for [bareJid] (e.g. "forget
+  /// account" flows).
+  Future<void> removeOmemoIdentity(String bareJid) async {
+    if (bareJid.isEmpty) {
+      return;
+    }
+    await _secureStorage.delete(key: '$_omemoIdentitySecureKeyPrefix$bareJid');
+  }
+
+  /// Persists the known legacy-OMEMO device list for [bareJid].
+  Future<void> storeOmemoDeviceList(
+    String bareJid,
+    List<int> deviceIds,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemoDeviceListPrefix$bareJid', deviceIds);
+    _afterHotWrite();
+  }
+
+  /// Loads the cached legacy-OMEMO device list for [bareJid], or `null` if
+  /// none is cached.
+  List<int>? loadOmemoDeviceList(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_omemoDeviceListPrefix$bareJid');
+    if (data is List) {
+      return data.map((e) => e as int).toList();
+    }
+    return null;
+  }
+
+  /// Caches a peer's legacy-OMEMO key bundle so it does not need to be
+  /// re-fetched via PEP on every session establishment attempt.
+  Future<void> storeOmemoBundle(
+    String bareJid,
+    int deviceId,
+    Map<String, dynamic> bundleJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemoBundlePrefix$bareJid:$deviceId', bundleJson);
+    _afterHotWrite();
+  }
+
+  Map<String, dynamic>? loadOmemoBundle(String bareJid, int deviceId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_omemoBundlePrefix$bareJid:$deviceId');
+    return data is Map ? Map<String, dynamic>.from(data) : null;
+  }
+
+  /// Persists a single legacy-OMEMO Double Ratchet session.
+  Future<void> storeOmemoRatchet(
+    String bareJid,
+    int deviceId,
+    Map<String, dynamic> ratchetJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemoRatchetPrefix$bareJid:$deviceId', ratchetJson);
+    _afterHotWrite();
+  }
+
+  Map<String, dynamic>? loadOmemoRatchet(String bareJid, int deviceId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_omemoRatchetPrefix$bareJid:$deviceId');
+    return data is Map ? Map<String, dynamic>.from(data) : null;
+  }
+
+  /// Loads every persisted legacy-OMEMO ratchet belonging to [bareJid],
+  /// keyed by device id.
+  Map<int, Map<String, dynamic>> loadOmemoRatchetsForJid(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final prefix = '$_omemoRatchetPrefix$bareJid:';
+    final result = <int, Map<String, dynamic>>{};
+    for (final key in _keysWithPrefix(box, prefix)) {
+      final deviceId = int.tryParse(key.substring(prefix.length));
+      if (deviceId == null) {
+        continue;
+      }
+      final data = box.get(key);
+      if (data is Map) {
+        result[deviceId] = Map<String, dynamic>.from(data);
+      }
+    }
+    return result;
+  }
+
+  Future<void> removeOmemoRatchets(
+    List<MapEntry<String, int>> ratchetKeys,
+  ) async {
+    final box = _box;
+    if (box == null || ratchetKeys.isEmpty) {
+      return;
+    }
+    await box.deleteAll([
+      for (final entry in ratchetKeys)
+        '$_omemoRatchetPrefix${entry.key}:${entry.value}',
+    ]);
+  }
+
+  /// Persists a Blind-Trust-Before-Verification trust decision for a
+  /// single legacy-OMEMO device.
+  Future<void> storeOmemoTrust(
+    String bareJid,
+    int deviceId,
+    Map<String, dynamic> trustJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_omemoTrustPrefix$bareJid:$deviceId', trustJson);
+    _afterHotWrite();
+  }
+
+  /// Loads every persisted legacy-OMEMO trust decision for [bareJid].
+  List<Map<String, dynamic>> loadOmemoTrustForJid(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return const [];
+    }
+    final prefix = '$_omemoTrustPrefix$bareJid:';
+    return [
+      for (final key in _keysWithPrefix(box, prefix))
+        if (box.get(key) is Map) Map<String, dynamic>.from(box.get(key) as Map),
+    ];
+  }
+
+  Future<void> removeOmemoTrustForJid(String bareJid) async {
+    await _deleteKeysWithPrefix('$_omemoTrustPrefix$bareJid:');
   }
 
   /// Persists the generic [TrustStore] trust-state value (the
