@@ -107,6 +107,12 @@ dependencies:
   # OpenPGP implementation (key generation, encryption/signing). BSD-3-Clause
   # licensed, see https://pub.dev/packages/dart_pg.
   dart_pg: ^2.1.0
+  # Already pulled in transitively by omemo_dart (used there for its
+  # internal diagnostics); declared directly here too since main.dart now
+  # wires `logging`'s `Logger.root` into xmpp_stone's `Log` so omemo_dart's
+  # warnings/errors (e.g. device-list/bundle fetch failures) end up in
+  # wimsy.log instead of being silently dropped.
+  logging: ^1.2.0
 
 dev_dependencies:
   sentry_dart_plugin: ^3.4.0

@@ -10165,6 +10165,25 @@ class XmppService extends ChangeNotifier {
         DecryptResult? result;
         try {
           result = await encryptionManager.decryptIncomingByNamespace(stanza);
+          if (result == null) {
+            Log.w(
+              'XmppService',
+              'Incoming <encrypted/> stanza from $from was not recognised '
+                  'by any encryption backend (unknown/unsupported '
+                  'namespace)',
+            );
+          } else if (result.error != null) {
+            Log.w(
+              'XmppService',
+              'Failed to decrypt incoming ${result.protocolId} message from '
+                  '$from: ${result.error}',
+            );
+          } else {
+            Log.d(
+              'XmppService',
+              'Decrypted incoming ${result.protocolId} message from $from',
+            );
+          }
         } catch (error) {
           Log.w('XmppService', 'Failed to decrypt incoming message: $error');
         }

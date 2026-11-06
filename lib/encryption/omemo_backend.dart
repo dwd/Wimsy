@@ -382,6 +382,22 @@ class OmemoBackend implements EncryptionBackend {
     final keysForJid = (result.encryptedKeys[toBareJid] ?? const [])
         .map(_fixOutgoingKexKey)
         .toList();
+    if (keysForJid.isEmpty) {
+      // No usable device/bundle was found for toBareJid (e.g. the device
+      // list/bundle fetch via PEP failed or returned nothing), so
+      // `omemo_dart` couldn't wrap any per-device key. Sending the
+      // resulting <encrypted/> stanza anyway would silently produce an
+      // undecryptable message with no <key> children at all -- throw
+      // instead, so the caller's "Failed to encrypt outgoing message" path
+      // (see xmpp_service.dart) surfaces this clearly instead of the
+      // message being sent (and accepted by the server) with no recipient
+      // able to decrypt it.
+      throw StateError(
+        'No legacy OMEMO devices/keys available for $toBareJid; '
+        'device list or bundle fetch via PEP likely failed (see '
+        'omemo_dart/OmemoManager logs above for the underlying cause)',
+      );
+    }
     for (final key in keysForJid) {
       final keyElement = XmppElement()..name = 'key';
       keyElement.addAttribute(XmppAttribute('rid', key.rid.toString()));

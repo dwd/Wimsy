@@ -53,6 +53,7 @@ import 'widgets/fingerprint_verification_screen.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:logging/logging.dart' as logging;
 
 const List<String> _defaultReactionOptions = [
   '👍',
@@ -75,6 +76,29 @@ Future<void> main() async {
     Log.logXmpp = true;
     return true;
   }());
+  // `omemo_dart` (vendored under vendor/omemo_dart) uses the `logging`
+  // package's `Logger` for its own internal diagnostics (e.g. device-list/
+  // bundle fetch failures, ratchet processing warnings), independently of
+  // xmpp_stone's `Log`. Without wiring it up here, those messages are
+  // silently dropped instead of appearing in wimsy.log, which made
+  // debugging encrypt/decrypt failures (e.g. "no devices known for a
+  // recipient") impossible from the log alone.
+  logging.Logger.root.level = logging.Level.ALL;
+  logging.Logger.root.onRecord.listen((record) {
+    final tag = 'omemo_dart/${record.loggerName}';
+    final message = record.error != null
+        ? '${record.message} (${record.error})'
+        : record.message;
+    if (record.level >= logging.Level.SEVERE) {
+      Log.e(tag, message);
+    } else if (record.level >= logging.Level.WARNING) {
+      Log.w(tag, message);
+    } else if (record.level >= logging.Level.INFO) {
+      Log.i(tag, message);
+    } else {
+      Log.v(tag, message);
+    }
+  });
   final prefs = await PreferencesService.load();
   await _startApp(sentryEnabled: prefs.sentryOptIn, preferences: prefs);
 }

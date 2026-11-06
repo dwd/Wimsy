@@ -239,6 +239,39 @@ void main() {
   );
 
   test(
+    'OmemoBackend: encryptForSend throws instead of silently sending an '
+    'empty <encrypted/> stanza when no devices/bundles are known for the '
+    'recipient',
+    () async {
+      // Regression test: if the recipient's device list/bundle fetch via
+      // PEP fails or returns nothing (e.g. the recipient has never
+      // published one, or our subscription/fetch failed), omemo_dart's
+      // onOutgoingStanza returns an EncryptionResult with no keys for that
+      // JID at all. Previously, encryptForSend would still build and
+      // return an <encrypted/> stanza with a <header> containing zero
+      // <key> children -- which the server would happily deliver, but no
+      // recipient device could ever decrypt -- without surfacing any
+      // error to the caller (see xmpp_service.dart's "Failed to encrypt
+      // outgoing message" path, which only fires on a thrown error).
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+
+      // Note: bobBackend.publishIdentity() is deliberately never called,
+      // so network.deviceLists/bundles has nothing for bobJid.
+      await expectLater(
+        aliceBackend.encryptForSend(bobJid, 'hello from alice'),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
+
+  test(
     'OmemoBackend: outgoing <key kex="true"> embeds libsignal '
     'DJB-type-prefixed ik/ek for interop with real legacy-OMEMO clients',
     () async {
