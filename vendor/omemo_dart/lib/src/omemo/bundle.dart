@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:cryptography/cryptography.dart';
 import 'package:hex/hex.dart';
 import 'package:omemo_dart/src/keys.dart';
+import 'package:omemo_dart/src/xeddsa_convert.dart';
 
 class OmemoBundle {
   const OmemoBundle(
@@ -13,6 +14,7 @@ class OmemoBundle {
     this.ikEncoded,
     this.opksEncoded, {
     this.spkSignatureMessageEncoded,
+    this.ikIsX25519 = false,
   });
 
   /// The bare Jid the Bundle belongs to
@@ -54,6 +56,27 @@ class OmemoBundle {
   /// raw key directly.
   final String? spkSignatureMessageEncoded;
 
+  /// Whether [ikEncoded] holds a raw Curve25519 (X25519) `u` coordinate
+  /// (as published by real legacy-OMEMO clients, XEP-0384 v0.3.0, for
+  /// their identity key -- see https://signal.org/docs/specifications/xeddsa)
+  /// rather than a genuine Ed25519-encoded point. Defaults to `false`, so
+  /// OMEMO2 (`urn:xmpp:omemo:2`, genuine Ed25519 identity keys) and any
+  /// other existing caller is completely unaffected.
+  ///
+  /// When `true`, [ik] applies the Montgomery->Edwards birational map
+  /// (`convert_mont(u, sign=0)`) to [ikEncoded] before returning it, so
+  /// that the *unmodified* Ed25519-signature-verification code in
+  /// `x3dhFromBundle` and the *unmodified* `OmemoPublicKey.toCurve25519()`
+  /// forward conversion used for the X3DH ECDH step both "just work" --
+  /// the forward (Edwards->Montgomery) map `toCurve25519()` already
+  /// performs is the algebraic inverse of `convert_mont`'s
+  /// (Montgomery->Edwards) map, independent of the discarded sign bit
+  /// (see `test/xeddsa_test.dart` for a dedicated round-trip test of this
+  /// property). [getFingerprint] intentionally does *not* use [ik] (see
+  /// below), so the Edwards-converted form never leaks into the
+  /// user-visible fingerprint.
+  final bool ikIsX25519;
+
   /// The bytes that [spkSignature] is a signature over. See
   /// [spkSignatureMessageEncoded].
   List<int> get spkSignatureMessage =>
@@ -66,6 +89,12 @@ class OmemoBundle {
 
   OmemoPublicKey get ik {
     final data = base64Decode(ikEncoded);
+    if (ikIsX25519) {
+      return OmemoPublicKey.fromBytes(
+        convertMontgomeryToEdwards(data),
+        KeyPairType.ed25519,
+      );
+    }
     return OmemoPublicKey.fromBytes(data, KeyPairType.ed25519);
   }
 
@@ -78,7 +107,13 @@ class OmemoBundle {
 
   /// Calculates the fingerprint of the bundle (See
   /// https://xmpp.org/extensions/xep-0384.html#security § 2).
+  ///
+  /// Always fingerprints the genuine identity-key bytes as published
+  /// (i.e. [ikEncoded] directly) rather than going through [ik], since
+  /// [ik] applies the Montgomery->Edwards conversion when [ikIsX25519] is
+  /// set -- a form real clients (e.g. Conversations) never display and
+  /// that must not leak into the user-visible fingerprint.
   Future<String> getFingerprint() async {
-    return HEX.encode(await ik.getBytes());
+    return HEX.encode(base64Decode(ikEncoded));
   }
 }

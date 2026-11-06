@@ -9,6 +9,7 @@ import 'encryption_backend.dart';
 import 'omemo2_backend.dart' show Omemo2DeviceFingerprint;
 import 'omemo2_serialization.dart';
 import 'trust_store.dart';
+import 'xeddsa.dart';
 
 /// The `eu.siacs.conversations.axolotl` namespace used by legacy OMEMO
 /// (XEP-0384 v0.3.0, https://xmpp.org/extensions/attic/xep-0384-0.3.0.html),
@@ -208,7 +209,8 @@ class OmemoBackend implements EncryptionBackend {
         return null;
       },
       (jid) async => pep.subscribeToLegacyDeviceList(jid),
-      (ownDevice) async => pep.publishLegacyBundle(await ownDevice.toBundle()),
+      (ownDevice) async =>
+          pep.publishLegacyBundle(await _legacyBundleFromDevice(ownDevice)),
       commitDevice: (updatedDevice) async {
         await storage.storeOmemoIdentity(
           selfBareJid,
@@ -247,6 +249,14 @@ class OmemoBackend implements EncryptionBackend {
             storage.loadOmemoDeviceList(jid) ?? ratchetsJson.keys.toList();
         return OmemoDataPackage(devices, ratchets);
       },
+      // Real legacy-OMEMO clients (Conversations/Gajim/Dino) use a single
+      // X25519 identity keypair signed via XEdDSA for both ECDH and
+      // signing (see lib/encryption/xeddsa.dart), not a genuine Ed25519
+      // identity key as OMEMO2 does -- so a remote device's identity key
+      // carried in an incoming <key kex="true"> element must be converted
+      // via the Montgomery->Edwards birational map before use. See
+      // OmemoManager.remoteIdentityKeysAreX25519 and VENDORING.md.
+      remoteIdentityKeysAreX25519: true,
     );
 
     return OmemoBackend._(
@@ -277,19 +287,117 @@ class OmemoBackend implements EncryptionBackend {
   ) async {
     final storedJson = await storage.loadOmemoIdentity(selfBareJid);
     if (storedJson != null) {
-      return omemoDeviceFromJson(storedJson);
+      final stored = await omemoDeviceFromJson(storedJson);
+      // Migration: before the XEdDSA fix, legacy-OMEMO devices (like
+      // OMEMO2's) were generated with a genuine Ed25519 `ik`, which is
+      // incompatible with real clients (Conversations/Gajim/Dino), who
+      // always expect our legacy-OMEMO identity key to be a raw X25519
+      // public key (see the class doc and `xeddsa.dart`). Such a
+      // pre-fix-era identity cannot simply be reinterpreted as X25519 (an
+      // Ed25519 keypair and an X25519 keypair are not the same secret),
+      // so it must be regenerated from scratch -- this resets the user's
+      // legacy-OMEMO fingerprint and all trust decisions/sessions built
+      // against it, which is unavoidable and is called out in
+      // `VENDORING.md`/this doc comment.
+      if (stored.ik.type != KeyPairType.x25519) {
+        Log.w(
+          'OmemoBackend',
+          'Stored legacy OMEMO identity for $selfBareJid has an '
+              'incompatible (pre-XEdDSA-fix) Ed25519 identity key; '
+              'regenerating a fresh X25519-based device. This resets the '
+              'legacy-OMEMO fingerprint and all trust/session state for '
+              'this account.',
+        );
+      } else {
+        return stored;
+      }
     }
     final device = importedIdentityKeyPem != null
-        ? await deviceFromIdentityKeyExport(
+        ? await _legacyDeviceFromIdentityKeyExport(
             selfBareJid,
             identityKeyPairFromPem(importedIdentityKeyPem, _identityKeyLabel),
           )
-        : await OmemoDevice.generateNewDevice(selfBareJid);
+        : await _generateNewLegacyDevice(selfBareJid);
     await storage.storeOmemoIdentity(
       selfBareJid,
       await omemoDeviceToJson(device),
     );
     return device;
+  }
+
+  /// Generates a brand-new legacy-OMEMO [OmemoDevice] whose identity key
+  /// (`ik`) is a genuine X25519 keypair, matching what real legacy-OMEMO
+  /// clients (Conversations/Gajim/Dino) publish and expect -- unlike
+  /// `OmemoDevice.generateNewDevice()` (used unmodified by
+  /// `Omemo2Backend`), which always generates an Ed25519 `ik` for OMEMO2.
+  /// The signed prekey's signature is produced with [xeddsaSign] over the
+  /// libsignal-serialized (DJB-type-prefixed) SPK bytes (see
+  /// `_legacySpkSignatureMessage`), since real clients verify it via
+  /// XEdDSA (`convert_mont` + standard Ed25519 verify) rather than a
+  /// plain Ed25519 signature.
+  static Future<OmemoDevice> _generateNewLegacyDevice(
+    String jid, {
+    int opkAmount = 100,
+  }) async {
+    final id = generateRandom32BitNumber();
+    final ik = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+    return _buildLegacyDeviceWithIk(jid, id, ik, opkAmount: opkAmount);
+  }
+
+  /// Like [deviceFromIdentityKeyExport], but for an imported X25519
+  /// legacy-OMEMO identity key (see [exportIdentityKey]).
+  static Future<OmemoDevice> _legacyDeviceFromIdentityKeyExport(
+    String jid,
+    OmemoKeyPair ik, {
+    int opkAmount = 100,
+  }) async {
+    return _buildLegacyDeviceWithIk(
+      jid,
+      generateRandom32BitNumber(),
+      ik,
+      opkAmount: opkAmount,
+    );
+  }
+
+  static Future<OmemoDevice> _buildLegacyDeviceWithIk(
+    String jid,
+    int id,
+    OmemoKeyPair ik, {
+    required int opkAmount,
+  }) async {
+    final spk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+    final spkId = generateRandom32BitNumber();
+    final signature = await _legacySpkSignature(ik, await spk.pk.getBytes());
+
+    final opks = <int, OmemoKeyPair>{};
+    for (var i = 0; i < opkAmount; i++) {
+      while (true) {
+        final opkId = generateRandom32BitNumber();
+        if (opks.containsKey(opkId)) {
+          continue;
+        }
+        opks[opkId] = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+        break;
+      }
+    }
+
+    return OmemoDevice(jid, id, ik, spk, spkId, signature, null, null, opks);
+  }
+
+  /// Produces the XEdDSA signature of our own SPK, matching the
+  /// convention real legacy-OMEMO clients use: signing the
+  /// libsignal-serialized, DJB-type-prefixed form of the SPK (0x05 +
+  /// 32 raw bytes), exactly as `OmemoBundle.spkSignatureMessageEncoded`
+  /// documents for verifying a *remote* bundle's signature. Real clients
+  /// will convert our raw X25519 `ik` bytes via `convert_mont` and verify
+  /// this signature as a standard Ed25519 signature.
+  static Future<List<int>> _legacySpkSignature(
+    OmemoKeyPair ik,
+    List<int> spkPublicKeyBytes,
+  ) async {
+    final message = _addDjbKeyTypeBytes(spkPublicKeyBytes);
+    final ikPrivateKeyBytes = await ik.sk.getBytes();
+    return xeddsaSign(ikPrivateKeyBytes, message);
   }
 
   /// Label used in the `BEGIN`/`END` markers of this backend's exported
@@ -344,6 +452,40 @@ class OmemoBackend implements EncryptionBackend {
           ),
       },
       spkSignatureMessageEncoded: json['spksMsg'] as String?,
+      // Real legacy-OMEMO clients' identity key is a raw X25519 (not
+      // Ed25519) public key -- see the class doc and `xeddsa.dart` --
+      // so OmemoBundle.ik must apply the Montgomery->Edwards conversion
+      // before it's used for Ed25519-signature verification/ECDH.
+      ikIsX25519: true,
+    );
+  }
+
+  /// Builds the [OmemoBundle] to publish for our own [device], mirroring
+  /// `OmemoDevice.toBundle()` but additionally setting
+  /// [OmemoBundle.spkSignatureMessageEncoded] to the libsignal
+  /// DJB-type-prefixed form of the SPK (0x05 + 32 raw bytes) -- the exact
+  /// bytes [_legacySpkSignature] actually signs via [xeddsaSign], matching
+  /// the convention real legacy-OMEMO clients use (see
+  /// `OmemoBundle.spkSignatureMessageEncoded`'s doc and
+  /// `vendor/omemo_dart/VENDORING.md`). Without this, a real contact (or
+  /// our own other device) verifying our bundle would check the signature
+  /// against the un-prefixed 32-byte SPK instead, which never matches and
+  /// reproduces `InvalidKeyExchangeSignatureError`.
+  static Future<OmemoBundle> _legacyBundleFromDevice(
+    OmemoDevice device,
+  ) async {
+    final bundle = await device.toBundle();
+    return OmemoBundle(
+      bundle.jid,
+      bundle.id,
+      bundle.spkEncoded,
+      bundle.spkId,
+      bundle.spkSignatureEncoded,
+      bundle.ikEncoded,
+      bundle.opksEncoded,
+      spkSignatureMessageEncoded: base64Encode(
+        _addDjbKeyTypeBytes(base64Decode(bundle.spkEncoded)),
+      ),
     );
   }
 
@@ -372,7 +514,7 @@ class OmemoBackend implements EncryptionBackend {
   @override
   Future<void> publishIdentity() async {
     final device = await _omemoManager.getDevice();
-    await pep.publishLegacyBundle(await device.toBundle());
+    await pep.publishLegacyBundle(await _legacyBundleFromDevice(device));
     final knownDevices = storage.loadOmemoDeviceList(selfBareJid) ?? [];
     final deviceIds = {...knownDevices, device.id}.toList();
     await storage.storeOmemoDeviceList(selfBareJid, deviceIds);

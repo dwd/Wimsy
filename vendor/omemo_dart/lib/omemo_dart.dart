@@ -18,3 +18,4 @@ export 'src/protobuf/schema.pb.dart';
 export 'src/trust/base.dart';
 export 'src/trust/btbv.dart';
 export 'src/x3dh/x3dh.dart';
+export 'src/xeddsa_convert.dart';

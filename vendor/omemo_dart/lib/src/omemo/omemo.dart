@@ -25,6 +25,7 @@ import 'package:omemo_dart/src/omemo/stanza.dart';
 import 'package:omemo_dart/src/protobuf/schema.pb.dart';
 import 'package:omemo_dart/src/trust/base.dart';
 import 'package:omemo_dart/src/x3dh/x3dh.dart';
+import 'package:omemo_dart/src/xeddsa_convert.dart';
 import 'package:synchronized/synchronized.dart';
 
 class OmemoDataPackage {
@@ -114,6 +115,7 @@ class OmemoManager {
     this.commitDevice = commitDeviceStub,
     this.removeRatchets = removeRatchetsStub,
     this.loadRatchets = loadRatchetsStub,
+    this.remoteIdentityKeysAreX25519 = false,
   });
 
   final Logger _log = Logger('OmemoManager');
@@ -151,6 +153,24 @@ class OmemoManager {
 
   /// Callback to load ratchets from persistent storage.
   final LoadRatchetsCallback loadRatchets;
+
+  /// Whether a remote device's identity key, as carried by an incoming
+  /// `<key kex="true">` element's `OMEMOKeyExchange` protobuf (`ik`
+  /// field), is a raw Curve25519 (X25519) public key rather than a
+  /// genuine Ed25519 point -- true for legacy OMEMO (XEP-0384 v0.3.0,
+  /// `eu.siacs.conversations.axolotl`), since real clients
+  /// (Conversations/Gajim/Dino) use XEdDSA (a single X25519 identity
+  /// keypair for both ECDH and signing, see
+  /// https://signal.org/docs/specifications/xeddsa) rather than OMEMO2's
+  /// genuine Ed25519 identity keys. Defaults to `false` so OMEMO2 is
+  /// completely unaffected; set by `OmemoBackend.create()` (see
+  /// `lib/encryption/omemo_backend.dart`), left at its default by
+  /// `Omemo2Backend.create()`. When `true`, [_onIncomingStanzaImpl]
+  /// applies the Montgomery->Edwards birational map
+  /// (`convertMontgomeryToEdwards`, see `VENDORING.md`) to `kexMessage.ik`
+  /// before treating it as an Ed25519 point, mirroring
+  /// `OmemoBundle.ikIsX25519` for the outgoing/bundle-fetch side.
+  final bool remoteIdentityKeysAreX25519;
 
   /// Map bare JID to its known devices
   final Map<String, List<int>> _deviceList = {};
@@ -416,7 +436,9 @@ class OmemoManager {
 
       // Build the new ratchet session
       final kexIk = OmemoPublicKey.fromBytes(
-        kexMessage.ik,
+        remoteIdentityKeysAreX25519
+            ? convertMontgomeryToEdwards(kexMessage.ik)
+            : kexMessage.ik,
         KeyPairType.ed25519,
       );
       final kexEk = OmemoPublicKey.fromBytes(
@@ -428,6 +450,11 @@ class OmemoManager {
           kexIk,
           kexEk,
           kexMessage.pkId,
+          // See X3DHMessage.getIkBytesForAd's doc: the associated data
+          // must use the un-converted (as received on the wire) ik bytes,
+          // not the Montgomery->Edwards-converted form used for the DH
+          // step above when remoteIdentityKeysAreX25519 is set.
+          ikRawBytes: kexMessage.ik,
         ),
         spk,
         device.opks[kexMessage.pkId]!,

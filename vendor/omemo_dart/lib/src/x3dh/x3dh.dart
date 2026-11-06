@@ -20,10 +20,25 @@ class X3DHAliceResult {
 
 /// Received by Bob
 class X3DHMessage {
-  const X3DHMessage(this.ik, this.ek, this.opkId);
+  const X3DHMessage(this.ik, this.ek, this.opkId, {List<int>? ikRawBytes})
+      : _ikRawBytes = ikRawBytes;
   final OmemoPublicKey ik;
   final OmemoPublicKey ek;
   final int opkId;
+
+  /// The canonical, un-converted bytes of [ik], to use for the X3DH
+  /// associated data (see [x3dhFromInitialMessage]) instead of [ik]'s own
+  /// (possibly Montgomery->Edwards-converted, for legacy OMEMO's XEdDSA --
+  /// see `OmemoManager.remoteIdentityKeysAreX25519`) bytes. Both parties
+  /// must agree on the exact same bytes for the same identity key when
+  /// computing `ad`, or the resulting Double Ratchet session's HMAC check
+  /// fails for every message -- but [ik] itself must be in whichever form
+  /// (converted or not) `omemoDH`'s ECDH step needs. Defaults to [ik]'s
+  /// own bytes (so OMEMO2, which never converts, is unaffected).
+  final List<int>? _ikRawBytes;
+
+  Future<List<int>> getIkBytesForAd() async =>
+      _ikRawBytes ?? await ik.getBytes();
 }
 
 class X3DHBobResult {
@@ -104,9 +119,16 @@ Future<Result<InvalidKeyExchangeSignatureError, X3DHAliceResult>>
   final dh4 = await omemoDH(ek, opk, 0);
 
   final sk = await kdf(concat([dh1, dh2, dh3, dh4]));
+  // Use bundle.ikEncoded's raw bytes (not bundle.ik.getBytes(), which
+  // applies the Montgomery->Edwards conversion when
+  // OmemoBundle.ikIsX25519 is set, see its doc) for the associated data,
+  // so both parties agree on the exact same bytes for the same identity
+  // key -- see X3DHMessage.getIkBytesForAd's doc for why this matters.
+  // A no-op for OMEMO2/any non-ikIsX25519 bundle, whose ikEncoded already
+  // *is* what bundle.ik.getBytes() would return.
   final ad = concat([
     await ik.pk.getBytes(),
-    await bundle.ik.getBytes(),
+    base64Decode(bundle.ikEncoded),
   ]);
 
   return Result(X3DHAliceResult(ek, sk, opkId, ad));
@@ -126,8 +148,10 @@ Future<X3DHBobResult> x3dhFromInitialMessage(
   final dh4 = await omemoDH(opk, msg.ek, 0);
 
   final sk = await kdf(concat([dh1, dh2, dh3, dh4]));
+  // See X3DHMessage.getIkBytesForAd's doc: must match the bytes the
+  // initiating party used for its half of the associated data.
   final ad = concat([
-    await msg.ik.getBytes(),
+    await msg.getIkBytesForAd(),
     await ik.pk.getBytes(),
   ]);
 

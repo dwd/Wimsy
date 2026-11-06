@@ -96,6 +96,109 @@ session with a real contact failed with `InvalidKeyExchangeSignatureError`
   cache miss so it gets refetched instead of reproducing the signature
   failure forever.
 
+### XEdDSA fix: our own identity key and verifying real clients' XEdDSA-signed bundles
+
+Real legacy-OMEMO clients (Conversations/Gajim/Dino, all libsignal-based)
+use a single **Curve25519 (X25519) identity keypair** for both ECDH *and*
+signing their signed-prekey (SPK), via the **XEdDSA** signature scheme
+(https://signal.org/docs/specifications/xeddsa) -- *not* a genuine
+Ed25519 identity keypair, unlike OMEMO2 (and unlike `omemo_dart`'s
+built-in `OmemoDevice.generateNewDevice()`, which always generates an
+Ed25519 `ik`). Treating a real client's raw X25519 identity-key bytes
+directly as an Ed25519 public key (the previous behavior) is
+mathematically wrong -- the SPK signature essentially never verifies,
+causing `InvalidKeyExchangeSignatureError` for every real contact, and
+(on the rarer incoming-session path, which has no signature check)
+silently wrong ECDH results.
+
+- `lib/encryption/xeddsa.dart` (new, app-level, not vendored): a
+  from-scratch, pure-Dart implementation of XEdDSA's
+  `calculate_key_pair`/`xeddsa_sign` (BigInt-based field arithmetic for
+  the Montgomery<->Edwards birational map, plus a minimal extended
+  twisted-Edwards25519 point/scalar-multiplication implementation), used
+  to generate our own legacy-OMEMO device's `ik` as a genuine X25519
+  keypair and sign our SPK the way real clients expect. No existing Dart
+  package was found exposing the lower-level primitives this needs
+  (checked `package:cryptography`'s public API). *Verifying* a remote
+  bundle's signature doesn't need this file at all -- just the
+  Montgomery->Edwards conversion (`convert_mont`) followed by a standard
+  `package:cryptography` `Ed25519().verify()`, since "XEd25519 signatures
+  are valid Ed25519 signatures and vice versa" per the spec.
+- `lib/src/xeddsa_convert.dart` (new, vendored): a small,
+  conversion-only (`convertMontgomeryToEdwards`, i.e. `convert_mont`)
+  re-implementation of the same birational map, needed *inside* the
+  vendored library itself (`OmemoManager._onIncomingStanzaImpl`, see
+  below) where application-level code can't intercept. Exported from
+  `lib/omemo_dart.dart`. Duplicated rather than shared with
+  `lib/encryption/xeddsa.dart` to avoid a dependency cycle between the
+  vendored package and the app; `test/xeddsa_test.dart` cross-checks that
+  both agree.
+- `lib/src/crypto.dart`'s `omemoDH`: only converts an identity
+  key/keypair from Ed25519 to X25519 when it's actually Ed25519-typed;
+  an already-X25519 identity key/keypair (our own legacy-OMEMO `ik`) is
+  now used directly for the DH, instead of asserting (`toCurve25519`
+  requires Ed25519 input).
+- `lib/src/omemo/bundle.dart`: added an optional `ikIsX25519` field to
+  `OmemoBundle` (default `false`, so OMEMO2 is unaffected). When `true`,
+  the `ik` getter applies `convertMontgomeryToEdwards` to `ikEncoded`
+  before returning it, so the *unmodified* `x3dhFromBundle` Ed25519
+  verification and the *unmodified* `OmemoPublicKey.toCurve25519()`
+  forward conversion (used for the actual X3DH ECDH step) both "just
+  work" -- the forward map is the algebraic inverse of `convert_mont`,
+  independent of the discarded sign bit (`test/xeddsa_test.dart` has a
+  dedicated round-trip test of this property, using real X25519-generated
+  keys; note the round-trip is *not* guaranteed for arbitrary byte
+  strings, only genuine X25519 public keys, since some byte strings
+  correspond to the curve's quadratic twist). `getFingerprint()` was
+  changed to always hash `ikEncoded` directly (not `ik.getBytes()`), so
+  the Edwards-converted form never leaks into the user-visible
+  fingerprint -- real clients (e.g. Conversations) always display the raw
+  X25519 bytes.
+- `lib/src/omemo/omemo.dart`: added an optional
+  `remoteIdentityKeysAreX25519` field to `OmemoManager` (default `false`).
+  When `true`, `_onIncomingStanzaImpl` applies
+  `convertMontgomeryToEdwards` to an incoming `<key kex="true">`
+  element's `OMEMOKeyExchange.ik` field before treating it as an Ed25519
+  point, mirroring `OmemoBundle.ikIsX25519` for the bundle-fetch side.
+  `lib/encryption/omemo_backend.dart`'s `OmemoBackend.create()` passes
+  `true`; `omemo2_backend.dart`'s `Omemo2Backend.create()` leaves it at
+  its default.
+- `lib/src/x3dh/x3dh.dart`: `X3DHMessage` gained an optional
+  `ikRawBytes` field (and `getIkBytesForAd()` accessor), and
+  `x3dhFromBundle`'s associated-data (`ad`) computation now uses
+  `bundle.ikEncoded`'s raw bytes instead of `bundle.ik.getBytes()`. This
+  was needed because `ad` is folded into the Double Ratchet's per-message
+  HMAC (see `OmemoDoubleRatchet._decrypt`/`ratchetEncrypt`'s `sessionAd`
+  use) and **both parties must compute byte-identical `ad`** for the same
+  identity key -- but with the Montgomery->Edwards conversion applied
+  asymmetrically (one party's own `ik` is raw X25519, the same key as
+  seen by the other party via `bundle.ik`/`kexIk` is Edwards-converted),
+  naively using `ik.getBytes()` on each side produced *different* bytes
+  for the same identity, silently breaking every message's HMAC check
+  with `InvalidMessageHMACError`. Using the canonical raw-encoded bytes on
+  both sides (regardless of which form is needed for the DH/signature
+  math) fixes this; a no-op for OMEMO2 (`ikIsX25519`/
+  `remoteIdentityKeysAreX25519` both `false`), whose `ikEncoded`/raw
+  `kexMessage.ik` bytes already equal what `ik.getBytes()` returns.
+- `lib/encryption/omemo_backend.dart`: generates a genuine X25519 `ik`
+  for new legacy-OMEMO devices (`_generateNewLegacyDevice`, bypassing
+  `OmemoDevice.generateNewDevice()`/the generic `sig()` helper, both of
+  which assert Ed25519), signs the SPK via `xeddsaSign` over the
+  DJB-type-prefixed SPK bytes (matching `spkSignatureMessageEncoded`'s
+  convention), and sets `ikIsX25519: true` when loading a
+  legacy-OMEMO bundle from cache or PEP. **Migration**: a legacy-OMEMO
+  identity persisted before this fix has an incompatible Ed25519 `ik`
+  (not reusable as X25519 -- the two key types are cryptographically
+  unrelated secrets); `_loadOrGenerateDevice` detects this (by checking
+  the stored `ik`'s `KeyPairType`) and transparently regenerates a fresh
+  X25519-based device instead, logging a warning. This is a
+  **user-visible, unavoidable one-time reset** of the legacy-OMEMO
+  fingerprint and all trust/session state for accounts that had already
+  used legacy OMEMO before this fix shipped.
+- `lib/xmpp/omemo_pep.dart`: `_legacyBundleFromElement` sets
+  `ikIsX25519: true` on bundles parsed from the wire, matching real
+  clients' identity-key convention.
+
 ## Upstream clone with our patches as real commits
 
 This directory (`vendor/omemo_dart/`) is a flat copy (no `.git`), so our local

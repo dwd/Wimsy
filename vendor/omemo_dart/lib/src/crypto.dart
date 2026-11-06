@@ -16,10 +16,16 @@ Future<List<int>> omemoDH(
   var ckp = kp;
   var cpk = pk;
 
+  // Legacy OMEMO (XEP-0384 v0.3.0, `eu.siacs.conversations.axolotl`) uses a
+  // genuine X25519 identity keypair/key (to interop with real clients'
+  // XEdDSA-signed identity keys -- see `lib/encryption/xeddsa.dart` and
+  // `VENDORING.md`), unlike OMEMO2's Ed25519 identity keys. Only convert
+  // when the identity key is actually Ed25519-typed; an already-X25519
+  // identity key/keypair is used directly for the DH.
   if (identityKey == 1) {
-    ckp = await kp.toCurve25519();
+    ckp = kp.type == KeyPairType.x25519 ? kp : await kp.toCurve25519();
   } else if (identityKey == 2) {
-    cpk = await pk.toCurve25519();
+    cpk = pk.type == KeyPairType.x25519 ? pk : await pk.toCurve25519();
   }
 
   final shared = await Cryptography.instance.x25519().sharedSecretKey(

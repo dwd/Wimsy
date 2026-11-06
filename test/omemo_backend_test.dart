@@ -150,7 +150,25 @@ class FakeOmemoPep implements OmemoPepTransport {
 
   @override
   Future<void> publishLegacyBundle(OmemoBundle bundle) async {
-    network.bundles['$ownBareJid:${bundle.id}'] = bundle;
+    // Mirror `OmemoPep._legacyBundleFromElement`'s real wire-level
+    // behavior: a legacy-OMEMO bundle's `ik` is a raw X25519 public key
+    // (see `lib/encryption/xeddsa.dart`), so a bundle received via PEP
+    // always carries `ikIsX25519: true` -- the real `OmemoBundle`
+    // produced by `OmemoDevice.toBundle()` doesn't set this itself (it
+    // doesn't know how it will be transported/parsed), so this fake PEP
+    // network applies it here, simulating what a publish-then-fetch round
+    // trip through real XML parsing would produce.
+    network.bundles['$ownBareJid:${bundle.id}'] = OmemoBundle(
+      bundle.jid,
+      bundle.id,
+      bundle.spkEncoded,
+      bundle.spkId,
+      bundle.spkSignatureEncoded,
+      bundle.ikEncoded,
+      bundle.opksEncoded,
+      spkSignatureMessageEncoded: bundle.spkSignatureMessageEncoded,
+      ikIsX25519: true,
+    );
   }
 
   @override
@@ -833,6 +851,116 @@ void main() {
         ),
         throwsFormatException,
       );
+    },
+  );
+
+  test(
+    'OmemoBackend: own identity key is a genuine X25519 keypair, and '
+    "both parties' fingerprints are the raw X25519 bytes (not the "
+    'Montgomery->Edwards-converted form used internally for verification)',
+    () async {
+      // Regression test for the root-cause fix: real legacy-OMEMO clients
+      // (Conversations/Gajim/Dino) use a single X25519 identity keypair
+      // for both ECDH and XEdDSA signing, unlike `omemo_dart`'s OMEMO2
+      // design (genuine Ed25519 identity keys). Our own device must match
+      // that convention, and the fingerprint shown to the user (e.g. via
+      // the shield/fingerprint-verification UI) must be the real raw
+      // X25519 bytes a real client would display -- never the
+      // Edwards-converted form `OmemoBundle.ik` uses internally for
+      // signature verification/ECDH (see `OmemoBundle.ikIsX25519`).
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+
+      final aliceIdentityJson = (await aliceStorage.loadOmemoIdentity(
+        aliceJid,
+      ))!;
+      expect((aliceIdentityJson['ik'] as Map)['type'], 'x25519');
+
+      await aliceBackend.publishIdentity();
+      await bobBackend.publishIdentity();
+      await aliceBackend.encryptForSend(bobJid, 'hi');
+
+      final bobDeviceId = await bobBackend.ownDeviceId();
+      final rawAliceIk = base64Decode(
+        (aliceIdentityJson['ik'] as Map)['pk'] as String,
+      );
+      // Sanity: alice's own raw ik bytes are exactly 32 bytes (a raw
+      // Curve25519 key), not some other encoding.
+      expect(rawAliceIk.length, 32);
+
+      final aliceOwnFingerprint = await aliceBackend.ownFingerprint();
+      final bobOwnFingerprint = await bobBackend.ownFingerprint();
+
+      // Alice's view of Bob's fingerprint (via the cached bundle) must
+      // match what Bob reports as his own fingerprint -- both must be the
+      // real raw X25519 bytes, consistently, regardless of the
+      // Montgomery->Edwards conversion `OmemoBundle.ik` applies
+      // internally.
+      final fingerprints = await aliceBackend.deviceFingerprintsFor(bobJid);
+      final bobSeenByAlice = fingerprints.firstWhere(
+        (f) => f.deviceId == bobDeviceId,
+      );
+      expect(bobSeenByAlice.fingerprint, bobOwnFingerprint);
+      expect(bobSeenByAlice.fingerprint, isNot(aliceOwnFingerprint));
+    },
+  );
+
+  test(
+    'OmemoBackend: regenerates a pre-XEdDSA-fix (Ed25519-typed) stored '
+    'legacy-OMEMO identity instead of reusing it as-is',
+    () async {
+      // Migration regression test: before this fix, legacy-OMEMO devices
+      // were generated with a genuine Ed25519 `ik` (like OMEMO2), which is
+      // incompatible with real clients. Simulate such a pre-fix identity
+      // already persisted in storage and verify OmemoBackend.create
+      // detects and replaces it with a fresh X25519-based device instead
+      // of loading it as-is (which would silently keep producing
+      // `InvalidKeyExchangeSignatureError` against every real contact).
+      final network = FakeOmemoNetwork();
+      final storage = FakeStorageService();
+
+      // Build a legitimate (but Ed25519-typed) pre-fix device the way
+      // `OmemoDevice.generateNewDevice` (OMEMO2's codepath, previously
+      // also used by the legacy backend) would have.
+      final preFixDevice = await OmemoDevice.generateNewDevice(aliceJid);
+      await storage.storeOmemoIdentity(
+        aliceJid,
+        await omemoDeviceToJson(preFixDevice),
+      );
+
+      final backend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: storage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+
+      final migratedJson = (await storage.loadOmemoIdentity(aliceJid))!;
+      expect((migratedJson['ik'] as Map)['type'], 'x25519');
+      expect(migratedJson['id'], isNot(preFixDevice.id));
+
+      // The regenerated device must still work end-to-end (produce a
+      // valid, verifiable bundle/session), not just have the right type.
+      await backend.publishIdentity();
+      final otherStorage = FakeStorageService();
+      final otherBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: otherStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+      final payload = await otherBackend.encryptForSend(aliceJid, 'hi alice');
+      expect(payload.element.getChild('header'), isNotNull);
     },
   );
 

@@ -552,6 +552,13 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
       // keep the exact bytes as received on the wire so signature
       // verification checks against what was actually signed.
       spkSignatureMessageEncoded: spkEncoded,
+      // Real legacy-OMEMO clients' identity key is a raw X25519 (not
+      // Ed25519) public key, signed via XEdDSA -- see
+      // `lib/encryption/xeddsa.dart` and `vendor/omemo_dart/VENDORING.md`
+      // -- so `OmemoBundle.ik` must apply the Montgomery->Edwards
+      // conversion before it's used for Ed25519-signature
+      // verification/ECDH.
+      ikIsX25519: true,
     );
   }
 }
