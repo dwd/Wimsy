@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../storage/storage_service.dart';
@@ -153,6 +155,7 @@ class EncryptionManager {
         pep: pep,
       );
       _backendsByProtocolId['omemo2'] = backend;
+      _publishIdentitySafely(backend, 'omemo2');
       return backend;
     }();
   }
@@ -170,6 +173,7 @@ class EncryptionManager {
         pep: pep,
       );
       _backendsByProtocolId['omemo'] = backend;
+      _publishIdentitySafely(backend, 'omemo');
       return backend;
     }();
   }
@@ -187,8 +191,40 @@ class EncryptionManager {
         pep: pep,
       );
       _backendsByProtocolId['ox'] = backend;
+      _publishIdentitySafely(backend, 'ox');
       return backend;
     }();
+  }
+
+  /// Publishes [backend]'s identity (device-list/bundle or public key) via
+  /// PEP right after it's created.
+  ///
+  /// Previously nothing in production code ever called
+  /// [EncryptionBackend.publishIdentity]: it was only exercised from unit
+  /// tests. In practice this meant our own OMEMO/OMEMO2 device-list and
+  /// bundle were never (re-)announced, so contacts kept a stale device id
+  /// from whatever one-off publish (if any) happened to occur -- e.g. a
+  /// device id persisted before an app reinstall/local-storage reset, or
+  /// after `_loadOrGenerateDevice`/`Omemo2Backend`'s equivalent silently
+  /// generated a brand-new device because none was found in storage. Real
+  /// clients (Conversations/Gajim/Dino) then kept encrypting to that old,
+  /// unpublished device id forever, which `omemo_dart` correctly rejects
+  /// with `NotEncryptedForDeviceError` since it doesn't match our actual
+  /// current device id.
+  ///
+  /// Fired-and-forgotten (not awaited by callers) so a slow/failed PEP
+  /// publish never blocks encrypting/decrypting a message; failures are
+  /// just logged; the next backend use (or reconnect) will retry since
+  /// publishing is cheap and idempotent.
+  void _publishIdentitySafely(EncryptionBackend backend, String protocolId) {
+    unawaited(
+      backend.publishIdentity().catchError((Object error) {
+        Log.w(
+          'EncryptionManager',
+          'Failed to publish identity for $protocolId: $error',
+        );
+      }),
+    );
   }
 
   /// Encrypts [plaintext] for sending to [toBareJid] using [toBareJid]'s

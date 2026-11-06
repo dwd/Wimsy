@@ -202,6 +202,56 @@ void main() {
     },
   );
 
+  test(
+    'creating a backend automatically publishes our identity via PEP '
+    'instead of requiring a separate, never-called publishIdentity() '
+    'from production code',
+    () async {
+      // Regression test: real-world interop failures (Conversations
+      // reporting "Message was not encrypted for this device" /
+      // omemo_dart throwing NotEncryptedForDeviceError on every incoming
+      // message) were traced back to `publishIdentity()` never being
+      // invoked anywhere outside of unit tests, so our own device/bundle
+      // was never (re-)announced via PEP after being (re)created --
+      // contacts kept a stale device id of ours forever. EncryptionManager
+      // must now publish identity itself, right when a backend is first
+      // created, so this can't regress silently again.
+      final storage = FakeStorageService();
+      final connection = _buildConnection();
+      final manager = EncryptionManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      expect(
+        connection.lastWrittenStanza,
+        isNull,
+        reason: 'nothing should be published before a backend is used',
+      );
+
+      await manager.backendFor(EncryptionProtocol.omemo2);
+      // publishIdentity() is fired-and-forgotten (not awaited by
+      // backendFor), so give the microtask queue a chance to run the
+      // publish's first `connection.writeStanza` call before asserting.
+      await Future<void>.delayed(Duration.zero);
+
+      final written = connection.lastWrittenStanza;
+      expect(
+        written,
+        isA<IqStanza>(),
+        reason:
+            'creating the OMEMO2 backend should have published our own '
+            'bundle/device-list via a PEP publish IQ',
+      );
+      final publish = (written as IqStanza).getChild('pubsub')?.getChild(
+        'publish',
+      );
+      expect(publish, isNotNull);
+    },
+  );
+
   test('encryptionProtocolId/encryptionProtocolFromId round-trip', () {
     for (final protocol in EncryptionProtocol.values) {
       final id = encryptionProtocolId(protocol);
