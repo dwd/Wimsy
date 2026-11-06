@@ -2679,6 +2679,7 @@ class XmppService extends ChangeNotifier {
   }) async {
     String? protocolId;
     EncryptedPayload? payload;
+    String? encryptError;
     try {
       payload = await encryptionManager.encryptForSend(
         _bareJid(toBareJid),
@@ -2688,17 +2689,65 @@ class XmppService extends ChangeNotifier {
         encryptionManager.protocolFor(_bareJid(toBareJid)),
       );
     } catch (error) {
+      encryptError = '$error';
       Log.w('XmppService', 'Failed to encrypt outgoing message: $error');
+    }
+    if (payload == null) {
+      // Encryption is turned on for this conversation, so the user
+      // explicitly asked for this message to be protected. Previously we
+      // fell back to sending `trimmed` as a plaintext <body/> whenever
+      // encryption failed (e.g. no trusted/enabled device known for the
+      // recipient) -- silently defeating the user's choice and leaking
+      // the message in the clear. Instead, surface the failure locally
+      // (as an "undecryptable"-style placeholder with encryptionError
+      // set) and do not write anything to the wire at all.
+      final sender =
+          _currentUserBareJid ?? connection?.fullJid.userAtDomain ?? '';
+      if (sender.isNotEmpty) {
+        _addMessage(
+          bareJid: toBareJid,
+          from: sender,
+          to: toBareJid,
+          body: trimmed,
+          rawXml: '',
+          outgoing: true,
+          timestamp: DateTime.now(),
+          messageId: messageId,
+          replyToId: reply?.id,
+          replyToJid: reply?.toJid,
+          replyFallback: reply?.fallback,
+          securityLabelText: pendingLabel?.info.text,
+          securityLabelFgColor: pendingLabel?.info.fgColor,
+          securityLabelBgColor: pendingLabel?.info.bgColor,
+          securityLabelIsFallback: false,
+          locallyOriginated: true,
+          encryptionProtocol: null,
+          encryptionError:
+              'Failed to encrypt outgoing message, not sent: '
+              '${encryptError ?? 'unknown error'}',
+        );
+      }
+      // Deliberately not calling _setError here: that flips the app's
+      // global connection status to XmppStatus.error, which would
+      // misleadingly suggest the whole connection/session is broken (and
+      // could trip reconnect logic) just because a single message to one
+      // contact couldn't be encrypted. The failure is instead surfaced
+      // locally on the message itself (via encryptionError above) and in
+      // the log.
+      Log.w(
+        'XmppService',
+        'Not sending message to $toBareJid in the clear after encryption '
+            'failure (encryption is enabled for this conversation).',
+      );
+      return;
     }
     final stanza = _buildChatMessageStanza(
       toBareJid: toBareJid,
       messageId: messageId,
-      body: payload?.fallbackBody ?? trimmed,
+      body: payload.fallbackBody ?? trimmed,
       reply: reply,
     );
-    if (payload != null) {
-      stanza.addChild(payload.element);
-    }
+    stanza.addChild(payload.element);
     _writeOrQueueMessage(stanza);
     if (pendingLabel != null) {
       setPendingSecurityLabel(toBareJid, null);
@@ -2723,10 +2772,8 @@ class XmppService extends ChangeNotifier {
         securityLabelBgColor: pendingLabel?.info.bgColor,
         securityLabelIsFallback: false,
         locallyOriginated: true,
-        encryptionProtocol: payload != null ? protocolId : null,
-        encryptionError: payload == null
-            ? 'Failed to encrypt outgoing message'
-            : null,
+        encryptionProtocol: protocolId,
+        encryptionError: null,
       );
     }
     final chatManager = _chatManager;

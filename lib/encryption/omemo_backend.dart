@@ -384,19 +384,15 @@ class OmemoBackend implements EncryptionBackend {
         .toList();
     if (keysForJid.isEmpty) {
       // No usable device/bundle was found for toBareJid (e.g. the device
-      // list/bundle fetch via PEP failed or returned nothing), so
-      // `omemo_dart` couldn't wrap any per-device key. Sending the
-      // resulting <encrypted/> stanza anyway would silently produce an
-      // undecryptable message with no <key> children at all -- throw
-      // instead, so the caller's "Failed to encrypt outgoing message" path
-      // (see xmpp_service.dart) surfaces this clearly instead of the
-      // message being sent (and accepted by the server) with no recipient
-      // able to decrypt it.
-      throw StateError(
-        'No legacy OMEMO devices/keys available for $toBareJid; '
-        'device list or bundle fetch via PEP likely failed (see '
-        'omemo_dart/OmemoManager logs above for the underlying cause)',
-      );
+      // list/bundle fetch via PEP failed, or every known device is
+      // untrusted/disabled), so `omemo_dart` couldn't wrap any per-device
+      // key. Sending the resulting <encrypted/> stanza anyway would
+      // silently produce an undecryptable message with no <key> children
+      // at all -- throw instead, so the caller's "Failed to encrypt
+      // outgoing message" path (see xmpp_service.dart) surfaces this
+      // clearly instead of the message being sent (and accepted by the
+      // server) with no recipient able to decrypt it.
+      throw StateError(await _describeNoUsableKeysReason(toBareJid, result));
     }
     for (final key in keysForJid) {
       final keyElement = XmppElement()..name = 'key';
@@ -427,6 +423,60 @@ class OmemoBackend implements EncryptionBackend {
           '(https://xmpp.org/extensions/attic/xep-0384-0.3.0.html) but '
           'your client does not support it.',
     );
+  }
+
+  /// Builds a specific, actionable explanation for why [encryptForSend]
+  /// couldn't wrap any per-device key for [toBareJid] in [result].
+  ///
+  /// `omemo_dart`'s `onOutgoingStanza` can end up with zero keys for a JID
+  /// for several very different reasons, only some of which it records in
+  /// `result.encryptionErrors`:
+  /// - no device list was ever cached for the JID at all;
+  /// - a bundle fetch via PEP failed, or the X3DH key-exchange signature
+  ///   was invalid;
+  /// - a ratchet session exists but has no matching entry in the
+  ///   ratchet map (shouldn't normally happen);
+  /// - **the device is known, a ratchet session was even just built for
+  ///   it (so "Fetching bundles"/"Building new ratchet" logged fine), but
+  ///   `BlindTrustBeforeVerificationTrustManager.isTrusted`/`isEnabled`
+  ///   silently skipped it** -- this happens whenever at least one other
+  ///   device of the same JID was ever manually marked "verified" via the
+  ///   fingerprint screen, since BTBV then refuses blind trust for any
+  ///   other (new/unverified) device of that JID. `omemo_dart` doesn't
+  ///   log or record this case as an error at all, which is why this was
+  ///   previously surfaced as a generic, unexplained failure.
+  Future<String> _describeNoUsableKeysReason(
+    String toBareJid,
+    EncryptionResult result,
+  ) async {
+    final errors = result.deviceEncryptionErrors[toBareJid];
+    if (errors != null && errors.isNotEmpty) {
+      final details = errors
+          .map((e) => '${e.device ?? '?'}: ${e.error.runtimeType}')
+          .join(', ');
+      return 'Failed to prepare legacy OMEMO keys for $toBareJid: $details';
+    }
+
+    final knownDeviceIds = await knownDeviceIdsFor(toBareJid);
+    if (knownDeviceIds.isEmpty) {
+      return 'No legacy OMEMO devices/keys available for $toBareJid; '
+          'device list or bundle fetch via PEP likely failed (see '
+          'omemo_dart/OmemoManager logs above for the underlying cause)';
+    }
+
+    final perDevice = <String>[];
+    for (final deviceId in knownDeviceIds) {
+      final trusted = await _trustManager.isTrusted(toBareJid, deviceId);
+      final enabled = await _trustManager.isEnabled(toBareJid, deviceId);
+      perDevice.add('$deviceId (trusted=$trusted, enabled=$enabled)');
+    }
+    return 'Found ${knownDeviceIds.length} known legacy OMEMO device(s) for '
+        '$toBareJid, but none are both trusted and enabled: '
+        '${perDevice.join(', ')}. This typically happens when another '
+        'device of this contact was previously marked "verified" in the '
+        'fingerprint screen, which makes BlindTrustBeforeVerification '
+        'refuse blind trust for any other (new/unverified) device of '
+        'theirs -- verify or manually trust the device above to fix this.';
   }
 
   /// The libsignal "DJB type" byte (`0x05`, indicating a Curve25519/DJB

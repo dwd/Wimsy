@@ -272,6 +272,63 @@ void main() {
   );
 
   test(
+    'OmemoBackend: encryptForSend explains *why* no usable key was found '
+    'when a known device exists but is no longer trusted/enabled, instead '
+    'of a generic "no devices/keys available" message',
+    () async {
+      // Regression test: a real-world session showed `omemo_dart` logging
+      // "Fetching bundles"/"Building new ratchet" for a known device (so
+      // it clearly had a device list and bundle), yet still producing zero
+      // usable keys with no explanation anywhere in the log -- this
+      // happens when BlindTrustBeforeVerificationTrustManager.isTrusted/
+      // isEnabled silently skip the device (e.g. because it was
+      // explicitly marked untrusted, or another device of the same JID
+      // was verified). The thrown error must name the actual device id
+      // and its trusted/enabled state instead of just saying "no devices
+      // known".
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+      await bobBackend.publishIdentity();
+
+      // First send succeeds and establishes a session + blind-trusted
+      // device for bob.
+      await aliceBackend.encryptForSend(bobJid, 'hello from alice');
+      final deviceIds = await aliceBackend.knownDeviceIdsFor(bobJid);
+      expect(deviceIds, isNotEmpty);
+      final deviceId = deviceIds.first;
+
+      // Now explicitly mark that device as untrusted (e.g. the user
+      // revoked trust, or -- as in the real-world report -- a different
+      // device of bob's was marked "verified", which makes BTBV refuse
+      // blind trust for this one).
+      await aliceBackend.setTrust(bobJid, '$deviceId', TrustState.untrusted);
+
+      await expectLater(
+        aliceBackend.encryptForSend(bobJid, 'hello again'),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('$deviceId'), contains('trusted=false')),
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
     'OmemoBackend: outgoing <key kex="true"> embeds libsignal '
     'DJB-type-prefixed ik/ek for interop with real legacy-OMEMO clients',
     () async {
