@@ -19,6 +19,8 @@ import '../models/muc_notify_settings.dart';
 import '../models/room_entry.dart';
 import '../models/room_occupant.dart';
 import '../bookmarks/bookmarks_manager.dart';
+import '../encryption/encryption_backend.dart';
+import '../encryption/encryption_manager.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/fast_token_record.dart';
@@ -414,6 +416,7 @@ class XmppService extends ChangeNotifier {
   final Set<String> _mucDefaultConfigSent = {};
   PepManager? _pepManager;
   PepCapsManager? _pepCapsManager;
+  EncryptionManager? _encryptionManager;
   BookmarksManager? _bookmarksManager;
   PrivacyListsManager? _privacyListsManager;
   JingleManager? _jingleManager;
@@ -2598,6 +2601,25 @@ class XmppService extends ChangeNotifier {
     // stanza, then clear it after sending - labels are per-outgoing-
     // message, not sticky.
     final pendingLabel = _pendingSecurityLabel[_bareJid(toBareJid)];
+    final encryptionManager = _encryptionManager;
+    if (encryptionManager != null &&
+        encryptionManager.isEncryptionEnabled(_bareJid(toBareJid))) {
+      // Encryption requires an async round-trip through the OMEMO2 backend
+      // (X3DH/session setup can involve fetching peer bundles over PEP), so
+      // this path is handled separately from the plaintext fast path below.
+      unawaited(
+        _sendEncryptedMessage(
+          toBareJid: toBareJid,
+          trimmed: trimmed,
+          messageId: messageId,
+          reply: reply,
+          pendingLabel: pendingLabel,
+          connection: connection,
+          encryptionManager: encryptionManager,
+        ),
+      );
+      return;
+    }
     final stanza = _buildChatMessageStanza(
       toBareJid: toBareJid,
       messageId: messageId,
@@ -2628,6 +2650,81 @@ class XmppService extends ChangeNotifier {
         securityLabelBgColor: pendingLabel?.info.bgColor,
         securityLabelIsFallback: false,
         locallyOriginated: true,
+      );
+    }
+    final chatManager = _chatManager;
+    if (chatManager != null) {
+      final jid = Jid.fromFullJid(toBareJid);
+      final chat = chatManager.getChat(jid);
+      _ensureChatSubscription(chat);
+      chat.myState = ChatState.ACTIVE;
+    }
+  }
+
+  /// OMEMO2 (or future E2EE protocol) send path for [sendMessage]: encrypts
+  /// [trimmed] via [encryptionManager], attaches the resulting `<encrypted/>`
+  /// element (plus a XEP-0420 fallback `<body/>` for non-supporting clients)
+  /// to the outgoing stanza, then records the message locally with its
+  /// plaintext body (since we already know it) tagged with the protocol id.
+  Future<void> _sendEncryptedMessage({
+    required String toBareJid,
+    required String trimmed,
+    required String messageId,
+    required ReplyReference? reply,
+    required ({XmppElement element, SecurityLabelInfo info})? pendingLabel,
+    required Connection? connection,
+    required EncryptionManager encryptionManager,
+  }) async {
+    String? protocolId;
+    EncryptedPayload? payload;
+    try {
+      payload = await encryptionManager.encryptForSend(
+        _bareJid(toBareJid),
+        trimmed,
+      );
+      protocolId = encryptionProtocolId(
+        encryptionManager.protocolFor(_bareJid(toBareJid)),
+      );
+    } catch (error) {
+      Log.w('XmppService', 'Failed to encrypt outgoing message: $error');
+    }
+    final stanza = _buildChatMessageStanza(
+      toBareJid: toBareJid,
+      messageId: messageId,
+      body: payload?.fallbackBody ?? trimmed,
+      reply: reply,
+    );
+    if (payload != null) {
+      stanza.addChild(payload.element);
+    }
+    _writeOrQueueMessage(stanza);
+    if (pendingLabel != null) {
+      setPendingSecurityLabel(toBareJid, null);
+    }
+    final sender =
+        _currentUserBareJid ?? connection?.fullJid.userAtDomain ?? '';
+    if (sender.isNotEmpty) {
+      _addMessage(
+        bareJid: toBareJid,
+        from: sender,
+        to: toBareJid,
+        body: trimmed,
+        rawXml: _serializeStanza(stanza),
+        outgoing: true,
+        timestamp: DateTime.now(),
+        messageId: messageId,
+        replyToId: reply?.id,
+        replyToJid: reply?.toJid,
+        replyFallback: reply?.fallback,
+        securityLabelText: pendingLabel?.info.text,
+        securityLabelFgColor: pendingLabel?.info.fgColor,
+        securityLabelBgColor: pendingLabel?.info.bgColor,
+        securityLabelIsFallback: false,
+        locallyOriginated: true,
+        encryptionProtocol: payload != null ? protocolId : null,
+        encryptionError: payload == null
+            ? 'Failed to encrypt outgoing message'
+            : null,
       );
     }
     final chatManager = _chatManager;
@@ -8676,12 +8773,40 @@ class XmppService extends ChangeNotifier {
     });
   }
 
+  /// Currently selected end-to-end-encryption protocol for the 1:1
+  /// conversation with [bareJid] (defaults to [EncryptionProtocol.none]
+  /// before a connection/[EncryptionManager] has been set up).
+  EncryptionProtocol encryptionProtocolFor(String bareJid) {
+    return _encryptionManager?.protocolFor(_bareJid(bareJid)) ??
+        EncryptionProtocol.none;
+  }
+
+  /// Selects [protocol] as the end-to-end-encryption protocol to use for
+  /// the 1:1 conversation with [bareJid], persisting the choice. See
+  /// `lib/widgets/encryption_selector.dart` for the UI entry point.
+  Future<void> setEncryptionProtocolFor(
+    String bareJid,
+    EncryptionProtocol protocol,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.setProtocolFor(_bareJid(bareJid), protocol);
+  }
+
   void _setupPep() {
     final connection = _connection;
     final storage = _storage;
     if (connection == null || storage == null || _currentUserBareJid == null) {
       return;
     }
+    _encryptionManager = EncryptionManager(
+      connection: connection,
+      storage: storage,
+      selfBareJid: _currentUserBareJid!,
+      onUpdate: () => notifyListeners(),
+    );
     _pepManager = PepManager(
       connection: connection,
       storage: storage,
@@ -9764,7 +9889,7 @@ class XmppService extends ChangeNotifier {
             continue;
           }
         }
-        _addMessage(
+        _addIncomingDmMessage(
           bareJid: targetBare,
           from: from,
           to: to,
@@ -9787,6 +9912,7 @@ class XmppService extends ChangeNotifier {
           securityLabelFgColor: securityLabel?.fgColor,
           securityLabelBgColor: securityLabel?.bgColor,
           securityLabelIsFallback: securityLabel?.isFallback ?? false,
+          stanza: message.messageStanza,
         );
       }
     }
@@ -9848,7 +9974,7 @@ class XmppService extends ChangeNotifier {
           invite == null) {
         return;
       }
-      _addMessage(
+      _addIncomingDmMessage(
         bareJid: targetBare,
         from: from,
         to: to,
@@ -9871,6 +9997,7 @@ class XmppService extends ChangeNotifier {
         securityLabelFgColor: securityLabel?.fgColor,
         securityLabelBgColor: securityLabel?.bgColor,
         securityLabelIsFallback: securityLabel?.isFallback ?? false,
+        stanza: message.messageStanza,
       );
     });
 
@@ -9879,6 +10006,102 @@ class XmppService extends ChangeNotifier {
       _chatStates[buddyJid] = state;
       notifyListeners();
     });
+  }
+
+  /// Thin wrapper around [_addMessage] for the live/historical 1:1 chat
+  /// message pipeline: if [stanza] carries a top-level `<encrypted/>` child
+  /// (currently only `urn:xmpp:omemo:2` is understood), attempts to decrypt
+  /// it via [_encryptionManager] before adding the message, so downstream
+  /// code always sees plaintext (or an `encryptionError` placeholder).
+  /// Plaintext/unencrypted stanzas are forwarded synchronously, unchanged.
+  void _addIncomingDmMessage({
+    required String bareJid,
+    required String from,
+    required String to,
+    required String body,
+    required String rawXml,
+    String? oobUrl,
+    String? oobDescription,
+    required bool outgoing,
+    required DateTime timestamp,
+    String? messageId,
+    String? mamId,
+    String? stanzaId,
+    String? inviteRoomJid,
+    String? inviteReason,
+    String? invitePassword,
+    String? replyToId,
+    String? replyToJid,
+    String? replyFallback,
+    String? securityLabelText,
+    String? securityLabelFgColor,
+    String? securityLabelBgColor,
+    bool securityLabelIsFallback = false,
+    required MessageStanza stanza,
+  }) {
+    final encryptionManager = _encryptionManager;
+    final hasEncrypted = stanza.getChild('encrypted') != null;
+    if (!outgoing && hasEncrypted && encryptionManager != null) {
+      unawaited(() async {
+        DecryptResult? result;
+        try {
+          result = await encryptionManager.decryptIncomingByNamespace(stanza);
+        } catch (error) {
+          Log.w('XmppService', 'Failed to decrypt incoming message: $error');
+        }
+        _addMessage(
+          bareJid: bareJid,
+          from: from,
+          to: to,
+          body: result?.plaintext ?? body,
+          rawXml: rawXml,
+          oobUrl: oobUrl,
+          oobDescription: oobDescription,
+          outgoing: outgoing,
+          timestamp: timestamp,
+          messageId: messageId,
+          mamId: mamId,
+          stanzaId: stanzaId,
+          inviteRoomJid: inviteRoomJid,
+          inviteReason: inviteReason,
+          invitePassword: invitePassword,
+          replyToId: replyToId,
+          replyToJid: replyToJid,
+          replyFallback: replyFallback,
+          securityLabelText: securityLabelText,
+          securityLabelFgColor: securityLabelFgColor,
+          securityLabelBgColor: securityLabelBgColor,
+          securityLabelIsFallback: securityLabelIsFallback,
+          encryptionProtocol: result?.protocolId,
+          encryptionError: result?.error,
+        );
+      }());
+      return;
+    }
+    _addMessage(
+      bareJid: bareJid,
+      from: from,
+      to: to,
+      body: body,
+      rawXml: rawXml,
+      oobUrl: oobUrl,
+      oobDescription: oobDescription,
+      outgoing: outgoing,
+      timestamp: timestamp,
+      messageId: messageId,
+      mamId: mamId,
+      stanzaId: stanzaId,
+      inviteRoomJid: inviteRoomJid,
+      inviteReason: inviteReason,
+      invitePassword: invitePassword,
+      replyToId: replyToId,
+      replyToJid: replyToJid,
+      replyFallback: replyFallback,
+      securityLabelText: securityLabelText,
+      securityLabelFgColor: securityLabelFgColor,
+      securityLabelBgColor: securityLabelBgColor,
+      securityLabelIsFallback: securityLabelIsFallback,
+    );
   }
 
   void _addMessage({
@@ -9910,6 +10133,8 @@ class XmppService extends ChangeNotifier {
     String? webxdcSummary,
     String? webxdcJsonPayload,
     bool locallyOriginated = false,
+    String? encryptionProtocol,
+    String? encryptionError,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -10140,6 +10365,8 @@ class XmppService extends ChangeNotifier {
           webxdcSummary: webxdcSummary,
           webxdcJsonPayload: webxdcJsonPayload,
           locallyOriginated: locallyOriginated,
+          encryptionProtocol: encryptionProtocol,
+          encryptionError: encryptionError,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -10177,6 +10404,8 @@ class XmppService extends ChangeNotifier {
       webxdcDocument: webxdcDocument,
       webxdcSummary: webxdcSummary,
       webxdcJsonPayload: webxdcJsonPayload,
+      encryptionProtocol: encryptionProtocol,
+      encryptionError: encryptionError,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
@@ -11645,6 +11874,7 @@ class XmppService extends ChangeNotifier {
     _mamCatchUpTimers.clear();
     _lastGlobalMamSyncAt = null;
     _pepManager = null;
+    _encryptionManager = null;
     _pepCapsManager = null;
     _bookmarksManager = null;
     _privacyListsManager = null;
