@@ -47,6 +47,8 @@ class ChatMessage {
     this.webxdcDocument,
     this.webxdcSummary,
     this.webxdcJsonPayload,
+    this.encryptionProtocol,
+    this.encryptionError,
   });
 
   final String from;
@@ -123,6 +125,15 @@ class ChatMessage {
   // XEP-0491: this message's own webxdc JSON payload as received on it
   // (not the "latest merged state" across the whole thread).
   final String? webxdcJsonPayload;
+  // The E2EE protocol identifier (e.g. 'omemo2') that produced/protects
+  // this message, or null if it is unencrypted. Mirrors
+  // [EncryptionBackend.protocolId] (see lib/encryption/encryption_backend.dart).
+  final String? encryptionProtocol;
+  // A human-readable description of why an encrypted message could not be
+  // decrypted, or null if decryption succeeded (or the message isn't
+  // encrypted). When set, the UI should render an "undecryptable message"
+  // placeholder instead of [body].
+  final String? encryptionError;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -176,6 +187,8 @@ class ChatMessage {
     Object? webxdcDocument = _absent,
     Object? webxdcSummary = _absent,
     Object? webxdcJsonPayload = _absent,
+    Object? encryptionProtocol = _absent,
+    Object? encryptionError = _absent,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -280,6 +293,12 @@ class ChatMessage {
       webxdcJsonPayload: identical(webxdcJsonPayload, _absent)
           ? this.webxdcJsonPayload
           : webxdcJsonPayload as String?,
+      encryptionProtocol: identical(encryptionProtocol, _absent)
+          ? this.encryptionProtocol
+          : encryptionProtocol as String?,
+      encryptionError: identical(encryptionError, _absent)
+          ? this.encryptionError
+          : encryptionError as String?,
     );
   }
 
@@ -332,6 +351,8 @@ class ChatMessage {
       'webxdcDocument': webxdcDocument,
       'webxdcSummary': webxdcSummary,
       'webxdcJsonPayload': webxdcJsonPayload,
+      'encryptionProtocol': encryptionProtocol,
+      'encryptionError': encryptionError,
     };
   }
 
@@ -400,6 +421,8 @@ class ChatMessage {
     final webxdcDocument = map['webxdcDocument']?.toString();
     final webxdcSummary = map['webxdcSummary']?.toString();
     final webxdcJsonPayload = map['webxdcJsonPayload']?.toString();
+    final encryptionProtocol = map['encryptionProtocol']?.toString();
+    final encryptionError = map['encryptionError']?.toString();
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -475,6 +498,8 @@ class ChatMessage {
       webxdcDocument: webxdcDocument,
       webxdcSummary: webxdcSummary,
       webxdcJsonPayload: webxdcJsonPayload,
+      encryptionProtocol: encryptionProtocol,
+      encryptionError: encryptionError,
     );
   }
 

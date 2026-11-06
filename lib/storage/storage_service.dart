@@ -104,6 +104,9 @@ class StorageService {
   // material (the `OmemoDevice`, including private keys). Never stored in
   // the (unencrypted-at-rest) Hive box.
   static const _omemo2IdentitySecureKeyPrefix = 'omemo2_identity:';
+  // EncryptionManager (lib/encryption/encryption_manager.dart): per-JID
+  // selected E2EE protocol id for 1:1 conversations (e.g. 'omemo2').
+  static const _encryptionProtocolPrefix = 'encproto:';
 
   /// The maximum number of messages loaded or retained in the local cache per
   /// conversation.
@@ -1466,6 +1469,38 @@ class StorageService {
 
   Future<void> removeOmemo2TrustForJid(String bareJid) async {
     await _deleteKeysWithPrefix('$_omemo2TrustPrefix$bareJid:');
+  }
+
+  /// Persists the selected end-to-end-encryption protocol id (e.g.
+  /// `'omemo2'`, or `null`/absent for "none") for a 1:1 conversation with
+  /// [bareJid]. See `lib/encryption/encryption_manager.dart`.
+  Future<void> storeEncryptionProtocolForJid(
+    String bareJid,
+    String? protocolId,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    final key = '$_encryptionProtocolPrefix$bareJid';
+    if (protocolId == null || protocolId.isEmpty) {
+      await box.delete(key);
+    } else {
+      await box.put(key, protocolId);
+    }
+    _afterHotWrite();
+  }
+
+  /// Loads the previously selected encryption protocol id for [bareJid],
+  /// or `null` if none was selected (i.e. encryption is off for that
+  /// conversation).
+  String? loadEncryptionProtocolForJid(String bareJid) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_encryptionProtocolPrefix$bareJid');
+    return data is String && data.isNotEmpty ? data : null;
   }
 
   /// Wipes all local OMEMO2 state for [bareJid] (ratchets, cached bundles,
