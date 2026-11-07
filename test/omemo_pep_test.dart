@@ -438,11 +438,15 @@ void main() {
         await pep.publishLegacyDeviceList([1]);
 
         expect(publishAttempts, 2);
-        // A `pubsub#owner` reconfigure IQ should have been sent between
-        // the failed and successful publish attempts.
+        // A `pubsub#owner` reconfigure (`type="set"`) IQ should have been
+        // sent between the failed and successful publish attempts (a
+        // `type="get"` IQ fetching the node's current config form is also
+        // sent first, to learn which fields it actually supports -- see
+        // the next test).
         final configureIq = connection.written.firstWhere(
           (s) =>
               s is IqStanza &&
+              s.type == IqStanzaType.SET &&
               s.getChild('pubsub')?.getAttribute('xmlns')?.value ==
                   'http://jabber.org/protocol/pubsub#owner',
         ) as IqStanza;
@@ -463,6 +467,111 @@ void main() {
               s is IqStanza &&
               s.getChild('pubsub')?.getChild('publish') != null,
         ) as IqStanza;
+        expect(accessModelOf(finalPublishIq), 'open');
+      },
+    );
+
+    test(
+      'when the node does not support pubsub#send_last_published_item, '
+      'the retry omits it instead of looping on precondition-not-met '
+      'forever',
+      () async {
+        // Regression test: Conversations could see devices/bundles in the
+        // PEP explorer, but never got updates, because some servers never
+        // expose `pubsub#send_last_published_item` on the OMEMO
+        // devices/bundles node's own configuration form. Asserting that
+        // field unconditionally in <publish-options>/<configure> made
+        // every single publish -- including the "fixed up" retry after
+        // reconfiguring -- fail with the exact same
+        // `precondition-not-met`, forever, with no way to recover short of
+        // a full reset. See `wimsy.log`.
+        var publishAttempts = 0;
+        connection.respond = (request) {
+          final pubsub = request.getChild('pubsub');
+          final getConfigure = request.type == IqStanzaType.GET
+              ? pubsub?.getChild('configure')
+              : null;
+          if (getConfigure != null) {
+            // The node's own configuration form doesn't list
+            // pubsub#send_last_published_item at all.
+            final result = IqStanza(request.id, IqStanzaType.RESULT);
+            final resultPubsub = XmppElement()..name = 'pubsub';
+            resultPubsub.addAttribute(
+              XmppAttribute(
+                'xmlns',
+                'http://jabber.org/protocol/pubsub#owner',
+              ),
+            );
+            final configure = XmppElement()..name = 'configure';
+            final form = XmppElement()..name = 'x';
+            form.addAttribute(XmppAttribute('xmlns', 'jabber:x:data'));
+            form.addAttribute(XmppAttribute('type', 'result'));
+            for (final field in [
+              'pubsub#persist_items',
+              'pubsub#access_model',
+              'pubsub#max_items',
+            ]) {
+              final f = XmppElement()..name = 'field';
+              f.addAttribute(XmppAttribute('var', field));
+              form.addChild(f);
+            }
+            configure.addChild(form);
+            resultPubsub.addChild(configure);
+            result.addChild(resultPubsub);
+            return result;
+          }
+          final publish = pubsub?.getChild('publish');
+          if (publish != null) {
+            publishAttempts++;
+            final options = pubsub!
+                .getChild('publish-options')
+                ?.getChild('x');
+            final hasUnsupportedField = options?.children
+                    .where((c) => c.name == 'field')
+                    .any(
+                      (f) =>
+                          f.getAttribute('var')?.value ==
+                          'pubsub#send_last_published_item',
+                    ) ??
+                false;
+            if (publishAttempts == 1 || hasUnsupportedField) {
+              final result = IqStanza(request.id, IqStanzaType.ERROR);
+              final error = XmppElement()..name = 'error';
+              final condition = XmppElement()..name = 'precondition-not-met';
+              condition.addAttribute(
+                XmppAttribute(
+                  'xmlns',
+                  'http://jabber.org/protocol/pubsub#errors',
+                ),
+              );
+              error.addChild(condition);
+              result.addChild(error);
+              return result;
+            }
+          }
+          return IqStanza(request.id, IqStanzaType.RESULT);
+        };
+
+        await pep.publishLegacyDeviceList([1]);
+
+        // The final (successful) publish must not have asserted the
+        // unsupported field.
+        final finalPublishIq = connection.written.lastWhere(
+          (s) =>
+              s is IqStanza &&
+              s.getChild('pubsub')?.getChild('publish') != null,
+        ) as IqStanza;
+        final finalOptions =
+            finalPublishIq.getChild('pubsub')?.getChild('publish-options')?.getChild('x');
+        final stillAssertsUnsupportedField = finalOptions?.children
+                .where((c) => c.name == 'field')
+                .any(
+                  (f) =>
+                      f.getAttribute('var')?.value ==
+                      'pubsub#send_last_published_item',
+                ) ??
+            false;
+        expect(stillAssertsUnsupportedField, isFalse);
         expect(accessModelOf(finalPublishIq), 'open');
       },
     );

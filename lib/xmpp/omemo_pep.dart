@@ -7,7 +7,12 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 import '../encryption/omemo2_backend.dart';
 import '../encryption/omemo_backend.dart' show OmemoPepTransport;
 import 'pep_publish.dart'
-    show buildOpenPepConfigureIq, buildOpenPepPublishOptions, iqPubsubErrorCondition;
+    show
+        buildOpenPepConfigureIq,
+        buildOpenPepPublishOptions,
+        extractNodeConfigFieldVars,
+        iqPubsubErrorCondition,
+        pubsubOwnerXmlns;
 
 /// XEP-0384 (OMEMO2) PEP node names.
 const String omemo2DeviceListNode = 'urn:xmpp:omemo:2:devices';
@@ -52,6 +57,17 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
   StreamSubscription<AbstractStanza?>? _subscription;
 
   final Map<String, Completer<IqStanza>> _pendingIqs = {};
+
+  /// Per-node cache of which `pubsub#owner` configuration form fields a
+  /// node actually supports (see [extractNodeConfigFieldVars]), populated
+  /// lazily by [_fetchSupportedConfigFields] the first time a publish to
+  /// that node hits `<precondition-not-met/>`. Some servers never expose
+  /// `pubsub#send_last_published_item` for OMEMO device-list/bundle nodes
+  /// (observed in the wild); without knowing this, the reconfigure+retry
+  /// in [_publishWithOpenAccess] would keep asserting that field and the
+  /// retry would fail with the exact same error forever, see
+  /// [pubsubSendLastPublishedItemField] in `pep_publish.dart`.
+  final Map<String, Set<String>?> _supportedConfigFieldsByNode = {};
 
   /// Stops listening to incoming stanzas. Should be called when the owning
   /// backend/connection is torn down.
@@ -104,25 +120,71 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
     required XmppElement Function() buildItem,
   }) async {
     final result = await _sendIqAndWait(
-      _buildOpenPublishIq(node: node, item: buildItem()),
+      _buildOpenPublishIq(
+        node: node,
+        item: buildItem(),
+        supportedConfigFields: _supportedConfigFieldsByNode[node],
+      ),
     );
     if (result.type != IqStanzaType.RESULT &&
         iqPubsubErrorCondition(result) == 'precondition-not-met') {
+      // Learn which config fields the node actually supports before
+      // reconfiguring/retrying, instead of blindly asserting fields it may
+      // not expose (which would otherwise make the retry below fail with
+      // the exact same `precondition-not-met` error, forever).
+      final supportedConfigFields = await _fetchSupportedConfigFields(node);
       await _sendIqAndWait(
         buildOpenPepConfigureIq(
           node: node,
           selfBareJid: connection.fullJid.userAtDomain,
+          supportedConfigFields: supportedConfigFields,
         ),
       );
       await _sendIqAndWait(
-        _buildOpenPublishIq(node: node, item: buildItem()),
+        _buildOpenPublishIq(
+          node: node,
+          item: buildItem(),
+          supportedConfigFields: supportedConfigFields,
+        ),
       );
     }
+  }
+
+  /// Fetches [node]'s current `pubsub#owner` configuration form and
+  /// extracts the set of `var` names it supports (see
+  /// [extractNodeConfigFieldVars]), caching the result in
+  /// [_supportedConfigFieldsByNode] for subsequent publishes. Returns
+  /// `null` (and caches `null`) if the fetch fails or the form couldn't be
+  /// parsed, in which case callers should keep asserting fields
+  /// optimistically, matching the previous behavior.
+  Future<Set<String>?> _fetchSupportedConfigFields(String node) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(connection.fullJid.userAtDomain);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', pubsubOwnerXmlns));
+    final configure = XmppElement()..name = 'configure';
+    configure.addAttribute(XmppAttribute('node', node));
+    pubsub.addChild(configure);
+    iqStanza.addChild(pubsub);
+    final result = await _sendIqAndWait(iqStanza);
+    Set<String>? fields;
+    if (result.type == IqStanzaType.RESULT) {
+      final configForm =
+          result.getChild('pubsub')?.getChild('configure')?.getChild('x');
+      if (configForm != null) {
+        final extracted = extractNodeConfigFieldVars(configForm);
+        fields = extracted.isEmpty ? null : extracted;
+      }
+    }
+    _supportedConfigFieldsByNode[node] = fields;
+    return fields;
   }
 
   IqStanza _buildOpenPublishIq({
     required String node,
     required XmppElement item,
+    Set<String>? supportedConfigFields,
   }) {
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.SET);
@@ -134,7 +196,9 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
     publish.addAttribute(XmppAttribute('node', node));
     publish.addChild(item);
     pubsub.addChild(publish);
-    pubsub.addChild(buildOpenPepPublishOptions());
+    pubsub.addChild(buildOpenPepPublishOptions(
+      supportedConfigFields: supportedConfigFields,
+    ));
     iqStanza.addChild(pubsub);
     return iqStanza;
   }
