@@ -291,6 +291,100 @@ class DataFormField {
       );
 }
 
+/// The XEP-0141 (Data Forms Layout) namespace.
+const String dataFormLayoutXmlns = 'http://jabber.org/protocol/xdata-layout';
+
+/// A single ordered item within a XEP-0141 `<page/>` or `<section/>`: a line
+/// of instructional text, a reference to a field to render at this point, a
+/// nested grouping of further items, or a reference to a reported/row
+/// header. Modeled as a base class with one subclass per item kind, since
+/// the XEP-0004 engine doesn't otherwise use sealed-class-style hierarchies.
+abstract class DataFormLayoutItem {
+  const DataFormLayoutItem();
+}
+
+/// A `<text>...</text>` line of instructional text within a page/section.
+class DataFormLayoutText extends DataFormLayoutItem {
+  const DataFormLayoutText(this.text);
+
+  final String text;
+}
+
+/// A `<fieldref var='...'/>`, referencing the field (by its `var`) to render
+/// at this point in the layout.
+class DataFormLayoutFieldRef extends DataFormLayoutItem {
+  const DataFormLayoutFieldRef(this.varName);
+
+  final String varName;
+}
+
+/// A `<section label='...'>`, a nested grouping of further layout items.
+class DataFormLayoutSection extends DataFormLayoutItem {
+  const DataFormLayoutSection({this.label, this.items = const []});
+
+  final String? label;
+  final List<DataFormLayoutItem> items;
+}
+
+/// A `<reportedref/>`, referencing the reported/row header. Modeled
+/// minimally as a marker, since reported items aren't otherwise represented
+/// in this generic XEP-0004 engine.
+class DataFormLayoutReportedRef extends DataFormLayoutItem {
+  const DataFormLayoutReportedRef();
+}
+
+/// Parses the ordered `<text/>`/`<fieldref/>`/`<section/>`/`<reportedref/>`
+/// children of a XEP-0141 `<page/>` or `<section/>` element into a list of
+/// [DataFormLayoutItem], preserving document order.
+List<DataFormLayoutItem> _dataFormLayoutItemsFromElement(XmppElement containerEl) {
+  final items = <DataFormLayoutItem>[];
+  for (final child in containerEl.children) {
+    switch (child.name) {
+      case 'text':
+        items.add(DataFormLayoutText(child.textValue ?? ''));
+        break;
+      case 'fieldref':
+        final varName = child.getAttribute('var')?.value;
+        if (varName != null) {
+          items.add(DataFormLayoutFieldRef(varName));
+        }
+        break;
+      case 'section':
+        items.add(
+          DataFormLayoutSection(
+            label: child.getAttribute('label')?.value,
+            items: _dataFormLayoutItemsFromElement(child),
+          ),
+        );
+        break;
+      case 'reportedref':
+        items.add(const DataFormLayoutReportedRef());
+        break;
+    }
+  }
+  return items;
+}
+
+/// A XEP-0141 (Data Forms Layout) `<page/>`, grouping a subset of a form's
+/// fields (by reference) together with instructional text and nested
+/// sections for improved presentation. This is a server->client rendering
+/// hint only and is never re-serialized when submitting the form back.
+class DataFormPage {
+  const DataFormPage({this.label, this.items = const []});
+
+  final String? label;
+  final List<DataFormLayoutItem> items;
+
+  /// Parses a `<page xmlns='http://jabber.org/protocol/xdata-layout'/>`
+  /// element into a [DataFormPage].
+  static DataFormPage fromElement(XmppElement pageEl) {
+    return DataFormPage(
+      label: pageEl.getAttribute('label')?.value,
+      items: _dataFormLayoutItemsFromElement(pageEl),
+    );
+  }
+}
+
 /// A parsed XEP-0004 data form.
 class DataForm {
   const DataForm({
@@ -298,6 +392,7 @@ class DataForm {
     this.title,
     this.instructions = const [],
     this.fields = const [],
+    this.pages = const [],
   });
 
   /// The form's `FORM_TYPE` hidden field value, if any. Per XEP-0004 §3.4,
@@ -309,6 +404,10 @@ class DataForm {
 
   /// All fields other than `FORM_TYPE`, in document order.
   final List<DataFormField> fields;
+
+  /// The XEP-0141 layout pages declared at the top level of the form, if
+  /// any. Empty (not `null`) when the form has no layout hints.
+  final List<DataFormPage> pages;
 
   /// Parses an `<x xmlns='jabber:x:data'/>` element into a [DataForm].
   /// Returns `null` if [x] isn't a data form element.
@@ -362,11 +461,16 @@ class DataForm {
         .map((c) => c.textValue ?? '')
         .where((s) => s.isNotEmpty)
         .toList(growable: false);
+    final pages = x.children
+        .where((c) => c.name == 'page')
+        .map(DataFormPage.fromElement)
+        .toList(growable: false);
     return DataForm(
       formType: formType,
       title: x.getChild('title')?.textValue,
       instructions: instructions,
       fields: fields,
+      pages: pages,
     );
   }
 
@@ -377,9 +481,10 @@ class DataForm {
   /// informational-only fields (e.g. section headers) that are never
   /// meant to be sent back in a submission.
   ///
-  /// Note that a field's XEP-0122 [DataFormField.validation] hint is never
-  /// re-serialized here: it's an informational server->client hint only,
-  /// not something the client echoes back when submitting.
+  /// Note that a field's XEP-0122 [DataFormField.validation] hint and the
+  /// form's XEP-0141 [pages] layout are never re-serialized here: they're
+  /// informational server->client hints only, not something the client
+  /// echoes back when submitting.
   XmppElement toSubmitElement() {
     final x = XmppElement()..name = 'x';
     x.addAttribute(XmppAttribute('xmlns', dataFormXmlns));
@@ -430,6 +535,7 @@ class DataForm {
               ? field.copyWith(values: updates[field.varName])
               : field,
       ],
+      pages: pages,
     );
   }
 }

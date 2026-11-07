@@ -1,7 +1,33 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xml/xml.dart' as xmlpkg;
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/xmpp/data_forms.dart';
+
+/// Converts a raw XML string into an [XmppElement] tree, for building
+/// round-trip test fixtures by hand (mirroring the conversion logic used
+/// when parsing XML off the wire elsewhere in the app).
+XmppElement _parseXml(String rawXml) {
+  return _xmppElementFromXmlNode(xmlpkg.XmlDocument.parse(rawXml).rootElement);
+}
+
+XmppElement _xmppElementFromXmlNode(xmlpkg.XmlElement element) {
+  final xmppElement = XmppElement()..name = element.name.local;
+  for (final attribute in element.attributes) {
+    xmppElement.addAttribute(XmppAttribute(attribute.name.local, attribute.value));
+  }
+  for (final child in element.children) {
+    if (child is xmlpkg.XmlElement) {
+      xmppElement.addChild(_xmppElementFromXmlNode(child));
+    } else if (child is xmlpkg.XmlText) {
+      final text = child.value.trim();
+      if (text.isNotEmpty) {
+        xmppElement.textValue = text;
+      }
+    }
+  }
+  return xmppElement;
+}
 
 XmppElement _field({
   String? varName,
@@ -62,7 +88,12 @@ XmppElement _listRange({String? min, String? max}) {
   return listRange;
 }
 
-XmppElement _form(List<XmppElement> fields, {String? title, List<String> instructions = const []}) {
+XmppElement _form(
+  List<XmppElement> fields, {
+  String? title,
+  List<String> instructions = const [],
+  List<XmppElement> pages = const [],
+}) {
   final x = XmppElement()..name = 'x';
   x.addAttribute(XmppAttribute('xmlns', dataFormXmlns));
   x.addAttribute(XmppAttribute('type', 'form'));
@@ -75,8 +106,44 @@ XmppElement _form(List<XmppElement> fields, {String? title, List<String> instruc
   for (final field in fields) {
     x.addChild(field);
   }
+  for (final page in pages) {
+    x.addChild(page);
+  }
   return x;
 }
+
+const _layoutXmlns = dataFormLayoutXmlns;
+
+XmppElement _page({String? label, List<XmppElement> items = const []}) {
+  final page = XmppElement()..name = 'page';
+  page.addAttribute(XmppAttribute('xmlns', _layoutXmlns));
+  if (label != null) page.addAttribute(XmppAttribute('label', label));
+  for (final item in items) {
+    page.addChild(item);
+  }
+  return page;
+}
+
+XmppElement _text(String text) => XmppElement()
+  ..name = 'text'
+  ..textValue = text;
+
+XmppElement _fieldref(String varName) {
+  final fieldref = XmppElement()..name = 'fieldref';
+  fieldref.addAttribute(XmppAttribute('var', varName));
+  return fieldref;
+}
+
+XmppElement _section({String? label, List<XmppElement> items = const []}) {
+  final section = XmppElement()..name = 'section';
+  if (label != null) section.addAttribute(XmppAttribute('label', label));
+  for (final item in items) {
+    section.addChild(item);
+  }
+  return section;
+}
+
+XmppElement _reportedref() => XmppElement()..name = 'reportedref';
 
 void main() {
   group('dataFormFieldTypeFromWire / dataFormFieldTypeToWire', () {
@@ -328,6 +395,174 @@ void main() {
       expect(updated.values, ['b']);
       expect(updated.validation, isNotNull);
       expect(updated.validation!.method, DataFormValidationMethod.basic);
+    });
+  });
+
+  group('XEP-0141 DataFormPage layout', () {
+    test('parses a flat list of text/fieldref items in order', () {
+      final x = _form(
+        [_field(varName: 'name')],
+        pages: [
+          _page(items: [_text('Please fill in your name.'), _fieldref('name')]),
+        ],
+      );
+      final form = DataForm.fromElement(x)!;
+      expect(form.pages, hasLength(1));
+      final items = form.pages.single.items;
+      expect(items, hasLength(2));
+      expect((items[0] as DataFormLayoutText).text, 'Please fill in your name.');
+      expect((items[1] as DataFormLayoutFieldRef).varName, 'name');
+    });
+
+    test('parses nested sections, including sections within sections', () {
+      final x = _form(
+        [],
+        pages: [
+          _page(
+            items: [
+              _section(
+                label: 'Outer',
+                items: [
+                  _text('outer text'),
+                  _section(label: 'Inner', items: [_fieldref('deep')]),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+      final form = DataForm.fromElement(x)!;
+      final outer = form.pages.single.items.single as DataFormLayoutSection;
+      expect(outer.label, 'Outer');
+      expect(outer.items, hasLength(2));
+      expect((outer.items[0] as DataFormLayoutText).text, 'outer text');
+      final inner = outer.items[1] as DataFormLayoutSection;
+      expect(inner.label, 'Inner');
+      expect((inner.items.single as DataFormLayoutFieldRef).varName, 'deep');
+    });
+
+    test('parses a page with and without a label', () {
+      final x = _form(
+        [],
+        pages: [_page(label: 'Page One'), _page()],
+      );
+      final form = DataForm.fromElement(x)!;
+      expect(form.pages[0].label, 'Page One');
+      expect(form.pages[1].label, isNull);
+    });
+
+    test('parses multiple pages on one form', () {
+      final x = _form(
+        [],
+        pages: [
+          _page(label: 'First', items: [_text('a')]),
+          _page(label: 'Second', items: [_text('b')]),
+        ],
+      );
+      final form = DataForm.fromElement(x)!;
+      expect(form.pages, hasLength(2));
+      expect(form.pages[0].label, 'First');
+      expect(form.pages[1].label, 'Second');
+    });
+
+    test('pages is empty (not null) for a form with no pages', () {
+      final x = _form([_field(varName: 'v')]);
+      final form = DataForm.fromElement(x)!;
+      expect(form.pages, isNotNull);
+      expect(form.pages, isEmpty);
+    });
+
+    test('parses reportedref', () {
+      final x = _form(
+        [],
+        pages: [
+          _page(items: [_reportedref(), _text('after')]),
+        ],
+      );
+      final items = DataForm.fromElement(x)!.pages.single.items;
+      expect(items[0], isA<DataFormLayoutReportedRef>());
+      expect((items[1] as DataFormLayoutText).text, 'after');
+    });
+
+    test('withFieldValues preserves pages', () {
+      final x = _form(
+        [_field(varName: 'v', values: ['old'])],
+        pages: [_page(label: 'P', items: [_fieldref('v')])],
+      );
+      final form = DataForm.fromElement(x)!;
+      final updated = form.withFieldValues({'v': ['new']});
+      expect(updated.pages, hasLength(1));
+      expect(updated.pages.single.label, 'P');
+    });
+  });
+
+  group('XEP-0004 + XEP-0122 + XEP-0141 round-trip', () {
+    test('parses a full form combining validate and layout with ordinary fields', () {
+      final xml = '''
+<x xmlns="jabber:x:data" type="form">
+  <title>Full form</title>
+  <instructions>Fill it in.</instructions>
+  <field var="FORM_TYPE" type="hidden"><value>urn:example:full</value></field>
+  <field var="username" type="text-single" label="Username">
+    <validate xmlns="http://jabber.org/protocol/xdata-validate" datatype="xs:string">
+      <regex>^[a-z0-9]+\$</regex>
+    </validate>
+  </field>
+  <field var="age" type="text-single" label="Age">
+    <validate xmlns="http://jabber.org/protocol/xdata-validate" datatype="xs:int">
+      <range min="0" max="120"/>
+    </validate>
+  </field>
+  <field var="tags" type="list-multi" label="Tags">
+    <option label="A"><value>a</value></option>
+    <option label="B"><value>b</value></option>
+    <validate xmlns="http://jabber.org/protocol/xdata-validate">
+      <basic/>
+      <list-range min="1" max="2"/>
+    </validate>
+  </field>
+  <page xmlns="http://jabber.org/protocol/xdata-layout" label="Main">
+    <text>Please fill in the fields below.</text>
+    <fieldref var="username"/>
+    <section label="Details">
+      <fieldref var="age"/>
+      <fieldref var="tags"/>
+    </section>
+  </page>
+</x>
+''';
+      final element = _parseXml(xml);
+      final form = DataForm.fromElement(element)!;
+      expect(form.formType, 'urn:example:full');
+      expect(form.title, 'Full form');
+      expect(form.instructions, ['Fill it in.']);
+      expect(form.fields, hasLength(3));
+
+      final username = form.fields.firstWhere((f) => f.varName == 'username');
+      expect(username.validation!.method, DataFormValidationMethod.regex);
+      expect(username.validation!.regex, r'^[a-z0-9]+$');
+
+      final age = form.fields.firstWhere((f) => f.varName == 'age');
+      expect(age.validation!.method, DataFormValidationMethod.range);
+      expect(age.validation!.rangeMin, '0');
+      expect(age.validation!.rangeMax, '120');
+      expect(age.validation!.datatype, 'xs:int');
+
+      final tags = form.fields.firstWhere((f) => f.varName == 'tags');
+      expect(tags.validation!.method, DataFormValidationMethod.basic);
+      expect(tags.validation!.listRange!.min, 1);
+      expect(tags.validation!.listRange!.max, 2);
+
+      expect(form.pages, hasLength(1));
+      final page = form.pages.single;
+      expect(page.label, 'Main');
+      expect(page.items, hasLength(3));
+      expect((page.items[0] as DataFormLayoutText).text, 'Please fill in the fields below.');
+      expect((page.items[1] as DataFormLayoutFieldRef).varName, 'username');
+      final section = page.items[2] as DataFormLayoutSection;
+      expect(section.label, 'Details');
+      expect((section.items[0] as DataFormLayoutFieldRef).varName, 'age');
+      expect((section.items[1] as DataFormLayoutFieldRef).varName, 'tags');
     });
   });
 }
