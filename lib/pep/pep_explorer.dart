@@ -6,10 +6,13 @@ library;
 
 import 'package:xmpp_stone/xmpp_stone.dart';
 
+import '../xmpp/data_forms.dart';
+
+export '../xmpp/data_forms.dart' show dataFormXmlns;
+
 const String discoItemsXmlns = 'http://jabber.org/protocol/disco#items';
 const String pepPubsubOwnerXmlns = 'http://jabber.org/protocol/pubsub#owner';
 const String pepPubsubXmlns = 'http://jabber.org/protocol/pubsub';
-const String dataFormXmlns = 'jabber:x:data';
 
 /// A single PEP node discovered via disco#items against the account's own
 /// bare JID.
@@ -59,55 +62,65 @@ class PepNodeConfigField {
     this.label,
     this.type,
     this.values = const [],
+    this.options = const [],
   });
 
   final String varName;
   final String? label;
   final String? type;
   final List<String> values;
+
+  /// The acceptable values for `list-single`/`list-multi` fields, as
+  /// declared by the server (XEP-0004 §3.3). Empty for other field types.
+  final List<DataFormOption> options;
 }
 
-/// Parses the `<x xmlns='jabber:x:data'>` configuration form carried in a
-/// `pubsub#owner` `configure` IQ result into a list of [PepNodeConfigField]s.
-///
-/// The `FORM_TYPE` field is omitted since it's just the form's namespace
-/// marker, not a user-relevant configuration value.
-List<PepNodeConfigField> parsePepNodeConfig(IqStanza? result) {
+/// Extracts the `pubsub#owner` `configure` form result's underlying
+/// [DataForm], or `null` if [result] isn't a valid configuration form
+/// result.
+DataForm? _pepNodeConfigDataForm(IqStanza? result) {
   if (result == null || result.type != IqStanzaType.RESULT) {
-    return const [];
+    return null;
   }
   final pubsub = result.getChild('pubsub');
   if (pubsub == null ||
       pubsub.getAttribute('xmlns')?.value != pepPubsubOwnerXmlns) {
-    return const [];
+    return null;
   }
   final configure = pubsub.getChild('configure');
   if (configure == null) {
-    return const [];
+    return null;
   }
   final form = configure.children.where(
     (c) => c.name == 'x' && c.getAttribute('xmlns')?.value == dataFormXmlns,
   );
   if (form.isEmpty) {
+    return null;
+  }
+  return DataForm.fromElement(form.first);
+}
+
+/// Parses the `<x xmlns='jabber:x:data'>` configuration form carried in a
+/// `pubsub#owner` `configure` IQ result into a list of [PepNodeConfigField]s,
+/// using the generic XEP-0004 [DataForm] engine.
+///
+/// The `FORM_TYPE` field is omitted since it's just the form's namespace
+/// marker, not a user-relevant configuration value.
+List<PepNodeConfigField> parsePepNodeConfig(IqStanza? result) {
+  final form = _pepNodeConfigDataForm(result);
+  if (form == null) {
     return const [];
   }
-  final fields = <PepNodeConfigField>[];
-  for (final field in form.first.children.where((c) => c.name == 'field')) {
-    final varName = field.getAttribute('var')?.value;
-    if (varName == null || varName.isEmpty || varName == 'FORM_TYPE') {
-      continue;
-    }
-    final label = field.getAttribute('label')?.value;
-    final type = field.getAttribute('type')?.value;
-    final values = field.children
-        .where((c) => c.name == 'value')
-        .map((c) => c.textValue ?? '')
-        .toList(growable: false);
-    fields.add(
-      PepNodeConfigField(varName: varName, label: label, type: type, values: values),
-    );
-  }
-  return fields;
+  return [
+    for (final field in form.fields)
+      PepNodeConfigField(
+        varName: field.varName,
+        label: field.label,
+        type: field.type != null ? dataFormFieldTypeToWire(field.type!) : null,
+        values: field.values,
+        options: field.options,
+      ),
+  ];
 }
 
 /// A single item published to a PEP node.
@@ -153,31 +166,7 @@ List<PepNodeItem> parsePepNodeItems(IqStanza? result) {
 /// Returns `null` if [result] isn't a valid configuration form result, or
 /// doesn't carry a `FORM_TYPE` field.
 String? parsePepNodeConfigFormType(IqStanza? result) {
-  if (result == null || result.type != IqStanzaType.RESULT) {
-    return null;
-  }
-  final pubsub = result.getChild('pubsub');
-  if (pubsub == null ||
-      pubsub.getAttribute('xmlns')?.value != pepPubsubOwnerXmlns) {
-    return null;
-  }
-  final configure = pubsub.getChild('configure');
-  if (configure == null) {
-    return null;
-  }
-  final form = configure.children.where(
-    (c) => c.name == 'x' && c.getAttribute('xmlns')?.value == dataFormXmlns,
-  );
-  if (form.isEmpty) {
-    return null;
-  }
-  for (final field in form.first.children.where((c) => c.name == 'field')) {
-    if (field.getAttribute('var')?.value == 'FORM_TYPE') {
-      final value = field.getChild('value');
-      return value?.textValue;
-    }
-  }
-  return null;
+  return _pepNodeConfigDataForm(result)?.formType;
 }
 
 /// Builds the `<x xmlns='jabber:x:data' type='submit'>` data form to submit
@@ -190,34 +179,20 @@ XmppElement buildPepNodeConfigSubmitForm(
   String? formType,
   List<PepNodeConfigField> fields,
 ) {
-  final form = XmppElement()..name = 'x';
-  form.addAttribute(XmppAttribute('xmlns', dataFormXmlns));
-  form.addAttribute(XmppAttribute('type', 'submit'));
-  if (formType != null && formType.isNotEmpty) {
-    final formTypeField = XmppElement()..name = 'field';
-    formTypeField.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
-    formTypeField.addAttribute(XmppAttribute('type', 'hidden'));
-    final value = XmppElement()
-      ..name = 'value'
-      ..textValue = formType;
-    formTypeField.addChild(value);
-    form.addChild(formTypeField);
-  }
-  for (final field in fields) {
-    final fieldEl = XmppElement()..name = 'field';
-    fieldEl.addAttribute(XmppAttribute('var', field.varName));
-    if (field.type != null) {
-      fieldEl.addAttribute(XmppAttribute('type', field.type!));
-    }
-    for (final value in field.values) {
-      final valueEl = XmppElement()
-        ..name = 'value'
-        ..textValue = value;
-      fieldEl.addChild(valueEl);
-    }
-    form.addChild(fieldEl);
-  }
-  return form;
+  final form = DataForm(
+    formType: formType,
+    fields: [
+      for (final field in fields)
+        DataFormField(
+          varName: field.varName,
+          label: field.label,
+          type: dataFormFieldTypeFromWire(field.type),
+          values: field.values,
+          options: field.options,
+        ),
+    ],
+  );
+  return form.toSubmitElement();
 }
 
 /// Extracts a human-readable error condition (e.g. `item-not-found`,
@@ -236,9 +211,21 @@ String? pepIqErrorCondition(IqStanza? result) {
   }
   for (final child in error.children) {
     final name = child.name;
-    if (name != null && name.isNotEmpty) {
+    if (name != null && name.isNotEmpty && name != 'text') {
       return name;
     }
   }
   return 'error';
+}
+
+/// Extracts the human-readable `<error><text/></error>` explanation (RFC
+/// 6120 §8.3.2) from a failed IQ [result], if the server included one.
+/// Returns `null` if there is none (most servers omit it).
+String? pepIqErrorText(IqStanza? result) {
+  if (result == null || result.type == IqStanzaType.RESULT) {
+    return null;
+  }
+  final error = result.getChild('error');
+  final text = error?.getChild('text')?.textValue;
+  return text?.isNotEmpty == true ? text : null;
 }

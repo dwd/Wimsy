@@ -33,11 +33,25 @@ IqStanza _buildConfigureResult(String id, String node, List<XmppElement> fields)
   return stanza;
 }
 
-XmppElement _field(String varName, {String? label, String? type, List<String> values = const []}) {
+XmppElement _field(
+  String varName, {
+  String? label,
+  String? type,
+  List<String> values = const [],
+  List<String> options = const [],
+}) {
   final field = XmppElement()..name = 'field';
   field.addAttribute(XmppAttribute('var', varName));
   if (label != null) field.addAttribute(XmppAttribute('label', label));
   if (type != null) field.addAttribute(XmppAttribute('type', type));
+  for (final option in options) {
+    final optionEl = XmppElement()..name = 'option';
+    final optionValue = XmppElement()
+      ..name = 'value'
+      ..textValue = option;
+    optionEl.addChild(optionValue);
+    field.addChild(optionEl);
+  }
   for (final value in values) {
     final v = XmppElement()
       ..name = 'value'
@@ -118,6 +132,26 @@ void main() {
       pubsub.addAttribute(XmppAttribute('xmlns', pepPubsubOwnerXmlns));
       stanza.addChild(pubsub);
       expect(parsePepNodeConfig(stanza), isEmpty);
+    });
+
+    test('parses the declared options of a list-single field', () {
+      final result = _buildConfigureResult('1', 'urn:xmpp:bookmarks:1', [
+        _field(
+          'pubsub#access_model',
+          type: 'list-single',
+          values: ['presence'],
+          options: ['authorize', 'open', 'presence', 'roster', 'whitelist'],
+        ),
+      ]);
+      final fields = parsePepNodeConfig(result);
+      expect(fields, hasLength(1));
+      expect(fields[0].options.map((o) => o.value), [
+        'authorize',
+        'open',
+        'presence',
+        'roster',
+        'whitelist',
+      ]);
     });
   });
 
@@ -200,6 +234,18 @@ void main() {
       final form = buildPepNodeConfigSubmitForm(null, const []);
       expect(form.children.where((c) => c.name == 'field'), isEmpty);
     });
+
+    test('omits fixed fields, which are informational-only (XEP-0004 §3.3)', () {
+      final form = buildPepNodeConfigSubmitForm('urn:example', const [
+        PepNodeConfigField(varName: 'instructions-header', type: 'fixed', values: ['Section']),
+        PepNodeConfigField(varName: 'pubsub#title', type: 'text-single', values: ['hi']),
+      ]);
+      final fields = form.children
+          .where((c) => c.name == 'field')
+          .map((c) => c.getAttribute('var')?.value)
+          .toList();
+      expect(fields, ['FORM_TYPE', 'pubsub#title']);
+    });
   });
 
   group('pepIqErrorCondition', () {
@@ -218,6 +264,36 @@ void main() {
       error.addChild(XmppElement()..name = 'item-not-found');
       stanza.addChild(error);
       expect(pepIqErrorCondition(stanza), 'item-not-found');
+    });
+  });
+
+  group('pepIqErrorText', () {
+    test('extracts the error text when present', () {
+      final stanza = IqStanza('1', IqStanzaType.ERROR);
+      final error = XmppElement()..name = 'error';
+      error.addChild(XmppElement()..name = 'not-acceptable');
+      final text = XmppElement()
+        ..name = 'text'
+        ..textValue = 'open access model is not supported for this node';
+      error.addChild(text);
+      stanza.addChild(error);
+      expect(
+        pepIqErrorText(stanza),
+        'open access model is not supported for this node',
+      );
+    });
+
+    test('returns null when there is no text element', () {
+      final stanza = IqStanza('1', IqStanzaType.ERROR);
+      final error = XmppElement()..name = 'error';
+      error.addChild(XmppElement()..name = 'not-acceptable');
+      stanza.addChild(error);
+      expect(pepIqErrorText(stanza), isNull);
+    });
+
+    test('returns null on success or null result', () {
+      expect(pepIqErrorText(IqStanza('1', IqStanzaType.RESULT)), isNull);
+      expect(pepIqErrorText(null), isNull);
     });
   });
 }

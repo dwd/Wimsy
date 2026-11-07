@@ -123,12 +123,23 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
 
   /// Text controllers for the currently edited fields, keyed by `var` name.
   /// Edited values are comma-joined/split, which keeps multi-value fields
-  /// editable without needing per-type widgets.
+  /// editable without needing per-type widgets. Not used for `list-single`
+  /// fields that declare `<option/>`s; see [_listSingleSelections].
   final Map<String, TextEditingController> _controllers = {};
+
+  /// The currently selected value for `list-single` fields that declare
+  /// `<option/>`s, keyed by `var` name. Using a dropdown restricted to the
+  /// server-declared options (XEP-0004 §3.3) rather than free text avoids
+  /// submitting a value the server doesn't recognize (e.g. a typo'd access
+  /// model).
+  final Map<String, String?> _listSingleSelections = {};
 
   /// The original field metadata (type, label) for the fields being edited,
   /// keyed by `var` name, so submission can preserve each field's `type`.
   Map<String, PepNodeConfigField> _editedFieldsByVar = {};
+
+  bool _isDropdownField(PepNodeConfigField field) =>
+      field.type == 'list-single' && field.options.isNotEmpty;
 
   @override
   void initState() {
@@ -155,16 +166,18 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
       for (final controller in _controllers.values) {
         controller.dispose();
       }
-      _controllers
-        ..clear()
-        ..addEntries(
-          fields.map(
-            (field) => MapEntry(
-              field.varName,
-              TextEditingController(text: field.values.join(', ')),
-            ),
-          ),
-        );
+      _controllers.clear();
+      _listSingleSelections.clear();
+      for (final field in fields) {
+        if (_isDropdownField(field)) {
+          _listSingleSelections[field.varName] =
+              field.values.isNotEmpty ? field.values.first : null;
+        } else {
+          _controllers[field.varName] = TextEditingController(
+            text: field.values.join(', '),
+          );
+        }
+      }
     });
     widget.service.fetchPepNodeConfigFormType(widget.node).then((formType) {
       if (mounted) {
@@ -190,9 +203,13 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
   void _cancelEditing() {
     setState(() {
       _editing = false;
-      // Reset controllers back to the last fetched values.
+      // Reset controls back to the last fetched values.
       for (final entry in _editedFieldsByVar.entries) {
         _controllers[entry.key]?.text = entry.value.values.join(', ');
+        if (_listSingleSelections.containsKey(entry.key)) {
+          _listSingleSelections[entry.key] =
+              entry.value.values.isNotEmpty ? entry.value.values.first : null;
+        }
       }
     });
   }
@@ -207,12 +224,18 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
           varName: entry.key,
           label: entry.value.label,
           type: entry.value.type,
-          values: _controllers[entry.key]!
-              .text
-              .split(',')
-              .map((v) => v.trim())
-              .where((v) => v.isNotEmpty)
-              .toList(),
+          options: entry.value.options,
+          values: _isDropdownField(entry.value)
+              ? [
+                  if (_listSingleSelections[entry.key] != null)
+                    _listSingleSelections[entry.key]!,
+                ]
+              : _controllers[entry.key]!
+                  .text
+                  .split(',')
+                  .map((v) => v.trim())
+                  .where((v) => v.isNotEmpty)
+                  .toList(),
         ),
     ];
     final error = await widget.service.submitPepNodeConfig(
@@ -316,16 +339,42 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: _editing
-                          ? TextField(
-                              controller: _controllers[field.varName],
-                              decoration: InputDecoration(
-                                labelText: field.label?.isNotEmpty == true
-                                    ? field.label!
-                                    : field.varName,
-                                helperText: 'Comma-separated for multiple values',
-                                isDense: true,
-                              ),
-                            )
+                          ? (_isDropdownField(field)
+                              ? DropdownButtonFormField<String>(
+                                  initialValue: _listSingleSelections[field.varName],
+                                  decoration: InputDecoration(
+                                    labelText: field.label?.isNotEmpty == true
+                                        ? field.label!
+                                        : field.varName,
+                                    isDense: true,
+                                  ),
+                                  items: [
+                                    for (final option in field.options)
+                                      DropdownMenuItem(
+                                        value: option.value,
+                                        child: Text(
+                                          option.label?.isNotEmpty == true
+                                              ? option.label!
+                                              : option.value,
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _listSingleSelections[field.varName] = value;
+                                    });
+                                  },
+                                )
+                              : TextField(
+                                  controller: _controllers[field.varName],
+                                  decoration: InputDecoration(
+                                    labelText: field.label?.isNotEmpty == true
+                                        ? field.label!
+                                        : field.varName,
+                                    helperText: 'Comma-separated for multiple values',
+                                    isDense: true,
+                                  ),
+                                ))
                           : Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [

@@ -8359,7 +8359,12 @@ class XmppService extends ChangeNotifier {
     pubsub.addChild(configure);
     iqStanza.addChild(pubsub);
     final result = await _sendIqAndAwait(iqStanza);
-    return pepIqErrorCondition(result);
+    final condition = pepIqErrorCondition(result);
+    if (condition == null) {
+      return null;
+    }
+    final text = pepIqErrorText(result);
+    return text != null ? '$condition: $text' : condition;
   }
 
   /// PEP explorer: fetches the list of items currently published to [node]
