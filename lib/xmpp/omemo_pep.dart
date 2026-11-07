@@ -6,6 +6,8 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../encryption/omemo2_backend.dart';
 import '../encryption/omemo_backend.dart' show OmemoPepTransport;
+import 'pep_publish.dart'
+    show buildOpenPepConfigureIq, buildOpenPepPublishOptions, iqPubsubErrorCondition;
 
 /// XEP-0384 (OMEMO2) PEP node names.
 const String omemo2DeviceListNode = 'urn:xmpp:omemo:2:devices';
@@ -79,10 +81,49 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
     return completer.future;
   }
 
-  /// Publishes [deviceIds] (which must include our own device id) as the
-  /// `urn:xmpp:omemo:2:devices` PEP item for our own bare JID.
-  @override
-  Future<void> publishDeviceList(List<int> deviceIds) async {
+  /// Publishes [item] to [node] with `<publish-options>` asserting
+  /// `pubsub#access_model = open` (see [buildOpenPepPublishOptions]).
+  ///
+  /// XEP-0384's OMEMO/OMEMO2 device-list and bundle nodes must be readable
+  /// by any contact without a prior subscription or whitelist entry --
+  /// that's exactly the scenario in which a session is first established
+  /// with someone. Without forcing `open` here, these nodes end up with
+  /// whatever access model the server happens to default newly
+  /// auto-created PEP nodes to, which is implementation-defined per
+  /// XEP-0060 §7.1.4 and may be as restrictive as `whitelist` -- silently
+  /// making our device list/bundles unreadable to everyone.
+  ///
+  /// If the node already exists with a different access model, the
+  /// server replies `<precondition-not-met/>` (XEP-0060 §7.1.3.3); in
+  /// that case we explicitly reconfigure the node to `open` via a
+  /// `pubsub#owner` `<configure/>` IQ and retry the publish once, the
+  /// same recovery pattern used for whitelist nodes elsewhere (see
+  /// `lib/xmpp/pep_publish.dart`'s `publishToPrivatePepNodeWithRetry`).
+  Future<void> _publishWithOpenAccess({
+    required String node,
+    required XmppElement Function() buildItem,
+  }) async {
+    final result = await _sendIqAndWait(
+      _buildOpenPublishIq(node: node, item: buildItem()),
+    );
+    if (result.type != IqStanzaType.RESULT &&
+        iqPubsubErrorCondition(result) == 'precondition-not-met') {
+      await _sendIqAndWait(
+        buildOpenPepConfigureIq(
+          node: node,
+          selfBareJid: connection.fullJid.userAtDomain,
+        ),
+      );
+      await _sendIqAndWait(
+        _buildOpenPublishIq(node: node, item: buildItem()),
+      );
+    }
+  }
+
+  IqStanza _buildOpenPublishIq({
+    required String node,
+    required XmppElement item,
+  }) {
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.SET);
     final pubsub = XmppElement()..name = 'pubsub';
@@ -90,21 +131,38 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
       XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
     );
     final publish = XmppElement()..name = 'publish';
-    publish.addAttribute(XmppAttribute('node', omemo2DeviceListNode));
-    final item = XmppElement()..name = 'item';
-    item.addAttribute(XmppAttribute('id', 'current'));
-    final devices = XmppElement()..name = 'devices';
-    devices.addAttribute(XmppAttribute('xmlns', omemo2Namespace));
-    for (final deviceId in deviceIds) {
-      final device = XmppElement()..name = 'device';
-      device.addAttribute(XmppAttribute('id', deviceId.toString()));
-      devices.addChild(device);
-    }
-    item.addChild(devices);
+    publish.addAttribute(XmppAttribute('node', node));
     publish.addChild(item);
     pubsub.addChild(publish);
+    pubsub.addChild(buildOpenPepPublishOptions());
     iqStanza.addChild(pubsub);
-    await _sendIqAndWait(iqStanza);
+    return iqStanza;
+  }
+
+  /// Publishes [deviceIds] (which must include our own device id) as the
+  /// `urn:xmpp:omemo:2:devices` PEP item for our own bare JID.
+  ///
+  /// Forces the node's `pubsub#access_model` to `open` (see
+  /// [_publishWithOpenAccess]), since contacts must be able to fetch our
+  /// device list without a prior subscription/whitelist entry.
+  @override
+  Future<void> publishDeviceList(List<int> deviceIds) async {
+    await _publishWithOpenAccess(
+      node: omemo2DeviceListNode,
+      buildItem: () {
+        final item = XmppElement()..name = 'item';
+        item.addAttribute(XmppAttribute('id', 'current'));
+        final devices = XmppElement()..name = 'devices';
+        devices.addAttribute(XmppAttribute('xmlns', omemo2Namespace));
+        for (final deviceId in deviceIds) {
+          final device = XmppElement()..name = 'device';
+          device.addAttribute(XmppAttribute('id', deviceId.toString()));
+          devices.addChild(device);
+        }
+        item.addChild(devices);
+        return item;
+      },
+    );
   }
 
   /// Fetches the `urn:xmpp:omemo:2:devices` device list for [bareJid], or
@@ -164,23 +222,21 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
   /// Publishes [bundle] (our own device's key bundle) to the
   /// `urn:xmpp:omemo:2:bundles` PEP node, using the device id as the item
   /// id, per XEP-0384.
+  ///
+  /// Forces the node's `pubsub#access_model` to `open` (see
+  /// [_publishWithOpenAccess]), since contacts must be able to fetch our
+  /// bundle without a prior subscription/whitelist entry.
   @override
   Future<void> publishBundle(OmemoBundle bundle) async {
-    final id = AbstractStanza.getRandomId();
-    final iqStanza = IqStanza(id, IqStanzaType.SET);
-    final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(
-      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    await _publishWithOpenAccess(
+      node: omemo2BundlesNode,
+      buildItem: () {
+        final item = XmppElement()..name = 'item';
+        item.addAttribute(XmppAttribute('id', bundle.id.toString()));
+        item.addChild(_bundleToElement(bundle));
+        return item;
+      },
     );
-    final publish = XmppElement()..name = 'publish';
-    publish.addAttribute(XmppAttribute('node', omemo2BundlesNode));
-    final item = XmppElement()..name = 'item';
-    item.addAttribute(XmppAttribute('id', bundle.id.toString()));
-    item.addChild(_bundleToElement(bundle));
-    publish.addChild(item);
-    pubsub.addChild(publish);
-    iqStanza.addChild(pubsub);
-    await _sendIqAndWait(iqStanza);
   }
 
   /// Fetches the key bundle for [deviceId] of [bareJid] from the
@@ -297,30 +353,28 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
   // legacy node names/namespace (see [legacyOmemoNamespace]).
   // -------------------------------------------------------------------
 
+  /// Publishes [deviceIds] as the legacy OMEMO device list. Forces the
+  /// node's `pubsub#access_model` to `open` (see [_publishWithOpenAccess]),
+  /// since contacts must be able to fetch our device list without a prior
+  /// subscription/whitelist entry.
   @override
   Future<void> publishLegacyDeviceList(List<int> deviceIds) async {
-    final id = AbstractStanza.getRandomId();
-    final iqStanza = IqStanza(id, IqStanzaType.SET);
-    final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(
-      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    await _publishWithOpenAccess(
+      node: legacyOmemoDeviceListNode,
+      buildItem: () {
+        final item = XmppElement()..name = 'item';
+        item.addAttribute(XmppAttribute('id', 'current'));
+        final list = XmppElement()..name = 'list';
+        list.addAttribute(XmppAttribute('xmlns', legacyOmemoNamespace));
+        for (final deviceId in deviceIds) {
+          final device = XmppElement()..name = 'device';
+          device.addAttribute(XmppAttribute('id', deviceId.toString()));
+          list.addChild(device);
+        }
+        item.addChild(list);
+        return item;
+      },
     );
-    final publish = XmppElement()..name = 'publish';
-    publish.addAttribute(XmppAttribute('node', legacyOmemoDeviceListNode));
-    final item = XmppElement()..name = 'item';
-    item.addAttribute(XmppAttribute('id', 'current'));
-    final list = XmppElement()..name = 'list';
-    list.addAttribute(XmppAttribute('xmlns', legacyOmemoNamespace));
-    for (final deviceId in deviceIds) {
-      final device = XmppElement()..name = 'device';
-      device.addAttribute(XmppAttribute('id', deviceId.toString()));
-      list.addChild(device);
-    }
-    item.addChild(list);
-    publish.addChild(item);
-    pubsub.addChild(publish);
-    iqStanza.addChild(pubsub);
-    await _sendIqAndWait(iqStanza);
   }
 
   @override
@@ -376,25 +430,21 @@ class OmemoPep implements Omemo2PepTransport, OmemoPepTransport {
   /// Publishes [bundle] (our own device's key bundle) to the
   /// `eu.siacs.conversations.axolotl.bundles:<deviceid>` PEP node, per
   /// XEP-0384 v0.3.0.
+  ///
+  /// Forces the node's `pubsub#access_model` to `open` (see
+  /// [_publishWithOpenAccess]), since contacts must be able to fetch our
+  /// bundle without a prior subscription/whitelist entry.
   @override
   Future<void> publishLegacyBundle(OmemoBundle bundle) async {
-    final id = AbstractStanza.getRandomId();
-    final iqStanza = IqStanza(id, IqStanzaType.SET);
-    final pubsub = XmppElement()..name = 'pubsub';
-    pubsub.addAttribute(
-      XmppAttribute('xmlns', 'http://jabber.org/protocol/pubsub'),
+    await _publishWithOpenAccess(
+      node: legacyOmemoBundlesNode(bundle.id),
+      buildItem: () {
+        final item = XmppElement()..name = 'item';
+        item.addAttribute(XmppAttribute('id', 'current'));
+        item.addChild(_legacyBundleToElement(bundle));
+        return item;
+      },
     );
-    final publish = XmppElement()..name = 'publish';
-    publish.addAttribute(
-      XmppAttribute('node', legacyOmemoBundlesNode(bundle.id)),
-    );
-    final item = XmppElement()..name = 'item';
-    item.addAttribute(XmppAttribute('id', 'current'));
-    item.addChild(_legacyBundleToElement(bundle));
-    publish.addChild(item);
-    pubsub.addChild(publish);
-    iqStanza.addChild(pubsub);
-    await _sendIqAndWait(iqStanza);
   }
 
   @override

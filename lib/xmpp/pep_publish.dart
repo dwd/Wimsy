@@ -115,6 +115,35 @@ XmppElement buildFormField(String varName, String value, {String? type}) {
 XmppElement buildPrivatePepPublishOptions({
   bool serverSupportsConfigNodeMax = true,
   Set<String>? supportedConfigFields,
+}) =>
+    _buildPepPublishOptionsForm(
+      accessModel: 'whitelist',
+      serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
+    );
+
+/// Builds the `<publish-options>` data form for a PEP node that must be
+/// readable by anyone without a prior subscription/whitelist entry (i.e.
+/// `pubsub#access_model` = `open`), as required for OMEMO/OMEMO2 device-list
+/// and bundle nodes (XEP-0384): a contact must be able to fetch our device
+/// list/bundle before we've ever exchanged presence/subscriptions with them.
+///
+/// Otherwise identical to [buildPrivatePepPublishOptions] (same
+/// `persist_items`/`send_last_published_item`/`max_items` handling).
+XmppElement buildOpenPepPublishOptions({
+  bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
+}) =>
+    _buildPepPublishOptionsForm(
+      accessModel: 'open',
+      serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
+    );
+
+XmppElement _buildPepPublishOptionsForm({
+  required String accessModel,
+  bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) {
   final publishOptions = XmppElement()..name = 'publish-options';
   final optForm = XmppElement()..name = 'x';
@@ -126,7 +155,7 @@ XmppElement buildPrivatePepPublishOptions({
     type: 'hidden',
   ));
   optForm.addChild(buildFormField('pubsub#persist_items', 'true'));
-  optForm.addChild(buildFormField('pubsub#access_model', 'whitelist'));
+  optForm.addChild(buildFormField('pubsub#access_model', accessModel));
   if (supportedConfigFields == null ||
       supportedConfigFields.contains(pubsubSendLastPublishedItemField)) {
     optForm.addChild(buildFormField(pubsubSendLastPublishedItemField, 'never'));
@@ -158,6 +187,39 @@ IqStanza buildPrivatePepConfigureIq({
   required String selfBareJid,
   bool serverSupportsConfigNodeMax = true,
   Set<String>? supportedConfigFields,
+}) =>
+    _buildPepConfigureIq(
+      accessModel: 'whitelist',
+      node: node,
+      selfBareJid: selfBareJid,
+      serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
+    );
+
+/// Builds a pubsub `owner` configure IQ that sets a PEP [node] to the `open`
+/// access model (see [buildOpenPepPublishOptions] for why OMEMO/OMEMO2
+/// device-list/bundle nodes need this). Called on `<precondition-not-met/>`
+/// the same way [buildPrivatePepConfigureIq] is for whitelist nodes.
+IqStanza buildOpenPepConfigureIq({
+  required String node,
+  required String selfBareJid,
+  bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
+}) =>
+    _buildPepConfigureIq(
+      accessModel: 'open',
+      node: node,
+      selfBareJid: selfBareJid,
+      serverSupportsConfigNodeMax: serverSupportsConfigNodeMax,
+      supportedConfigFields: supportedConfigFields,
+    );
+
+IqStanza _buildPepConfigureIq({
+  required String accessModel,
+  required String node,
+  required String selfBareJid,
+  bool serverSupportsConfigNodeMax = true,
+  Set<String>? supportedConfigFields,
 }) {
   final id = AbstractStanza.getRandomId();
   final iq = IqStanza(id, IqStanzaType.SET);
@@ -175,7 +237,7 @@ IqStanza buildPrivatePepConfigureIq({
     type: 'hidden',
   ));
   configForm.addChild(buildFormField('pubsub#persist_items', 'true'));
-  configForm.addChild(buildFormField('pubsub#access_model', 'whitelist'));
+  configForm.addChild(buildFormField('pubsub#access_model', accessModel));
   if (supportedConfigFields == null ||
       supportedConfigFields.contains(pubsubSendLastPublishedItemField)) {
     configForm.addChild(buildFormField(pubsubSendLastPublishedItemField, 'never'));

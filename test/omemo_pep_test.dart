@@ -331,4 +331,140 @@ void main() {
       },
     );
   });
+
+  group('OMEMO/OMEMO2 PEP nodes force pubsub#access_model = open', () {
+    // XEP-0384's device-list/bundle nodes must be readable by any contact
+    // without a prior subscription/whitelist entry -- exactly the
+    // situation when a session is first being established. Without
+    // explicitly asserting `open` via `<publish-options>`, these nodes
+    // would end up with whatever access model the server defaults newly
+    // auto-created PEP nodes to (implementation-defined per XEP-0060
+    // §7.1.4), which could silently make them unreadable.
+    late XmppAccountSettings account;
+    late TestConnection connection;
+    late OmemoPep pep;
+
+    setUp(() {
+      account = XmppAccountSettings('test', 'user', 'example.com', 'pass', 5222);
+      connection = TestConnection(account);
+      pep = OmemoPep(connection);
+    });
+
+    tearDown(() {
+      pep.dispose();
+    });
+
+    String? accessModelOf(IqStanza iq) {
+      final form = iq.getChild('pubsub')?.getChild('publish-options')?.getChild('x');
+      if (form == null) return null;
+      for (final field in form.children.where((c) => c.name == 'field')) {
+        if (field.getAttribute('var')?.value == 'pubsub#access_model') {
+          return field.getChild('value')?.textValue;
+        }
+      }
+      return null;
+    }
+
+    test('publishDeviceList (OMEMO2) asserts access_model = open', () async {
+      await pep.publishDeviceList([1]);
+      final iq = connection.written.last as IqStanza;
+      expect(accessModelOf(iq), 'open');
+    });
+
+    test('publishBundle (OMEMO2) asserts access_model = open', () async {
+      final bundle = OmemoBundle(
+        'user@example.com',
+        1,
+        base64Encode(List<int>.generate(32, (i) => i)),
+        1,
+        base64Encode([1, 2, 3]),
+        base64Encode(List<int>.generate(32, (i) => 32 + i)),
+        const {},
+      );
+      await pep.publishBundle(bundle);
+      final iq = connection.written.last as IqStanza;
+      expect(accessModelOf(iq), 'open');
+    });
+
+    test('publishLegacyDeviceList asserts access_model = open', () async {
+      await pep.publishLegacyDeviceList([1]);
+      final iq = connection.written.last as IqStanza;
+      expect(accessModelOf(iq), 'open');
+    });
+
+    test('publishLegacyBundle asserts access_model = open', () async {
+      final bundle = OmemoBundle(
+        'user@example.com',
+        1,
+        base64Encode(List<int>.generate(32, (i) => i)),
+        1,
+        base64Encode([1, 2, 3]),
+        base64Encode(List<int>.generate(32, (i) => 32 + i)),
+        const {},
+      );
+      await pep.publishLegacyBundle(bundle);
+      final iq = connection.written.last as IqStanza;
+      expect(accessModelOf(iq), 'open');
+    });
+
+    test(
+      'on precondition-not-met, reconfigures the node to open and retries '
+      'the publish, succeeding on the second attempt',
+      () async {
+        var publishAttempts = 0;
+        connection.respond = (request) {
+          final pubsub = request.getChild('pubsub');
+          final publish = pubsub?.getChild('publish');
+          if (publish != null) {
+            publishAttempts++;
+            if (publishAttempts == 1) {
+              final result = IqStanza(request.id, IqStanzaType.ERROR);
+              final error = XmppElement()..name = 'error';
+              final condition = XmppElement()..name = 'precondition-not-met';
+              condition.addAttribute(
+                XmppAttribute(
+                  'xmlns',
+                  'http://jabber.org/protocol/pubsub#errors',
+                ),
+              );
+              error.addChild(condition);
+              result.addChild(error);
+              return result;
+            }
+          }
+          return IqStanza(request.id, IqStanzaType.RESULT);
+        };
+
+        await pep.publishLegacyDeviceList([1]);
+
+        expect(publishAttempts, 2);
+        // A `pubsub#owner` reconfigure IQ should have been sent between
+        // the failed and successful publish attempts.
+        final configureIq = connection.written.firstWhere(
+          (s) =>
+              s is IqStanza &&
+              s.getChild('pubsub')?.getAttribute('xmlns')?.value ==
+                  'http://jabber.org/protocol/pubsub#owner',
+        ) as IqStanza;
+        final configForm = configureIq
+            .getChild('pubsub')
+            ?.getChild('configure')
+            ?.getChild('x');
+        final accessModelField = configForm?.children
+            .where((c) => c.name == 'field')
+            .firstWhere(
+              (f) => f.getAttribute('var')?.value == 'pubsub#access_model',
+            );
+        expect(accessModelField?.getChild('value')?.textValue, 'open');
+
+        // Final publish (second attempt) must have succeeded.
+        final finalPublishIq = connection.written.lastWhere(
+          (s) =>
+              s is IqStanza &&
+              s.getChild('pubsub')?.getChild('publish') != null,
+        ) as IqStanza;
+        expect(accessModelOf(finalPublishIq), 'open');
+      },
+    );
+  });
 }
