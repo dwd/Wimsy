@@ -9171,6 +9171,16 @@ class XmppService extends ChangeNotifier {
       selfBareJid: _currentUserBareJid!,
       onUpdate: () => notifyListeners(),
     );
+    // Publish our own OMEMO2/legacy-OMEMO device list and key bundle to
+    // PEP as soon as we connect, instead of waiting for the user to
+    // explicitly turn on encryption or send/receive an encrypted message
+    // in some conversation. Without this, a user who never did either of
+    // those from this device/account would have their device list/bundle
+    // permanently unpublished, making them invisible to contacts trying
+    // to establish an OMEMO session with them (even though we ourselves
+    // can happily read contacts' device lists, since that's a plain IQ
+    // fetch that doesn't require our own backend to exist).
+    _encryptionManager?.publishAllIdentities();
     _pepManager = PepManager(
       connection: connection,
       storage: storage,

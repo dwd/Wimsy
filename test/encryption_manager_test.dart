@@ -52,6 +52,31 @@ class FakeStorageService extends StorageService {
 
   @override
   List<int>? loadOmemo2DeviceList(String bareJid) => deviceLists[bareJid];
+
+  @override
+  Future<void> storeOmemoIdentity(
+    String bareJid,
+    Map<String, dynamic> deviceJson,
+  ) async {
+    identities['legacy:$bareJid'] = deviceJson;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> loadOmemoIdentity(String bareJid) async {
+    return identities['legacy:$bareJid'];
+  }
+
+  @override
+  Future<void> storeOmemoDeviceList(
+    String bareJid,
+    List<int> deviceIds,
+  ) async {
+    deviceLists['legacy:$bareJid'] = List.of(deviceIds);
+  }
+
+  @override
+  List<int>? loadOmemoDeviceList(String bareJid) =>
+      deviceLists['legacy:$bareJid'];
 }
 
 class TestConnection extends Connection {
@@ -253,6 +278,69 @@ void main() {
         'publish',
       );
       expect(publish, isNotNull);
+    },
+  );
+
+  test(
+    'publishAllIdentities() eagerly creates the OMEMO2 and legacy-OMEMO '
+    'backends so our own identity is published right after connecting, '
+    'without waiting for any per-conversation action',
+    () async {
+      // Regression test: previously, our own OMEMO2/legacy-OMEMO device
+      // list and key bundle were only ever published reactively -- when
+      // a conversation's protocol was explicitly selected, or a message
+      // was sent/received -- so an account that never did either of
+      // those from a given device simply never announced itself via PEP,
+      // making it invisible to contacts trying to discover its devices
+      // even though it could happily read contacts' own device lists.
+      final storage = FakeStorageService();
+      final connection = _buildConnection();
+      final manager = EncryptionManager(
+        connection: connection,
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      expect(
+        connection.writtenStanzas,
+        isEmpty,
+        reason: 'nothing should be published before publishAllIdentities()',
+      );
+
+      manager.publishAllIdentities();
+      // Both backends' identity publishes are fired-and-forgotten. Each
+      // `publishIdentity()` first publishes the device's bundle, then
+      // awaits a device-list fetch IQ response (to merge with it) before
+      // publishing the device list itself -- since nothing in this test
+      // ever responds to that fetch, only the two bundle publishes are
+      // observable here; that's still enough to prove both backends were
+      // actually created and started publishing.
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      final publishedNodes = connection.writtenStanzas
+          .whereType<IqStanza>()
+          .map(
+            (iq) => iq.getChild('pubsub')?.getChild('publish')?.getAttribute('node')?.value,
+          )
+          .whereType<String>()
+          .toSet();
+      expect(
+        publishedNodes.contains('urn:xmpp:omemo:2:bundles'),
+        isTrue,
+        reason: 'publishAllIdentities() should have published our OMEMO2 bundle',
+      );
+      expect(
+        publishedNodes.any(
+          (node) => node.startsWith('eu.siacs.conversations.axolotl.bundles:'),
+        ),
+        isTrue,
+        reason:
+            'publishAllIdentities() should have published our legacy-OMEMO '
+            'bundle',
+      );
     },
   );
 

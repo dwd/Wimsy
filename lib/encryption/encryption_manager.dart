@@ -277,6 +277,33 @@ class EncryptionManager {
     );
   }
 
+  /// Proactively creates (if not already created) the OMEMO2 and
+  /// legacy-OMEMO backends right after connecting, so our own device
+  /// list/bundle get published to PEP immediately -- see the doc comment
+  /// on [_publishIdentitySafely].
+  ///
+  /// Without this, backend creation (and therefore [publishIdentity]) was
+  /// purely reactive: it only happened once the user explicitly selected
+  /// an encryption protocol for a given conversation, or sent/received an
+  /// encrypted message in one. If Wimsy's user never did that from this
+  /// device for a particular account (e.g. only ever *received* OMEMO
+  /// messages, or never selected encryption at all), our own device-list
+  /// and key bundle were simply never published, even though we're
+  /// perfectly able to *read* contacts' device lists -- matching the
+  /// observed asymmetry ("Conversations cannot see any OMEMO devices for
+  /// Wimsy" despite Wimsy seeing Conversations' devices fine).
+  ///
+  /// OX is intentionally not included here: unlike OMEMO's device-list
+  /// discovery model (where *any* contact needs to be able to find our
+  /// device to start a session), OX's public-key announcement is only
+  /// useful once the user has actually generated/selected an OpenPGP key
+  /// for a conversation, so eagerly creating it on every connect would
+  /// just add unnecessary PEP traffic.
+  void publishAllIdentities() {
+    unawaited(_omemo2Backend());
+    unawaited(_legacyOmemoBackend());
+  }
+
   /// Encrypts [plaintext] for sending to [toBareJid] using [toBareJid]'s
   /// currently selected protocol. Returns `null` when encryption is off
   /// for that conversation (callers should then send plaintext as usual).
