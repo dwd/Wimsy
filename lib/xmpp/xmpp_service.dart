@@ -9085,6 +9085,33 @@ class XmppService extends ChangeNotifier {
     return refreshed;
   }
 
+  /// Completely resets all locally-held OMEMO2 state for [bareJid] (every
+  /// session, cached bundle, trust decision, and the device list itself)
+  /// -- the fingerprint verification screen's "Reset OMEMO state" action,
+  /// for when a contact's OMEMO state is permanently stuck/corrupted and
+  /// [refreshOmemo2DevicesFor] alone doesn't fix it. See
+  /// `Omemo2Backend.resetDeviceState` for details.
+  Future<void> resetOmemo2DeviceStateFor(String bareJid) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.resetOmemo2DeviceState(_bareJid(bareJid));
+    notifyListeners();
+  }
+
+  /// Completely resets all locally-held legacy-OMEMO state for [bareJid].
+  /// See [resetOmemo2DeviceStateFor]/`OmemoBackend.resetDeviceState` for
+  /// details.
+  Future<void> resetLegacyOmemoDeviceStateFor(String bareJid) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.resetLegacyOmemoDeviceState(_bareJid(bareJid));
+    notifyListeners();
+  }
+
   /// Every known OX key fingerprint (and its trust state) of [bareJid].
   /// See `lib/widgets/fingerprint_verification_screen.dart`.
   Future<List<OxKeyFingerprint>> oxFingerprintsFor(String bareJid) async {

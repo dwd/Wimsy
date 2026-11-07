@@ -1020,6 +1020,19 @@ class OmemoBackend implements EncryptionBackend {
     return true;
   }
 
+  /// Completely resets all locally-held legacy-OMEMO state for [bareJid],
+  /// mirroring `Omemo2Backend.resetDeviceState`: every Double Ratchet
+  /// session, cached key bundle, trust/enablement decision, and the
+  /// cached device list itself are wiped, so the very next message
+  /// to/from [bareJid] starts entirely from scratch. See
+  /// `Omemo2Backend.resetDeviceState`'s doc comment for when to use this
+  /// over [refreshDevices].
+  Future<void> resetDeviceState(String bareJid) async {
+    await _omemoManager.removeAllRatchets(bareJid);
+    await storage.removeOmemoBundlesForJid(bareJid);
+    await trustStore.forgetJid(bareJid);
+  }
+
   /// Every known legacy-OMEMO device of [bareJid] with its fingerprint
   /// (when cached) and current [TrustState], mirroring
   /// `Omemo2Backend.deviceFingerprintsFor`.

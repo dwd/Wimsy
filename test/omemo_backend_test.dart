@@ -61,6 +61,16 @@ class FakeStorageService extends StorageService {
       bundles['$bareJid:$deviceId'];
 
   @override
+  Future<void> removeOmemoBundlesForJid(String bareJid) async {
+    bundles.removeWhere((key, _) => key.startsWith('$bareJid:'));
+  }
+
+  @override
+  Future<void> removeOmemoDeviceList(String bareJid) async {
+    deviceLists.remove(bareJid);
+  }
+
+  @override
   Future<void> storeOmemoRatchet(
     String bareJid,
     int deviceId,
@@ -359,6 +369,66 @@ void main() {
       // storage (see the class doc on OmemoBackend): the legacy device id
       // persisted here should not collide with any `omemo2dl:`-style key.
       expect(aliceStorage.deviceLists.containsKey(aliceJid), isTrue);
+    },
+  );
+
+  test(
+    'OmemoBackend.resetDeviceState: completely wipes a contact\'s '
+    'ratchets, cached bundle, device list, and trust decision, so the '
+    'next interaction starts entirely from scratch',
+    () async {
+      // Mirrors the identical feature/regression test in
+      // test/omemo2_backend_test.dart for the "I need a tool to
+      // completely reset the OMEMO state for a particular contact"
+      // request.
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+      await bobBackend.publishIdentity();
+
+      await aliceBackend.encryptForSend(bobJid, 'hello from alice');
+      final deviceIds = await aliceBackend.knownDeviceIdsFor(bobJid);
+      expect(deviceIds, isNotEmpty);
+      final bobDeviceId = deviceIds.first;
+      await aliceBackend.setTrust(
+        bobJid,
+        '$bobDeviceId',
+        TrustState.verified,
+      );
+      expect(
+        await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
+        TrustState.verified,
+      );
+      expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isTrue);
+
+      await aliceBackend.resetDeviceState(bobJid);
+
+      expect(
+        aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'),
+        isFalse,
+      );
+      expect(aliceStorage.deviceLists[bobJid], isEmpty);
+      expect(
+        await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
+        TrustState.tofu,
+      );
+
+      // The contact can still be messaged entirely fresh afterwards.
+      await expectLater(
+        aliceBackend.encryptForSend(bobJid, 'hello again after a full reset'),
+        completes,
+      );
     },
   );
 

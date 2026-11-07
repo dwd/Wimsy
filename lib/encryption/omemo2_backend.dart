@@ -613,6 +613,32 @@ class Omemo2Backend implements EncryptionBackend {
     return true;
   }
 
+  /// Completely resets all locally-held OMEMO2 state for [bareJid]: every
+  /// Double Ratchet session, cached key bundle, trust/enablement decision,
+  /// and the cached device list itself. Unlike [refreshDevices] (which
+  /// only re-fetches the device list/bundles while carefully *preserving*
+  /// existing sessions and trust), this is for when a contact's OMEMO
+  /// state is permanently stuck/corrupted (e.g. the confusing "Found N
+  /// known device(s)... but none are both trusted and enabled" send
+  /// failure persists no matter what), and the user wants a clean slate:
+  /// after this, the very next message to/from [bareJid] starts entirely
+  /// from scratch, as if we had never spoken to them before -- fresh
+  /// device discovery, fresh X3DH sessions, and fresh (blind-)trust
+  /// decisions.
+  ///
+  /// [OmemoManager.removeAllRatchets] already handles clearing the
+  /// in-memory and persisted ratchets, BTBV trust/enablement decisions,
+  /// and device list (including the "already fetched this process"
+  /// flag, so the next heartbeat/send does a genuinely fresh live PEP
+  /// fetch rather than reusing a stale in-memory list). This additionally
+  /// wipes the cached key bundles and the generic [trustStore] decisions
+  /// that [removeAllRatchets] doesn't know about.
+  Future<void> resetDeviceState(String bareJid) async {
+    await _omemoManager.removeAllRatchets(bareJid);
+    await storage.removeOmemo2BundlesForJid(bareJid);
+    await trustStore.forgetJid(bareJid);
+  }
+
   /// Returns every known OMEMO2 device of [bareJid] (that a session has
   /// been established with at least once) together with its fingerprint
   /// (when the device's bundle is cached) and current [TrustState], for

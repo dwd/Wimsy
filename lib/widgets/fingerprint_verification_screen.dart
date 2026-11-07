@@ -47,6 +47,7 @@ class _FingerprintVerificationScreenState
   String? _error;
   bool _refreshingOmemo2Devices = false;
   bool _refreshingLegacyOmemoDevices = false;
+  bool _resettingOmemoState = false;
 
   @override
   void initState() {
@@ -201,6 +202,73 @@ class _FingerprintVerificationScreenState
       }
     }
     await _load();
+  }
+
+  /// Completely resets all locally-held OMEMO2 *and* legacy-OMEMO state
+  /// for this contact (every session, cached bundle, trust decision, and
+  /// device list), after the user confirms via [_confirmResetOmemoState].
+  /// For when a contact's OMEMO state is permanently stuck/corrupted
+  /// (e.g. a confusing "no device is both trusted and enabled" send
+  /// failure that persists no matter what) and
+  /// [_refreshOmemo2Devices]/[_refreshLegacyOmemoDevices] alone don't fix
+  /// it -- this is the "nuclear option": the next message to/from this
+  /// contact starts entirely from scratch, as if we'd never spoken to
+  /// them before.
+  Future<void> _resetOmemoState() async {
+    final confirmed = await _confirmResetOmemoState();
+    if (!confirmed) {
+      return;
+    }
+    setState(() => _resettingOmemoState = true);
+    try {
+      await widget.service.resetOmemo2DeviceStateFor(widget.peerBareJid);
+      await widget.service.resetLegacyOmemoDeviceStateFor(
+        widget.peerBareJid,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'OMEMO state reset for this contact. Future messages will '
+            'start a fresh session.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _resettingOmemoState = false);
+      }
+    }
+    await _load();
+  }
+
+  Future<bool> _confirmResetOmemoState() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset OMEMO state?'),
+        content: Text(
+          'This permanently forgets every known OMEMO2 and legacy-OMEMO '
+          'device, session, cached key, and trust decision for '
+          '${widget.peerBareJid}. Use this only if encryption to this '
+          'contact is permanently stuck. The next message exchanged will '
+          'start entirely from scratch.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   /// Builds the `xmpp:`-URI QR-code payload real OMEMO clients (e.g.
@@ -390,6 +458,20 @@ class _FingerprintVerificationScreenState
     return Scaffold(
       appBar: AppBar(
         title: Text('Verify ${widget.peerBareJid}'),
+        actions: [
+          IconButton(
+            key: const Key('reset-omemo-state'),
+            tooltip: 'Reset OMEMO state for this contact',
+            icon: _resettingOmemoState
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.delete_forever),
+            onPressed: _resettingOmemoState ? null : _resetOmemoState,
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _load,

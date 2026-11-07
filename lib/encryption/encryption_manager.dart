@@ -170,6 +170,21 @@ class EncryptionManager {
     return backend.refreshDevices(bareJid);
   }
 
+  /// Completely resets all locally-held OMEMO2 state for [bareJid]. See
+  /// `Omemo2Backend.resetDeviceState` for details on when to reach for
+  /// this over [refreshOmemo2Devices].
+  Future<void> resetOmemo2DeviceState(String bareJid) async {
+    final backend = await _omemo2Backend();
+    await backend.resetDeviceState(bareJid);
+  }
+
+  /// Completely resets all locally-held legacy-OMEMO state for [bareJid].
+  /// See `OmemoBackend.resetDeviceState` for details.
+  Future<void> resetLegacyOmemoDeviceState(String bareJid) async {
+    final backend = await _legacyOmemoBackend();
+    await backend.resetDeviceState(bareJid);
+  }
+
   /// Whether encryption is turned on for [bareJid] (i.e. its selected
   /// protocol is not [EncryptionProtocol.none]).
   bool isEncryptionEnabled(String bareJid) {

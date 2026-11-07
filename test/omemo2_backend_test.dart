@@ -362,6 +362,75 @@ void main() {
   );
 
   test(
+    'Omemo2Backend.resetDeviceState: completely wipes a contact\'s '
+    'ratchets, cached bundle, device list, and trust decision, so the '
+    'next interaction starts entirely from scratch',
+    () async {
+      // Regression/feature test for the "I need a tool to completely
+      // reset the OMEMO state for a particular contact" request: unlike
+      // refreshDevices (which carefully preserves existing sessions and
+      // trust), resetDeviceState must forget everything so a contact
+      // permanently stuck in a broken trust/device-list state can start
+      // clean.
+      final network = FakeOmemo2Network();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      final bobBackend = await Omemo2Backend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemo2Pep(network, bobJid),
+      );
+
+      // Bob publishes his device/bundle, Alice discovers and verifies it.
+      await bobBackend.publishIdentity();
+      await aliceBackend.ensureDevicesKnown(bobJid);
+      final beforeReset = await aliceBackend.deviceFingerprintsFor(bobJid);
+      expect(beforeReset, hasLength(1));
+      final bobDeviceId = beforeReset.single.deviceId;
+      await aliceBackend.setTrust(
+        bobJid,
+        '$bobDeviceId',
+        TrustState.verified,
+      );
+      expect(
+        await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
+        TrustState.verified,
+      );
+      expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isTrue);
+
+      await aliceBackend.resetDeviceState(bobJid);
+
+      // Every trace of Bob must be gone: no cached bundle, no cached
+      // (non-empty) device list, and trust reset back to the default
+      // (unseen pair -> TOFU) rather than remaining "verified".
+      expect(
+        aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'),
+        isFalse,
+      );
+      expect(aliceStorage.deviceLists[bobJid], isEmpty);
+      expect(
+        await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
+        TrustState.tofu,
+      );
+
+      // But the contact can still be discovered and messaged entirely
+      // fresh afterwards (a full reset must not permanently break
+      // encryption to that contact).
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello again after a full reset',
+      );
+      expect(payload.element.getChild('header'), isNotNull);
+    },
+  );
+
+  test(
     'Omemo2Backend: bundle fetch always consults PEP live instead of '
     'getting stuck on a stale/broken cached bundle forever',
     () async {

@@ -82,6 +82,16 @@ class TrustStore {
     };
   }
 
+  /// Forgets every trust decision recorded for [bareJid], both in the
+  /// in-memory cache and in persistent storage (e.g. as part of a "reset
+  /// OMEMO state for this contact" action -- see
+  /// `Omemo2Backend.resetDeviceState`/`OmemoBackend.resetDeviceState`).
+  Future<void> forgetJid(String bareJid) async {
+    final prefix = '$bareJid:';
+    _cache.removeWhere((key, _) => key.startsWith(prefix));
+    await storage.removeTrustStatesForJid(bareJid);
+  }
+
   TrustState? _parse(String name) {
     for (final state in TrustState.values) {
       if (state.name == name) {
