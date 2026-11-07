@@ -45,6 +45,8 @@ class _FingerprintVerificationScreenState
   List<OxKeyFingerprint> _peerOxKeys = const [];
   bool _loading = true;
   String? _error;
+  bool _refreshingOmemo2Devices = false;
+  bool _refreshingLegacyOmemoDevices = false;
 
   @override
   void initState() {
@@ -139,6 +141,65 @@ class _FingerprintVerificationScreenState
       device.deviceId,
       TrustState.revoked,
     );
+    await _load();
+  }
+
+  /// Wipes the locally cached OMEMO2 device list/bundles for the contact
+  /// and re-fetches both live from PEP, for when the device list shown
+  /// here appears stale/out of sync (e.g. a device that was removed
+  /// elsewhere still shows up, or a transient PEP fetch issue silently
+  /// dropped a device -- see `Omemo2Backend.refreshDevices`).
+  Future<void> _refreshOmemo2Devices() async {
+    setState(() => _refreshingOmemo2Devices = true);
+    try {
+      final refreshed = await widget.service.refreshOmemo2DevicesFor(
+        widget.peerBareJid,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!refreshed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Failed to refresh OMEMO2 devices from PEP (are you online?).',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _refreshingOmemo2Devices = false);
+      }
+    }
+    await _load();
+  }
+
+  /// Same as [_refreshOmemo2Devices], but for legacy-OMEMO devices.
+  Future<void> _refreshLegacyOmemoDevices() async {
+    setState(() => _refreshingLegacyOmemoDevices = true);
+    try {
+      final refreshed = await widget.service.refreshLegacyOmemoDevicesFor(
+        widget.peerBareJid,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!refreshed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Failed to refresh legacy-OMEMO devices from PEP (are you '
+              'online?).',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _refreshingLegacyOmemoDevices = false);
+      }
+    }
     await _load();
   }
 
@@ -406,9 +467,31 @@ class _FingerprintVerificationScreenState
                     ],
                   ),
                   const Divider(height: 32),
-                  Text(
-                    "${widget.peerBareJid}'s devices",
-                    style: Theme.of(context).textTheme.titleMedium,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          "${widget.peerBareJid}'s devices",
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      IconButton(
+                        key: const Key('refresh-omemo2-devices'),
+                        tooltip: 'Refresh devices from PEP',
+                        icon: _refreshingOmemo2Devices
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh),
+                        onPressed: _refreshingOmemo2Devices
+                            ? null
+                            : _refreshOmemo2Devices,
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   if (_peerDevices.isEmpty)
@@ -515,9 +598,31 @@ class _FingerprintVerificationScreenState
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    "${widget.peerBareJid}'s legacy OMEMO devices",
-                    style: Theme.of(context).textTheme.titleMedium,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          "${widget.peerBareJid}'s legacy OMEMO devices",
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      IconButton(
+                        key: const Key('refresh-legacy-omemo-devices'),
+                        tooltip: 'Refresh devices from PEP',
+                        icon: _refreshingLegacyOmemoDevices
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh),
+                        onPressed: _refreshingLegacyOmemoDevices
+                            ? null
+                            : _refreshLegacyOmemoDevices,
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   if (_peerLegacyDevices.isEmpty)

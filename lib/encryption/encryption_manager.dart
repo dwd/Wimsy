@@ -152,6 +152,24 @@ class EncryptionManager {
     await backend.ensureDevicesKnown(bareJid);
   }
 
+  /// Wipes the locally cached OMEMO2 device list/bundles for [bareJid] and
+  /// re-fetches both live from PEP. See `Omemo2Backend.refreshDevices` for
+  /// why this is a separate operation from [ensureOmemo2DevicesKnown].
+  /// Returns `false` if the live PEP fetch failed (e.g. offline).
+  Future<bool> refreshOmemo2Devices(String bareJid) async {
+    final backend = await _omemo2Backend();
+    return backend.refreshDevices(bareJid);
+  }
+
+  /// Wipes the locally cached legacy-OMEMO device list/bundles for
+  /// [bareJid] and re-fetches both live from PEP. See
+  /// `OmemoBackend.refreshDevices` for details. Returns `false` if the
+  /// live PEP fetch failed (e.g. offline).
+  Future<bool> refreshLegacyOmemoDevices(String bareJid) async {
+    final backend = await _legacyOmemoBackend();
+    return backend.refreshDevices(bareJid);
+  }
+
   /// Whether encryption is turned on for [bareJid] (i.e. its selected
   /// protocol is not [EncryptionProtocol.none]).
   bool isEncryptionEnabled(String bareJid) {

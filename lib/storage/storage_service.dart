@@ -1465,6 +1465,17 @@ class StorageService {
     return null;
   }
 
+  /// Wipes the cached OMEMO2 device list for [bareJid] (e.g. before a
+  /// user-triggered "refresh devices from PEP" re-fetch; see
+  /// `Omemo2Backend.refreshDevices`).
+  Future<void> removeOmemo2DeviceList(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.delete('$_omemo2DeviceListPrefix$bareJid');
+  }
+
   /// Caches a peer's OMEMO2 key bundle so it does not need to be re-fetched
   /// via PEP on every session establishment attempt.
   Future<void> storeOmemo2Bundle(
@@ -1487,6 +1498,18 @@ class StorageService {
     }
     final data = box.get('$_omemo2BundlePrefix$bareJid:$deviceId');
     return data is Map ? Map<String, dynamic>.from(data) : null;
+  }
+
+  /// Wipes every cached OMEMO2 key bundle belonging to [bareJid] (e.g.
+  /// before a user-triggered "refresh devices from PEP" re-fetch; see
+  /// `Omemo2Backend.refreshDevices`).
+  Future<void> removeOmemo2BundlesForJid(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    final keys = _keysWithPrefix(box, '$_omemo2BundlePrefix$bareJid:');
+    await box.deleteAll(keys);
   }
 
   /// Persists a single OMEMO2 Double Ratchet session (see
@@ -1654,6 +1677,17 @@ class StorageService {
     return null;
   }
 
+  /// Wipes the cached legacy-OMEMO device list for [bareJid] (e.g. before
+  /// a user-triggered "refresh devices from PEP" re-fetch; see
+  /// `OmemoBackend.refreshDevices`).
+  Future<void> removeOmemoDeviceList(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.delete('$_omemoDeviceListPrefix$bareJid');
+  }
+
   /// Caches a peer's legacy-OMEMO key bundle so it does not need to be
   /// re-fetched via PEP on every session establishment attempt.
   Future<void> storeOmemoBundle(
@@ -1676,6 +1710,18 @@ class StorageService {
     }
     final data = box.get('$_omemoBundlePrefix$bareJid:$deviceId');
     return data is Map ? Map<String, dynamic>.from(data) : null;
+  }
+
+  /// Wipes every cached legacy-OMEMO key bundle belonging to [bareJid]
+  /// (e.g. before a user-triggered "refresh devices from PEP" re-fetch;
+  /// see `OmemoBackend.refreshDevices`).
+  Future<void> removeOmemoBundlesForJid(String bareJid) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    final keys = _keysWithPrefix(box, '$_omemoBundlePrefix$bareJid:');
+    await box.deleteAll(keys);
   }
 
   /// Persists a single legacy-OMEMO Double Ratchet session.

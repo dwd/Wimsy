@@ -967,6 +967,25 @@ class OmemoBackend implements EncryptionBackend {
     }
   }
 
+  /// Wipes the locally cached legacy-OMEMO device list and key bundles for
+  /// [bareJid] and re-fetches both live from PEP. Mirrors
+  /// `Omemo2Backend.refreshDevices` -- see its doc comment for why this
+  /// forces a fresh [OmemoManager.onDeviceListUpdate] instead of merging
+  /// with the cache the way [ensureDevicesKnown] does.
+  ///
+  /// Returns `false` (without touching the cache) if the live PEP fetch
+  /// itself fails, e.g. because we're offline.
+  Future<bool> refreshDevices(String bareJid) async {
+    final liveDeviceList = await pep.fetchLegacyDeviceList(bareJid);
+    if (liveDeviceList == null) {
+      return false;
+    }
+    await storage.removeOmemoBundlesForJid(bareJid);
+    await _omemoManager.onDeviceListUpdate(bareJid, liveDeviceList);
+    await ensureDevicesKnown(bareJid);
+    return true;
+  }
+
   /// Every known legacy-OMEMO device of [bareJid] with its fingerprint
   /// (when cached) and current [TrustState], mirroring
   /// `Omemo2Backend.deviceFingerprintsFor`.

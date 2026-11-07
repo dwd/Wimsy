@@ -542,6 +542,37 @@ class Omemo2Backend implements EncryptionBackend {
     }
   }
 
+  /// Wipes the locally cached OMEMO2 device list and key bundles for
+  /// [bareJid] and re-fetches both live from PEP, for the fingerprint
+  /// verification screen's "Refresh devices" action.
+  ///
+  /// Unlike [ensureDevicesKnown], which relies on [OmemoManager]'s own
+  /// "only ever fetch the device list once per JID per process lifetime"
+  /// behaviour (see the comment on `fetchDeviceListImpl` in [create]),
+  /// this unconditionally performs a fresh live fetch and feeds it to
+  /// [OmemoManager.onDeviceListUpdate] -- the same entry point used when a
+  /// contact pushes a device-list update via PEP -- so the in-memory
+  /// device list and its on-disk cache are both forced back in sync with
+  /// whatever the contact's PEP node currently says, rather than merging
+  /// with (and therefore potentially perpetuating) a stale/incomplete
+  /// cached list. Already-established Double Ratchet sessions are left
+  /// untouched: dropped devices simply stop being used, and genuinely new
+  /// devices get a session established via [ensureDevicesKnown]'s
+  /// heartbeat below.
+  ///
+  /// Returns `false` (without touching the cache) if the live PEP fetch
+  /// itself fails, e.g. because we're offline.
+  Future<bool> refreshDevices(String bareJid) async {
+    final liveDeviceList = await pep.fetchDeviceList(bareJid);
+    if (liveDeviceList == null) {
+      return false;
+    }
+    await storage.removeOmemo2BundlesForJid(bareJid);
+    await _omemoManager.onDeviceListUpdate(bareJid, liveDeviceList);
+    await ensureDevicesKnown(bareJid);
+    return true;
+  }
+
   /// Returns every known OMEMO2 device of [bareJid] (that a session has
   /// been established with at least once) together with its fingerprint
   /// (when the device's bundle is cached) and current [TrustState], for

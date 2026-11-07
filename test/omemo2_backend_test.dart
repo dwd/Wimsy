@@ -45,6 +45,11 @@ class FakeStorageService extends StorageService {
   List<int>? loadOmemo2DeviceList(String bareJid) => deviceLists[bareJid];
 
   @override
+  Future<void> removeOmemo2DeviceList(String bareJid) async {
+    deviceLists.remove(bareJid);
+  }
+
+  @override
   Future<void> storeOmemo2Bundle(
     String bareJid,
     int deviceId,
@@ -56,6 +61,11 @@ class FakeStorageService extends StorageService {
   @override
   Map<String, dynamic>? loadOmemo2Bundle(String bareJid, int deviceId) =>
       bundles['$bareJid:$deviceId'];
+
+  @override
+  Future<void> removeOmemo2BundlesForJid(String bareJid) async {
+    bundles.removeWhere((key, _) => key.startsWith('$bareJid:'));
+  }
 
   @override
   Future<void> storeOmemo2Ratchet(
@@ -201,6 +211,85 @@ void main() {
 
       final fingerprints = await aliceBackend.deviceFingerprintsFor(bobJid);
       expect(fingerprints, isNotEmpty);
+    },
+  );
+
+  test(
+    'Omemo2Backend.refreshDevices: wipes the cached device list/bundles '
+    "for a contact and picks up a device removed from the contact's live "
+    'PEP device list',
+    () async {
+      final network = FakeOmemo2Network();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      final bobBackend = await Omemo2Backend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemo2Pep(network, bobJid),
+      );
+
+      // Bob publishes his device/bundle, and Alice discovers it.
+      await bobBackend.publishIdentity();
+      await aliceBackend.ensureDevicesKnown(bobJid);
+      final beforeRemoval = await aliceBackend.deviceFingerprintsFor(bobJid);
+      expect(beforeRemoval, hasLength(1));
+      final bobDeviceId = beforeRemoval.single.deviceId;
+      expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isTrue);
+
+      // Bob then removes his device from PEP entirely (e.g. re-installed
+      // the app). Without a refresh, OmemoManager would keep using its
+      // in-memory device list from the one-time fetch above forever.
+      network.deviceLists[bobJid] = <int>[];
+
+      final refreshed = await aliceBackend.refreshDevices(bobJid);
+      expect(refreshed, isTrue);
+
+      // The stale bundle cache must have been wiped...
+      expect(
+        aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'),
+        isFalse,
+      );
+      // ...and the cached device list must now reflect Bob's live (now
+      // empty) device list instead of the stale one from before the
+      // refresh. (Note: [deviceFingerprintsFor] is driven by the trust
+      // store's own record of devices it has ever seen, not by the
+      // device list cache, so a previously-trusted device intentionally
+      // keeps showing up there even after a refresh removes it from the
+      // active/live device list -- trust decisions are only cleared
+      // explicitly, e.g. via the "Untrust" button.)
+      expect(aliceStorage.deviceLists[bobJid], isEmpty);
+    },
+  );
+
+  test(
+    'Omemo2Backend.refreshDevices: returns false and leaves the cache '
+    'untouched when the live PEP fetch fails',
+    () async {
+      final network = FakeOmemo2Network();
+      final aliceStorage = FakeStorageService();
+      aliceStorage.deviceLists[bobJid] = <int>[1234];
+      aliceStorage.bundles['$bobJid:1234'] = {'cached': true};
+
+      final aliceBackend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+
+      // Bob has never published anything, so `fetchDeviceList` returns
+      // `null` (as opposed to an empty list), simulating e.g. no PEP node
+      // existing at all / being offline.
+      final refreshed = await aliceBackend.refreshDevices(bobJid);
+
+      expect(refreshed, isFalse);
+      expect(aliceStorage.deviceLists[bobJid], equals([1234]));
+      expect(aliceStorage.bundles['$bobJid:1234'], equals({'cached': true}));
     },
   );
 

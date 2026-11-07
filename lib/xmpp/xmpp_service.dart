@@ -9001,6 +9001,20 @@ class XmppService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Wipes the locally cached OMEMO2 device list/bundles for [bareJid]
+  /// and re-fetches both live from PEP (the fingerprint verification
+  /// screen's "Refresh devices" action). Returns `false` if the live PEP
+  /// fetch failed (e.g. offline), in which case nothing was touched.
+  Future<bool> refreshOmemo2DevicesFor(String bareJid) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return false;
+    }
+    final refreshed = await manager.refreshOmemo2Devices(_bareJid(bareJid));
+    notifyListeners();
+    return refreshed;
+  }
+
   /// Every known legacy-OMEMO (XEP-0384 v0.3.0,
   /// `eu.siacs.conversations.axolotl`) device (and its fingerprint/trust
   /// state) of [bareJid]. This is a *different* identity key from OMEMO2's
@@ -9052,6 +9066,23 @@ class XmppService extends ChangeNotifier {
       state,
     );
     notifyListeners();
+  }
+
+  /// Wipes the locally cached legacy-OMEMO device list/bundles for
+  /// [bareJid] and re-fetches both live from PEP (the fingerprint
+  /// verification screen's "Refresh devices" action). Returns `false` if
+  /// the live PEP fetch failed (e.g. offline), in which case nothing was
+  /// touched.
+  Future<bool> refreshLegacyOmemoDevicesFor(String bareJid) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return false;
+    }
+    final refreshed = await manager.refreshLegacyOmemoDevices(
+      _bareJid(bareJid),
+    );
+    notifyListeners();
+    return refreshed;
   }
 
   /// Every known OX key fingerprint (and its trust state) of [bareJid].
