@@ -214,18 +214,34 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
     });
   }
 
+  /// Returns `true` if [a] and [b] contain the same values in the same
+  /// order, i.e. the field's current value is unchanged from its original.
+  bool _sameValues(List<String> a, List<String> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   Future<void> _saveEditing() async {
     setState(() {
       _saving = true;
     });
+    // XEP-0004 §3.5 ("Partial Form Submission") only requires fields the
+    // submitter actually changed to be included; sending every field back
+    // unconditionally (even ones left at their original value) is not
+    // required by the spec and some servers reject such "full" submissions
+    // for fields they don't expect a client to set. So only the fields
+    // whose values the user actually edited are included here.
     final editedFields = [
       for (final entry in _editedFieldsByVar.entries)
-        PepNodeConfigField(
-          varName: entry.key,
-          label: entry.value.label,
-          type: entry.value.type,
-          options: entry.value.options,
-          values: _isDropdownField(entry.value)
+        if (!_sameValues(
+          _isDropdownField(entry.value)
               ? [
                   if (_listSingleSelections[entry.key] != null)
                     _listSingleSelections[entry.key]!,
@@ -236,8 +252,33 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
                   .map((v) => v.trim())
                   .where((v) => v.isNotEmpty)
                   .toList(),
-        ),
+          entry.value.values,
+        ))
+          PepNodeConfigField(
+            varName: entry.key,
+            label: entry.value.label,
+            type: entry.value.type,
+            options: entry.value.options,
+            values: _isDropdownField(entry.value)
+                ? [
+                    if (_listSingleSelections[entry.key] != null)
+                      _listSingleSelections[entry.key]!,
+                  ]
+                : _controllers[entry.key]!
+                    .text
+                    .split(',')
+                    .map((v) => v.trim())
+                    .where((v) => v.isNotEmpty)
+                    .toList(),
+          ),
     ];
+    if (editedFields.isEmpty) {
+      setState(() {
+        _saving = false;
+        _editing = false;
+      });
+      return;
+    }
     final error = await widget.service.submitPepNodeConfig(
       widget.node,
       _formType,
