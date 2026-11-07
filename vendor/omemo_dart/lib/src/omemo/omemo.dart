@@ -1043,6 +1043,19 @@ class OmemoManager {
     return fingerprints;
   }
 
+  /// Returns the device identifiers of [jid] that are actually tracked in
+  /// this [OmemoManager]'s internal device list, i.e. the list that
+  /// [_onOutgoingStanzaImpl] iterates over when deciding which devices to
+  /// encrypt to. This can differ from whatever a [TrustManager] implementation
+  /// separately remembers (e.g. devices it was told about via [TrustManager.onNewSession]
+  /// in the past), for example right after a device list fetch that, for
+  /// whatever reason, did not include a device that was known before.
+  /// Returns null if no device list is cached for [jid] at all.
+  List<int>? getKnownDevices(String jid) {
+    final devices = _deviceList[jid];
+    return devices == null ? null : List<int>.unmodifiable(devices);
+  }
+
   /// Returns the device used for encryption and decryption.
   Future<OmemoDevice> getDevice() => _deviceLock.synchronized(() => _device);
 

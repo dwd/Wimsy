@@ -171,8 +171,27 @@ class OmemoBackend implements EncryptionBackend {
         // list -- until the app is restarted. Fall back to the cached list
         // only if the live fetch itself fails (e.g. we're offline or the
         // contact has no PEP node at all).
-        return await pep.fetchLegacyDeviceList(jid) ??
-            storage.loadOmemoDeviceList(jid);
+        final liveDeviceList = await pep.fetchLegacyDeviceList(jid);
+        if (liveDeviceList == null) {
+          return storage.loadOmemoDeviceList(jid);
+        }
+        // Union the live result with whatever we had cached, instead of
+        // trusting it wholesale: a transient/incomplete PEP response (e.g.
+        // a device-list `<items/>` result missing an entry due to a
+        // server-side pubsub hiccup) would otherwise silently drop an
+        // already-known, already-trusted device from `OmemoManager`'s
+        // internal device list for the rest of the process's lifetime --
+        // `onOutgoingStanza` would then skip that device during encryption
+        // without recording any error, surfacing as a confusing "no device
+        // is both trusted and enabled" failure even though the trust store
+        // still (correctly) considers the device trusted. A stale entry
+        // lingering here is harmless (its bundle/ratchet were already
+        // established, so it just keeps receiving messages); a genuinely
+        // removed device is still cleaned up via `onDeviceListUpdate`/
+        // `removeTrustDecisionsForJid` when the contact actively publishes
+        // an updated (and this time complete) list.
+        final cachedDeviceList = storage.loadOmemoDeviceList(jid) ?? const [];
+        return {...liveDeviceList, ...cachedDeviceList}.toList();
       },
       (jid, id) async {
         // Like fetchDeviceListImpl above, always try a live PEP fetch
@@ -662,12 +681,45 @@ class OmemoBackend implements EncryptionBackend {
           'omemo_dart/OmemoManager logs above for the underlying cause)';
     }
 
+    // `knownDeviceIds` comes from our own trust store, which can know about
+    // a device that `omemo_dart`'s internal `OmemoManager._deviceList` --
+    // the list it actually iterates over when picking which devices to
+    // encrypt to -- currently does not (e.g. a live device-list fetch that
+    // raced with/omitted a device that was known from an earlier session).
+    // When that happens, the device is silently skipped during encryption
+    // without ever reaching the trust/enabled check below, so reporting
+    // trust/enabled state for it is misleading: the device looks "trusted
+    // and enabled" yet nothing was ever encrypted for it. Surface that
+    // distinction explicitly instead of blaming BTBV for every case.
+    final activeDeviceIds = _omemoManager.getKnownDevices(toBareJid);
+    final missingFromActiveList = activeDeviceIds == null
+        ? knownDeviceIds
+        : knownDeviceIds
+              .where((id) => !activeDeviceIds.contains(id))
+              .toList();
+
     final perDevice = <String>[];
     for (final deviceId in knownDeviceIds) {
+      if (missingFromActiveList.contains(deviceId)) {
+        perDevice.add('$deviceId (not in current device list)');
+        continue;
+      }
       final trusted = await _trustManager.isTrusted(toBareJid, deviceId);
       final enabled = await _trustManager.isEnabled(toBareJid, deviceId);
       perDevice.add('$deviceId (trusted=$trusted, enabled=$enabled)');
     }
+
+    if (missingFromActiveList.isNotEmpty &&
+        missingFromActiveList.length == knownDeviceIds.length) {
+      return 'Found ${knownDeviceIds.length} known legacy OMEMO device(s) for '
+          '$toBareJid in our trust store, but none of them are in the '
+          'current device list fetched from $toBareJid\'s PEP node: '
+          '${perDevice.join(', ')}. This typically means the device-list '
+          'fetch returned an incomplete/stale list (e.g. a transient PEP '
+          'issue); retry sending, or restart the app to force a fresh '
+          'fetch.';
+    }
+
     return 'Found ${knownDeviceIds.length} known legacy OMEMO device(s) for '
         '$toBareJid, but none are both trusted and enabled: '
         '${perDevice.join(', ')}. This typically happens when another '

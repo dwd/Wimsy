@@ -117,6 +117,31 @@ class _FingerprintVerificationScreenState
     await _load();
   }
 
+  /// Revokes trust for [device] (OMEMO2), e.g. because the user no longer
+  /// recognises it or it was previously verified in error. Mirrors
+  /// `Omemo2Backend.setTrust`'s handling of [TrustState.revoked], which
+  /// both untrusts *and* disables the device so it's no longer used for
+  /// encryption -- there was previously no way to do this from this
+  /// screen once a device had been trusted/verified.
+  Future<void> _revoke(Omemo2DeviceFingerprint device) async {
+    await widget.service.setOmemo2DeviceTrust(
+      widget.peerBareJid,
+      device.deviceId,
+      TrustState.revoked,
+    );
+    await _load();
+  }
+
+  /// Same as [_revoke], but for a legacy-OMEMO device.
+  Future<void> _revokeLegacy(Omemo2DeviceFingerprint device) async {
+    await widget.service.setLegacyOmemoDeviceTrust(
+      widget.peerBareJid,
+      device.deviceId,
+      TrustState.revoked,
+    );
+    await _load();
+  }
+
   /// Builds the `xmpp:`-URI QR-code payload real OMEMO clients (e.g.
   /// Conversations) expect for fingerprint verification by scanning, per
   /// the convention documented at
@@ -140,6 +165,16 @@ class _FingerprintVerificationScreenState
       widget.peerBareJid,
       key.fingerprint,
       TrustState.verified,
+    );
+    await _load();
+  }
+
+  /// Same as [_revoke], but for an OX key.
+  Future<void> _revokeOxKey(OxKeyFingerprint key) async {
+    await widget.service.setOxKeyTrust(
+      widget.peerBareJid,
+      key.fingerprint,
+      TrustState.revoked,
     );
     await _load();
   }
@@ -398,14 +433,24 @@ class _FingerprintVerificationScreenState
                           style: const TextStyle(fontFamily: 'monospace'),
                         ),
                         isThreeLine: device.fingerprint != null,
-                        trailing: device.trust == TrustState.verified
-                            ? null
-                            : TextButton(
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (device.trust != TrustState.verified)
+                              TextButton(
                                 onPressed: device.fingerprint == null
                                     ? null
                                     : () => _verify(device),
                                 child: const Text('Mark verified'),
                               ),
+                            if (device.trust != TrustState.untrusted &&
+                                device.trust != TrustState.revoked)
+                              TextButton(
+                                onPressed: () => _revoke(device),
+                                child: const Text('Untrust'),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   const Divider(height: 32),
@@ -499,14 +544,24 @@ class _FingerprintVerificationScreenState
                           style: const TextStyle(fontFamily: 'monospace'),
                         ),
                         isThreeLine: device.fingerprint != null,
-                        trailing: device.trust == TrustState.verified
-                            ? null
-                            : TextButton(
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (device.trust != TrustState.verified)
+                              TextButton(
                                 onPressed: device.fingerprint == null
                                     ? null
                                     : () => _verifyLegacy(device),
                                 child: const Text('Mark verified'),
                               ),
+                            if (device.trust != TrustState.untrusted &&
+                                device.trust != TrustState.revoked)
+                              TextButton(
+                                onPressed: () => _revokeLegacy(device),
+                                child: const Text('Untrust'),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   const Divider(height: 32),
@@ -548,12 +603,22 @@ class _FingerprintVerificationScreenState
                           style: const TextStyle(fontFamily: 'monospace'),
                         ),
                         isThreeLine: true,
-                        trailing: key.trust == TrustState.verified
-                            ? null
-                            : TextButton(
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (key.trust != TrustState.verified)
+                              TextButton(
                                 onPressed: () => _verifyOxKey(key),
                                 child: const Text('Mark verified'),
                               ),
+                            if (key.trust != TrustState.untrusted &&
+                                key.trust != TrustState.revoked)
+                              TextButton(
+                                onPressed: () => _revokeOxKey(key),
+                                child: const Text('Untrust'),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                 ],

@@ -150,7 +150,18 @@ class Omemo2Backend implements EncryptionBackend {
         // short, `OmemoManager` only calls this once per JID per process
         // lifetime, so preferring the cache would mean a newly-added
         // device of a contact is never discovered until the app restarts.
-        return await pep.fetchDeviceList(jid) ?? storage.loadOmemo2DeviceList(jid);
+        final liveDeviceList = await pep.fetchDeviceList(jid);
+        if (liveDeviceList == null) {
+          return storage.loadOmemo2DeviceList(jid);
+        }
+        // Union with the cached list rather than trusting the live result
+        // wholesale; see the identical comment in `OmemoBackend.create` for
+        // why -- a transient/incomplete PEP response must not silently
+        // drop an already-known, already-trusted device for the rest of
+        // the process's lifetime.
+        final cachedDeviceList =
+            storage.loadOmemo2DeviceList(jid) ?? const [];
+        return {...liveDeviceList, ...cachedDeviceList}.toList();
       },
       (jid, id) async {
         // Like fetchDeviceListImpl above, always try a live PEP fetch
