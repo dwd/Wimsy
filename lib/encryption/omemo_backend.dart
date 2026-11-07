@@ -967,11 +967,14 @@ class OmemoBackend implements EncryptionBackend {
     }
   }
 
-  /// Wipes the locally cached legacy-OMEMO device list and key bundles for
-  /// [bareJid] and re-fetches both live from PEP. Mirrors
-  /// `Omemo2Backend.refreshDevices` -- see its doc comment for why this
-  /// forces a fresh [OmemoManager.onDeviceListUpdate] instead of merging
-  /// with the cache the way [ensureDevicesKnown] does.
+  /// Wipes the locally cached legacy-OMEMO key bundles for [bareJid] and
+  /// re-fetches both the device list and bundles live from PEP. Mirrors
+  /// `Omemo2Backend.refreshDevices` -- see its doc comment for why the
+  /// live device-list fetch is *unioned* with whatever is already known
+  /// (rather than used wholesale) before being pushed into
+  /// [OmemoManager.onDeviceListUpdate]: a single transient/incomplete PEP
+  /// response must not be allowed to permanently drop an already-trusted
+  /// device from the active device list for the rest of the process.
   ///
   /// Returns `false` (without touching the cache) if the live PEP fetch
   /// itself fails, e.g. because we're offline.
@@ -980,8 +983,13 @@ class OmemoBackend implements EncryptionBackend {
     if (liveDeviceList == null) {
       return false;
     }
+    final knownDeviceList =
+        _omemoManager.getKnownDevices(bareJid) ??
+        storage.loadOmemoDeviceList(bareJid) ??
+        const <int>[];
+    final mergedDeviceList = {...liveDeviceList, ...knownDeviceList}.toList();
     await storage.removeOmemoBundlesForJid(bareJid);
-    await _omemoManager.onDeviceListUpdate(bareJid, liveDeviceList);
+    await _omemoManager.onDeviceListUpdate(bareJid, mergedDeviceList);
     await ensureDevicesKnown(bareJid);
     return true;
   }

@@ -215,9 +215,8 @@ void main() {
   );
 
   test(
-    'Omemo2Backend.refreshDevices: wipes the cached device list/bundles '
-    "for a contact and picks up a device removed from the contact's live "
-    'PEP device list',
+    'Omemo2Backend.refreshDevices: wipes the cached bundles for a contact '
+    'and picks up a brand-new device added to the live PEP device list',
     () async {
       final network = FakeOmemo2Network();
       final aliceStorage = FakeStorageService();
@@ -237,33 +236,91 @@ void main() {
       // Bob publishes his device/bundle, and Alice discovers it.
       await bobBackend.publishIdentity();
       await aliceBackend.ensureDevicesKnown(bobJid);
-      final beforeRemoval = await aliceBackend.deviceFingerprintsFor(bobJid);
-      expect(beforeRemoval, hasLength(1));
-      final bobDeviceId = beforeRemoval.single.deviceId;
-      expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isTrue);
+      final beforeRefresh = await aliceBackend.deviceFingerprintsFor(bobJid);
+      expect(beforeRefresh, hasLength(1));
+      final firstDeviceId = beforeRefresh.single.deviceId;
+      expect(
+        aliceStorage.bundles.containsKey('$bobJid:$firstDeviceId'),
+        isTrue,
+      );
 
-      // Bob then removes his device from PEP entirely (e.g. re-installed
-      // the app). Without a refresh, OmemoManager would keep using its
-      // in-memory device list from the one-time fetch above forever.
+      // Bob then adds a second device (e.g. logs in from another install).
+      const secondDeviceId = 99887766;
+      network.deviceLists[bobJid] = [
+        ...network.deviceLists[bobJid]!,
+        secondDeviceId,
+      ];
+      network.bundles['$bobJid:$secondDeviceId'] =
+          network.bundles['$bobJid:$firstDeviceId']!;
+
+      final refreshed = await aliceBackend.refreshDevices(bobJid);
+      expect(refreshed, isTrue);
+
+      // The new device must now be known, and the old bundle cache entry
+      // wiped (refreshDevices always wipes the bundle cache before
+      // re-fetching, even though `OmemoManager` only actually re-fetches
+      // the bundle for devices it doesn't already have a ratchet for).
+      expect(
+        aliceStorage.deviceLists[bobJid],
+        containsAll([firstDeviceId, secondDeviceId]),
+      );
+    },
+  );
+
+  test(
+    'Omemo2Backend.refreshDevices: a single incomplete/flaky live PEP '
+    'fetch must not drop an already-known device from the active device '
+    "list (regression: this previously caused a trusted, enabled device "
+    'to vanish from encryption for the rest of the process)',
+    () async {
+      final network = FakeOmemo2Network();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await Omemo2Backend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemo2Pep(network, aliceJid),
+      );
+      final bobBackend = await Omemo2Backend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemo2Pep(network, bobJid),
+      );
+
+      // Bob publishes his device/bundle, and Alice discovers it (and
+      // establishes a session/trust for it).
+      await bobBackend.publishIdentity();
+      await aliceBackend.ensureDevicesKnown(bobJid);
+      final beforeRefresh = await aliceBackend.deviceFingerprintsFor(bobJid);
+      expect(beforeRefresh, hasLength(1));
+      final bobDeviceId = beforeRefresh.single.deviceId;
+
+      // Simulate a transient/incomplete PEP response (e.g. a pubsub
+      // hiccup) that comes back empty instead of reflecting Bob's real,
+      // unchanged device list.
       network.deviceLists[bobJid] = <int>[];
 
       final refreshed = await aliceBackend.refreshDevices(bobJid);
       expect(refreshed, isTrue);
 
-      // The stale bundle cache must have been wiped...
-      expect(
-        aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'),
-        isFalse,
+      // Bob's device must still be usable for encryption afterwards --
+      // before the fix, the empty live fetch would have wholesale
+      // replaced `OmemoManager`'s active device list, permanently
+      // dropping Bob's (trusted, enabled) device and causing this to
+      // throw a "none are both trusted and enabled" StateError instead.
+      final payload = await aliceBackend.encryptForSend(
+        bobJid,
+        'hello from alice after a flaky refresh',
       );
-      // ...and the cached device list must now reflect Bob's live (now
-      // empty) device list instead of the stale one from before the
-      // refresh. (Note: [deviceFingerprintsFor] is driven by the trust
-      // store's own record of devices it has ever seen, not by the
-      // device list cache, so a previously-trusted device intentionally
-      // keeps showing up there even after a refresh removes it from the
-      // active/live device list -- trust decisions are only cleared
-      // explicitly, e.g. via the "Untrust" button.)
-      expect(aliceStorage.deviceLists[bobJid], isEmpty);
+      final keyRids = payload.element
+          .getChild('header')!
+          .getChild('keys')!
+          .children
+          .where((c) => c.name == 'key')
+          .map((c) => int.parse(c.getAttribute('rid')!.value!))
+          .toList();
+      expect(keyRids, contains(bobDeviceId));
     },
   );
 

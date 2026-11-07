@@ -542,23 +542,32 @@ class Omemo2Backend implements EncryptionBackend {
     }
   }
 
-  /// Wipes the locally cached OMEMO2 device list and key bundles for
-  /// [bareJid] and re-fetches both live from PEP, for the fingerprint
-  /// verification screen's "Refresh devices" action.
+  /// Wipes the locally cached OMEMO2 key bundles for [bareJid] and
+  /// re-fetches both the device list and bundles live from PEP, for the
+  /// fingerprint verification screen's "Refresh devices" action.
   ///
-  /// Unlike [ensureDevicesKnown], which relies on [OmemoManager]'s own
-  /// "only ever fetch the device list once per JID per process lifetime"
-  /// behaviour (see the comment on `fetchDeviceListImpl` in [create]),
-  /// this unconditionally performs a fresh live fetch and feeds it to
+  /// This does a fresh live fetch and feeds it to
   /// [OmemoManager.onDeviceListUpdate] -- the same entry point used when a
-  /// contact pushes a device-list update via PEP -- so the in-memory
-  /// device list and its on-disk cache are both forced back in sync with
-  /// whatever the contact's PEP node currently says, rather than merging
-  /// with (and therefore potentially perpetuating) a stale/incomplete
-  /// cached list. Already-established Double Ratchet sessions are left
-  /// untouched: dropped devices simply stop being used, and genuinely new
-  /// devices get a session established via [ensureDevicesKnown]'s
-  /// heartbeat below.
+  /// contact pushes a device-list update via PEP -- to pick up any
+  /// genuinely new device the normal once-per-process fetch (see
+  /// [ensureDevicesKnown]) might otherwise never discover. However, the
+  /// live result is *unioned* with whatever `OmemoManager` currently
+  /// considers known (falling back to the on-disk cache if nothing has
+  /// been fetched this process yet) rather than used wholesale: a single
+  /// transient/incomplete PEP response (e.g. a pubsub `<items/>` result
+  /// missing an entry) must not be allowed to silently and permanently
+  /// drop an already-known, already-trusted device from the active
+  /// device list for the rest of the process's lifetime -- which would
+  /// otherwise surface as a confusing "no device is both trusted and
+  /// enabled" send failure even though the dropped device genuinely is
+  /// trusted and enabled. A stale entry lingering here is harmless: a
+  /// genuine removal is still handled via the normal
+  /// [OmemoManager.onDeviceListUpdate] path when the contact actively
+  /// publishes an updated (and this time complete) list, or explicitly
+  /// via the fingerprint screen's "Untrust" button. Already-established
+  /// Double Ratchet sessions are left untouched; genuinely new devices
+  /// get a session established via [ensureDevicesKnown]'s heartbeat
+  /// below.
   ///
   /// Returns `false` (without touching the cache) if the live PEP fetch
   /// itself fails, e.g. because we're offline.
@@ -567,8 +576,13 @@ class Omemo2Backend implements EncryptionBackend {
     if (liveDeviceList == null) {
       return false;
     }
+    final knownDeviceList =
+        _omemoManager.getKnownDevices(bareJid) ??
+        storage.loadOmemo2DeviceList(bareJid) ??
+        const <int>[];
+    final mergedDeviceList = {...liveDeviceList, ...knownDeviceList}.toList();
     await storage.removeOmemo2BundlesForJid(bareJid);
-    await _omemoManager.onDeviceListUpdate(bareJid, liveDeviceList);
+    await _omemoManager.onDeviceListUpdate(bareJid, mergedDeviceList);
     await ensureDevicesKnown(bareJid);
     return true;
   }
