@@ -976,6 +976,15 @@ class OmemoBackend implements EncryptionBackend {
   /// response must not be allowed to permanently drop an already-trusted
   /// device from the active device list for the rest of the process.
   ///
+  /// Since the bundle cache was just wiped, every device's bundle is then
+  /// explicitly (re-)fetched live from PEP and re-cached -- not just the
+  /// devices [ensureDevicesKnown]'s heartbeat would fetch (which only
+  /// fetches bundles for devices lacking an existing Double Ratchet
+  /// session). Without this, a device we already have a session with
+  /// would be left with no cached bundle at all after a refresh, so its
+  /// fingerprint could no longer be displayed on the fingerprint
+  /// verification screen.
+  ///
   /// Returns `false` (without touching the cache) if the live PEP fetch
   /// itself fails, e.g. because we're offline.
   Future<bool> refreshDevices(String bareJid) async {
@@ -991,6 +1000,23 @@ class OmemoBackend implements EncryptionBackend {
     await storage.removeOmemoBundlesForJid(bareJid);
     await _omemoManager.onDeviceListUpdate(bareJid, mergedDeviceList);
     await ensureDevicesKnown(bareJid);
+    for (final deviceId in mergedDeviceList) {
+      try {
+        final fetched = await pep.fetchLegacyBundle(bareJid, deviceId);
+        if (fetched != null) {
+          await storage.storeOmemoBundle(
+            bareJid,
+            deviceId,
+            await _bundleToJson(fetched),
+          );
+        }
+      } catch (e) {
+        Log.w(
+          'OmemoBackend',
+          'Failed to refresh legacy OMEMO bundle for $bareJid:$deviceId: $e',
+        );
+      }
+    }
     return true;
   }
 

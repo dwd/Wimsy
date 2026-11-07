@@ -256,13 +256,24 @@ void main() {
       final refreshed = await aliceBackend.refreshDevices(bobJid);
       expect(refreshed, isTrue);
 
-      // The new device must now be known, and the old bundle cache entry
-      // wiped (refreshDevices always wipes the bundle cache before
-      // re-fetching, even though `OmemoManager` only actually re-fetches
-      // the bundle for devices it doesn't already have a ratchet for).
+      // The new device must now be known...
       expect(
         aliceStorage.deviceLists[bobJid],
         containsAll([firstDeviceId, secondDeviceId]),
+      );
+      // ...and both devices' bundles must be (re-)cached -- the first
+      // device's bundle is explicitly re-fetched even though
+      // `OmemoManager` itself wouldn't bother (it already has a ratchet
+      // for it), so its fingerprint keeps displaying on the fingerprint
+      // verification screen; the second (brand-new) device's bundle is
+      // fetched for the first time.
+      expect(
+        aliceStorage.bundles.containsKey('$bobJid:$firstDeviceId'),
+        isTrue,
+      );
+      expect(
+        aliceStorage.bundles.containsKey('$bobJid:$secondDeviceId'),
+        isTrue,
       );
     },
   );
