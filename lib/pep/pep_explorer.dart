@@ -146,6 +146,80 @@ List<PepNodeItem> parsePepNodeItems(IqStanza? result) {
   return result2;
 }
 
+/// Extracts the `FORM_TYPE` value from a node's configuration data form
+/// result (e.g. `http://jabber.org/protocol/pubsub#node_config`), which
+/// must be echoed back unchanged when submitting an edited configuration.
+///
+/// Returns `null` if [result] isn't a valid configuration form result, or
+/// doesn't carry a `FORM_TYPE` field.
+String? parsePepNodeConfigFormType(IqStanza? result) {
+  if (result == null || result.type != IqStanzaType.RESULT) {
+    return null;
+  }
+  final pubsub = result.getChild('pubsub');
+  if (pubsub == null ||
+      pubsub.getAttribute('xmlns')?.value != pepPubsubOwnerXmlns) {
+    return null;
+  }
+  final configure = pubsub.getChild('configure');
+  if (configure == null) {
+    return null;
+  }
+  final form = configure.children.where(
+    (c) => c.name == 'x' && c.getAttribute('xmlns')?.value == dataFormXmlns,
+  );
+  if (form.isEmpty) {
+    return null;
+  }
+  for (final field in form.first.children.where((c) => c.name == 'field')) {
+    if (field.getAttribute('var')?.value == 'FORM_TYPE') {
+      final value = field.getChild('value');
+      return value?.textValue;
+    }
+  }
+  return null;
+}
+
+/// Builds the `<x xmlns='jabber:x:data' type='submit'>` data form to submit
+/// an edited node configuration (XEP-0060 §8.2.4 "Form Submission" /
+/// XEP-0004).
+///
+/// [formType] (if non-null) is echoed back as the hidden `FORM_TYPE` field,
+/// as required for the submission to be recognized by the server.
+XmppElement buildPepNodeConfigSubmitForm(
+  String? formType,
+  List<PepNodeConfigField> fields,
+) {
+  final form = XmppElement()..name = 'x';
+  form.addAttribute(XmppAttribute('xmlns', dataFormXmlns));
+  form.addAttribute(XmppAttribute('type', 'submit'));
+  if (formType != null && formType.isNotEmpty) {
+    final formTypeField = XmppElement()..name = 'field';
+    formTypeField.addAttribute(XmppAttribute('var', 'FORM_TYPE'));
+    formTypeField.addAttribute(XmppAttribute('type', 'hidden'));
+    final value = XmppElement()
+      ..name = 'value'
+      ..textValue = formType;
+    formTypeField.addChild(value);
+    form.addChild(formTypeField);
+  }
+  for (final field in fields) {
+    final fieldEl = XmppElement()..name = 'field';
+    fieldEl.addAttribute(XmppAttribute('var', field.varName));
+    if (field.type != null) {
+      fieldEl.addAttribute(XmppAttribute('type', field.type!));
+    }
+    for (final value in field.values) {
+      final valueEl = XmppElement()
+        ..name = 'value'
+        ..textValue = value;
+      fieldEl.addChild(valueEl);
+    }
+    form.addChild(fieldEl);
+  }
+  return form;
+}
+
 /// Extracts a human-readable error condition (e.g. `item-not-found`,
 /// `forbidden`) from a failed IQ [result], or `null` if [result] is a
 /// success or carries no recognizable error element.

@@ -111,17 +111,133 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
   late Future<List<PepNodeConfigField>> _configFuture;
   late Future<List<PepNodeItem>> _itemsFuture;
 
+  /// Whether the configuration section is currently in edit mode.
+  bool _editing = false;
+
+  /// Whether a configuration submission is in flight.
+  bool _saving = false;
+
+  /// `FORM_TYPE` of the node's configuration form, needed to submit edits
+  /// back unchanged (see XEP-0060 §8.2.4).
+  String? _formType;
+
+  /// Text controllers for the currently edited fields, keyed by `var` name.
+  /// Edited values are comma-joined/split, which keeps multi-value fields
+  /// editable without needing per-type widgets.
+  final Map<String, TextEditingController> _controllers = {};
+
+  /// The original field metadata (type, label) for the fields being edited,
+  /// keyed by `var` name, so submission can preserve each field's `type`.
+  Map<String, PepNodeConfigField> _editedFieldsByVar = {};
+
   @override
   void initState() {
     super.initState();
-    _configFuture = widget.service.fetchPepNodeConfig(widget.node);
+    _loadConfig();
     _itemsFuture = widget.service.fetchPepNodeItems(widget.node);
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _loadConfig() {
+    _configFuture = widget.service.fetchPepNodeConfig(widget.node);
+    _configFuture.then((fields) {
+      if (!mounted) {
+        return;
+      }
+      _editedFieldsByVar = {for (final field in fields) field.varName: field};
+      for (final controller in _controllers.values) {
+        controller.dispose();
+      }
+      _controllers
+        ..clear()
+        ..addEntries(
+          fields.map(
+            (field) => MapEntry(
+              field.varName,
+              TextEditingController(text: field.values.join(', ')),
+            ),
+          ),
+        );
+    });
+    widget.service.fetchPepNodeConfigFormType(widget.node).then((formType) {
+      if (mounted) {
+        _formType = formType;
+      }
+    });
   }
 
   void _refresh() {
     setState(() {
-      _configFuture = widget.service.fetchPepNodeConfig(widget.node);
+      _editing = false;
+      _loadConfig();
       _itemsFuture = widget.service.fetchPepNodeItems(widget.node);
+    });
+  }
+
+  void _startEditing() {
+    setState(() {
+      _editing = true;
+    });
+  }
+
+  void _cancelEditing() {
+    setState(() {
+      _editing = false;
+      // Reset controllers back to the last fetched values.
+      for (final entry in _editedFieldsByVar.entries) {
+        _controllers[entry.key]?.text = entry.value.values.join(', ');
+      }
+    });
+  }
+
+  Future<void> _saveEditing() async {
+    setState(() {
+      _saving = true;
+    });
+    final editedFields = [
+      for (final entry in _editedFieldsByVar.entries)
+        PepNodeConfigField(
+          varName: entry.key,
+          label: entry.value.label,
+          type: entry.value.type,
+          values: _controllers[entry.key]!
+              .text
+              .split(',')
+              .map((v) => v.trim())
+              .where((v) => v.isNotEmpty)
+              .toList(),
+        ),
+    ];
+    final error = await widget.service.submitPepNodeConfig(
+      widget.node,
+      _formType,
+      editedFields,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _saving = false;
+    });
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save configuration: $error')),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Configuration saved.')),
+    );
+    setState(() {
+      _editing = false;
+      _loadConfig();
     });
   }
 
@@ -132,17 +248,45 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
       appBar: AppBar(
         title: Text(widget.node, overflow: TextOverflow.ellipsis),
         actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
-          ),
+          if (!_editing)
+            IconButton(
+              tooltip: 'Refresh',
+              icon: const Icon(Icons.refresh),
+              onPressed: _refresh,
+            ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('Configuration', style: theme.textTheme.titleMedium),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Configuration', style: theme.textTheme.titleMedium),
+              ),
+              if (_editing) ...[
+                TextButton(
+                  onPressed: _saving ? null : _cancelEditing,
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: _saving ? null : _saveEditing,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Save'),
+                ),
+              ] else
+                TextButton.icon(
+                  onPressed: _startEditing,
+                  icon: const Icon(Icons.edit),
+                  label: const Text('Edit'),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
           FutureBuilder<List<PepNodeConfigField>>(
             future: _configFuture,
@@ -171,31 +315,42 @@ class _PepNodeDetailScreenState extends State<PepNodeDetailScreen> {
                   for (final field in fields)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              field.label?.isNotEmpty == true
-                                  ? field.label!
-                                  : field.varName,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              field.values.isEmpty
-                                  ? '(empty)'
-                                  : field.values.join(', '),
-                              textAlign: TextAlign.end,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontFamily: 'monospace',
+                      child: _editing
+                          ? TextField(
+                              controller: _controllers[field.varName],
+                              decoration: InputDecoration(
+                                labelText: field.label?.isNotEmpty == true
+                                    ? field.label!
+                                    : field.varName,
+                                helperText: 'Comma-separated for multiple values',
+                                isDense: true,
                               ),
+                            )
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    field.label?.isNotEmpty == true
+                                        ? field.label!
+                                        : field.varName,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    field.values.isEmpty
+                                        ? '(empty)'
+                                        : field.values.join(', '),
+                                    textAlign: TextAlign.end,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
                     ),
                 ],
               );

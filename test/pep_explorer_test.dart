@@ -144,6 +144,64 @@ void main() {
     });
   });
 
+  group('parsePepNodeConfigFormType', () {
+    test('extracts the FORM_TYPE value', () {
+      final result = _buildConfigureResult('1', 'urn:xmpp:bookmarks:1', [
+        _field('FORM_TYPE', type: 'hidden', values: ['http://jabber.org/protocol/pubsub#node_config']),
+        _field('pubsub#access_model', values: ['whitelist']),
+      ]);
+      expect(
+        parsePepNodeConfigFormType(result),
+        'http://jabber.org/protocol/pubsub#node_config',
+      );
+    });
+
+    test('returns null when there is no FORM_TYPE field', () {
+      final result = _buildConfigureResult('1', 'urn:xmpp:bookmarks:1', [
+        _field('pubsub#access_model', values: ['whitelist']),
+      ]);
+      expect(parsePepNodeConfigFormType(result), isNull);
+    });
+
+    test('returns null for non-result or wrong namespace', () {
+      final error = IqStanza('1', IqStanzaType.ERROR);
+      expect(parsePepNodeConfigFormType(error), isNull);
+      expect(parsePepNodeConfigFormType(null), isNull);
+    });
+  });
+
+  group('buildPepNodeConfigSubmitForm', () {
+    test('builds a submit form with FORM_TYPE and fields', () {
+      final form = buildPepNodeConfigSubmitForm(
+        'http://jabber.org/protocol/pubsub#node_config',
+        const [
+          PepNodeConfigField(
+            varName: 'pubsub#access_model',
+            type: 'list-single',
+            values: ['open'],
+          ),
+        ],
+      );
+      expect(form.name, 'x');
+      expect(form.getAttribute('xmlns')?.value, dataFormXmlns);
+      expect(form.getAttribute('type')?.value, 'submit');
+      final fields = form.children.where((c) => c.name == 'field').toList();
+      expect(fields, hasLength(2));
+      expect(fields[0].getAttribute('var')?.value, 'FORM_TYPE');
+      expect(
+        fields[0].getChild('value')?.textValue,
+        'http://jabber.org/protocol/pubsub#node_config',
+      );
+      expect(fields[1].getAttribute('var')?.value, 'pubsub#access_model');
+      expect(fields[1].getChild('value')?.textValue, 'open');
+    });
+
+    test('omits FORM_TYPE field when formType is null', () {
+      final form = buildPepNodeConfigSubmitForm(null, const []);
+      expect(form.children.where((c) => c.name == 'field'), isEmpty);
+    });
+  });
+
   group('pepIqErrorCondition', () {
     test('returns null on success', () {
       final result = IqStanza('1', IqStanzaType.RESULT);

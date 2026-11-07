@@ -8303,9 +8303,22 @@ class XmppService extends ChangeNotifier {
   /// PEP explorer: fetches [node]'s configuration form via a
   /// `pubsub#owner` `<configure/>` GET IQ (XEP-0060 §8.2).
   Future<List<PepNodeConfigField>> fetchPepNodeConfig(String node) async {
+    final result = await _fetchPepNodeConfigResult(node);
+    return parsePepNodeConfig(result);
+  }
+
+  /// PEP explorer: fetches [node]'s `FORM_TYPE` (needed to submit an edited
+  /// configuration back, since it must be echoed unchanged), alongside the
+  /// node's current configuration form.
+  Future<String?> fetchPepNodeConfigFormType(String node) async {
+    final result = await _fetchPepNodeConfigResult(node);
+    return parsePepNodeConfigFormType(result);
+  }
+
+  Future<IqStanza?> _fetchPepNodeConfigResult(String node) async {
     final selfJid = _currentUserBareJid;
     if (selfJid == null || selfJid.isEmpty) {
-      return const [];
+      return null;
     }
     final id = AbstractStanza.getRandomId();
     final iqStanza = IqStanza(id, IqStanzaType.GET);
@@ -8316,8 +8329,37 @@ class XmppService extends ChangeNotifier {
     configure.addAttribute(XmppAttribute('node', node));
     pubsub.addChild(configure);
     iqStanza.addChild(pubsub);
+    return _sendIqAndAwait(iqStanza);
+  }
+
+  /// PEP explorer: submits an edited configuration for [node] via a
+  /// `pubsub#owner` `<configure/>` SET IQ carrying a `submit` data form
+  /// (XEP-0060 §8.2.4). [formType] should be the value previously obtained
+  /// from [fetchPepNodeConfigFormType], and is echoed back as required.
+  ///
+  /// Returns `null` on success, or a human-readable error condition (see
+  /// [pepIqErrorCondition]) on failure.
+  Future<String?> submitPepNodeConfig(
+    String node,
+    String? formType,
+    List<PepNodeConfigField> fields,
+  ) async {
+    final selfJid = _currentUserBareJid;
+    if (selfJid == null || selfJid.isEmpty) {
+      return 'not-connected';
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(selfJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', pepPubsubOwnerXmlns));
+    final configure = XmppElement()..name = 'configure';
+    configure.addAttribute(XmppAttribute('node', node));
+    configure.addChild(buildPepNodeConfigSubmitForm(formType, fields));
+    pubsub.addChild(configure);
+    iqStanza.addChild(pubsub);
     final result = await _sendIqAndAwait(iqStanza);
-    return parsePepNodeConfig(result);
+    return pepIqErrorCondition(result);
   }
 
   /// PEP explorer: fetches the list of items currently published to [node]
