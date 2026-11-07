@@ -34,6 +34,11 @@ migrate_working_dir/
 /build--OLD/
 /android/build/
 vendor/xmpp_stone/build/
+
+# Full upstream git clone of omemo_dart, kept alongside the flat vendored
+# copy for tracking/rebasing our local patches as a branch with real commits
+# (see vendor/omemo_dart/VENDORING.md). Not part of the Wimsy repo history.
+vendor/omemo_dart-upstream-clone/
 /coverage/
 
 # Symbolication related
