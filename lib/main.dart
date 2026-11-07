@@ -25,6 +25,7 @@ import 'av/camera_device.dart';
 import 'keepalive_settings_screen.dart';
 import 'login_screen.dart';
 import 'login_link.dart';
+import 'pep_explorer_screen.dart';
 import 'login_export.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
@@ -8967,6 +8968,14 @@ class _PresenceMenu extends StatelessWidget {
                       _ConnectionLogDialog(store: connectionLogStore),
                 );
                 break;
+              case _PresenceAction.pepExplorer:
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) =>
+                        PepExplorerScreen(service: service),
+                  ),
+                );
+                break;
               case _PresenceAction.csiAuto:
                 service.setCsiOverrideMode(CsiOverrideMode.auto);
                 await preferences.setLowBandwidthMode(false);
@@ -9016,6 +9025,10 @@ class _PresenceMenu extends StatelessWidget {
             const PopupMenuItem(
               value: _PresenceAction.connectionLog,
               child: Text('Connection log...'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.pepExplorer,
+              child: Text('PEP explorer...'),
             ),
             const PopupMenuDivider(),
             const PopupMenuItem(
@@ -9529,6 +9542,7 @@ enum _PresenceAction {
   simulateDisconnect,
   keepaliveSettings,
   connectionLog,
+  pepExplorer,
   clearCacheExit,
   exit,
 }

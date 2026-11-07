@@ -23,6 +23,7 @@ import '../encryption/encryption_backend.dart';
 import '../encryption/encryption_manager.dart';
 import '../encryption/omemo2_backend.dart' show Omemo2DeviceFingerprint;
 import '../encryption/ox_backend.dart' show OxKeyFingerprint;
+import '../pep/pep_explorer.dart';
 import '../pep/pep_manager.dart';
 import '../pep/pep_caps_manager.dart';
 import '../storage/fast_token_record.dart';
@@ -8277,6 +8278,66 @@ class XmppService extends ChangeNotifier {
     );
     iqStanza.addChild(query);
     return _sendIqAndAwait(iqStanza);
+  }
+
+  /// PEP explorer: lists all nodes on the logged-in user's PEP service by
+  /// sending a XEP-0030 disco#items query to their own bare JID (XEP-0163
+  /// §4.2 requires PEP services to answer disco#items with the set of nodes
+  /// that have items, but in practice many servers list every node the
+  /// account owns regardless of whether it currently has items).
+  Future<List<PepNodeSummary>> fetchPepNodes() async {
+    final selfJid = _currentUserBareJid;
+    if (selfJid == null || selfJid.isEmpty) {
+      return const [];
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(selfJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', discoItemsXmlns));
+    iqStanza.addChild(query);
+    final result = await _sendIqAndAwait(iqStanza);
+    return parsePepNodeSummaries(result);
+  }
+
+  /// PEP explorer: fetches [node]'s configuration form via a
+  /// `pubsub#owner` `<configure/>` GET IQ (XEP-0060 §8.2).
+  Future<List<PepNodeConfigField>> fetchPepNodeConfig(String node) async {
+    final selfJid = _currentUserBareJid;
+    if (selfJid == null || selfJid.isEmpty) {
+      return const [];
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(selfJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', pepPubsubOwnerXmlns));
+    final configure = XmppElement()..name = 'configure';
+    configure.addAttribute(XmppAttribute('node', node));
+    pubsub.addChild(configure);
+    iqStanza.addChild(pubsub);
+    final result = await _sendIqAndAwait(iqStanza);
+    return parsePepNodeConfig(result);
+  }
+
+  /// PEP explorer: fetches the list of items currently published to [node]
+  /// via a `pubsub` `<items/>` GET IQ (XEP-0060 §6.1).
+  Future<List<PepNodeItem>> fetchPepNodeItems(String node) async {
+    final selfJid = _currentUserBareJid;
+    if (selfJid == null || selfJid.isEmpty) {
+      return const [];
+    }
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(selfJid);
+    final pubsub = XmppElement()..name = 'pubsub';
+    pubsub.addAttribute(XmppAttribute('xmlns', pepPubsubXmlns));
+    final items = XmppElement()..name = 'items';
+    items.addAttribute(XmppAttribute('node', node));
+    pubsub.addChild(items);
+    iqStanza.addChild(pubsub);
+    final result = await _sendIqAndAwait(iqStanza);
+    return parsePepNodeItems(result);
   }
 
   Future<List<JidSuggestion>> _requestJidSearch(
