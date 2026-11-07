@@ -203,6 +203,16 @@ class ServiceDiscoveryNegotiator extends Negotiator {
     var query = XmppElement();
     query.name = 'query';
     query.addAttribute(XmppAttribute('xmlns', NAMESPACE_DISCO_INFO));
+    // XEP-0030 requires that if the request's <query> carries a `node`
+    // attribute (e.g. XEP-0115 entity caps verification requests), the
+    // response MUST echo back the exact same `node` attribute. Omitting it
+    // causes strict clients (e.g. Conversations) to reject the response
+    // with "Node in response did not match node in request".
+    final requestQuery = request.getChild('query');
+    final requestedNode = requestQuery?.getAttribute('node')?.value;
+    if (requestedNode != null && requestedNode.isNotEmpty) {
+      query.addAttribute(XmppAttribute('node', requestedNode));
+    }
     for (final identity in SERVICE_DISCOVERY_IDENTITIES) {
       var identityElement = XmppElement();
       identityElement.name = 'identity';

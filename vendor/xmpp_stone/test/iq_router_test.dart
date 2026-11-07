@@ -160,6 +160,29 @@ void main() {
         equals('http://jabber.org/protocol/disco#info'));
   });
 
+  test('Service discovery echoes node attribute in disco#info response',
+      () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account);
+    connection.socket = _FakeSocket();
+    ServiceDiscoveryNegotiator.getInstance(connection);
+
+    final responseFuture = _waitForIqResponse(connection, 'disco2');
+    final iq = '<iq type="get" id="disco2" from="peer@example.com/res">'
+        '<query xmlns="http://jabber.org/protocol/disco#info" '
+        'node="http://example.com/caps#abc123"/></iq>';
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final response = await responseFuture;
+    expect(response.type, IqStanzaType.RESULT);
+    final query = response.getChild('query');
+    expect(query, isNotNull);
+    expect(query!.getAttribute('xmlns')?.value,
+        equals('http://jabber.org/protocol/disco#info'));
+    expect(query.getAttribute('node')?.value,
+        equals('http://example.com/caps#abc123'));
+  });
+
   test('Roster manager responds to roster push IQ via router', () async {
     final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
     final connection = Connection(account);
