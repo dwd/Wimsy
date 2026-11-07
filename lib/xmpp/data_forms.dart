@@ -6,11 +6,24 @@
 /// `pubsub#owner` node configuration editor, and is intended to be reused
 /// for other data-form-carrying extensions (e.g. XEP-0045 MUC room
 /// configuration) rather than re-implemented ad hoc each time.
+///
+/// It also supports two data-forms extensions that servers/field-processing
+/// entities may attach to a `form`/`result`-typed form as parsing/rendering
+/// hints: XEP-0122 (Data Forms Validation), which lets a `<field/>` declare
+/// a `<validate/>` child describing acceptable input (datatype, validation
+/// method and/or an allowed-count range for multi-valued fields), and
+/// XEP-0141 (Data Forms Layout), which lets a form group its fields into
+/// `<page/>`s (and nested `<section/>`s) for improved presentation. Both are
+/// purely server->client hints and are never re-serialized when submitting
+/// a form back (see [DataForm.toSubmitElement]).
 library;
 
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 const String dataFormXmlns = 'jabber:x:data';
+
+/// The XEP-0122 (Data Forms Validation) namespace.
+const String dataFormValidateXmlns = 'http://jabber.org/protocol/xdata-validate';
 
 /// The field types defined by XEP-0004 §3.3.
 enum DataFormFieldType {
@@ -103,6 +116,144 @@ class DataFormOption {
   final String? label;
 }
 
+/// The validation methods defined by XEP-0122 §3.3, describing how a
+/// field's value(s) should be checked against [DataFormValidation.datatype].
+enum DataFormValidationMethod {
+  /// The value simply needs to be a valid instance of the given datatype.
+  basic,
+
+  /// Like [basic], but the field-processing entity declares that it will
+  /// also accept values outside the ones listed in the field's `<option/>`
+  /// children (for `list-single`/`list-multi` fields).
+  open,
+
+  /// The value must match the datatype's lexical space *and* the regular
+  /// expression carried in [DataFormValidation.regex].
+  regex,
+
+  /// The value must fall within the inclusive numeric range described by
+  /// [DataFormValidation.rangeMin]/[DataFormValidation.rangeMax].
+  range,
+}
+
+/// Parses a XEP-0122 `<validate/>` method child name into a
+/// [DataFormValidationMethod], or `null` if unrecognized.
+DataFormValidationMethod? _dataFormValidationMethodFromElementName(String name) {
+  switch (name) {
+    case 'basic':
+      return DataFormValidationMethod.basic;
+    case 'open':
+      return DataFormValidationMethod.open;
+    case 'regex':
+      return DataFormValidationMethod.regex;
+    case 'range':
+      return DataFormValidationMethod.range;
+    default:
+      return null;
+  }
+}
+
+/// A XEP-0122 `<list-range/>`, constraining the number of values a
+/// `list-multi`/`jid-multi`/`text-multi` field may carry. Either bound may
+/// be absent, meaning that bound is unconstrained.
+class DataFormListRange {
+  const DataFormListRange({this.min, this.max});
+
+  final int? min;
+  final int? max;
+
+  static DataFormListRange? fromElement(XmppElement? listRangeEl) {
+    // Unlike the top-level <validate/> element, <list-range/> is a plain
+    // child and doesn't repeat the xmlns attribute (it inherits it from its
+    // parent per normal XML namespace rules), so only the element name is
+    // checked here.
+    if (listRangeEl == null || listRangeEl.name != 'list-range') {
+      return null;
+    }
+    return DataFormListRange(
+      min: int.tryParse(listRangeEl.getAttribute('min')?.value ?? ''),
+      max: int.tryParse(listRangeEl.getAttribute('max')?.value ?? ''),
+    );
+  }
+}
+
+/// A XEP-0122 (Data Forms Validation) `<validate/>` hint attached to a
+/// `<field/>` of a `form`/`result`-typed data form, describing the
+/// acceptable input for that field. This is a server->client hint only and
+/// is never re-serialized when submitting the form back.
+class DataFormValidation {
+  const DataFormValidation({
+    this.datatype = 'xs:string',
+    this.method,
+    this.regex,
+    this.rangeMin,
+    this.rangeMax,
+    this.listRange,
+  });
+
+  /// The `datatype` attribute, e.g. `xs:string`/`xs:int`. Defaults to
+  /// `xs:string` per XEP-0122 §3.2 when the attribute is absent.
+  final String datatype;
+
+  /// Which of the mutually-exclusive validation methods applies, or `null`
+  /// if `<validate/>` had no recognized method child.
+  final DataFormValidationMethod? method;
+
+  /// The pattern text of a `<regex/>` method child, only set when [method]
+  /// is [DataFormValidationMethod.regex].
+  final String? regex;
+
+  /// The `min`/`max` attributes of a `<range/>` method child, only set when
+  /// [method] is [DataFormValidationMethod.range]. Kept as raw strings
+  /// (rather than parsed numbers) since [datatype] can be any `xs:` type,
+  /// not just numeric ones.
+  final String? rangeMin;
+  final String? rangeMax;
+
+  /// The optional `<list-range/>`, constraining the number of selected or
+  /// entered values for list-multi/jid-multi/text-multi fields. Valid
+  /// alongside any [method].
+  final DataFormListRange? listRange;
+
+  /// Parses a `<validate xmlns='http://jabber.org/protocol/xdata-validate'/>`
+  /// element, or returns `null` if [validateEl] is `null` or isn't that
+  /// element.
+  static DataFormValidation? fromElement(XmppElement? validateEl) {
+    if (validateEl == null ||
+        validateEl.name != 'validate' ||
+        validateEl.getAttribute('xmlns')?.value != dataFormValidateXmlns) {
+      return null;
+    }
+    final datatype = validateEl.getAttribute('datatype')?.value ?? 'xs:string';
+    DataFormValidationMethod? method;
+    String? regex;
+    String? rangeMin;
+    String? rangeMax;
+    for (final child in validateEl.children) {
+      final parsedMethod = _dataFormValidationMethodFromElementName(child.name ?? '');
+      if (parsedMethod == null) {
+        continue;
+      }
+      method = parsedMethod;
+      if (parsedMethod == DataFormValidationMethod.regex) {
+        regex = child.textValue ?? '';
+      } else if (parsedMethod == DataFormValidationMethod.range) {
+        rangeMin = child.getAttribute('min')?.value;
+        rangeMax = child.getAttribute('max')?.value;
+      }
+      break;
+    }
+    return DataFormValidation(
+      datatype: datatype,
+      method: method,
+      regex: regex,
+      rangeMin: rangeMin,
+      rangeMax: rangeMax,
+      listRange: DataFormListRange.fromElement(validateEl.getChild('list-range')),
+    );
+  }
+}
+
 /// A single `<field/>` of a data form.
 class DataFormField {
   const DataFormField({
@@ -112,6 +263,7 @@ class DataFormField {
     this.values = const [],
     this.options = const [],
     this.required = false,
+    this.validation,
   });
 
   final String varName;
@@ -124,6 +276,10 @@ class DataFormField {
   final List<DataFormOption> options;
   final bool required;
 
+  /// The XEP-0122 validation hint for this field, if the field-processing
+  /// entity declared one. `null` if the field had no `<validate/>` child.
+  final DataFormValidation? validation;
+
   DataFormField copyWith({List<String>? values}) => DataFormField(
         varName: varName,
         label: label,
@@ -131,6 +287,7 @@ class DataFormField {
         values: values ?? this.values,
         options: options,
         required: required,
+        validation: validation,
       );
 }
 
@@ -196,6 +353,7 @@ class DataForm {
           values: values,
           options: options,
           required: field.getChild('required') != null,
+          validation: DataFormValidation.fromElement(field.getChild('validate')),
         ),
       );
     }
@@ -218,6 +376,10 @@ class DataForm {
   /// Fields of type `fixed` are always omitted: they are read-only,
   /// informational-only fields (e.g. section headers) that are never
   /// meant to be sent back in a submission.
+  ///
+  /// Note that a field's XEP-0122 [DataFormField.validation] hint is never
+  /// re-serialized here: it's an informational server->client hint only,
+  /// not something the client echoes back when submitting.
   XmppElement toSubmitElement() {
     final x = XmppElement()..name = 'x';
     x.addAttribute(XmppAttribute('xmlns', dataFormXmlns));

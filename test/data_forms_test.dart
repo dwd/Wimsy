@@ -10,6 +10,7 @@ XmppElement _field({
   List<String> values = const [],
   List<String> options = const [],
   bool required = false,
+  XmppElement? validate,
 }) {
   final field = XmppElement()..name = 'field';
   if (varName != null) field.addAttribute(XmppAttribute('var', varName));
@@ -24,7 +25,41 @@ XmppElement _field({
   for (final value in values) {
     field.addChild(XmppElement()..name = 'value'..textValue = value);
   }
+  if (validate != null) field.addChild(validate);
   return field;
+}
+
+const _validateXmlns = dataFormValidateXmlns;
+
+XmppElement _validate({
+  String? datatype,
+  XmppElement? method,
+  XmppElement? listRange,
+}) {
+  final validate = XmppElement()..name = 'validate';
+  validate.addAttribute(XmppAttribute('xmlns', _validateXmlns));
+  if (datatype != null) validate.addAttribute(XmppAttribute('datatype', datatype));
+  if (method != null) validate.addChild(method);
+  if (listRange != null) validate.addChild(listRange);
+  return validate;
+}
+
+XmppElement _basic() => XmppElement()..name = 'basic';
+XmppElement _open() => XmppElement()..name = 'open';
+XmppElement _regex(String pattern) => XmppElement()
+  ..name = 'regex'
+  ..textValue = pattern;
+XmppElement _range({String? min, String? max}) {
+  final range = XmppElement()..name = 'range';
+  if (min != null) range.addAttribute(XmppAttribute('min', min));
+  if (max != null) range.addAttribute(XmppAttribute('max', max));
+  return range;
+}
+XmppElement _listRange({String? min, String? max}) {
+  final listRange = XmppElement()..name = 'list-range';
+  if (min != null) listRange.addAttribute(XmppAttribute('min', min));
+  if (max != null) listRange.addAttribute(XmppAttribute('max', max));
+  return listRange;
 }
 
 XmppElement _form(List<XmppElement> fields, {String? title, List<String> instructions = const []}) {
@@ -186,6 +221,113 @@ void main() {
       expect(dataFormFieldTypeAllowsMultipleValues(DataFormFieldType.textSingle), isFalse);
       expect(dataFormFieldTypeAllowsMultipleValues(DataFormFieldType.listSingle), isFalse);
       expect(dataFormFieldTypeAllowsMultipleValues(null), isFalse);
+    });
+  });
+
+  group('XEP-0122 DataFormValidation', () {
+    test('parses the basic method', () {
+      final x = _form([_field(varName: 'v', validate: _validate(method: _basic()))]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation;
+      expect(validation, isNotNull);
+      expect(validation!.method, DataFormValidationMethod.basic);
+      expect(validation.datatype, 'xs:string');
+    });
+
+    test('parses the open method', () {
+      final x = _form([_field(varName: 'v', validate: _validate(method: _open()))]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation;
+      expect(validation!.method, DataFormValidationMethod.open);
+    });
+
+    test('parses the regex method with its pattern text', () {
+      final x = _form([
+        _field(varName: 'v', validate: _validate(datatype: 'xs:string', method: _regex(r'^\d{3}$'))),
+      ]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation;
+      expect(validation!.method, DataFormValidationMethod.regex);
+      expect(validation.regex, r'^\d{3}$');
+    });
+
+    test('parses the range method with both min and max', () {
+      final x = _form([
+        _field(varName: 'v', validate: _validate(datatype: 'xs:int', method: _range(min: '1', max: '10'))),
+      ]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation;
+      expect(validation!.method, DataFormValidationMethod.range);
+      expect(validation.rangeMin, '1');
+      expect(validation.rangeMax, '10');
+      expect(validation.datatype, 'xs:int');
+    });
+
+    test('parses the range method with only min or only max', () {
+      final xMinOnly = _form([_field(varName: 'v', validate: _validate(method: _range(min: '5')))]);
+      final minOnly = DataForm.fromElement(xMinOnly)!.fields.single.validation!;
+      expect(minOnly.rangeMin, '5');
+      expect(minOnly.rangeMax, isNull);
+
+      final xMaxOnly = _form([_field(varName: 'v', validate: _validate(method: _range(max: '9')))]);
+      final maxOnly = DataForm.fromElement(xMaxOnly)!.fields.single.validation!;
+      expect(maxOnly.rangeMin, isNull);
+      expect(maxOnly.rangeMax, '9');
+    });
+
+    test('defaults datatype to xs:string when absent', () {
+      final x = _form([_field(varName: 'v', validate: _validate(method: _basic()))]);
+      expect(DataForm.fromElement(x)!.fields.single.validation!.datatype, 'xs:string');
+    });
+
+    test('uses the explicit datatype attribute when present', () {
+      final x = _form([_field(varName: 'v', validate: _validate(datatype: 'xs:anyURI', method: _basic()))]);
+      expect(DataForm.fromElement(x)!.fields.single.validation!.datatype, 'xs:anyURI');
+    });
+
+    test('parses a list-range alone (no method)', () {
+      final x = _form([
+        _field(varName: 'v', validate: _validate(listRange: _listRange(min: '1', max: '3'))),
+      ]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation!;
+      expect(validation.method, isNull);
+      expect(validation.listRange, isNotNull);
+      expect(validation.listRange!.min, 1);
+      expect(validation.listRange!.max, 3);
+    });
+
+    test('parses a list-range combined with a method', () {
+      final x = _form([
+        _field(
+          varName: 'v',
+          validate: _validate(method: _basic(), listRange: _listRange(min: '2')),
+        ),
+      ]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation!;
+      expect(validation.method, DataFormValidationMethod.basic);
+      expect(validation.listRange!.min, 2);
+      expect(validation.listRange!.max, isNull);
+    });
+
+    test('is null for a field with no validate child', () {
+      final x = _form([_field(varName: 'v')]);
+      expect(DataForm.fromElement(x)!.fields.single.validation, isNull);
+    });
+
+    // A <validate/> with no recognized method child (e.g. missing or
+    // malformed) is still parsed into a DataFormValidation object (so
+    // datatype/list-range are still available), but with a null `method`.
+    test('is non-null with a null method for a validate with no recognized method child', () {
+      final x = _form([_field(varName: 'v', validate: _validate(datatype: 'xs:int'))]);
+      final validation = DataForm.fromElement(x)!.fields.single.validation;
+      expect(validation, isNotNull);
+      expect(validation!.method, isNull);
+      expect(validation.datatype, 'xs:int');
+    });
+
+    test('copyWith preserves validation', () {
+      final x = _form([_field(varName: 'v', values: ['a'], validate: _validate(method: _basic()))]);
+      final field = DataForm.fromElement(x)!.fields.single;
+      final updated = field.copyWith(values: ['b']);
+      expect(updated.values, ['b']);
+      expect(updated.validation, isNotNull);
+      expect(updated.validation!.method, DataFormValidationMethod.basic);
     });
   });
 }
