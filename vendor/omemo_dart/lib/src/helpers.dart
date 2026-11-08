@@ -36,9 +36,21 @@ List<int> generateRandomBytes(int length) {
   return bytes;
 }
 
-/// Generate a random number between 0 inclusive and 2**32 exclusive (2**32 - 1 inclusive).
+/// Generate a random number between 0 inclusive and 2**31 - 1 exclusive
+/// (i.e. 0 to 2147483646 inclusive).
+///
+/// This is used for OMEMO device ids and signed/one-time prekey ids, which
+/// are serialized as plain XML integer attributes (`sid`, `rid`,
+/// `signedPreKeyId`, `preKeyId`, ...). While XEP-0384 itself doesn't
+/// constrain these to fit in a *signed* 32-bit integer, several real-world
+/// implementations (e.g. Dino's xmpp-vala, via `StanzaNode.get_attribute_int`)
+/// parse them as such. Generating a value in the full unsigned 32-bit range
+/// (as this function used to do) therefore has roughly a 50% chance of
+/// producing an id those clients cannot parse, silently breaking OMEMO
+/// interoperability with them (manifesting e.g. as Dino logging "Can't
+/// parse OMEMO node: No sid" and failing to decrypt/discover devices).
 int generateRandom32BitNumber() {
-  return Random.secure().nextInt(4294967295 /*pow(2, 32) - 1*/);
+  return Random.secure().nextInt(2147483647 /*pow(2, 31) - 1*/);
 }
 
 /// Describes the differences between two lists in terms of its items.
