@@ -6,6 +6,9 @@ import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../storage/storage_service.dart';
 import 'encryption_backend.dart';
+import 'legacy_double_ratchet.dart';
+import 'legacy_signal_wire.dart';
+import 'legacy_x3dh.dart';
 import 'omemo2_backend.dart' show Omemo2DeviceFingerprint;
 import 'omemo2_serialization.dart';
 import 'trust_store.dart';
@@ -436,9 +439,7 @@ class OmemoBackend implements EncryptionBackend {
     return identityKeyPairToPem(device.ik, _identityKeyLabel);
   }
 
-  static Future<Map<String, dynamic>> _bundleToJson(
-    OmemoBundle bundle,
-  ) async {
+  static Future<Map<String, dynamic>> _bundleToJson(OmemoBundle bundle) async {
     return {
       'jid': bundle.jid,
       'id': bundle.id,
@@ -490,9 +491,7 @@ class OmemoBackend implements EncryptionBackend {
   /// our own other device) verifying our bundle would check the signature
   /// against the un-prefixed 32-byte SPK instead, which never matches and
   /// reproduces `InvalidKeyExchangeSignatureError`.
-  static Future<OmemoBundle> _legacyBundleFromDevice(
-    OmemoDevice device,
-  ) async {
+  static Future<OmemoBundle> _legacyBundleFromDevice(OmemoDevice device) async {
     final bundle = await device.toBundle();
     return OmemoBundle(
       bundle.jid,
@@ -615,7 +614,10 @@ class OmemoBackend implements EncryptionBackend {
       final keyElement = XmppElement()..name = 'key';
       keyElement.addAttribute(XmppAttribute('rid', key.rid.toString()));
       if (key.kex) {
-        keyElement.addAttribute(XmppAttribute('kex', 'true'));
+        // Legacy OMEMO (XEP-0384 v0.3.0) marks a prekey-wrapped key with
+        // `prekey="true"`, unlike OMEMO2 which uses `kex="true"` -- real
+        // clients (e.g. Conversations) only recognise the former.
+        keyElement.addAttribute(XmppAttribute('prekey', 'true'));
       }
       keyElement.textValue = key.value;
       header.addChild(keyElement);
@@ -694,9 +696,7 @@ class OmemoBackend implements EncryptionBackend {
     final activeDeviceIds = _omemoManager.getKnownDevices(toBareJid);
     final missingFromActiveList = activeDeviceIds == null
         ? knownDeviceIds
-        : knownDeviceIds
-              .where((id) => !activeDeviceIds.contains(id))
-              .toList();
+        : knownDeviceIds.where((id) => !activeDeviceIds.contains(id)).toList();
 
     final perDevice = <String>[];
     for (final deviceId in knownDeviceIds) {
@@ -798,6 +798,147 @@ class OmemoBackend implements EncryptionBackend {
     }
   }
 
+  /// Unwraps the per-device `<key>` addressed to our device using the
+  /// from-scratch libsignal-compatible stack ([legacyX3dhReceiver] +
+  /// [LegacyRatchetSession]) and returns the transported key material
+  /// (16-byte AES-128 key, optionally followed by the 16-byte GCM tag).
+  ///
+  /// Returns `null` if there is no `<key>` for our device, or if the key
+  /// bytes are not in libsignal wire format at all -- the caller then falls
+  /// back to omemo_dart. Returns a record with `error` set if the bytes
+  /// *are* libsignal wire format but cannot be processed (unknown prekey,
+  /// bad MAC, duplicate, ...). Sessions live under their own storage prefix
+  /// (see `StorageService.storeLegacySignalSession`), never in omemo_dart's
+  /// ratchet map. Sessions are persisted only after a successful decrypt.
+  ///
+  /// UNVERIFIED against a real client: see the limitations documented in
+  /// `legacy_x3dh.dart` and `legacy_double_ratchet.dart`.
+  Future<({List<int>? keyMaterial, String? error})?> _decryptKeyWithSignalStack(
+    String bareSenderJid,
+    int sid,
+    List<EncryptedKey> keys,
+  ) async {
+    final device = await _omemoManager.getDevice();
+    final ours = keys.where((k) => k.rid == device.id).firstOrNull;
+    if (ours == null) {
+      return null;
+    }
+    final List<int> bytes;
+    try {
+      bytes = base64Decode(ours.value);
+    } catch (_) {
+      return null;
+    }
+    try {
+      LegacyRatchetSession? existing;
+      final storedJson = storage.loadLegacySignalSession(bareSenderJid, sid);
+      if (storedJson != null) {
+        existing = LegacyRatchetSession.fromJson(
+          jsonDecode(storedJson) as Map<String, dynamic>,
+        );
+      }
+
+      if (!ours.kex) {
+        final SignalMessageWire parsed;
+        try {
+          parsed = SignalMessageWire.parse(bytes);
+        } on LegacySignalWireFormatException {
+          return null;
+        }
+        if (parsed.version != kLegacySignalWireVersion) {
+          return null;
+        }
+        if (existing == null) {
+          return (keyMaterial: null, error: 'No session with device $sid');
+        }
+        final plaintext = await existing.decrypt(bytes);
+        await storage.storeLegacySignalSession(
+          bareSenderJid,
+          sid,
+          jsonEncode(existing.toJson()),
+        );
+        return (keyMaterial: plaintext, error: null);
+      }
+
+      final PreKeySignalMessageWire pre;
+      try {
+        pre = PreKeySignalMessageWire.parse(bytes);
+      } on LegacySignalWireFormatException {
+        return null;
+      }
+
+      // A retransmitted/duplicate PreKeySignalMessage for an established
+      // session is simply decrypted with that session.
+      if (existing != null) {
+        try {
+          final plaintext = await existing.decrypt(pre.message);
+          await storage.storeLegacySignalSession(
+            bareSenderJid,
+            sid,
+            jsonEncode(existing.toJson()),
+          );
+          return (keyMaterial: plaintext, error: null);
+        } on LegacyRatchetException {
+          // Fall through: treat as a fresh session from the peer.
+        }
+      }
+
+      if (pre.signedPreKeyId != device.spkId) {
+        return (
+          keyMaterial: null,
+          error:
+              'PreKeySignalMessage uses unknown signed prekey '
+              '${pre.signedPreKeyId}',
+        );
+      }
+      final opk = device.opks[pre.preKeyId];
+      if (opk == null) {
+        return (
+          keyMaterial: null,
+          error:
+              'PreKeySignalMessage uses unknown one-time prekey '
+              '${pre.preKeyId}',
+        );
+      }
+      final x3dh = await legacyX3dhReceiver(
+        ourIdentityKey: await device.ik.asKeyPair(),
+        ourSignedPreKey: await device.spk.asKeyPair(),
+        ourOneTimePreKey: await opk.asKeyPair(),
+        theirIdentityKey: pre.identityKey,
+        theirBaseKey: pre.baseKey,
+      );
+      final session = await LegacyRatchetSession.responder(
+        x3dh: x3dh,
+        ourIdentityPublicKey: addDjbType(await device.ik.pk.getBytes()),
+        theirIdentityPublicKey: pre.identityKey,
+        ourSignedPreKey: await device.spk.asKeyPair(),
+      );
+      final plaintext = await session.decrypt(pre.message);
+      await storage.storeLegacySignalSession(
+        bareSenderJid,
+        sid,
+        jsonEncode(session.toJson()),
+      );
+      // ignore: invalid_use_of_internal_member
+      await _trustManager.onNewSession(bareSenderJid, sid);
+      // Consume the one-time prekey (libsignal semantics) and republish the
+      // bundle so peers don't try to use it again.
+      try {
+        await _omemoManager.replaceOnetimePrekey(pre.preKeyId);
+        await pep.publishLegacyBundle(
+          await _legacyBundleFromDevice(await _omemoManager.getDevice()),
+        );
+      } catch (e) {
+        Log.w('OmemoBackend', 'Failed to rotate used one-time prekey: $e');
+      }
+      return (keyMaterial: plaintext, error: null);
+    } on LegacyRatchetException catch (e) {
+      return (keyMaterial: null, error: e.message);
+    } on ArgumentError catch (e) {
+      return (keyMaterial: null, error: 'Invalid key material: $e');
+    }
+  }
+
   @override
   Future<DecryptResult> decryptIncoming(XmppElement stanza) async {
     final encrypted = stanza.name == 'encrypted'
@@ -828,13 +969,15 @@ class OmemoBackend implements EncryptionBackend {
     }
     // Unlike OMEMO2's envelope, legacy OMEMO's <key> elements are direct
     // children of <header>, not nested under a <keys> sub-element.
+    // Legacy OMEMO marks a key as wrapping a PreKeySignalMessage with a
+    // `prekey="true"` attribute (unlike OMEMO2, which uses `kex="true"`).
     final keys = <EncryptedKey>[
       for (final child in header?.children ?? const [])
         if (child.name == 'key')
           EncryptedKey(
             int.tryParse(child.getAttribute('rid')?.value ?? '') ?? -1,
             child.textValue?.trim() ?? '',
-            child.getAttribute('kex')?.value == 'true',
+            child.getAttribute('prekey')?.value == 'true',
           ),
     ]..removeWhere((key) => key.rid == -1 || key.value.isEmpty);
     final fixedKeys = keys.map(_fixIncomingKexKey).toList();
@@ -846,27 +989,58 @@ class OmemoBackend implements EncryptionBackend {
     // AES-256-CBC+HMAC-SHA-256); instead we get back the raw ratchet-
     // unwrapped key material and decrypt/verify it ourselves -- see the
     // class doc.
-    final result = await _omemoManager.onIncomingStanza(
-      OmemoIncomingStanza(
-        bareSenderJid,
-        sid,
-        fixedKeys,
-        payload,
-        false,
-        skipPayloadDecryption: true,
-      ),
+    //
+    // Real legacy-OMEMO clients wrap the key in libsignal's native wire
+    // format, which omemo_dart's ratchet/MAC cannot process. So first try
+    // our own from-scratch libsignal-compatible stack (see
+    // [_decryptKeyWithSignalStack]); only if the key bytes aren't in that
+    // wire format at all (e.g. a peer that is itself an omemo_dart-based
+    // client) do we fall back to omemo_dart's `OmemoManager`.
+    List<int>? rawKeyMaterial;
+    final signalAttempt = await _decryptKeyWithSignalStack(
+      bareSenderJid,
+      sid,
+      keys,
     );
-
-    if (result.error != null) {
-      return DecryptResult(
-        plaintext: null,
-        protocolId: protocolId,
-        senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
-        error: result.error.toString(),
+    if (signalAttempt != null) {
+      if (signalAttempt.error != null) {
+        return DecryptResult(
+          plaintext: null,
+          protocolId: protocolId,
+          senderTrust: await trustStateFor(
+            bareSenderJid,
+            deviceOrKeyId: '$sid',
+          ),
+          error: signalAttempt.error,
+        );
+      }
+      rawKeyMaterial = signalAttempt.keyMaterial;
+    } else {
+      final result = await _omemoManager.onIncomingStanza(
+        OmemoIncomingStanza(
+          bareSenderJid,
+          sid,
+          fixedKeys,
+          payload,
+          false,
+          skipPayloadDecryption: true,
+        ),
       );
+
+      if (result.error != null) {
+        return DecryptResult(
+          plaintext: null,
+          protocolId: protocolId,
+          senderTrust: await trustStateFor(
+            bareSenderJid,
+            deviceOrKeyId: '$sid',
+          ),
+          error: result.error.toString(),
+        );
+      }
+      rawKeyMaterial = result.rawKeyMaterial;
     }
 
-    final rawKeyMaterial = result.rawKeyMaterial;
     if (payload == null || rawKeyMaterial == null) {
       return DecryptResult(
         plaintext: null,
@@ -875,27 +1049,37 @@ class OmemoBackend implements EncryptionBackend {
         error: 'Empty legacy OMEMO message',
       );
     }
+    // Conversations sends 32 bytes (key + GCM tag); some clients (e.g.
+    // Dino) send only the 16-byte key and append the tag to <payload>.
     if (ivBase64 == null ||
         ivBase64.isEmpty ||
-        rawKeyMaterial.length != _aes128KeyLength + _gcmMacLength) {
+        (rawKeyMaterial.length != _aes128KeyLength + _gcmMacLength &&
+            rawKeyMaterial.length != _aes128KeyLength)) {
       return DecryptResult(
         plaintext: null,
         protocolId: protocolId,
         senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
-        error: 'Missing <iv> or malformed key material on legacy OMEMO '
+        error:
+            'Missing <iv> or malformed key material on legacy OMEMO '
             'message',
       );
     }
 
     try {
       final rawKey = rawKeyMaterial.sublist(0, _aes128KeyLength);
-      final mac = rawKeyMaterial.sublist(_aes128KeyLength);
+      var cipherText = base64Decode(payload);
+      List<int> mac;
+      if (rawKeyMaterial.length > _aes128KeyLength) {
+        mac = rawKeyMaterial.sublist(_aes128KeyLength);
+      } else {
+        if (cipherText.length < _gcmMacLength) {
+          throw const FormatException('Payload too short for GCM tag');
+        }
+        mac = cipherText.sublist(cipherText.length - _gcmMacLength);
+        cipherText = cipherText.sublist(0, cipherText.length - _gcmMacLength);
+      }
       final iv = base64Decode(ivBase64);
-      final secretBox = SecretBox(
-        base64Decode(payload),
-        nonce: iv,
-        mac: Mac(mac),
-      );
+      final secretBox = SecretBox(cipherText, nonce: iv, mac: Mac(mac));
       final plaintextBytes = await _payloadCipher.decrypt(
         secretBox,
         secretKey: SecretKey(rawKey),
@@ -1029,6 +1213,7 @@ class OmemoBackend implements EncryptionBackend {
   /// over [refreshDevices].
   Future<void> resetDeviceState(String bareJid) async {
     await _omemoManager.removeAllRatchets(bareJid);
+    await storage.removeLegacySignalSessionsForJid(bareJid);
     await storage.removeOmemoBundlesForJid(bareJid);
     await trustStore.forgetJid(bareJid);
   }

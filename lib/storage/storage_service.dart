@@ -121,6 +121,10 @@ class StorageService {
   static const _omemoDeviceListPrefix = 'omemodl:';
   static const _omemoBundlePrefix = 'omemobundle:';
   static const _omemoRatchetPrefix = 'omemork:';
+  // Legacy-OMEMO sessions of our from-scratch libsignal-compatible Double
+  // Ratchet (lib/encryption/legacy_double_ratchet.dart); deliberately a
+  // different prefix from `omemork:` (omemo_dart's incompatible ratchets).
+  static const _legacySignalSessionPrefix = 'omemosig:';
   static const _omemoTrustPrefix = 'omemotrust:';
   static const _omemoIdentitySecureKeyPrefix = 'omemo_identity:';
   // OX (urn:xmpp:openpgp:0, XEP-0373/XEP-0374, see
@@ -1381,7 +1385,9 @@ class StorageService {
     if (bareJid.isEmpty) {
       return null;
     }
-    final raw = await _secureStorage.read(key: '$_oxIdentitySecureKeyPrefix$bareJid');
+    final raw = await _secureStorage.read(
+      key: '$_oxIdentitySecureKeyPrefix$bareJid',
+    );
     return (raw == null || raw.isEmpty) ? null : raw;
   }
 
@@ -1408,7 +1414,10 @@ class StorageService {
     await box.put('$_oxPublicKeyPrefix$bareJid:$fingerprint', armoredPublicKey);
     final known = loadOxFingerprintList(bareJid) ?? [];
     if (!known.contains(fingerprint)) {
-      await box.put('$_oxFingerprintListPrefix$bareJid', [...known, fingerprint]);
+      await box.put('$_oxFingerprintListPrefix$bareJid', [
+        ...known,
+        fingerprint,
+      ]);
     }
     _afterHotWrite();
   }
@@ -1651,10 +1660,7 @@ class StorageService {
   }
 
   /// Persists the known legacy-OMEMO device list for [bareJid].
-  Future<void> storeOmemoDeviceList(
-    String bareJid,
-    List<int> deviceIds,
-  ) async {
+  Future<void> storeOmemoDeviceList(String bareJid, List<int> deviceIds) async {
     final box = _box;
     if (box == null || bareJid.isEmpty) {
       return;
@@ -1780,6 +1786,39 @@ class StorageService {
       for (final entry in ratchetKeys)
         '$_omemoRatchetPrefix${entry.key}:${entry.value}',
     ]);
+  }
+
+  /// Persists the serialized libsignal-compatible legacy-OMEMO Double
+  /// Ratchet session ([sessionJson], a JSON string because the nested
+  /// structure would otherwise come back from Hive with loose types) for
+  /// [bareJid]/[deviceId].
+  Future<void> storeLegacySignalSession(
+    String bareJid,
+    int deviceId,
+    String sessionJson,
+  ) async {
+    final box = _box;
+    if (box == null || bareJid.isEmpty) {
+      return;
+    }
+    await box.put('$_legacySignalSessionPrefix$bareJid:$deviceId', sessionJson);
+    _afterHotWrite();
+  }
+
+  /// Loads the serialized legacy-OMEMO Double Ratchet session for
+  /// [bareJid]/[deviceId], or `null` if none exists.
+  String? loadLegacySignalSession(String bareJid, int deviceId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_legacySignalSessionPrefix$bareJid:$deviceId');
+    return data is String && data.isNotEmpty ? data : null;
+  }
+
+  /// Removes every libsignal-compatible legacy-OMEMO session of [bareJid].
+  Future<void> removeLegacySignalSessionsForJid(String bareJid) async {
+    await _deleteKeysWithPrefix('$_legacySignalSessionPrefix$bareJid:');
   }
 
   /// Persists a Blind-Trust-Before-Verification trust decision for a

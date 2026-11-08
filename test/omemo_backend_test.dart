@@ -7,6 +7,9 @@ import 'package:xml/xml.dart' as xml;
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import 'package:wimsy/encryption/encryption_backend.dart';
+import 'package:wimsy/encryption/legacy_double_ratchet.dart';
+import 'package:wimsy/encryption/legacy_signal_wire.dart';
+import 'package:wimsy/encryption/legacy_x3dh.dart';
 import 'package:wimsy/encryption/omemo_backend.dart';
 import 'package:wimsy/encryption/omemo2_serialization.dart';
 import 'package:wimsy/storage/storage_service.dart';
@@ -37,10 +40,7 @@ class FakeStorageService extends StorageService {
   }
 
   @override
-  Future<void> storeOmemoDeviceList(
-    String bareJid,
-    List<int> deviceIds,
-  ) async {
+  Future<void> storeOmemoDeviceList(String bareJid, List<int> deviceIds) async {
     deviceLists[bareJid] = List.of(deviceIds);
   }
 
@@ -128,6 +128,26 @@ class FakeStorageService extends StorageService {
   @override
   Future<void> removeOmemoTrustForJid(String bareJid) async {
     trust.removeWhere((key, _) => key.startsWith('$bareJid:'));
+  }
+
+  final Map<String, String> signalSessions = {};
+
+  @override
+  Future<void> storeLegacySignalSession(
+    String bareJid,
+    int deviceId,
+    String sessionJson,
+  ) async {
+    signalSessions['$bareJid:$deviceId'] = sessionJson;
+  }
+
+  @override
+  String? loadLegacySignalSession(String bareJid, int deviceId) =>
+      signalSessions['$bareJid:$deviceId'];
+
+  @override
+  Future<void> removeLegacySignalSessionsForJid(String bareJid) async {
+    signalSessions.removeWhere((key, _) => key.startsWith('$bareJid:'));
   }
 }
 
@@ -239,63 +259,60 @@ void main() {
     },
   );
 
-  test(
-    'OmemoBackend: bundle fetch always consults PEP live instead of '
-    'getting stuck on a stale/broken cached bundle forever',
-    () async {
-      // Regression test: previously, fetchDeviceBundleImpl preferred a
-      // cached `storage.loadOmemoBundle(jid, id)` (when it carried the
-      // 'spksMsg' field) over a live PEP fetch. Since `OmemoManager` only
-      // calls that callback once per (jid, device) for the lifetime of
-      // the process (it skips devices it already has a ratchet for), a
-      // stale/broken bundle cached from an earlier session was never
-      // refreshed -- no bundle-fetch IQ was ever sent for that device
-      // again -- matching the observed symptom of Wimsy publishing its
-      // own bundle but never fetching a contact's.
-      final network = FakeOmemoNetwork();
-      final aliceStorage = FakeStorageService();
-      final bobStorage = FakeStorageService();
+  test('OmemoBackend: bundle fetch always consults PEP live instead of '
+      'getting stuck on a stale/broken cached bundle forever', () async {
+    // Regression test: previously, fetchDeviceBundleImpl preferred a
+    // cached `storage.loadOmemoBundle(jid, id)` (when it carried the
+    // 'spksMsg' field) over a live PEP fetch. Since `OmemoManager` only
+    // calls that callback once per (jid, device) for the lifetime of
+    // the process (it skips devices it already has a ratchet for), a
+    // stale/broken bundle cached from an earlier session was never
+    // refreshed -- no bundle-fetch IQ was ever sent for that device
+    // again -- matching the observed symptom of Wimsy publishing its
+    // own bundle but never fetching a contact's.
+    final network = FakeOmemoNetwork();
+    final aliceStorage = FakeStorageService();
+    final bobStorage = FakeStorageService();
 
-      final bobBackend = await OmemoBackend.create(
-        selfBareJid: bobJid,
-        storage: bobStorage,
-        pep: FakeOmemoPep(network, bobJid),
-      );
-      final bobDeviceId = await bobBackend.ownDeviceId();
+    final bobBackend = await OmemoBackend.create(
+      selfBareJid: bobJid,
+      storage: bobStorage,
+      pep: FakeOmemoPep(network, bobJid),
+    );
+    final bobDeviceId = await bobBackend.ownDeviceId();
 
-      // Simulate a stale/broken cached bundle for Bob's device: it has
-      // the 'spksMsg' field (so it would normally be treated as usable),
-      // but garbage key material that cannot possibly produce a valid
-      // session.
-      aliceStorage.bundles['$bobJid:$bobDeviceId'] = {
-        'jid': bobJid,
-        'id': bobDeviceId,
-        'ik': base64Encode(List<int>.filled(32, 0)),
-        'spk': base64Encode(List<int>.filled(32, 0)),
-        'spkId': 1,
-        'spks': base64Encode(List<int>.filled(64, 0)),
-        'spksMsg': base64Encode(List<int>.filled(33, 0)),
-        'opks': {'1': base64Encode(List<int>.filled(32, 0))},
-      };
+    // Simulate a stale/broken cached bundle for Bob's device: it has
+    // the 'spksMsg' field (so it would normally be treated as usable),
+    // but garbage key material that cannot possibly produce a valid
+    // session.
+    aliceStorage.bundles['$bobJid:$bobDeviceId'] = {
+      'jid': bobJid,
+      'id': bobDeviceId,
+      'ik': base64Encode(List<int>.filled(32, 0)),
+      'spk': base64Encode(List<int>.filled(32, 0)),
+      'spkId': 1,
+      'spks': base64Encode(List<int>.filled(64, 0)),
+      'spksMsg': base64Encode(List<int>.filled(33, 0)),
+      'opks': {'1': base64Encode(List<int>.filled(32, 0))},
+    };
 
-      final aliceBackend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: aliceStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
+    final aliceBackend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: aliceStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
 
-      // Bob now publishes his real device/bundle via PEP.
-      await bobBackend.publishIdentity();
+    // Bob now publishes his real device/bundle via PEP.
+    await bobBackend.publishIdentity();
 
-      // Despite the stale/broken cached bundle, Alice must perform a live
-      // fetch and use Bob's real, current bundle to successfully encrypt.
-      final payload = await aliceBackend.encryptForSend(
-        bobJid,
-        'hello from alice',
-      );
-      expect(payload.element.getChild('header'), isNotNull);
-    },
-  );
+    // Despite the stale/broken cached bundle, Alice must perform a live
+    // fetch and use Bob's real, current bundle to successfully encrypt.
+    final payload = await aliceBackend.encryptForSend(
+      bobJid,
+      'hello from alice',
+    );
+    expect(payload.element.getChild('header'), isNotNull);
+  });
 
   test(
     'OmemoBackend: session establishment and encrypt/decrypt round-trip',
@@ -372,165 +389,149 @@ void main() {
     },
   );
 
-  test(
-    'OmemoBackend.resetDeviceState: completely wipes a contact\'s '
-    'ratchets, cached bundle, device list, and trust decision, so the '
-    'next interaction starts entirely from scratch',
-    () async {
-      // Mirrors the identical feature/regression test in
-      // test/omemo2_backend_test.dart for the "I need a tool to
-      // completely reset the OMEMO state for a particular contact"
-      // request.
-      final network = FakeOmemoNetwork();
-      final aliceStorage = FakeStorageService();
-      final bobStorage = FakeStorageService();
+  test('OmemoBackend.resetDeviceState: completely wipes a contact\'s '
+      'ratchets, cached bundle, device list, and trust decision, so the '
+      'next interaction starts entirely from scratch', () async {
+    // Mirrors the identical feature/regression test in
+    // test/omemo2_backend_test.dart for the "I need a tool to
+    // completely reset the OMEMO state for a particular contact"
+    // request.
+    final network = FakeOmemoNetwork();
+    final aliceStorage = FakeStorageService();
+    final bobStorage = FakeStorageService();
 
-      final aliceBackend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: aliceStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-      final bobBackend = await OmemoBackend.create(
-        selfBareJid: bobJid,
-        storage: bobStorage,
-        pep: FakeOmemoPep(network, bobJid),
-      );
-      await bobBackend.publishIdentity();
+    final aliceBackend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: aliceStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    final bobBackend = await OmemoBackend.create(
+      selfBareJid: bobJid,
+      storage: bobStorage,
+      pep: FakeOmemoPep(network, bobJid),
+    );
+    await bobBackend.publishIdentity();
 
-      await aliceBackend.encryptForSend(bobJid, 'hello from alice');
-      final deviceIds = await aliceBackend.knownDeviceIdsFor(bobJid);
-      expect(deviceIds, isNotEmpty);
-      final bobDeviceId = deviceIds.first;
-      await aliceBackend.setTrust(
-        bobJid,
-        '$bobDeviceId',
-        TrustState.verified,
-      );
-      expect(
-        await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
-        TrustState.verified,
-      );
-      expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isTrue);
+    await aliceBackend.encryptForSend(bobJid, 'hello from alice');
+    final deviceIds = await aliceBackend.knownDeviceIdsFor(bobJid);
+    expect(deviceIds, isNotEmpty);
+    final bobDeviceId = deviceIds.first;
+    await aliceBackend.setTrust(bobJid, '$bobDeviceId', TrustState.verified);
+    expect(
+      await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
+      TrustState.verified,
+    );
+    expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isTrue);
 
-      await aliceBackend.resetDeviceState(bobJid);
+    await aliceBackend.resetDeviceState(bobJid);
 
-      expect(
-        aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'),
-        isFalse,
-      );
-      expect(aliceStorage.deviceLists[bobJid], isEmpty);
-      expect(
-        await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
-        TrustState.tofu,
-      );
+    expect(aliceStorage.bundles.containsKey('$bobJid:$bobDeviceId'), isFalse);
+    expect(aliceStorage.deviceLists[bobJid], isEmpty);
+    expect(
+      await aliceBackend.trustStateFor(bobJid, deviceOrKeyId: '$bobDeviceId'),
+      TrustState.tofu,
+    );
 
-      // The contact can still be messaged entirely fresh afterwards.
-      await expectLater(
-        aliceBackend.encryptForSend(bobJid, 'hello again after a full reset'),
-        completes,
-      );
-    },
-  );
+    // The contact can still be messaged entirely fresh afterwards.
+    await expectLater(
+      aliceBackend.encryptForSend(bobJid, 'hello again after a full reset'),
+      completes,
+    );
+  });
 
-  test(
-    'OmemoBackend: encryptForSend throws instead of silently sending an '
-    'empty <encrypted/> stanza when no devices/bundles are known for the '
-    'recipient',
-    () async {
-      // Regression test: if the recipient's device list/bundle fetch via
-      // PEP fails or returns nothing (e.g. the recipient has never
-      // published one, or our subscription/fetch failed), omemo_dart's
-      // onOutgoingStanza returns an EncryptionResult with no keys for that
-      // JID at all. Previously, encryptForSend would still build and
-      // return an <encrypted/> stanza with a <header> containing zero
-      // <key> children -- which the server would happily deliver, but no
-      // recipient device could ever decrypt -- without surfacing any
-      // error to the caller (see xmpp_service.dart's "Failed to encrypt
-      // outgoing message" path, which only fires on a thrown error).
-      final network = FakeOmemoNetwork();
-      final aliceStorage = FakeStorageService();
+  test('OmemoBackend: encryptForSend throws instead of silently sending an '
+      'empty <encrypted/> stanza when no devices/bundles are known for the '
+      'recipient', () async {
+    // Regression test: if the recipient's device list/bundle fetch via
+    // PEP fails or returns nothing (e.g. the recipient has never
+    // published one, or our subscription/fetch failed), omemo_dart's
+    // onOutgoingStanza returns an EncryptionResult with no keys for that
+    // JID at all. Previously, encryptForSend would still build and
+    // return an <encrypted/> stanza with a <header> containing zero
+    // <key> children -- which the server would happily deliver, but no
+    // recipient device could ever decrypt -- without surfacing any
+    // error to the caller (see xmpp_service.dart's "Failed to encrypt
+    // outgoing message" path, which only fires on a thrown error).
+    final network = FakeOmemoNetwork();
+    final aliceStorage = FakeStorageService();
 
-      final aliceBackend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: aliceStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
+    final aliceBackend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: aliceStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
 
-      // Note: bobBackend.publishIdentity() is deliberately never called,
-      // so network.deviceLists/bundles has nothing for bobJid.
-      await expectLater(
-        aliceBackend.encryptForSend(bobJid, 'hello from alice'),
-        throwsA(isA<StateError>()),
-      );
-    },
-  );
+    // Note: bobBackend.publishIdentity() is deliberately never called,
+    // so network.deviceLists/bundles has nothing for bobJid.
+    await expectLater(
+      aliceBackend.encryptForSend(bobJid, 'hello from alice'),
+      throwsA(isA<StateError>()),
+    );
+  });
 
-  test(
-    'OmemoBackend: encryptForSend explains *why* no usable key was found '
-    'when a known device exists but is no longer trusted/enabled, instead '
-    'of a generic "no devices/keys available" message',
-    () async {
-      // Regression test: a real-world session showed `omemo_dart` logging
-      // "Fetching bundles"/"Building new ratchet" for a known device (so
-      // it clearly had a device list and bundle), yet still producing zero
-      // usable keys with no explanation anywhere in the log -- this
-      // happens when BlindTrustBeforeVerificationTrustManager.isTrusted/
-      // isEnabled silently skip the device (e.g. because it was
-      // explicitly marked untrusted, or another device of the same JID
-      // was verified). The thrown error must name the actual device id
-      // and its trusted/enabled state instead of just saying "no devices
-      // known".
-      final network = FakeOmemoNetwork();
-      final aliceStorage = FakeStorageService();
-      final bobStorage = FakeStorageService();
+  test('OmemoBackend: encryptForSend explains *why* no usable key was found '
+      'when a known device exists but is no longer trusted/enabled, instead '
+      'of a generic "no devices/keys available" message', () async {
+    // Regression test: a real-world session showed `omemo_dart` logging
+    // "Fetching bundles"/"Building new ratchet" for a known device (so
+    // it clearly had a device list and bundle), yet still producing zero
+    // usable keys with no explanation anywhere in the log -- this
+    // happens when BlindTrustBeforeVerificationTrustManager.isTrusted/
+    // isEnabled silently skip the device (e.g. because it was
+    // explicitly marked untrusted, or another device of the same JID
+    // was verified). The thrown error must name the actual device id
+    // and its trusted/enabled state instead of just saying "no devices
+    // known".
+    final network = FakeOmemoNetwork();
+    final aliceStorage = FakeStorageService();
+    final bobStorage = FakeStorageService();
 
-      final aliceBackend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: aliceStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-      final bobBackend = await OmemoBackend.create(
-        selfBareJid: bobJid,
-        storage: bobStorage,
-        pep: FakeOmemoPep(network, bobJid),
-      );
-      await bobBackend.publishIdentity();
+    final aliceBackend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: aliceStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    final bobBackend = await OmemoBackend.create(
+      selfBareJid: bobJid,
+      storage: bobStorage,
+      pep: FakeOmemoPep(network, bobJid),
+    );
+    await bobBackend.publishIdentity();
 
-      // First send succeeds and establishes a session + blind-trusted
-      // device for bob.
-      await aliceBackend.encryptForSend(bobJid, 'hello from alice');
-      final deviceIds = await aliceBackend.knownDeviceIdsFor(bobJid);
-      expect(deviceIds, isNotEmpty);
-      final deviceId = deviceIds.first;
+    // First send succeeds and establishes a session + blind-trusted
+    // device for bob.
+    await aliceBackend.encryptForSend(bobJid, 'hello from alice');
+    final deviceIds = await aliceBackend.knownDeviceIdsFor(bobJid);
+    expect(deviceIds, isNotEmpty);
+    final deviceId = deviceIds.first;
 
-      // Now explicitly mark that device as untrusted (e.g. the user
-      // revoked trust, or -- as in the real-world report -- a different
-      // device of bob's was marked "verified", which makes BTBV refuse
-      // blind trust for this one).
-      await aliceBackend.setTrust(bobJid, '$deviceId', TrustState.untrusted);
+    // Now explicitly mark that device as untrusted (e.g. the user
+    // revoked trust, or -- as in the real-world report -- a different
+    // device of bob's was marked "verified", which makes BTBV refuse
+    // blind trust for this one).
+    await aliceBackend.setTrust(bobJid, '$deviceId', TrustState.untrusted);
 
-      await expectLater(
-        aliceBackend.encryptForSend(bobJid, 'hello again'),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('$deviceId'), contains('trusted=false')),
-          ),
+    await expectLater(
+      aliceBackend.encryptForSend(bobJid, 'hello again'),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('$deviceId'), contains('trusted=false')),
         ),
-      );
-    },
-  );
+      ),
+    );
+  });
 
   test(
-    'OmemoBackend: outgoing <key kex="true"> embeds libsignal '
+    'OmemoBackend: outgoing <key prekey="true"> embeds libsignal '
     'DJB-type-prefixed ik/ek for interop with real legacy-OMEMO clients',
     () async {
       // Regression test for the "Message was not encrypted for this
       // device" / "Algorithm ed25519 expects a public key with 32 bytes,
       // but got: 33 bytes" bugs: real legacy-OMEMO clients
       // (Conversations/Gajim/Dino) serialize the `ik`/`ek` fields of the
-      // `OMEMOKeyExchange` protobuf embedded in a <key kex='true'>
+      // `OMEMOKeyExchange` protobuf embedded in a <key prekey='true'>
       // element using libsignal's DJB-type-prefixed format (leading 0x05
       // byte + 32 raw bytes = 33 bytes total), not the raw 32-byte form
       // `omemo_dart`'s own schema expects. We must do the same when
@@ -558,7 +559,7 @@ void main() {
       );
       final header = payload.element.getChild('header')!;
       final kexKeyElement = header.children.firstWhere(
-        (c) => c.name == 'key' && c.getAttribute('kex')?.value == 'true',
+        (c) => c.name == 'key' && c.getAttribute('prekey')?.value == 'true',
       );
       final kex = OMEMOKeyExchange.fromBuffer(
         base64Decode(kexKeyElement.textValue!.trim()),
@@ -612,94 +613,88 @@ void main() {
     },
   );
 
-  test(
-    'OmemoBackend: encryptForSend tolerates a stale pre-fix cached bundle '
-    'carrying a 33-byte libsignal-DJB-type-prefixed key',
-    () async {
-      // Regression test: before the DJB-type-byte fix in
-      // lib/xmpp/omemo_pep.dart, fetched bundles from real legacy-OMEMO
-      // clients (Conversations/Gajim/Dino) were cached verbatim with a
-      // leading 0x05 byte on each key (33 bytes instead of 32), and that
-      // stale cache entry is never re-fetched once present. Simulate such
-      // a stale Hive cache entry directly in storage (bypassing the fixed
-      // fetch path entirely) and confirm OmemoBackend's cache-loading
-      // path (_bundleFromJson) now defensively strips it, instead of
-      // reproducing "Algorithm ed25519 expects a public key with 32
-      // bytes, but got: 33 bytes" indefinitely.
-      final network = FakeOmemoNetwork();
-      final aliceStorage = FakeStorageService();
-      final bobStorage = FakeStorageService();
+  test('OmemoBackend: encryptForSend tolerates a stale pre-fix cached bundle '
+      'carrying a 33-byte libsignal-DJB-type-prefixed key', () async {
+    // Regression test: before the DJB-type-byte fix in
+    // lib/xmpp/omemo_pep.dart, fetched bundles from real legacy-OMEMO
+    // clients (Conversations/Gajim/Dino) were cached verbatim with a
+    // leading 0x05 byte on each key (33 bytes instead of 32), and that
+    // stale cache entry is never re-fetched once present. Simulate such
+    // a stale Hive cache entry directly in storage (bypassing the fixed
+    // fetch path entirely) and confirm OmemoBackend's cache-loading
+    // path (_bundleFromJson) now defensively strips it, instead of
+    // reproducing "Algorithm ed25519 expects a public key with 32
+    // bytes, but got: 33 bytes" indefinitely.
+    final network = FakeOmemoNetwork();
+    final aliceStorage = FakeStorageService();
+    final bobStorage = FakeStorageService();
 
-      final aliceBackend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: aliceStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-      final bobBackend = await OmemoBackend.create(
-        selfBareJid: bobJid,
-        storage: bobStorage,
-        pep: FakeOmemoPep(network, bobJid),
-      );
+    final aliceBackend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: aliceStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    final bobBackend = await OmemoBackend.create(
+      selfBareJid: bobJid,
+      storage: bobStorage,
+      pep: FakeOmemoPep(network, bobJid),
+    );
 
-      await bobBackend.publishIdentity();
-      final bobDeviceId =
-          (await bobStorage.loadOmemoIdentity(bobJid))!['id'] as int;
-      final realBundle = network.bundles['$bobJid:$bobDeviceId']!;
+    await bobBackend.publishIdentity();
+    final bobDeviceId =
+        (await bobStorage.loadOmemoIdentity(bobJid))!['id'] as int;
+    final realBundle = network.bundles['$bobJid:$bobDeviceId']!;
 
-      String addDjbType(String base64Encoded) =>
-          base64Encode([0x05, ...base64Decode(base64Encoded)]);
+    String addDjbType(String base64Encoded) =>
+        base64Encode([0x05, ...base64Decode(base64Encoded)]);
 
-      // Pre-seed alice's bundle cache with a stale, pre-fix-style entry:
-      // same keys as bob's real bundle, but with the libsignal DJB-type
-      // byte still attached (33 bytes).
-      await aliceStorage.storeOmemoBundle(bobJid, bobDeviceId, {
-        'jid': bobJid,
-        'id': bobDeviceId,
-        'spk': addDjbType(realBundle.spkEncoded),
-        'spkId': realBundle.spkId,
-        'spks': realBundle.spkSignatureEncoded,
-        'ik': addDjbType(realBundle.ikEncoded),
-        'opks': {
-          for (final entry in realBundle.opksEncoded.entries)
-            entry.key.toString(): addDjbType(entry.value),
-        },
-      });
+    // Pre-seed alice's bundle cache with a stale, pre-fix-style entry:
+    // same keys as bob's real bundle, but with the libsignal DJB-type
+    // byte still attached (33 bytes).
+    await aliceStorage.storeOmemoBundle(bobJid, bobDeviceId, {
+      'jid': bobJid,
+      'id': bobDeviceId,
+      'spk': addDjbType(realBundle.spkEncoded),
+      'spkId': realBundle.spkId,
+      'spks': realBundle.spkSignatureEncoded,
+      'ik': addDjbType(realBundle.ikEncoded),
+      'opks': {
+        for (final entry in realBundle.opksEncoded.entries)
+          entry.key.toString(): addDjbType(entry.value),
+      },
+    });
 
-      // Must not throw "Algorithm ed25519 expects a public key with 32
-      // bytes, but got: 33 bytes" despite the stale cache entry.
-      final payload = await aliceBackend.encryptForSend(
-        bobJid,
-        'hello from alice',
-      );
-      expect(payload.element.name, 'encrypted');
-    },
-  );
+    // Must not throw "Algorithm ed25519 expects a public key with 32
+    // bytes, but got: 33 bytes" despite the stale cache entry.
+    final payload = await aliceBackend.encryptForSend(
+      bobJid,
+      'hello from alice',
+    );
+    expect(payload.element.name, 'encrypted');
+  });
 
-  test(
-    'OmemoBackend: restores the same identity across restarts',
-    () async {
-      final network = FakeOmemoNetwork();
-      final storage = FakeStorageService();
+  test('OmemoBackend: restores the same identity across restarts', () async {
+    final network = FakeOmemoNetwork();
+    final storage = FakeStorageService();
 
-      final first = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: storage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-      await first.publishIdentity();
-      final firstDeviceId = (await storage.loadOmemoIdentity(aliceJid))!['id'];
+    final first = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: storage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    await first.publishIdentity();
+    final firstDeviceId = (await storage.loadOmemoIdentity(aliceJid))!['id'];
 
-      final second = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: storage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-      final secondDeviceId = (await storage.loadOmemoIdentity(aliceJid))!['id'];
+    final second = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: storage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    final secondDeviceId = (await storage.loadOmemoIdentity(aliceJid))!['id'];
 
-      expect(secondDeviceId, firstDeviceId);
-      expect(second.protocolId, 'omemo');
-    },
-  );
+    expect(secondDeviceId, firstDeviceId);
+    expect(second.protocolId, 'omemo');
+  });
 
   test(
     'OmemoBackend: decryptIncoming reports an error for a non-legacy-OMEMO stanza',
@@ -793,7 +788,7 @@ void main() {
   <encrypted xmlns="eu.siacs.conversations.axolotl">
     <header sid="1234">
       <key rid="5678">BASE64RATCHETKEYDATA==</key>
-      <key rid="9012" kex="true">BASE64KEXKEYDATA==</key>
+      <key rid="9012" prekey="true">BASE64KEXKEYDATA==</key>
       <iv>BASE64IVDATA==</iv>
     </header>
     <payload>BASE64CIPHERTEXTDATA==</payload>
@@ -809,9 +804,9 @@ void main() {
       final keyXmls = headerXml.findElements('key').toList();
       expect(keyXmls.length, 2);
       expect(keyXmls[0].getAttribute('rid'), '5678');
-      expect(keyXmls[0].getAttribute('kex'), isNull);
+      expect(keyXmls[0].getAttribute('prekey'), isNull);
       expect(keyXmls[1].getAttribute('rid'), '9012');
-      expect(keyXmls[1].getAttribute('kex'), 'true');
+      expect(keyXmls[1].getAttribute('prekey'), 'true');
 
       final ivXml = headerXml.findElements('iv').first;
       expect(ivXml.innerText, 'BASE64IVDATA==');
@@ -821,83 +816,77 @@ void main() {
     },
   );
 
-  test(
-    'AES-128-GCM payload cipher helper: round-trips plaintext and rejects '
-    'tampered ciphertext',
-    () async {
-      // Targeted unit test of the exact cipher/key-material convention used
-      // by OmemoBackend.encryptForSend/decryptIncoming (16-byte AES-128 key
-      // + 16-byte GCM tag as the 32-byte ratchet-wrapped key material, IV
-      // transported separately), independent of the OMEMO
-      // session/ratchet machinery.
-      final cipher = AesGcm.with128bits();
-      final secretKey = await cipher.newSecretKey();
-      final nonce = cipher.newNonce();
-      const plaintext = 'hello legacy OMEMO';
+  test('AES-128-GCM payload cipher helper: round-trips plaintext and rejects '
+      'tampered ciphertext', () async {
+    // Targeted unit test of the exact cipher/key-material convention used
+    // by OmemoBackend.encryptForSend/decryptIncoming (16-byte AES-128 key
+    // + 16-byte GCM tag as the 32-byte ratchet-wrapped key material, IV
+    // transported separately), independent of the OMEMO
+    // session/ratchet machinery.
+    final cipher = AesGcm.with128bits();
+    final secretKey = await cipher.newSecretKey();
+    final nonce = cipher.newNonce();
+    const plaintext = 'hello legacy OMEMO';
 
-      final secretBox = await cipher.encrypt(
-        utf8.encode(plaintext),
-        secretKey: secretKey,
-        nonce: nonce,
-      );
-      final rawKeyMaterial = [
-        ...await secretKey.extractBytes(),
-        ...secretBox.mac.bytes,
-      ];
-      expect(rawKeyMaterial.length, 32);
-      expect(secretBox.mac.bytes.length, 16);
+    final secretBox = await cipher.encrypt(
+      utf8.encode(plaintext),
+      secretKey: secretKey,
+      nonce: nonce,
+    );
+    final rawKeyMaterial = [
+      ...await secretKey.extractBytes(),
+      ...secretBox.mac.bytes,
+    ];
+    expect(rawKeyMaterial.length, 32);
+    expect(secretBox.mac.bytes.length, 16);
 
-      final rawKey = rawKeyMaterial.sublist(0, 16);
-      final mac = rawKeyMaterial.sublist(16);
-      final decrypted = await cipher.decrypt(
-        SecretBox(secretBox.cipherText, nonce: nonce, mac: Mac(mac)),
+    final rawKey = rawKeyMaterial.sublist(0, 16);
+    final mac = rawKeyMaterial.sublist(16);
+    final decrypted = await cipher.decrypt(
+      SecretBox(secretBox.cipherText, nonce: nonce, mac: Mac(mac)),
+      secretKey: SecretKey(rawKey),
+    );
+    expect(utf8.decode(decrypted), plaintext);
+
+    // Tampering with the ciphertext must be rejected by GCM's
+    // authentication tag check.
+    final tamperedCiphertext = List<int>.of(secretBox.cipherText);
+    tamperedCiphertext[0] ^= 0xff;
+    await expectLater(
+      cipher.decrypt(
+        SecretBox(tamperedCiphertext, nonce: nonce, mac: Mac(mac)),
         secretKey: SecretKey(rawKey),
-      );
-      expect(utf8.decode(decrypted), plaintext);
+      ),
+      throwsA(isA<Exception>()),
+    );
+  });
 
-      // Tampering with the ciphertext must be rejected by GCM's
-      // authentication tag check.
-      final tamperedCiphertext = List<int>.of(secretBox.cipherText);
-      tamperedCiphertext[0] ^= 0xff;
-      await expectLater(
-        cipher.decrypt(
-          SecretBox(tamperedCiphertext, nonce: nonce, mac: Mac(mac)),
-          secretKey: SecretKey(rawKey),
-        ),
-        throwsA(isA<Exception>()),
-      );
-    },
-  );
+  test('OmemoBackend: exported identity key can be imported to restore the '
+      'same fingerprint', () async {
+    final network = FakeOmemoNetwork();
+    final originalStorage = FakeStorageService();
 
-  test(
-    'OmemoBackend: exported identity key can be imported to restore the '
-    'same fingerprint',
-    () async {
-      final network = FakeOmemoNetwork();
-      final originalStorage = FakeStorageService();
+    final original = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: originalStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    final exported = await original.exportIdentityKey();
 
-      final original = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: originalStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-      final exported = await original.exportIdentityKey();
+    expect(exported, startsWith('-----BEGIN OMEMO IDENTITY KEY-----'));
+    expect(exported, endsWith('-----END OMEMO IDENTITY KEY-----'));
 
-      expect(exported, startsWith('-----BEGIN OMEMO IDENTITY KEY-----'));
-      expect(exported, endsWith('-----END OMEMO IDENTITY KEY-----'));
+    // "Reinstall": a fresh, empty storage, restoring via the exported PEM.
+    final restoredStorage = FakeStorageService();
+    final restored = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: restoredStorage,
+      pep: FakeOmemoPep(network, aliceJid),
+      importedIdentityKeyPem: exported,
+    );
 
-      // "Reinstall": a fresh, empty storage, restoring via the exported PEM.
-      final restoredStorage = FakeStorageService();
-      final restored = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: restoredStorage,
-        pep: FakeOmemoPep(network, aliceJid),
-        importedIdentityKeyPem: exported,
-      );
-
-      expect(await restored.ownFingerprint(), await original.ownFingerprint());
-    },
-  );
+    expect(await restored.ownFingerprint(), await original.ownFingerprint());
+  });
 
   test(
     'OmemoBackend: importing an OMEMO2 export fails with a mismatched label',
@@ -987,169 +976,363 @@ void main() {
     },
   );
 
-  test(
-    'OmemoBackend: regenerates a pre-XEdDSA-fix (Ed25519-typed) stored '
-    'legacy-OMEMO identity instead of reusing it as-is',
-    () async {
-      // Migration regression test: before this fix, legacy-OMEMO devices
-      // were generated with a genuine Ed25519 `ik` (like OMEMO2), which is
-      // incompatible with real clients. Simulate such a pre-fix identity
-      // already persisted in storage and verify OmemoBackend.create
-      // detects and replaces it with a fresh X25519-based device instead
-      // of loading it as-is (which would silently keep producing
-      // `InvalidKeyExchangeSignatureError` against every real contact).
+  test('OmemoBackend: regenerates a pre-XEdDSA-fix (Ed25519-typed) stored '
+      'legacy-OMEMO identity instead of reusing it as-is', () async {
+    // Migration regression test: before this fix, legacy-OMEMO devices
+    // were generated with a genuine Ed25519 `ik` (like OMEMO2), which is
+    // incompatible with real clients. Simulate such a pre-fix identity
+    // already persisted in storage and verify OmemoBackend.create
+    // detects and replaces it with a fresh X25519-based device instead
+    // of loading it as-is (which would silently keep producing
+    // `InvalidKeyExchangeSignatureError` against every real contact).
+    final network = FakeOmemoNetwork();
+    final storage = FakeStorageService();
+
+    // Build a legitimate (but Ed25519-typed) pre-fix device the way
+    // `OmemoDevice.generateNewDevice` (OMEMO2's codepath, previously
+    // also used by the legacy backend) would have.
+    final preFixDevice = await OmemoDevice.generateNewDevice(aliceJid);
+    await storage.storeOmemoIdentity(
+      aliceJid,
+      await omemoDeviceToJson(preFixDevice),
+    );
+
+    final backend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: storage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+
+    final migratedJson = (await storage.loadOmemoIdentity(aliceJid))!;
+    expect((migratedJson['ik'] as Map)['type'], 'x25519');
+    expect(migratedJson['id'], isNot(preFixDevice.id));
+
+    // The regenerated device must still work end-to-end (produce a
+    // valid, verifiable bundle/session), not just have the right type.
+    await backend.publishIdentity();
+    final otherStorage = FakeStorageService();
+    final otherBackend = await OmemoBackend.create(
+      selfBareJid: bobJid,
+      storage: otherStorage,
+      pep: FakeOmemoPep(network, bobJid),
+    );
+    final payload = await otherBackend.encryptForSend(aliceJid, 'hi alice');
+    expect(payload.element.getChild('header'), isNotNull);
+  });
+
+  test('OmemoBackend.publishIdentity: adds our own device id without '
+      'removing any other device already published for this account', () async {
+    // Regression test for a real-world interop requirement (XEP-0384 /
+    // XEP-0163 PEP semantics): publishing our own device-list must only
+    // *add* our device id if it's not already present, never drop other
+    // entries. Wimsy isn't necessarily the only client active on this
+    // account -- other OMEMO-capable clients/installs may be running
+    // concurrently on the same JID -- so unconditionally replacing the
+    // list with just our own id would wrongly deregister those other,
+    // perfectly valid devices.
+    final network = FakeOmemoNetwork();
+    final storage = FakeStorageService();
+
+    // Simulate another device already published for this account (e.g.
+    // another client/install on the same JID), both in the live
+    // published list and the local cache.
+    const otherDeviceId = 123456789;
+    storage.deviceLists[aliceJid] = [otherDeviceId];
+    network.deviceLists[aliceJid] = [otherDeviceId];
+
+    final backend = await OmemoBackend.create(
+      selfBareJid: aliceJid,
+      storage: storage,
+      pep: FakeOmemoPep(network, aliceJid),
+    );
+    await backend.publishIdentity();
+
+    final currentDeviceId = await backend.ownDeviceId();
+    expect(currentDeviceId, isNot(otherDeviceId));
+
+    expect(
+      storage.deviceLists[aliceJid],
+      containsAll([otherDeviceId, currentDeviceId]),
+    );
+    expect(
+      network.deviceLists[aliceJid],
+      containsAll([otherDeviceId, currentDeviceId]),
+    );
+
+    // Publishing again must not duplicate our own id.
+    await backend.publishIdentity();
+    expect(
+      network.deviceLists[aliceJid]!.where((id) => id == currentDeviceId),
+      hasLength(1),
+    );
+  });
+
+  test('x3dhFromBundle: verifies the SPK signature against the libsignal '
+      'type-byte-prefixed bytes when OmemoBundle.spkSignatureMessageEncoded '
+      'is set, matching how real legacy-OMEMO clients (Conversations/Gajim/'
+      'Dino) sign their bundle', () async {
+    // Reproduces the real-world "InvalidKeyExchangeSignatureError" bug:
+    // libsignal's SignedPreKeyRecord signs `publicKey.serialize()`,
+    // which is the 33-byte DJB-type-prefixed form (0x05 + 32 raw
+    // bytes), not the raw 32-byte key omemo_dart itself works with.
+    // `lib/xmpp/omemo_pep.dart` strips that type byte from the keys it
+    // hands to `omemo_dart` for X3DH/ECDH, but previously had no way to
+    // tell `x3dhFromBundle` that the *signature* still covers the
+    // original, longer bytes -- so verification always failed for any
+    // real contact's bundle. This asserts the dedicated
+    // `spkSignatureMessageEncoded` field fixes that, and that omitting
+    // it (the old behaviour) reproduces the original bug.
+    final ik = await OmemoKeyPair.generateNewPair(KeyPairType.ed25519);
+    final spk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+    final opk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
+
+    final rawSpkBytes = await spk.pk.getBytes();
+    final djbPrefixedSpkBytes = [0x05, ...rawSpkBytes];
+    // What a real libsignal-based client actually signs.
+    final signature = await sig(ik, djbPrefixedSpkBytes);
+
+    final bundleWithFix = OmemoBundle(
+      bobJid,
+      1,
+      base64Encode(rawSpkBytes),
+      99,
+      base64Encode(signature),
+      base64Encode(await ik.pk.getBytes()),
+      {7: base64Encode(await opk.pk.getBytes())},
+      spkSignatureMessageEncoded: base64Encode(djbPrefixedSpkBytes),
+    );
+
+    final fixedResult = await x3dhFromBundle(bundleWithFix, ik);
+    expect(
+      fixedResult.isType<InvalidKeyExchangeSignatureError>(),
+      isFalse,
+      reason:
+          'with spkSignatureMessageEncoded set to the DJB-prefixed '
+          'bytes that were actually signed, verification must succeed',
+    );
+
+    // Without the fix (old behaviour: no spkSignatureMessageEncoded),
+    // the signature is checked against the raw, un-prefixed SPK bytes
+    // instead -- which never matches a real client's signature.
+    final bundleWithoutFix = OmemoBundle(
+      bobJid,
+      1,
+      base64Encode(rawSpkBytes),
+      99,
+      base64Encode(signature),
+      base64Encode(await ik.pk.getBytes()),
+      {7: base64Encode(await opk.pk.getBytes())},
+    );
+    final brokenResult = await x3dhFromBundle(bundleWithoutFix, ik);
+    expect(
+      brokenResult.isType<InvalidKeyExchangeSignatureError>(),
+      isTrue,
+      reason:
+          'reproduces the real-world bug: without the fix, a correctly '
+          'signed real-client bundle is wrongly rejected',
+    );
+  });
+
+  group('OmemoBackend.decryptIncoming with libsignal-format keys', () {
+    // Simulates a *real* legacy-OMEMO client ("Alice") built on our own
+    // from-scratch libsignal-compatible stack (legacy_x3dh.dart /
+    // legacy_double_ratchet.dart / legacy_signal_wire.dart) talking to a
+    // real OmemoBackend ("Bob"). Both ends share one implementation, so
+    // this proves self-consistency and the integration plumbing (storage,
+    // OPK handling, payload cipher), NOT interoperability with a real
+    // Conversations/Gajim/Dino -- that needs known-answer vectors or a
+    // live client, which were unavailable. The previous omemo_dart-based
+    // tests above exercise the fallback path.
+    const sid = 4242;
+
+    Future<
+      ({
+        OmemoBackend bob,
+        FakeStorageService bobStorage,
+        int bobId,
+        LegacyRatchetSession alice,
+        List<int> aliceIkPub,
+        List<int> aliceEkPub,
+        int spkId,
+        int opkId,
+      })
+    >
+    setup() async {
       final network = FakeOmemoNetwork();
-      final storage = FakeStorageService();
-
-      // Build a legitimate (but Ed25519-typed) pre-fix device the way
-      // `OmemoDevice.generateNewDevice` (OMEMO2's codepath, previously
-      // also used by the legacy backend) would have.
-      final preFixDevice = await OmemoDevice.generateNewDevice(aliceJid);
-      await storage.storeOmemoIdentity(
-        aliceJid,
-        await omemoDeviceToJson(preFixDevice),
-      );
-
-      final backend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: storage,
-        pep: FakeOmemoPep(network, aliceJid),
-      );
-
-      final migratedJson = (await storage.loadOmemoIdentity(aliceJid))!;
-      expect((migratedJson['ik'] as Map)['type'], 'x25519');
-      expect(migratedJson['id'], isNot(preFixDevice.id));
-
-      // The regenerated device must still work end-to-end (produce a
-      // valid, verifiable bundle/session), not just have the right type.
-      await backend.publishIdentity();
-      final otherStorage = FakeStorageService();
-      final otherBackend = await OmemoBackend.create(
+      final bobStorage = FakeStorageService();
+      final bob = await OmemoBackend.create(
         selfBareJid: bobJid,
-        storage: otherStorage,
+        storage: bobStorage,
         pep: FakeOmemoPep(network, bobJid),
       );
-      final payload = await otherBackend.encryptForSend(aliceJid, 'hi alice');
-      expect(payload.element.getChild('header'), isNotNull);
-    },
-  );
+      await bob.publishIdentity();
+      final bobId = await bob.ownDeviceId();
+      final bundle = network.bundles['$bobJid:$bobId']!;
 
-  test(
-    'OmemoBackend.publishIdentity: adds our own device id without '
-    'removing any other device already published for this account',
-    () async {
-      // Regression test for a real-world interop requirement (XEP-0384 /
-      // XEP-0163 PEP semantics): publishing our own device-list must only
-      // *add* our device id if it's not already present, never drop other
-      // entries. Wimsy isn't necessarily the only client active on this
-      // account -- other OMEMO-capable clients/installs may be running
-      // concurrently on the same JID -- so unconditionally replacing the
-      // list with just our own id would wrongly deregister those other,
-      // perfectly valid devices.
-      final network = FakeOmemoNetwork();
-      final storage = FakeStorageService();
-
-      // Simulate another device already published for this account (e.g.
-      // another client/install on the same JID), both in the live
-      // published list and the local cache.
-      const otherDeviceId = 123456789;
-      storage.deviceLists[aliceJid] = [otherDeviceId];
-      network.deviceLists[aliceJid] = [otherDeviceId];
-
-      final backend = await OmemoBackend.create(
-        selfBareJid: aliceJid,
-        storage: storage,
-        pep: FakeOmemoPep(network, aliceJid),
+      final x = X25519();
+      final ikA = await x.newKeyPair();
+      final ekA = await x.newKeyPair();
+      final ikAPub = addDjbType((await ikA.extractPublicKey()).bytes);
+      final ekAPub = addDjbType((await ekA.extractPublicKey()).bytes);
+      final opkId = bundle.opksEncoded.keys.first;
+      final bobIk = base64Decode(bundle.ikEncoded);
+      final bobSpk = base64Decode(bundle.spkEncoded);
+      final x3dh = await legacyX3dhInitiator(
+        ourIdentityKey: ikA,
+        ourBaseKey: ekA,
+        theirIdentityKey: bobIk,
+        theirSignedPreKey: bobSpk,
+        theirOneTimePreKey: base64Decode(bundle.opksEncoded[opkId]!),
       );
-      await backend.publishIdentity();
-
-      final currentDeviceId = await backend.ownDeviceId();
-      expect(currentDeviceId, isNot(otherDeviceId));
-
-      expect(storage.deviceLists[aliceJid], containsAll([
-        otherDeviceId,
-        currentDeviceId,
-      ]));
-      expect(network.deviceLists[aliceJid], containsAll([
-        otherDeviceId,
-        currentDeviceId,
-      ]));
-
-      // Publishing again must not duplicate our own id.
-      await backend.publishIdentity();
-      expect(
-        network.deviceLists[aliceJid]!.where((id) => id == currentDeviceId),
-        hasLength(1),
+      final alice = await LegacyRatchetSession.initiator(
+        x3dh: x3dh,
+        ourIdentityPublicKey: ikAPub,
+        theirIdentityPublicKey: bobIk,
+        theirSignedPreKey: bobSpk,
       );
-    },
-  );
-
-  test(
-    'x3dhFromBundle: verifies the SPK signature against the libsignal '
-    'type-byte-prefixed bytes when OmemoBundle.spkSignatureMessageEncoded '
-    'is set, matching how real legacy-OMEMO clients (Conversations/Gajim/'
-    'Dino) sign their bundle',
-    () async {
-      // Reproduces the real-world "InvalidKeyExchangeSignatureError" bug:
-      // libsignal's SignedPreKeyRecord signs `publicKey.serialize()`,
-      // which is the 33-byte DJB-type-prefixed form (0x05 + 32 raw
-      // bytes), not the raw 32-byte key omemo_dart itself works with.
-      // `lib/xmpp/omemo_pep.dart` strips that type byte from the keys it
-      // hands to `omemo_dart` for X3DH/ECDH, but previously had no way to
-      // tell `x3dhFromBundle` that the *signature* still covers the
-      // original, longer bytes -- so verification always failed for any
-      // real contact's bundle. This asserts the dedicated
-      // `spkSignatureMessageEncoded` field fixes that, and that omitting
-      // it (the old behaviour) reproduces the original bug.
-      final ik = await OmemoKeyPair.generateNewPair(KeyPairType.ed25519);
-      final spk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
-      final opk = await OmemoKeyPair.generateNewPair(KeyPairType.x25519);
-
-      final rawSpkBytes = await spk.pk.getBytes();
-      final djbPrefixedSpkBytes = [0x05, ...rawSpkBytes];
-      // What a real libsignal-based client actually signs.
-      final signature = await sig(ik, djbPrefixedSpkBytes);
-
-      final bundleWithFix = OmemoBundle(
-        bobJid,
-        1,
-        base64Encode(rawSpkBytes),
-        99,
-        base64Encode(signature),
-        base64Encode(await ik.pk.getBytes()),
-        {7: base64Encode(await opk.pk.getBytes())},
-        spkSignatureMessageEncoded: base64Encode(djbPrefixedSpkBytes),
+      return (
+        bob: bob,
+        bobStorage: bobStorage,
+        bobId: bobId,
+        alice: alice,
+        aliceIkPub: ikAPub,
+        aliceEkPub: ekAPub,
+        spkId: bundle.spkId,
+        opkId: opkId,
       );
+    }
 
-      final fixedResult = await x3dhFromBundle(bundleWithFix, ik);
-      expect(
-        fixedResult.isType<InvalidKeyExchangeSignatureError>(),
-        isFalse,
-        reason:
-            'with spkSignatureMessageEncoded set to the DJB-prefixed '
-            'bytes that were actually signed, verification must succeed',
+    /// Builds the `<message><encrypted/></message>` a real client would
+    /// send: `<key>` wraps [wrapSession]'s ratchet output of the AES key
+    /// (+ tag when [withTagInKey]); the payload is AES-128-GCM.
+    Future<MessageStanza> buildStanza({
+      required LegacyRatchetSession alice,
+      required int bobId,
+      required String text,
+      PreKeySignalMessageWire Function(List<int> inner)? prekey,
+      bool withTagInKey = true,
+    }) async {
+      final cipher = AesGcm.with128bits();
+      final key = await cipher.newSecretKey();
+      final nonce = cipher.newNonce();
+      final box = await cipher.encrypt(
+        utf8.encode(text),
+        secretKey: key,
+        nonce: nonce,
       );
+      final keyBytes = await key.extractBytes();
+      final material = withTagInKey
+          ? [...keyBytes, ...box.mac.bytes]
+          : keyBytes;
+      final inner = await alice.encrypt(material);
+      final keyElement = XmppElement()..name = 'key';
+      keyElement.addAttribute(XmppAttribute('rid', '$bobId'));
+      if (prekey != null) {
+        keyElement.addAttribute(XmppAttribute('prekey', 'true'));
+        keyElement.textValue = base64Encode(prekey(inner).serialize());
+      } else {
+        keyElement.textValue = base64Encode(inner);
+      }
+      final header = XmppElement()..name = 'header';
+      header.addAttribute(XmppAttribute('sid', '$sid'));
+      header.addChild(keyElement);
+      final iv = XmppElement()..name = 'iv';
+      iv.textValue = base64Encode(nonce);
+      header.addChild(iv);
+      final payload = XmppElement()..name = 'payload';
+      payload.textValue = base64Encode(
+        withTagInKey ? box.cipherText : [...box.cipherText, ...box.mac.bytes],
+      );
+      final encrypted = XmppElement()..name = 'encrypted';
+      encrypted.addAttribute(XmppAttribute('xmlns', legacyOmemoNamespace));
+      encrypted.addChild(header);
+      encrypted.addChild(payload);
+      final message = MessageStanza(
+        AbstractStanza.getRandomId(),
+        MessageStanzaType.CHAT,
+      );
+      message.fromJid = Jid.fromFullJid('$aliceJid/device1');
+      message.addChild(encrypted);
+      return message;
+    }
 
-      // Without the fix (old behaviour: no spkSignatureMessageEncoded),
-      // the signature is checked against the raw, un-prefixed SPK bytes
-      // instead -- which never matches a real client's signature.
-      final bundleWithoutFix = OmemoBundle(
-        bobJid,
-        1,
-        base64Encode(rawSpkBytes),
-        99,
-        base64Encode(signature),
-        base64Encode(await ik.pk.getBytes()),
-        {7: base64Encode(await opk.pk.getBytes())},
+    PreKeySignalMessageWire Function(List<int>) wrapPrekey(dynamic s) =>
+        (inner) => PreKeySignalMessageWire(
+          version: kLegacySignalWireVersion,
+          registrationId: sid,
+          preKeyId: s.opkId as int,
+          signedPreKeyId: s.spkId as int,
+          baseKey: s.aliceEkPub as List<int>,
+          identityKey: s.aliceIkPub as List<int>,
+          message: inner,
+        );
+
+    test('prekey message then follow-ups decrypt via the new stack', () async {
+      final s = await setup();
+      final first = await buildStanza(
+        alice: s.alice,
+        bobId: s.bobId,
+        text: 'first from real client',
+        prekey: wrapPrekey(s),
       );
-      final brokenResult = await x3dhFromBundle(bundleWithoutFix, ik);
-      expect(
-        brokenResult.isType<InvalidKeyExchangeSignatureError>(),
-        isTrue,
-        reason:
-            'reproduces the real-world bug: without the fix, a correctly '
-            'signed real-client bundle is wrongly rejected',
+      final r1 = await s.bob.decryptIncoming(first);
+      expect(r1.error, isNull);
+      expect(r1.plaintext, 'first from real client');
+      // Persisted in our own storage, never in omemo_dart's ratchet map.
+      expect(s.bobStorage.signalSessions.keys, ['$aliceJid:$sid']);
+      expect(s.bobStorage.ratchets, isEmpty);
+
+      final second = await buildStanza(
+        alice: s.alice,
+        bobId: s.bobId,
+        text: 'second, plain SignalMessage',
       );
-    },
-  );
+      final r2 = await s.bob.decryptIncoming(second);
+      expect(r2.error, isNull);
+      expect(r2.plaintext, 'second, plain SignalMessage');
+    });
+
+    test('16-byte key with the GCM tag appended to <payload> works', () async {
+      final s = await setup();
+      final first = await buildStanza(
+        alice: s.alice,
+        bobId: s.bobId,
+        text: 'dino style',
+        prekey: wrapPrekey(s),
+        withTagInKey: false,
+      );
+      final r = await s.bob.decryptIncoming(first);
+      expect(r.error, isNull);
+      expect(r.plaintext, 'dino style');
+    });
+
+    test(
+      'replaying the prekey message after its OPK was consumed fails',
+      () async {
+        final s = await setup();
+        final first = await buildStanza(
+          alice: s.alice,
+          bobId: s.bobId,
+          text: 'once',
+          prekey: wrapPrekey(s),
+        );
+        expect((await s.bob.decryptIncoming(first)).plaintext, 'once');
+        final replay = await s.bob.decryptIncoming(first);
+        expect(replay.plaintext, isNull);
+        expect(replay.error, isNotNull);
+      },
+    );
+
+    test('a plain message with no session is reported as an error', () async {
+      final s = await setup();
+      final stanza = await buildStanza(
+        alice: s.alice,
+        bobId: s.bobId,
+        text: 'no session',
+      );
+      final r = await s.bob.decryptIncoming(stanza);
+      expect(r.plaintext, isNull);
+      expect(r.error, contains('No session'));
+    });
+  });
 }
