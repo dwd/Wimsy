@@ -92,9 +92,21 @@ class RatchetAccessQueue {
     Future<T> Function() function,
   ) async {
     await enterCriticalSection(jids);
-    final result = await function();
-    await leaveCriticalSection(jids);
-
-    return result;
+    try {
+      return await function();
+    } finally {
+      // Always release the critical section, even if [function] throws.
+      // Previously, an exception from [function] (e.g. a malformed
+      // incoming message failing to decrypt) would skip
+      // [leaveCriticalSection], permanently leaving [jids] marked as
+      // "running" in [runningOperations]. Every subsequent operation on
+      // those jids (including completely unrelated ones, like fetching
+      // fingerprints for the fingerprint verification screen) would then
+      // queue up behind it forever, since nothing was left to ever
+      // complete their [_RatchetAccessQueueEntry.completer] -- observed
+      // as the fingerprint screen's "orange shield" spinner never
+      // resolving after a single bad incoming message.
+      await leaveCriticalSection(jids);
+    }
   }
 }

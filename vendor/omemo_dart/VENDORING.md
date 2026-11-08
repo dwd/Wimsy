@@ -199,6 +199,41 @@ silently wrong ECDH results.
   `ikIsX25519: true` on bundles parsed from the wire, matching real
   clients' identity-key convention.
 
+### `RatchetAccessQueue` deadlock fix (incoming message never processed, no logging at all)
+
+`RatchetAccessQueue.synchronized` (`lib/src/omemo/queue.dart`) wraps every
+per-JID ratchet/session operation (including `OmemoManager.onIncomingStanza`,
+the fallback path used by `lib/encryption/omemo_backend.dart`'s
+`decryptIncoming` for a peer not yet on the libsignal wire-format stack) in
+`enterCriticalSection`/`leaveCriticalSection`. The original implementation
+only called `leaveCriticalSection` *after* `await function()` returned,
+unconditionally assuming success:
+
+```dart
+await enterCriticalSection(jids);
+final result = await function();
+await leaveCriticalSection(jids);
+return result;
+```
+
+If `function()` ever threw (e.g. a malformed/undecryptable incoming message,
+or any other exception along the decrypt path) the `leaveCriticalSection`
+call was skipped entirely, permanently leaving those JIDs marked "running"
+in `runningOperations`. Every *subsequent* `synchronized` call for the same
+JID(s) -- including completely unrelated ones, like a later incoming message
+from the same contact, or a fingerprint lookup for the verification screen
+-- then queued up behind the stuck entry forever, since nothing was ever
+left to complete its `_RatchetAccessQueueEntry.completer`. This is the root
+cause behind reports of a message appearing to do nothing at all (not even
+an error log line): the `await` on `onIncomingStanza` for that contact's
+next message never completes, so none of `decryptIncoming`'s own logging or
+error handling ever runs.
+
+- `lib/src/omemo/queue.dart`: `synchronized` now wraps `await function()` in
+  a `try`/`finally`, so `leaveCriticalSection` always runs, even when
+  `function()` throws. The thrown exception still propagates to the caller
+  as before; only the critical-section bookkeeping is now exception-safe.
+
 ## Upstream clone with our patches as real commits
 
 This directory (`vendor/omemo_dart/`) is a flat copy (no `.git`), so our local

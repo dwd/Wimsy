@@ -40,6 +40,30 @@ void main() {
     expect(queue.runningOperations.length, 0);
   });
 
+  test(
+    'synchronized releases the critical section even if the wrapped '
+    'function throws, so a later call for the same JIDs does not hang '
+    'forever',
+    () async {
+      final queue = RatchetAccessQueue();
+
+      await expectLater(
+        queue.synchronized(['a'], () async {
+          throw StateError('simulated decrypt failure');
+        }),
+        throwsStateError,
+      );
+
+      // Before the fix, the above throw left 'a' permanently marked as
+      // running, so this would hang forever instead of completing.
+      final result = await queue
+          .synchronized(['a'], () async => 'ok')
+          .timeout(const Duration(seconds: 5));
+      expect(result, 'ok');
+      expect(queue.runningOperations.contains('a'), isFalse);
+    },
+  );
+
   test('Test not blocking due to no conflicts', () async {
     final queue = RatchetAccessQueue();
 

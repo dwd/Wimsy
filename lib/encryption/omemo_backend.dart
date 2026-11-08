@@ -821,14 +821,29 @@ class OmemoBackend implements EncryptionBackend {
     final device = await _omemoManager.getDevice();
     final ours = keys.where((k) => k.rid == device.id).firstOrNull;
     if (ours == null) {
+      Log.v(
+        'OmemoBackend',
+        'No <key> addressed to our device (id=${device.id}) from '
+            '$bareSenderJid/$sid among ${keys.length} key(s); falling back '
+            'to omemo_dart',
+      );
       return null;
     }
     final List<int> bytes;
     try {
       bytes = base64Decode(ours.value);
-    } catch (_) {
+    } catch (e) {
+      Log.w(
+        'OmemoBackend',
+        'Could not base64-decode <key> from $bareSenderJid/$sid: $e',
+      );
       return null;
     }
+    Log.v(
+      'OmemoBackend',
+      'Attempting legacy-signal decrypt of <key prekey="${ours.kex}"> '
+          '(${bytes.length} bytes) from $bareSenderJid/$sid',
+    );
     try {
       LegacyRatchetSession? existing;
       final storedJson = storage.loadLegacySignalSession(bareSenderJid, sid);
@@ -842,10 +857,21 @@ class OmemoBackend implements EncryptionBackend {
         final SignalMessageWire parsed;
         try {
           parsed = SignalMessageWire.parse(bytes);
-        } on LegacySignalWireFormatException {
+        } on LegacySignalWireFormatException catch (e) {
+          Log.v(
+            'OmemoBackend',
+            'Non-prekey <key> from $bareSenderJid/$sid is not libsignal '
+                'wire format ($e); falling back to omemo_dart',
+          );
           return null;
         }
         if (parsed.version != kLegacySignalWireVersion) {
+          Log.v(
+            'OmemoBackend',
+            'Non-prekey <key> from $bareSenderJid/$sid has unsupported '
+                'libsignal wire version ${parsed.version}; falling back to '
+                'omemo_dart',
+          );
           return null;
         }
         if (existing == null) {
@@ -863,7 +889,12 @@ class OmemoBackend implements EncryptionBackend {
       final PreKeySignalMessageWire pre;
       try {
         pre = PreKeySignalMessageWire.parse(bytes);
-      } on LegacySignalWireFormatException {
+      } on LegacySignalWireFormatException catch (e) {
+        Log.v(
+          'OmemoBackend',
+          'Prekey <key> from $bareSenderJid/$sid is not libsignal wire '
+              'format ($e); falling back to omemo_dart',
+        );
         return null;
       }
 
@@ -933,9 +964,37 @@ class OmemoBackend implements EncryptionBackend {
       }
       return (keyMaterial: plaintext, error: null);
     } on LegacyRatchetException catch (e) {
+      Log.w(
+        'OmemoBackend',
+        'Legacy-signal decrypt of <key> from $bareSenderJid/$sid failed: '
+            '${e.message}',
+      );
       return (keyMaterial: null, error: e.message);
     } on ArgumentError catch (e) {
+      Log.w(
+        'OmemoBackend',
+        'Legacy-signal decrypt of <key> from $bareSenderJid/$sid failed: '
+            'invalid key material: $e',
+      );
       return (keyMaterial: null, error: 'Invalid key material: $e');
+    } catch (e, st) {
+      // Catch-all: an unanticipated exception type here (e.g. from
+      // `package:cryptography`'s AES/HKDF/X25519 primitives, or a malformed
+      // protobuf triggering a RangeError/StateError/FormatException that
+      // none of the narrower `on` clauses above catch) must not be allowed
+      // to propagate out of this method uncaught. If it did, it would skip
+      // every Log.w/Log.v call in this file and only surface via the
+      // generic try/catch in `XmppService._addIncomingDmMessage` (or, if
+      // thrown from a context that Future doesn't propagate cleanly,
+      // potentially not at all) -- which is exactly what made earlier
+      // reports of this bug look like "nothing happened, no logging
+      // output" instead of a clear, attributable error.
+      Log.w(
+        'OmemoBackend',
+        'Unexpected error during legacy-signal decrypt of <key> from '
+            '$bareSenderJid/$sid: $e\n$st',
+      );
+      return (keyMaterial: null, error: 'Unexpected decrypt error: $e');
     }
   }
 
@@ -996,6 +1055,11 @@ class OmemoBackend implements EncryptionBackend {
     // [_decryptKeyWithSignalStack]); only if the key bytes aren't in that
     // wire format at all (e.g. a peer that is itself an omemo_dart-based
     // client) do we fall back to omemo_dart's `OmemoManager`.
+    Log.v(
+      'OmemoBackend',
+      'decryptIncoming: legacy OMEMO <encrypted/> from $bareSenderJid '
+          'sid=$sid with ${keys.length} <key/> element(s)',
+    );
     List<int>? rawKeyMaterial;
     final signalAttempt = await _decryptKeyWithSignalStack(
       bareSenderJid,
@@ -1004,6 +1068,11 @@ class OmemoBackend implements EncryptionBackend {
     );
     if (signalAttempt != null) {
       if (signalAttempt.error != null) {
+        Log.w(
+          'OmemoBackend',
+          'decryptIncoming: legacy-signal stack reported an error for '
+              '$bareSenderJid/$sid: ${signalAttempt.error}',
+        );
         return DecryptResult(
           plaintext: null,
           protocolId: protocolId,
@@ -1016,18 +1085,49 @@ class OmemoBackend implements EncryptionBackend {
       }
       rawKeyMaterial = signalAttempt.keyMaterial;
     } else {
-      final result = await _omemoManager.onIncomingStanza(
-        OmemoIncomingStanza(
-          bareSenderJid,
-          sid,
-          fixedKeys,
-          payload,
-          false,
-          skipPayloadDecryption: true,
-        ),
+      Log.v(
+        'OmemoBackend',
+        'decryptIncoming: falling back to omemo_dart OmemoManager for '
+            '$bareSenderJid/$sid',
       );
+      final dynamic result;
+      try {
+        result = await _omemoManager.onIncomingStanza(
+          OmemoIncomingStanza(
+            bareSenderJid,
+            sid,
+            fixedKeys,
+            payload,
+            false,
+            skipPayloadDecryption: true,
+          ),
+        );
+      } catch (e, st) {
+        // As with _decryptKeyWithSignalStack's catch-all: don't let an
+        // unanticipated exception from the omemo_dart fallback propagate
+        // uncaught, or this method's own logging never runs.
+        Log.w(
+          'OmemoBackend',
+          'decryptIncoming: omemo_dart fallback threw for '
+              '$bareSenderJid/$sid: $e\n$st',
+        );
+        return DecryptResult(
+          plaintext: null,
+          protocolId: protocolId,
+          senderTrust: await trustStateFor(
+            bareSenderJid,
+            deviceOrKeyId: '$sid',
+          ),
+          error: 'Unexpected omemo_dart error: $e',
+        );
+      }
 
       if (result.error != null) {
+        Log.w(
+          'OmemoBackend',
+          'decryptIncoming: omemo_dart reported an error for '
+              '$bareSenderJid/$sid: ${result.error}',
+        );
         return DecryptResult(
           plaintext: null,
           protocolId: protocolId,
@@ -1084,12 +1184,22 @@ class OmemoBackend implements EncryptionBackend {
         secretBox,
         secretKey: SecretKey(rawKey),
       );
+      Log.v(
+        'OmemoBackend',
+        'decryptIncoming: successfully decrypted legacy OMEMO message from '
+            '$bareSenderJid/$sid',
+      );
       return DecryptResult(
         plaintext: utf8.decode(plaintextBytes),
         protocolId: protocolId,
         senderTrust: await trustStateFor(bareSenderJid, deviceOrKeyId: '$sid'),
       );
     } on Exception catch (e) {
+      Log.w(
+        'OmemoBackend',
+        'decryptIncoming: failed to decrypt AES-128-GCM payload from '
+            '$bareSenderJid/$sid: $e',
+      );
       return DecryptResult(
         plaintext: null,
         protocolId: protocolId,
