@@ -241,8 +241,12 @@ class BlindTrustBeforeVerificationTrustManager extends TrustManager {
 
   @override
   Future<void> removeTrustDecisionsForJid(String jid) async {
-    // Clear the caches
-    for (final device in devices[jid]!) {
+    // Clear the caches. Guard against jid not being present in [devices]
+    // at all (e.g. no trust decisions were ever recorded for it, as can
+    // happen when resetting OMEMO state for a contact we've never
+    // actually exchanged any OMEMO-encrypted traffic with), which
+    // previously crashed with a null check error.
+    for (final device in devices[jid] ?? const <int>[]) {
       final key = RatchetMapKey(jid, device);
       trustCache.remove(key);
       enablementCache.remove(key);

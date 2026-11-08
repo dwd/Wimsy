@@ -37,4 +37,20 @@ void main() {
     expect(await btbv.isEnabled(bobJid, 3), true);
     expect(await btbv.isEnabled(bobJid, 4), true);
   });
+
+  test(
+    'removeTrustDecisionsForJid does not throw for a jid with no recorded '
+    'trust decisions',
+    () async {
+      // Regression test: removeTrustDecisionsForJid used to do
+      // `devices[jid]!`, which threw a null check error whenever it was
+      // called for a jid that was never added to the devices map (e.g.
+      // resetting OMEMO state for a contact we've never actually
+      // exchanged any OMEMO-encrypted traffic with).
+      final btbv = BlindTrustBeforeVerificationTrustManager();
+      const unknownJid = 'unknown@some.server';
+
+      await btbv.removeTrustDecisionsForJid(unknownJid);
+    },
+  );
 }
