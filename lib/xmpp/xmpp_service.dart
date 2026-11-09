@@ -7081,6 +7081,40 @@ class XmppService extends ChangeNotifier {
     return _buildMessageIntents(stanza);
   }
 
+  /// Test-only seam exercising [_addMessage] directly, including its
+  /// "merge into existing message with the same messageId" path - used to
+  /// cover the async-OMEMO-decrypt-arrives-after-the-placeholder scenario
+  /// without needing a live connection/stanza round-trip.
+  @visibleForTesting
+  void addMessageForTesting({
+    required String bareJid,
+    required String from,
+    required String to,
+    required String body,
+    required bool outgoing,
+    required DateTime timestamp,
+    String? messageId,
+    String? mamId,
+    String? stanzaId,
+    String? encryptionProtocol,
+    String? encryptionError,
+  }) {
+    _addMessage(
+      bareJid: bareJid,
+      from: from,
+      to: to,
+      body: body,
+      rawXml: '',
+      outgoing: outgoing,
+      timestamp: timestamp,
+      messageId: messageId,
+      mamId: mamId,
+      stanzaId: stanzaId,
+      encryptionProtocol: encryptionProtocol,
+      encryptionError: encryptionError,
+    );
+  }
+
   void _applyMessageIntents(MessageStanza stanza, List<MessageIntent> intents) {
     for (final intent in intents) {
       if (intent is HandleJmiIntent) {
@@ -10570,6 +10604,23 @@ class XmppService extends ChangeNotifier {
       );
       if (existingIndex != -1) {
         final existing = list[existingIndex];
+        // A later call for the same messageId carries the "best known"
+        // rendering of this message's content - e.g. the async OMEMO
+        // decrypt result arriving after the synchronous placeholder/
+        // fallback-body add in [_addIncomingDmMessage]. Without updating
+        // body/encryptionProtocol/encryptionError here, that decrypted
+        // text would be silently discarded by this "merge existing, early
+        // return" path and the UI would be stuck showing the original
+        // ciphertext fallback body forever.
+        final nextBody = body.isNotEmpty ? body : existing.body;
+        final nextEncryptionProtocol =
+            (encryptionProtocol != null && encryptionProtocol.isNotEmpty)
+            ? encryptionProtocol
+            : existing.encryptionProtocol;
+        final nextEncryptionError =
+            (encryptionError != null && encryptionError.isNotEmpty)
+            ? encryptionError
+            : existing.encryptionError;
         final nextMamId = (mamId != null && mamId.isNotEmpty)
             ? mamId
             : existing.mamId;
@@ -10645,7 +10696,10 @@ class XmppService extends ChangeNotifier {
         // to false by a later merge.
         final nextLocallyOriginated =
             locallyOriginated || existing.locallyOriginated;
-        if (nextMamId != existing.mamId ||
+        if (nextBody != existing.body ||
+            nextEncryptionProtocol != existing.encryptionProtocol ||
+            nextEncryptionError != existing.encryptionError ||
+            nextMamId != existing.mamId ||
             nextStanzaId != existing.stanzaId ||
             nextOobUrl != existing.oobUrl ||
             nextRawXml != existing.rawXml ||
@@ -10667,6 +10721,9 @@ class XmppService extends ChangeNotifier {
             nextWebxdcJsonPayload != existing.webxdcJsonPayload ||
             nextLocallyOriginated != existing.locallyOriginated) {
           list[existingIndex] = existing.copyWith(
+            body: nextBody,
+            encryptionProtocol: nextEncryptionProtocol,
+            encryptionError: nextEncryptionError,
             mamId: nextMamId,
             stanzaId: nextStanzaId,
             oobUrl: nextOobUrl,
