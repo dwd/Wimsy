@@ -97,4 +97,54 @@ void main() {
       expect(merged.encryptionError, 'bad MAC');
     },
   );
+
+  test(
+    'a later failed re-decrypt of an already successfully-decrypted message '
+    'does not revert its body/protocol/error back to the fallback (e.g. '
+    'MAM catch-up/history replay re-delivering a message after restart, '
+    'whose Double Ratchet message key was already consumed)',
+    () {
+      final service = XmppService();
+      const bareJid = 'dave@example.com';
+      const from = 'dave@example.com';
+      const to = 'bob@example.com';
+      const messageId = 'msg-3';
+      final timestamp = DateTime.utc(2026, 1, 1);
+      const fallbackBody =
+          'I sent you an OMEMO encrypted message but your client '
+          "doesn't seem to support that.";
+
+      // First add: successfully decrypted live.
+      service.addMessageForTesting(
+        bareJid: bareJid,
+        from: from,
+        to: to,
+        body: 'the real decrypted plaintext',
+        outgoing: false,
+        timestamp: timestamp,
+        messageId: messageId,
+        encryptionProtocol: 'omemo',
+      );
+
+      // Second add for the same messageId: a re-delivery of the same
+      // stanza (e.g. after an app restart triggers a MAM catch-up replay)
+      // fails to re-decrypt, since the message key was already consumed
+      // and removed from the ratchet the first time.
+      service.addMessageForTesting(
+        bareJid: bareJid,
+        from: from,
+        to: to,
+        body: fallbackBody,
+        outgoing: false,
+        timestamp: timestamp,
+        messageId: messageId,
+        encryptionError: 'message key already consumed',
+      );
+
+      final merged = service.messagesFor(bareJid).single;
+      expect(merged.body, 'the real decrypted plaintext');
+      expect(merged.encryptionProtocol, 'omemo');
+      expect(merged.encryptionError, isNull);
+    },
+  );
 }

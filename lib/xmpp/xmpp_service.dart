@@ -10612,13 +10612,34 @@ class XmppService extends ChangeNotifier {
         // text would be silently discarded by this "merge existing, early
         // return" path and the UI would be stuck showing the original
         // ciphertext fallback body forever.
-        final nextBody = body.isNotEmpty ? body : existing.body;
-        final nextEncryptionProtocol =
-            (encryptionProtocol != null && encryptionProtocol.isNotEmpty)
+        // If this message was already successfully decrypted (e.g. live,
+        // before a restart) and this call is a *failed* re-decrypt attempt
+        // of the exact same message -- e.g. MAM catch-up/history replay on
+        // reconnect re-delivering a stanza we already decrypted, whose
+        // Double Ratchet message key was already consumed and removed the
+        // first time around -- we must not let the resulting fallback
+        // <body>/encryptionError clobber the good cached plaintext. This
+        // was the actual cause of decrypted messages reverting to the
+        // undecryptable-fallback text after an app restart.
+        final existingDecryptedOk =
+            existing.encryptionProtocol != null &&
+            existing.encryptionError == null;
+        final isFailedRedecryptOfDecryptedMessage =
+            existingDecryptedOk &&
+            (encryptionProtocol == null || encryptionProtocol.isEmpty) &&
+            encryptionError != null &&
+            encryptionError.isNotEmpty;
+        final nextBody = isFailedRedecryptOfDecryptedMessage
+            ? existing.body
+            : (body.isNotEmpty ? body : existing.body);
+        final nextEncryptionProtocol = isFailedRedecryptOfDecryptedMessage
+            ? existing.encryptionProtocol
+            : (encryptionProtocol != null && encryptionProtocol.isNotEmpty)
             ? encryptionProtocol
             : existing.encryptionProtocol;
-        final nextEncryptionError =
-            (encryptionError != null && encryptionError.isNotEmpty)
+        final nextEncryptionError = isFailedRedecryptOfDecryptedMessage
+            ? existing.encryptionError
+            : (encryptionError != null && encryptionError.isNotEmpty)
             ? encryptionError
             : existing.encryptionError;
         final nextMamId = (mamId != null && mamId.isNotEmpty)
