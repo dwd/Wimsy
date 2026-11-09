@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../storage/storage_service.dart';
+import '../xmpp/encryption_settings_pep.dart';
 import '../xmpp/omemo_pep.dart' hide omemo2Namespace, legacyOmemoNamespace;
 import '../xmpp/ox_pep.dart' hide oxNamespace;
 import 'encryption_backend.dart';
@@ -65,6 +66,64 @@ EncryptionProtocol encryptionProtocolFromId(String? id) {
   }
 }
 
+/// Implemented, user-selectable cryptosystems (excludes [EncryptionProtocol.none],
+/// which is never itself "enabled"/"disabled").
+const List<EncryptionProtocol> implementedEncryptionProtocols = [
+  EncryptionProtocol.omemo2,
+  EncryptionProtocol.legacyOmemo,
+  EncryptionProtocol.ox,
+];
+
+/// Global policy, applied to conversations with no explicit per-contact
+/// protocol choice (see [EncryptionManager.setProtocolFor]), that decides
+/// whether/when end-to-end encryption is turned on by default.
+enum EncryptionDefaultPolicy {
+  /// Never auto-select encryption; new conversations start in plaintext
+  /// until the user explicitly turns it on.
+  never,
+
+  /// Auto-select the first enabled cryptosystem
+  /// ([EncryptionManager.isProtocolLikelySupported]) the contact is known
+  /// to support; otherwise stay in plaintext.
+  ifSupported,
+
+  /// Always auto-select the first enabled cryptosystem, regardless of
+  /// whether the contact is known to support it yet.
+  always,
+}
+
+/// Maps an [EncryptionDefaultPolicy] to the stable string id used for
+/// persistence/PEP sync.
+String encryptionDefaultPolicyId(EncryptionDefaultPolicy policy) {
+  switch (policy) {
+    case EncryptionDefaultPolicy.never:
+      return 'never';
+    case EncryptionDefaultPolicy.ifSupported:
+      return 'ifSupported';
+    case EncryptionDefaultPolicy.always:
+      return 'always';
+  }
+}
+
+/// Parses a persisted/synced default-policy id back into an
+/// [EncryptionDefaultPolicy], defaulting to [EncryptionDefaultPolicy.never]
+/// for unknown/absent values.
+EncryptionDefaultPolicy encryptionDefaultPolicyFromId(String? id) {
+  switch (id) {
+    case 'ifSupported':
+      return EncryptionDefaultPolicy.ifSupported;
+    case 'always':
+      return EncryptionDefaultPolicy.always;
+    default:
+      return EncryptionDefaultPolicy.never;
+  }
+}
+
+/// The PEP global-settings item id used to persist a cryptosystem's
+/// enable/disable flag (e.g. `'omemo2Enabled'`).
+String _enabledSettingId(EncryptionProtocol protocol) =>
+    '${encryptionProtocolId(protocol)}Enabled';
+
 /// Tracks, per bare JID (1:1 conversation), which [EncryptionProtocol] is
 /// currently selected, persists that selection, and dispatches
 /// encrypt/decrypt calls to the matching [EncryptionBackend].
@@ -79,15 +138,27 @@ class EncryptionManager {
     required this.storage,
     required this.selfBareJid,
     required EncryptionUpdateCallback onUpdate,
-  }) : _onUpdate = onUpdate;
+  }) : _onUpdate = onUpdate,
+       _settingsPep = EncryptionSettingsPep(
+         connection: connection,
+         selfBareJid: selfBareJid,
+         onRemoteUpdate: onUpdate,
+       );
 
   final Connection connection;
   final StorageService storage;
   final String selfBareJid;
   final EncryptionUpdateCallback _onUpdate;
 
+  /// Syncs the global settings and per-contact protocol choices below
+  /// across this account's devices via two private PEP nodes. See
+  /// `lib/xmpp/encryption_settings_pep.dart`.
+  final EncryptionSettingsPep _settingsPep;
+
   final Map<String, EncryptionProtocol> _selectedProtocol = {};
   final Map<String, EncryptionBackend> _backendsByProtocolId = {};
+  EncryptionDefaultPolicy? _defaultPolicy;
+  final Map<EncryptionProtocol, bool> _enabledProtocols = {};
 
   OmemoPep? _omemoPep;
   OxPep? _oxPep;
@@ -95,28 +166,141 @@ class EncryptionManager {
   Future<OmemoBackend>? _legacyOmemoBackendFuture;
   Future<OxBackend>? _oxBackendFuture;
 
-  /// Returns the currently selected [EncryptionProtocol] for [bareJid],
-  /// loading it from persisted storage on first access.
-  EncryptionProtocol protocolFor(String bareJid) {
-    return _selectedProtocol.putIfAbsent(
-      bareJid,
-      () => encryptionProtocolFromId(
-        storage.loadEncryptionProtocolForJid(bareJid),
-      ),
+  /// Requests the current global/per-contact settings from the two private
+  /// PEP nodes (e.g. right after connecting), so this device picks up any
+  /// changes made from another device. See `EncryptionSettingsPep`.
+  void requestSettingsSync() {
+    _settingsPep.requestGlobalSettings();
+    _settingsPep.requestContactSettings();
+  }
+
+  /// Forwards an incoming stanza to [_settingsPep] so PEP events/IQ results
+  /// for the global-settings/per-contact-settings nodes are applied. Should
+  /// be wired into the same stanza stream as other PEP managers (see
+  /// `XmppService._setupPep`).
+  void handleStanza(AbstractStanza stanza) {
+    _settingsPep.handleStanza(stanza);
+  }
+
+  /// The global default encryption policy, loaded from persisted storage
+  /// (or the synced PEP value if more recent) on first access.
+  EncryptionDefaultPolicy get defaultPolicy {
+    return _defaultPolicy ??= encryptionDefaultPolicyFromId(
+      _settingsPep.globalItems['defaultPolicy'] ??
+          storage.loadEncryptionDefaultPolicy(),
     );
   }
 
-  /// Selects [protocol] for [bareJid] and persists the choice.
+  /// Sets the global default encryption policy, persisting it locally and
+  /// publishing it to the global-settings PEP node for other devices.
+  Future<void> setDefaultPolicy(EncryptionDefaultPolicy policy) async {
+    _defaultPolicy = policy;
+    await storage.storeEncryptionDefaultPolicy(encryptionDefaultPolicyId(policy));
+    unawaited(_settingsPep.publishGlobalSetting(
+      'defaultPolicy',
+      encryptionDefaultPolicyId(policy),
+    ));
+    _onUpdate();
+  }
+
+  /// Whether [protocol] is currently enabled as a cryptosystem. Disabled
+  /// cryptosystems must be hidden from menus/screens (see
+  /// `lib/widgets/encryption_selector.dart`) and are never auto-selected
+  /// by [defaultPolicy]. Defaults to `true` (enabled) until explicitly
+  /// disabled. [EncryptionProtocol.none] is always considered "enabled".
+  bool isProtocolEnabled(EncryptionProtocol protocol) {
+    if (protocol == EncryptionProtocol.none) {
+      return true;
+    }
+    return _enabledProtocols.putIfAbsent(protocol, () {
+      final remote = _settingsPep.globalItems[_enabledSettingId(protocol)];
+      if (remote != null) {
+        return remote == 'true';
+      }
+      return storage.loadEncryptionProtocolEnabled(encryptionProtocolId(protocol)) ??
+          true;
+    });
+  }
+
+  /// Enables/disables [protocol] as a cryptosystem, persisting the choice
+  /// locally and publishing it to the global-settings PEP node. Turning a
+  /// protocol off does not change any existing per-contact selection of it
+  /// (see [protocolFor]'s fallback-to-none behavior for a disabled choice).
+  Future<void> setProtocolEnabled(EncryptionProtocol protocol, bool enabled) async {
+    if (protocol == EncryptionProtocol.none) {
+      return;
+    }
+    _enabledProtocols[protocol] = enabled;
+    await storage.storeEncryptionProtocolEnabled(
+      encryptionProtocolId(protocol),
+      enabled,
+    );
+    unawaited(_settingsPep.publishGlobalSetting(
+      _enabledSettingId(protocol),
+      enabled ? 'true' : 'false',
+    ));
+    _onUpdate();
+  }
+
+  /// Returns the currently selected [EncryptionProtocol] for [bareJid].
+  ///
+  /// If the user has made an explicit choice for [bareJid] (locally or via
+  /// another device, see [setProtocolFor]), that choice wins, as long as
+  /// its protocol is still enabled -- a disabled cryptosystem is treated as
+  /// if nothing had been chosen, falling through to [defaultPolicy] below.
+  /// Otherwise, [defaultPolicy] decides: [EncryptionDefaultPolicy.never]
+  /// stays in plaintext, [EncryptionDefaultPolicy.always] auto-selects the
+  /// first enabled cryptosystem, and [EncryptionDefaultPolicy.ifSupported]
+  /// does the same only for a cryptosystem [bareJid] is already known to
+  /// support (see [isProtocolLikelySupported]).
+  EncryptionProtocol protocolFor(String bareJid) {
+    final explicit = _selectedProtocol.putIfAbsent(
+      bareJid,
+      () => encryptionProtocolFromId(
+        _settingsPep.contactItems[bareJid] ??
+            storage.loadEncryptionProtocolForJid(bareJid),
+      ),
+    );
+    if (explicit != EncryptionProtocol.none && isProtocolEnabled(explicit)) {
+      return explicit;
+    }
+    // Either no explicit choice was made, or the explicitly-chosen
+    // protocol has since been disabled; fall through to the default
+    // policy rather than silently using a disabled cryptosystem.
+    return _defaultProtocolFor(bareJid);
+  }
+
+  /// Implements the [defaultPolicy] fallback used by [protocolFor] when
+  /// [bareJid] has no usable explicit protocol choice.
+  EncryptionProtocol _defaultProtocolFor(String bareJid) {
+    final policy = defaultPolicy;
+    if (policy == EncryptionDefaultPolicy.never) {
+      return EncryptionProtocol.none;
+    }
+    for (final protocol in implementedEncryptionProtocols) {
+      if (!isProtocolEnabled(protocol)) {
+        continue;
+      }
+      if (policy == EncryptionDefaultPolicy.always ||
+          isProtocolLikelySupported(bareJid, protocol)) {
+        return protocol;
+      }
+    }
+    return EncryptionProtocol.none;
+  }
+
+  /// Selects [protocol] explicitly for [bareJid], persisting the choice
+  /// locally and publishing it to the per-contact-settings PEP node so
+  /// other devices pick it up too.
   Future<void> setProtocolFor(String bareJid, EncryptionProtocol protocol) async {
     _selectedProtocol[bareJid] = protocol;
+    final protocolId = encryptionProtocolId(protocol);
     if (protocol == EncryptionProtocol.none) {
       await storage.storeEncryptionProtocolForJid(bareJid, null);
     } else {
-      await storage.storeEncryptionProtocolForJid(
-        bareJid,
-        encryptionProtocolId(protocol),
-      );
+      await storage.storeEncryptionProtocolForJid(bareJid, protocolId);
     }
+    unawaited(_settingsPep.publishContactProtocol(bareJid, protocolId));
     // Proactively kick off device discovery as soon as encryption is
     // turned on for this conversation, rather than waiting for the first
     // outgoing message to trigger `omemo_dart`'s own fetch-on-encrypt

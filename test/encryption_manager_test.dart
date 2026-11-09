@@ -425,6 +425,87 @@ void main() {
     },
   );
 
+  test(
+    'defaultPolicy=never keeps new conversations in plaintext even when '
+    'cryptosystems are enabled',
+    () async {
+      final storage = FakeStorageService();
+      final manager = EncryptionManager(
+        connection: _buildConnection(),
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      expect(manager.defaultPolicy, EncryptionDefaultPolicy.never);
+      expect(manager.protocolFor(bobJid), EncryptionProtocol.none);
+    },
+  );
+
+  test(
+    'defaultPolicy=always auto-selects the first enabled cryptosystem for '
+    'a conversation with no explicit choice',
+    () async {
+      final storage = FakeStorageService();
+      final manager = EncryptionManager(
+        connection: _buildConnection(),
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      await manager.setDefaultPolicy(EncryptionDefaultPolicy.always);
+      expect(manager.protocolFor(bobJid), EncryptionProtocol.omemo2);
+    },
+  );
+
+  test(
+    'defaultPolicy=always skips a disabled cryptosystem and falls through '
+    'to the next enabled one',
+    () async {
+      final storage = FakeStorageService();
+      final manager = EncryptionManager(
+        connection: _buildConnection(),
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      await manager.setDefaultPolicy(EncryptionDefaultPolicy.always);
+      await manager.setProtocolEnabled(EncryptionProtocol.omemo2, false);
+      expect(manager.protocolFor(bobJid), EncryptionProtocol.legacyOmemo);
+    },
+  );
+
+  test(
+    'disabling a cryptosystem overrides an existing explicit per-contact '
+    'choice of it, falling back to the default policy',
+    () async {
+      final storage = FakeStorageService();
+      final manager = EncryptionManager(
+        connection: _buildConnection(),
+        storage: storage,
+        selfBareJid: aliceJid,
+        onUpdate: () {},
+      );
+
+      await manager.setProtocolFor(bobJid, EncryptionProtocol.omemo2);
+      expect(manager.protocolFor(bobJid), EncryptionProtocol.omemo2);
+
+      await manager.setProtocolEnabled(EncryptionProtocol.omemo2, false);
+      expect(manager.protocolFor(bobJid), EncryptionProtocol.none);
+    },
+  );
+
+  test('encryptionDefaultPolicyId/encryptionDefaultPolicyFromId round-trip', () {
+    for (final policy in EncryptionDefaultPolicy.values) {
+      final id = encryptionDefaultPolicyId(policy);
+      expect(encryptionDefaultPolicyFromId(id), policy);
+    }
+    expect(encryptionDefaultPolicyFromId(null), EncryptionDefaultPolicy.never);
+    expect(encryptionDefaultPolicyFromId('bogus'), EncryptionDefaultPolicy.never);
+  });
+
   test('encryptionProtocolId/encryptionProtocolFromId round-trip', () {
     for (final protocol in EncryptionProtocol.values) {
       final id = encryptionProtocolId(protocol);

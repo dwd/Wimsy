@@ -107,6 +107,15 @@ class StorageService {
   // EncryptionManager (lib/encryption/encryption_manager.dart): per-JID
   // selected E2EE protocol id for 1:1 conversations (e.g. 'omemo2').
   static const _encryptionProtocolPrefix = 'encproto:';
+  // EncryptionManager: global default encryption policy id ('never',
+  // 'ifSupported', or 'always'), applied to conversations with no explicit
+  // per-contact choice recorded above. Synced via a private PEP node (see
+  // `lib/xmpp/encryption_settings_pep.dart`).
+  static const _encryptionDefaultPolicyKey = 'encdefaultpolicy';
+  // EncryptionManager: per-cryptosystem enable/disable flag, keyed by
+  // protocol id (e.g. 'omemo2'). A disabled cryptosystem is hidden from
+  // menus/screens and never auto-selected by the default policy above.
+  static const _encryptionProtocolEnabledPrefix = 'encprotoenabled:';
   // TrustStore (lib/encryption/trust_store.dart): generic, protocol-agnostic
   // trust decisions shared by every EncryptionBackend, keyed by
   // 'bareJid:deviceOrKeyId'. Distinct from the OMEMO2-specific
@@ -1918,6 +1927,78 @@ class StorageService {
     }
     final data = box.get('$_encryptionProtocolPrefix$bareJid');
     return data is String && data.isNotEmpty ? data : null;
+  }
+
+  /// Every bare JID with an explicit persisted per-contact encryption
+  /// protocol choice, for re-publishing to the per-contact PEP settings
+  /// node on reconnect. See `lib/xmpp/encryption_settings_pep.dart`.
+  Map<String, String> loadAllEncryptionProtocolChoices() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final result = <String, String>{};
+    for (final key in box.keys) {
+      if (key is String && key.startsWith(_encryptionProtocolPrefix)) {
+        final value = box.get(key);
+        if (value is String && value.isNotEmpty) {
+          result[key.substring(_encryptionProtocolPrefix.length)] = value;
+        }
+      }
+    }
+    return result;
+  }
+
+  /// Persists the global default encryption policy id (`'never'`,
+  /// `'ifSupported'`, or `'always'`). See `EncryptionDefaultPolicy`.
+  Future<void> storeEncryptionDefaultPolicy(String? policyId) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    if (policyId == null || policyId.isEmpty) {
+      await box.delete(_encryptionDefaultPolicyKey);
+    } else {
+      await box.put(_encryptionDefaultPolicyKey, policyId);
+    }
+    _afterHotWrite();
+  }
+
+  /// Loads the persisted global default encryption policy id, or `null` if
+  /// none has been set yet.
+  String? loadEncryptionDefaultPolicy() {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get(_encryptionDefaultPolicyKey);
+    return data is String && data.isNotEmpty ? data : null;
+  }
+
+  /// Persists whether [protocolId] (e.g. `'omemo2'`) is enabled as a
+  /// cryptosystem. Disabled cryptosystems are hidden from menus/screens and
+  /// are never auto-selected by the global default policy.
+  Future<void> storeEncryptionProtocolEnabled(
+    String protocolId,
+    bool enabled,
+  ) async {
+    final box = _box;
+    if (box == null || protocolId.isEmpty) {
+      return;
+    }
+    await box.put('$_encryptionProtocolEnabledPrefix$protocolId', enabled);
+    _afterHotWrite();
+  }
+
+  /// Loads whether [protocolId] is enabled, or `null` if no explicit choice
+  /// has been persisted yet (callers should default to enabled/`true`).
+  bool? loadEncryptionProtocolEnabled(String protocolId) {
+    final box = _box;
+    if (box == null) {
+      return null;
+    }
+    final data = box.get('$_encryptionProtocolEnabledPrefix$protocolId');
+    return data is bool ? data : null;
   }
 
   /// Wipes all local OMEMO2 state for [bareJid] (ratchets, cached bundles,

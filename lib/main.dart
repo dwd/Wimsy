@@ -50,6 +50,7 @@ import 'encryption/encryption_backend.dart';
 import 'encryption/encryption_manager.dart';
 import 'widgets/avatar_with_presence.dart';
 import 'widgets/encryption_selector.dart';
+import 'widgets/encryption_settings_screen.dart';
 import 'widgets/fingerprint_verification_screen.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
@@ -2019,6 +2020,8 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                   activeChat,
                                   protocol,
                                 ),
+                            isProtocolEnabled: (protocol) =>
+                                service.isEncryptionProtocolEnabled(protocol),
                           ),
                           _TrustIndicator(
                             service: service,
@@ -8987,6 +8990,14 @@ class _PresenceMenu extends StatelessWidget {
                   ),
                 );
                 break;
+              case _PresenceAction.encryptionSettings:
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) =>
+                        EncryptionSettingsScreen(service: service),
+                  ),
+                );
+                break;
               case _PresenceAction.connectionLog:
                 await showDialog<void>(
                   context: context,
@@ -9136,6 +9147,10 @@ class _PresenceMenu extends StatelessWidget {
             const PopupMenuItem(
               value: _PresenceAction.keepaliveSettings,
               child: Text('Keepalive settings...'),
+            ),
+            const PopupMenuItem(
+              value: _PresenceAction.encryptionSettings,
+              child: Text('Encryption settings...'),
             ),
             const PopupMenuDivider(),
             PopupMenuItem(
@@ -9567,6 +9582,7 @@ enum _PresenceAction {
   toggleSentry,
   simulateDisconnect,
   keepaliveSettings,
+  encryptionSettings,
   connectionLog,
   pepExplorer,
   clearCacheExit,

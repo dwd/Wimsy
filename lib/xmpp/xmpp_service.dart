@@ -9021,6 +9021,49 @@ class XmppService extends ChangeNotifier {
         true;
   }
 
+  /// The global default encryption policy (never / if-supported / always),
+  /// applied to conversations with no explicit per-contact protocol choice.
+  /// Defaults to [EncryptionDefaultPolicy.never] before a connection has
+  /// been established.
+  EncryptionDefaultPolicy get encryptionDefaultPolicy {
+    return _encryptionManager?.defaultPolicy ?? EncryptionDefaultPolicy.never;
+  }
+
+  /// Sets the global default encryption policy, persisting it and syncing
+  /// it to other devices via a private PEP node. See
+  /// `lib/encryption/encryption_manager.dart`.
+  Future<void> setEncryptionDefaultPolicy(EncryptionDefaultPolicy policy) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.setDefaultPolicy(policy);
+    notifyListeners();
+  }
+
+  /// Whether [protocol] is currently enabled as a cryptosystem. A disabled
+  /// cryptosystem must be hidden from menus/screens (e.g.
+  /// [EncryptionSelector]/`FingerprintVerificationScreen`) and is never
+  /// auto-selected by [encryptionDefaultPolicy]. Defaults to `true` before
+  /// a connection has been established.
+  bool isEncryptionProtocolEnabled(EncryptionProtocol protocol) {
+    return _encryptionManager?.isProtocolEnabled(protocol) ?? true;
+  }
+
+  /// Enables/disables [protocol] as a cryptosystem, persisting the choice
+  /// and syncing it to other devices via a private PEP node.
+  Future<void> setEncryptionProtocolEnabled(
+    EncryptionProtocol protocol,
+    bool enabled,
+  ) async {
+    final manager = _encryptionManager;
+    if (manager == null) {
+      return;
+    }
+    await manager.setProtocolEnabled(protocol, enabled);
+    notifyListeners();
+  }
+
   /// Every known OMEMO2 device (and its fingerprint/trust state) of
   /// [bareJid]. See `lib/widgets/fingerprint_verification_screen.dart`.
   Future<List<Omemo2DeviceFingerprint>> omemo2FingerprintsFor(
@@ -9270,6 +9313,10 @@ class XmppService extends ChangeNotifier {
     // can happily read contacts' device lists, since that's a plain IQ
     // fetch that doesn't require our own backend to exist).
     _encryptionManager?.publishAllIdentities();
+    // Pick up any global default-policy/cryptosystem-enable changes and
+    // per-contact protocol choices made from another device. See
+    // `EncryptionSettingsPep`.
+    _encryptionManager?.requestSettingsSync();
     _pepManager = PepManager(
       connection: connection,
       storage: storage,
@@ -9304,6 +9351,7 @@ class XmppService extends ChangeNotifier {
       _pepManager?.handleStanza(stanza);
       _pepCapsManager?.handleStanza(stanza);
       _bookmarksManager?.handleStanza(stanza);
+      _encryptionManager?.handleStanza(stanza);
       if (stanza is PresenceStanza) {
         _handleVcardPresenceUpdate(stanza);
       }

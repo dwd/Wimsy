@@ -858,6 +858,12 @@ class _FingerprintVerificationScreenState
     required String title,
     required List<Widget> children,
   }) {
+    // A cryptosystem disabled in the global encryption settings is removed
+    // from screens like this one entirely, not merely folded/greyed out --
+    // see `EncryptionManager.isProtocolEnabled`.
+    if (!widget.service.isEncryptionProtocolEnabled(protocol)) {
+      return const SizedBox.shrink();
+    }
     final isSupported = widget.service.isEncryptionProtocolLikelySupported(
       widget.peerBareJid,
       protocol,

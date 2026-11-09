@@ -15,6 +15,7 @@ class EncryptionSelector extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     this.isProtocolSupported,
+    this.isProtocolEnabled,
   });
 
   /// The currently selected protocol for the open conversation.
@@ -31,6 +32,14 @@ class EncryptionSelector extends StatelessWidget {
   /// are unlikely to work. If omitted, all options are rendered normally.
   final bool Function(EncryptionProtocol protocol)? isProtocolSupported;
 
+  /// Optional callback returning whether a cryptosystem is enabled in the
+  /// global encryption settings. Unlike [isProtocolSupported], a protocol
+  /// reported as disabled here is removed from the menu entirely (not just
+  /// greyed out) -- see the "enable/disable each cryptosystem ... should
+  /// remove it from menus/screens elsewhere" requirement. If omitted, all
+  /// implemented protocols are offered.
+  final bool Function(EncryptionProtocol protocol)? isProtocolEnabled;
+
   @override
   Widget build(BuildContext context) {
     final isEncrypted = selected != EncryptionProtocol.none;
@@ -42,12 +51,18 @@ class EncryptionSelector extends StatelessWidget {
       icon: Icon(isEncrypted ? Icons.lock : Icons.lock_open),
       itemBuilder: (context) => [
         _buildItem(context, EncryptionProtocol.none, 'None'),
-        _buildItem(context, EncryptionProtocol.omemo2, 'OMEMO2'),
-        _buildItem(context, EncryptionProtocol.legacyOmemo, 'Legacy OMEMO'),
-        _buildItem(context, EncryptionProtocol.ox, 'OX (OpenPGP)'),
+        if (_isEnabled(EncryptionProtocol.omemo2))
+          _buildItem(context, EncryptionProtocol.omemo2, 'OMEMO2'),
+        if (_isEnabled(EncryptionProtocol.legacyOmemo))
+          _buildItem(context, EncryptionProtocol.legacyOmemo, 'Legacy OMEMO'),
+        if (_isEnabled(EncryptionProtocol.ox))
+          _buildItem(context, EncryptionProtocol.ox, 'OX (OpenPGP)'),
       ],
     );
   }
+
+  bool _isEnabled(EncryptionProtocol protocol) =>
+      isProtocolEnabled?.call(protocol) ?? true;
 
   /// Builds a single menu entry for [protocol], greying out its text (but
   /// keeping it selectable) when [isProtocolSupported] reports no known
