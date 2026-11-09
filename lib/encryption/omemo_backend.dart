@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:omemo_dart/omemo_dart.dart';
@@ -566,10 +568,9 @@ class OmemoBackend implements EncryptionBackend {
     String plaintext,
   ) async {
     // XEP-0384 v0.3.0 mandates AES-128-GCM for <payload>. We generate our
-    // own random AES-128 key/IV, encrypt with it ourselves, and only hand
-    // `OmemoManager` the resulting 32 bytes of raw key material (16-byte
-    // key + 16-byte GCM tag) to be ratchet-wrapped per-device alongside the
-    // already-encrypted ciphertext -- see the class doc.
+    // own random AES-128 key/IV, encrypt with it ourselves, and ratchet-
+    // wrap the resulting 32 bytes of raw key material (16-byte key +
+    // 16-byte GCM tag) per-device ourselves -- see the class doc.
     final secretKey = await _payloadCipher.newSecretKey();
     final nonce = _payloadCipher.newNonce();
     final secretBox = await _payloadCipher.encrypt(
@@ -582,45 +583,85 @@ class OmemoBackend implements EncryptionBackend {
       ...secretBox.mac.bytes,
     ];
 
-    final result = await _omemoManager.onOutgoingStanza(
-      OmemoOutgoingStanza(
-        [toBareJid],
-        plaintext,
-        rawKeyMaterial: rawKeyMaterial,
-        ciphertext: secretBox.cipherText,
-      ),
-    );
+    // Discover/refresh toBareJid's device list and any bundles needed to
+    // build a brand-new session, exactly as `omemo_dart`'s own
+    // `onOutgoingStanza` used to do as a side effect of encrypting (see
+    // `ensureDevicesKnown`'s doc: it runs through the same device-list-
+    // fetch/bundle-fetch/subscribe logic as a real encrypt via a no-op
+    // heartbeat).
+    await ensureDevicesKnown(toBareJid);
+    final deviceIds = storage.loadOmemoDeviceList(toBareJid) ?? const <int>[];
+
+    final keyElements = <XmppElement>[];
+    final errors = <String>[];
+    for (final deviceId in deviceIds) {
+      try {
+        // A device we have never seen before has no entry in the BTBV
+        // trust manager at all, which makes `isEnabled` default to
+        // `false` (see `BlindTrustBeforeVerificationTrustManager`) --
+        // unlike `omemo_dart`'s own flow, which always calls
+        // `onNewSession` as a side effect of building a fresh ratchet
+        // session, before ever checking trust/enablement for it. Mirror
+        // that here so a brand-new device isn't skipped as "disabled"
+        // before we even get a chance to encrypt for it.
+        final hadTrustEntry = (await _trustManager.getDevicesTrust(
+          toBareJid,
+        )).containsKey(deviceId);
+        if (!hadTrustEntry) {
+          // ignore: invalid_use_of_internal_member
+          await _trustManager.onNewSession(toBareJid, deviceId);
+        }
+        final trusted = await _trustManager.isTrusted(toBareJid, deviceId);
+        final enabled = await _trustManager.isEnabled(toBareJid, deviceId);
+        if (!trusted || !enabled) {
+          errors.add(
+            '$deviceId (trusted=$trusted, enabled=$enabled)',
+          );
+          continue;
+        }
+        final keyElement = await _encryptKeyForDeviceWithSignalStack(
+          toBareJid,
+          deviceId,
+          rawKeyMaterial,
+        );
+        if (keyElement != null) {
+          keyElements.add(keyElement);
+        } else {
+          errors.add('$deviceId: no usable bundle/session');
+        }
+      } catch (e) {
+        Log.w(
+          'OmemoBackend',
+          'Failed to encrypt legacy OMEMO key for $toBareJid:$deviceId: $e',
+        );
+        errors.add('$deviceId: $e');
+      }
+    }
+
+    if (keyElements.isEmpty) {
+      // No usable device/bundle was found for toBareJid (e.g. the device
+      // list/bundle fetch via PEP failed, or every known device is
+      // untrusted/disabled). Sending the resulting <encrypted/> stanza
+      // anyway would silently produce an undecryptable message with no
+      // <key> children at all -- throw instead, so the caller's "Failed to
+      // encrypt outgoing message" path (see xmpp_service.dart) surfaces
+      // this clearly instead of the message being sent (and accepted by
+      // the server) with no recipient able to decrypt it.
+      throw StateError(
+        deviceIds.isEmpty
+            ? 'No legacy OMEMO devices/keys available for $toBareJid; '
+                  'device list or bundle fetch via PEP likely failed'
+            : 'Failed to prepare legacy OMEMO keys for $toBareJid: '
+                  '${errors.join(', ')}',
+      );
+    }
 
     final encrypted = XmppElement()..name = 'encrypted';
     encrypted.addAttribute(XmppAttribute('xmlns', legacyOmemoNamespace));
     final device = await _omemoManager.getDevice();
     final header = XmppElement()..name = 'header';
     header.addAttribute(XmppAttribute('sid', device.id.toString()));
-    final keysForJid = (result.encryptedKeys[toBareJid] ?? const [])
-        .map(_fixOutgoingKexKey)
-        .toList();
-    if (keysForJid.isEmpty) {
-      // No usable device/bundle was found for toBareJid (e.g. the device
-      // list/bundle fetch via PEP failed, or every known device is
-      // untrusted/disabled), so `omemo_dart` couldn't wrap any per-device
-      // key. Sending the resulting <encrypted/> stanza anyway would
-      // silently produce an undecryptable message with no <key> children
-      // at all -- throw instead, so the caller's "Failed to encrypt
-      // outgoing message" path (see xmpp_service.dart) surfaces this
-      // clearly instead of the message being sent (and accepted by the
-      // server) with no recipient able to decrypt it.
-      throw StateError(await _describeNoUsableKeysReason(toBareJid, result));
-    }
-    for (final key in keysForJid) {
-      final keyElement = XmppElement()..name = 'key';
-      keyElement.addAttribute(XmppAttribute('rid', key.rid.toString()));
-      if (key.kex) {
-        // Legacy OMEMO (XEP-0384 v0.3.0) marks a prekey-wrapped key with
-        // `prekey="true"`, unlike OMEMO2 which uses `kex="true"` -- real
-        // clients (e.g. Conversations) only recognise the former.
-        keyElement.addAttribute(XmppAttribute('prekey', 'true'));
-      }
-      keyElement.textValue = key.value;
+    for (final keyElement in keyElements) {
       header.addChild(keyElement);
     }
     // Legacy OMEMO's <header> transports the AES-128-GCM IV explicitly as
@@ -630,11 +671,9 @@ class OmemoBackend implements EncryptionBackend {
     header.addChild(ivElement);
     encrypted.addChild(header);
 
-    if (result.ciphertext != null) {
-      final payload = XmppElement()..name = 'payload';
-      payload.textValue = base64Encode(result.ciphertext!);
-      encrypted.addChild(payload);
-    }
+    final payload = XmppElement()..name = 'payload';
+    payload.textValue = base64Encode(secretBox.cipherText);
+    encrypted.addChild(payload);
 
     return EncryptedPayload(
       element: encrypted,
@@ -645,89 +684,150 @@ class OmemoBackend implements EncryptionBackend {
     );
   }
 
-  /// Builds a specific, actionable explanation for why [encryptForSend]
-  /// couldn't wrap any per-device key for [toBareJid] in [result].
+  /// Encrypts [keyMaterial] (our AES-128-GCM key + GCM tag for this
+  /// message) for [deviceId] of [bareJid], via the from-scratch
+  /// libsignal-compatible stack ([legacyX3dhInitiator] +
+  /// [LegacyRatchetSession]) -- the send-side counterpart of
+  /// [_decryptKeyWithSignalStack]. Reuses an existing persisted session if
+  /// one exists (producing a plain, non-prekey `<key>`); otherwise
+  /// establishes a brand-new one via X3DH against [deviceId]'s cached/
+  /// freshly-fetched [OmemoBundle] (producing a `<key prekey="true">`).
   ///
-  /// `omemo_dart`'s `onOutgoingStanza` can end up with zero keys for a JID
-  /// for several very different reasons, only some of which it records in
-  /// `result.encryptionErrors`:
-  /// - no device list was ever cached for the JID at all;
-  /// - a bundle fetch via PEP failed, or the X3DH key-exchange signature
-  ///   was invalid;
-  /// - a ratchet session exists but has no matching entry in the
-  ///   ratchet map (shouldn't normally happen);
-  /// - **the device is known, a ratchet session was even just built for
-  ///   it (so "Fetching bundles"/"Building new ratchet" logged fine), but
-  ///   `BlindTrustBeforeVerificationTrustManager.isTrusted`/`isEnabled`
-  ///   silently skipped it** -- this happens whenever at least one other
-  ///   device of the same JID was ever manually marked "verified" via the
-  ///   fingerprint screen, since BTBV then refuses blind trust for any
-  ///   other (new/unverified) device of that JID. `omemo_dart` doesn't
-  ///   log or record this case as an error at all, which is why this was
-  ///   previously surfaced as a generic, unexplained failure.
-  Future<String> _describeNoUsableKeysReason(
-    String toBareJid,
-    EncryptionResult result,
+  /// Returns `null` (logging why) if no session could be established --
+  /// e.g. no bundle is available at all, its SPK signature doesn't verify,
+  /// or it has no one-time prekeys left -- in which case the caller simply
+  /// omits this device from the outgoing stanza rather than failing the
+  /// whole send.
+  ///
+  /// UNVERIFIED against a real client beyond the device's own
+  /// [_decryptKeyWithSignalStack] round-trip: see the limitations
+  /// documented in `legacy_x3dh.dart` and `legacy_double_ratchet.dart`.
+  Future<XmppElement?> _encryptKeyForDeviceWithSignalStack(
+    String bareJid,
+    int deviceId,
+    List<int> keyMaterial,
   ) async {
-    final errors = result.deviceEncryptionErrors[toBareJid];
-    if (errors != null && errors.isNotEmpty) {
-      final details = errors
-          .map((e) => '${e.device ?? '?'}: ${e.error.runtimeType}')
-          .join(', ');
-      return 'Failed to prepare legacy OMEMO keys for $toBareJid: $details';
+    final storedJson = storage.loadLegacySignalSession(bareJid, deviceId);
+    if (storedJson != null) {
+      final session = LegacyRatchetSession.fromJson(
+        jsonDecode(storedJson) as Map<String, dynamic>,
+      );
+      final messageBytes = await session.encrypt(keyMaterial);
+      await storage.storeLegacySignalSession(
+        bareJid,
+        deviceId,
+        jsonEncode(session.toJson()),
+      );
+      final keyElement = XmppElement()..name = 'key';
+      keyElement.addAttribute(XmppAttribute('rid', deviceId.toString()));
+      keyElement.textValue = base64Encode(messageBytes);
+      return keyElement;
     }
 
-    final knownDeviceIds = await knownDeviceIdsFor(toBareJid);
-    if (knownDeviceIds.isEmpty) {
-      return 'No legacy OMEMO devices/keys available for $toBareJid; '
-          'device list or bundle fetch via PEP likely failed (see '
-          'omemo_dart/OmemoManager logs above for the underlying cause)';
-    }
-
-    // `knownDeviceIds` comes from our own trust store, which can know about
-    // a device that `omemo_dart`'s internal `OmemoManager._deviceList` --
-    // the list it actually iterates over when picking which devices to
-    // encrypt to -- currently does not (e.g. a live device-list fetch that
-    // raced with/omitted a device that was known from an earlier session).
-    // When that happens, the device is silently skipped during encryption
-    // without ever reaching the trust/enabled check below, so reporting
-    // trust/enabled state for it is misleading: the device looks "trusted
-    // and enabled" yet nothing was ever encrypted for it. Surface that
-    // distinction explicitly instead of blaming BTBV for every case.
-    final activeDeviceIds = _omemoManager.getKnownDevices(toBareJid);
-    final missingFromActiveList = activeDeviceIds == null
-        ? knownDeviceIds
-        : knownDeviceIds.where((id) => !activeDeviceIds.contains(id)).toList();
-
-    final perDevice = <String>[];
-    for (final deviceId in knownDeviceIds) {
-      if (missingFromActiveList.contains(deviceId)) {
-        perDevice.add('$deviceId (not in current device list)');
-        continue;
+    // No existing session: establish one via X3DH against the device's
+    // prekey bundle, fetching it live if we don't already have a usable
+    // one cached (mirrors the fallback logic in `create()`'s
+    // `fetchBundleImpl`: a bundle cached before the SPK-signature-message
+    // fix lacks 'spksMsg' and must not be reused).
+    final cachedBundleJson = storage.loadOmemoBundle(bareJid, deviceId);
+    var bundle = cachedBundleJson != null && cachedBundleJson.containsKey('spksMsg')
+        ? _bundleFromJson(bareJid, deviceId, cachedBundleJson)
+        : null;
+    if (bundle == null) {
+      final fetched = await pep.fetchLegacyBundle(bareJid, deviceId);
+      if (fetched == null) {
+        Log.w(
+          'OmemoBackend',
+          'No bundle available for $bareJid:$deviceId; cannot establish a '
+              'legacy-signal session to encrypt for it',
+        );
+        return null;
       }
-      final trusted = await _trustManager.isTrusted(toBareJid, deviceId);
-      final enabled = await _trustManager.isEnabled(toBareJid, deviceId);
-      perDevice.add('$deviceId (trusted=$trusted, enabled=$enabled)');
+      await storage.storeOmemoBundle(
+        bareJid,
+        deviceId,
+        await _bundleToJson(fetched),
+      );
+      bundle = fetched;
     }
 
-    if (missingFromActiveList.isNotEmpty &&
-        missingFromActiveList.length == knownDeviceIds.length) {
-      return 'Found ${knownDeviceIds.length} known legacy OMEMO device(s) for '
-          '$toBareJid in our trust store, but none of them are in the '
-          'current device list fetched from $toBareJid\'s PEP node: '
-          '${perDevice.join(', ')}. This typically means the device-list '
-          'fetch returned an incomplete/stale list (e.g. a transient PEP '
-          'issue); retry sending, or restart the app to force a fresh '
-          'fetch.';
+    final signatureOk = await Ed25519().verify(
+      bundle.spkSignatureMessage,
+      signature: Signature(
+        bundle.spkSignature,
+        publicKey: bundle.ik.asPublicKey(),
+      ),
+    );
+    if (!signatureOk) {
+      Log.w(
+        'OmemoBackend',
+        'Invalid SPK signature in bundle for $bareJid:$deviceId; refusing '
+            'to establish a session with it',
+      );
+      return null;
     }
 
-    return 'Found ${knownDeviceIds.length} known legacy OMEMO device(s) for '
-        '$toBareJid, but none are both trusted and enabled: '
-        '${perDevice.join(', ')}. This typically happens when another '
-        'device of this contact was previously marked "verified" in the '
-        'fingerprint screen, which makes BlindTrustBeforeVerification '
-        'refuse blind trust for any other (new/unverified) device of '
-        'theirs -- verify or manually trust the device above to fix this.';
+    final opkIds = bundle.opksEncoded.keys.toList();
+    if (opkIds.isEmpty) {
+      Log.w(
+        'OmemoBackend',
+        'Bundle for $bareJid:$deviceId has no one-time prekeys left; cannot '
+            'establish a new session',
+      );
+      return null;
+    }
+    final opkId = opkIds[Random.secure().nextInt(opkIds.length)];
+    final opk = bundle.getOpk(opkId);
+
+    final device = await _omemoManager.getDevice();
+    final ourIdentityKeyPair = await device.ik.asKeyPair();
+    final ourBaseKeyPair = await X25519().newKeyPair();
+
+    final theirIdentityKeyRaw = base64Decode(bundle.ikEncoded);
+    final theirSignedPreKeyRaw = base64Decode(bundle.spkEncoded);
+    final theirOneTimePreKeyRaw = await opk.getBytes();
+
+    final x3dh = await legacyX3dhInitiator(
+      ourIdentityKey: ourIdentityKeyPair,
+      ourBaseKey: ourBaseKeyPair,
+      theirIdentityKey: theirIdentityKeyRaw,
+      theirSignedPreKey: theirSignedPreKeyRaw,
+      theirOneTimePreKey: theirOneTimePreKeyRaw,
+    );
+    final session = await LegacyRatchetSession.initiator(
+      x3dh: x3dh,
+      ourIdentityPublicKey: addDjbType(await device.ik.pk.getBytes()),
+      theirIdentityPublicKey: addDjbType(theirIdentityKeyRaw),
+      theirSignedPreKey: theirSignedPreKeyRaw,
+    );
+    final messageBytes = await session.encrypt(keyMaterial);
+    await storage.storeLegacySignalSession(
+      bareJid,
+      deviceId,
+      jsonEncode(session.toJson()),
+    );
+
+    final ourBaseKeyPublic = Uint8List.fromList(
+      (await ourBaseKeyPair.extractPublicKey()).bytes,
+    );
+    final pre = PreKeySignalMessageWire(
+      version: kLegacySignalWireVersion,
+      // libsignal's registrationId is only used for session-reset
+      // detection, not for the crypto itself; our own device id is a
+      // stable, already-unique-enough stand-in since we don't separately
+      // track one.
+      registrationId: device.id,
+      preKeyId: opkId,
+      signedPreKeyId: bundle.spkId,
+      baseKey: addDjbType(ourBaseKeyPublic),
+      identityKey: addDjbType(await device.ik.pk.getBytes()),
+      message: messageBytes,
+    );
+    final keyElement = XmppElement()..name = 'key';
+    keyElement.addAttribute(XmppAttribute('rid', deviceId.toString()));
+    keyElement.addAttribute(XmppAttribute('prekey', 'true'));
+    keyElement.textValue = base64Encode(pre.serialize());
+    return keyElement;
   }
 
   /// The libsignal "DJB type" byte (`0x05`, indicating a Curve25519/DJB
@@ -738,8 +838,10 @@ class OmemoBackend implements EncryptionBackend {
   /// embedded in a `<key kex='true'>` element used to establish a new
   /// X3DH session. `omemo_dart`'s own schema (shared with OMEMO2, which
   /// never adds this prefix) expects the raw 32-byte form, so we must
-  /// strip/add it ourselves on this protobuf too -- see
-  /// [_fixIncomingKexKey]/[_fixOutgoingKexKey].
+  /// strip it ourselves on this protobuf too -- see [_fixIncomingKexKey].
+  /// (Only the incoming direction is still needed: outgoing encryption no
+  /// longer uses `omemo_dart`'s `OMEMOKeyExchange` protobuf at all -- see
+  /// [encryptForSend]/[_encryptKeyForDeviceWithSignalStack].)
   static const int _djbKeyType = 0x05;
 
   static List<int> _stripDjbKeyTypeBytes(List<int> bytes) {
@@ -754,28 +856,6 @@ class OmemoBackend implements EncryptionBackend {
       return [_djbKeyType, ...bytes];
     }
     return bytes;
-  }
-
-  /// Prepends the libsignal DJB-type byte to the `ik`/`ek` fields of an
-  /// outgoing `<key kex='true'>` element's embedded `OMEMOKeyExchange`
-  /// protobuf, so real legacy-OMEMO clients can parse our key exchange
-  /// (otherwise they fail to recognise the message as encrypted for their
-  /// device, e.g. Conversations' "Message was not encrypted for this
-  /// device"). A no-op for non-kex (plain ratchet message) keys, and
-  /// defensive against malformed protobuf data (falls back to the
-  /// original key unchanged).
-  static EncryptedKey _fixOutgoingKexKey(EncryptedKey key) {
-    if (!key.kex) {
-      return key;
-    }
-    try {
-      final kex = OMEMOKeyExchange.fromBuffer(key.data);
-      kex.ik = _addDjbKeyTypeBytes(kex.ik);
-      kex.ek = _addDjbKeyTypeBytes(kex.ek);
-      return EncryptedKey(key.rid, base64Encode(kex.writeToBuffer()), key.kex);
-    } catch (_) {
-      return key;
-    }
   }
 
   /// Strips a leading libsignal DJB-type byte from the `ik`/`ek` fields of

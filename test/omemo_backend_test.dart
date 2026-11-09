@@ -379,13 +379,88 @@ void main() {
       expect(result.protocolId, 'omemo');
       expect(result.senderTrust, TrustState.tofu);
 
-      expect(aliceStorage.ratchets, isNotEmpty);
-      expect(bobStorage.ratchets, isNotEmpty);
+      // Outgoing/incoming legacy-OMEMO sessions are persisted under the
+      // dedicated legacy-signal-stack storage prefix, never in
+      // omemo_dart's own ratchet map (see OmemoBackend's class doc).
+      expect(aliceStorage.signalSessions, isNotEmpty);
+      expect(bobStorage.signalSessions, isNotEmpty);
 
       // Legacy-OMEMO and OMEMO2 devices must be tracked under distinct
       // storage (see the class doc on OmemoBackend): the legacy device id
       // persisted here should not collide with any `omemo2dl:`-style key.
       expect(aliceStorage.deviceLists.containsKey(aliceJid), isTrue);
+    },
+  );
+
+  test(
+    'OmemoBackend: encryptForSend reuses the established session for a '
+    'second message, sending a plain (non-prekey) <key> that the receiver '
+    'can still decrypt',
+    () async {
+      // Regression test for the send-side counterpart of the already-
+      // tested receive path: once a session with a device has been
+      // established (the first message's prekey X3DH handshake), a
+      // second outgoing message to the same device must reuse the
+      // persisted LegacyRatchetSession and produce a plain <key> (no
+      // prekey='true' attribute, since no new handshake is needed),
+      // and the ratchet must advance correctly across both messages.
+      final network = FakeOmemoNetwork();
+      final aliceStorage = FakeStorageService();
+      final bobStorage = FakeStorageService();
+
+      final aliceBackend = await OmemoBackend.create(
+        selfBareJid: aliceJid,
+        storage: aliceStorage,
+        pep: FakeOmemoPep(network, aliceJid),
+      );
+      final bobBackend = await OmemoBackend.create(
+        selfBareJid: bobJid,
+        storage: bobStorage,
+        pep: FakeOmemoPep(network, bobJid),
+      );
+      await bobBackend.publishIdentity();
+
+      final firstPayload = await aliceBackend.encryptForSend(
+        bobJid,
+        'first message',
+      );
+      final firstKey = firstPayload.element
+          .getChild('header')!
+          .children
+          .firstWhere((c) => c.name == 'key');
+      expect(firstKey.getAttribute('prekey')?.value, 'true');
+
+      final firstMessage = MessageStanza(
+        AbstractStanza.getRandomId(),
+        MessageStanzaType.CHAT,
+      );
+      firstMessage.fromJid = Jid.fromFullJid('$aliceJid/device1');
+      firstMessage.addChild(firstPayload.element);
+      final firstResult = await bobBackend.decryptIncoming(firstMessage);
+      expect(firstResult.error, isNull);
+      expect(firstResult.plaintext, 'first message');
+
+      final secondPayload = await aliceBackend.encryptForSend(
+        bobJid,
+        'second message',
+      );
+      final secondKey = secondPayload.element
+          .getChild('header')!
+          .children
+          .firstWhere((c) => c.name == 'key');
+      // No new handshake was needed: this must be a plain key, not a
+      // fresh prekey message.
+      expect(secondKey.getAttribute('prekey')?.value, isNot('true'));
+
+      final secondMessage = MessageStanza(
+        AbstractStanza.getRandomId(),
+        MessageStanzaType.CHAT,
+      );
+      secondMessage.fromJid = Jid.fromFullJid('$aliceJid/device1');
+      secondMessage.addChild(secondPayload.element);
+      final secondResult = await bobBackend.decryptIncoming(secondMessage);
+      expect(secondResult.error, isNull);
+      expect(secondResult.plaintext, 'second message');
     },
   );
 
@@ -524,19 +599,17 @@ void main() {
   });
 
   test(
-    'OmemoBackend: outgoing <key prekey="true"> embeds libsignal '
-    'DJB-type-prefixed ik/ek for interop with real legacy-OMEMO clients',
+    'OmemoBackend: outgoing <key prekey="true"> embeds a libsignal-wire '
+    'PreKeySignalMessage with DJB-type-prefixed baseKey/identityKey for '
+    'interop with real legacy-OMEMO clients',
     () async {
-      // Regression test for the "Message was not encrypted for this
-      // device" / "Algorithm ed25519 expects a public key with 32 bytes,
-      // but got: 33 bytes" bugs: real legacy-OMEMO clients
-      // (Conversations/Gajim/Dino) serialize the `ik`/`ek` fields of the
-      // `OMEMOKeyExchange` protobuf embedded in a <key prekey='true'>
-      // element using libsignal's DJB-type-prefixed format (leading 0x05
-      // byte + 32 raw bytes = 33 bytes total), not the raw 32-byte form
-      // `omemo_dart`'s own schema expects. We must do the same when
-      // publishing a brand-new session's key exchange, or those clients
-      // fail to recognise our message as encrypted for their device.
+      // Regression test: outgoing encryption now builds the <key
+      // prekey='true'> content as a real libsignal-wire
+      // `PreKeySignalMessage` (see legacy_signal_wire.dart), whose
+      // baseKey/identityKey fields must be the libsignal DJB-type-prefixed
+      // form (leading 0x05 byte + 32 raw bytes = 33 bytes total) for real
+      // clients (Conversations/Gajim/Dino) to recognise it -- it must not
+      // regress to omemo_dart's own, incompatible OMEMOKeyExchange schema.
       final network = FakeOmemoNetwork();
       final aliceStorage = FakeStorageService();
       final bobStorage = FakeStorageService();
@@ -561,17 +634,15 @@ void main() {
       final kexKeyElement = header.children.firstWhere(
         (c) => c.name == 'key' && c.getAttribute('prekey')?.value == 'true',
       );
-      final kex = OMEMOKeyExchange.fromBuffer(
+      final pre = PreKeySignalMessageWire.parse(
         base64Decode(kexKeyElement.textValue!.trim()),
       );
-      expect(kex.ik.length, 33);
-      expect(kex.ik.first, 0x05);
-      expect(kex.ek.length, 33);
-      expect(kex.ek.first, 0x05);
+      expect(pre.baseKey.length, 33);
+      expect(pre.baseKey.first, 0x05);
+      expect(pre.identityKey.length, 33);
+      expect(pre.identityKey.first, 0x05);
 
-      // And the receiving side must still be able to decrypt it (i.e. the
-      // DJB-type byte is correctly stripped again before being handed to
-      // `OmemoManager`).
+      // And the receiving side must still be able to decrypt it.
       final message = MessageStanza(
         AbstractStanza.getRandomId(),
         MessageStanzaType.CHAT,
