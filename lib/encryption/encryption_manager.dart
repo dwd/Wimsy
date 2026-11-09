@@ -191,6 +191,37 @@ class EncryptionManager {
     return protocolFor(bareJid) != EncryptionProtocol.none;
   }
 
+  /// Best-effort, purely local/synchronous guess at whether [bareJid]'s
+  /// client supports [protocol], based only on whatever device list/key
+  /// fingerprints we've already cached for them (e.g. from a previous
+  /// successful device discovery or message exchange).
+  ///
+  /// This is intentionally conservative and offline: it never triggers a
+  /// live PEP fetch (see [ensureOmemo2DevicesKnown]/
+  /// [ensureLegacyOmemoDevicesKnown] for that), so it's safe to call
+  /// synchronously from UI build methods (e.g. [EncryptionSelector]) to
+  /// decide whether to grey out a protocol option. A `false` result only
+  /// means "we have no evidence of support yet" -- it does not mean the
+  /// contact definitely lacks support (we may simply never have looked),
+  /// so the option must remain selectable regardless; see the UX
+  /// requirement in `lib/widgets/encryption_selector.dart`.
+  bool isProtocolLikelySupported(String bareJid, EncryptionProtocol protocol) {
+    switch (protocol) {
+      case EncryptionProtocol.none:
+        // "No encryption" is trivially always usable.
+        return true;
+      case EncryptionProtocol.omemo2:
+        final devices = storage.loadOmemo2DeviceList(bareJid);
+        return devices != null && devices.isNotEmpty;
+      case EncryptionProtocol.legacyOmemo:
+        final devices = storage.loadOmemoDeviceList(bareJid);
+        return devices != null && devices.isNotEmpty;
+      case EncryptionProtocol.ox:
+        final fingerprints = storage.loadOxFingerprintList(bareJid);
+        return fingerprints != null && fingerprints.isNotEmpty;
+    }
+  }
+
   /// Returns the [EncryptionBackend] for [protocol], creating/caching it
   /// lazily on first use. Returns `null` for [EncryptionProtocol.none] or
   /// for protocols that aren't implemented yet.

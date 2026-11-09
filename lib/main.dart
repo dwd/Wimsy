@@ -2014,6 +2014,11 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                 protocol,
                               );
                             },
+                            isProtocolSupported: (protocol) => service
+                                .isEncryptionProtocolLikelySupported(
+                                  activeChat,
+                                  protocol,
+                                ),
                           ),
                           if (service.encryptionProtocolFor(activeChat) !=
                               EncryptionProtocol.none)

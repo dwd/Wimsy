@@ -9003,6 +9003,24 @@ class XmppService extends ChangeNotifier {
     return _encryptionManager?.trustSummaryFor(_bareJid(bareJid));
   }
 
+  /// Best-effort, purely local guess at whether [bareJid]'s client
+  /// supports [protocol], based only on cached device-list/key-fingerprint
+  /// data -- see `EncryptionManager.isProtocolLikelySupported`. Used by
+  /// [EncryptionSelector] to grey out (but still allow selecting) a
+  /// protocol option for which we have no evidence of remote support.
+  /// Defaults to `true` (i.e. not greyed out) before a connection/
+  /// [EncryptionManager] has been set up.
+  bool isEncryptionProtocolLikelySupported(
+    String bareJid,
+    EncryptionProtocol protocol,
+  ) {
+    return _encryptionManager?.isProtocolLikelySupported(
+          _bareJid(bareJid),
+          protocol,
+        ) ??
+        true;
+  }
+
   /// Every known OMEMO2 device (and its fingerprint/trust state) of
   /// [bareJid]. See `lib/widgets/fingerprint_verification_screen.dart`.
   Future<List<Omemo2DeviceFingerprint>> omemo2FingerprintsFor(
