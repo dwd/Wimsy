@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../encryption/encryption_backend.dart';
+import '../encryption/encryption_manager.dart' show EncryptionProtocol;
 import '../encryption/omemo2_backend.dart';
 import '../encryption/ox_backend.dart';
 import '../xmpp/xmpp_service.dart';
@@ -490,8 +491,13 @@ class _FingerprintVerificationScreenState
                         ),
                       ),
                     ),
+                  _foldableSection(
+                    context: context,
+                    protocol: EncryptionProtocol.omemo2,
+                    title: 'OMEMO2',
+                    children: [
                   Text(
-                    'Your fingerprint',
+                    'Your OMEMO2 fingerprint',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
@@ -618,7 +624,14 @@ class _FingerprintVerificationScreenState
                         ),
                       ),
                     ),
+                    ],
+                  ),
                   const Divider(height: 32),
+                  _foldableSection(
+                    context: context,
+                    protocol: EncryptionProtocol.legacyOmemo,
+                    title: 'Legacy OMEMO',
+                    children: [
                   Text(
                     'Your legacy OMEMO fingerprint',
                     style: Theme.of(context).textTheme.titleMedium,
@@ -751,7 +764,14 @@ class _FingerprintVerificationScreenState
                         ),
                       ),
                     ),
+                    ],
+                  ),
                   const Divider(height: 32),
+                  _foldableSection(
+                    context: context,
+                    protocol: EncryptionProtocol.ox,
+                    title: 'OX (OpenPGP)',
+                    children: [
                   Text(
                     'Your OX (OpenPGP) fingerprint',
                     style: Theme.of(context).textTheme.titleMedium,
@@ -808,9 +828,46 @@ class _FingerprintVerificationScreenState
                         ),
                       ),
                     ),
+                    ],
+                  ),
                 ],
               ),
       ),
+    );
+  }
+
+  /// Wraps a cryptosystem's section ([children]) in an [ExpansionTile] so
+  /// contacts' unsupported cryptosystems (per
+  /// `XmppService.isEncryptionProtocolLikelySupported`) are folded away
+  /// by default, instead of always showing every protocol's full
+  /// fingerprint/device list regardless of whether the contact ever
+  /// announced support for it.
+  Widget _foldableSection({
+    required BuildContext context,
+    required EncryptionProtocol protocol,
+    required String title,
+    required List<Widget> children,
+  }) {
+    final isSupported = widget.service.isEncryptionProtocolLikelySupported(
+      widget.peerBareJid,
+      protocol,
+    );
+    return ExpansionTile(
+      key: PageStorageKey(protocol),
+      initiallyExpanded: isSupported,
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      subtitle: isSupported
+          ? null
+          : Text(
+              'Not known to be supported by ${widget.peerBareJid}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      children: children,
     );
   }
 }
