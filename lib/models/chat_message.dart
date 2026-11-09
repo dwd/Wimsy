@@ -49,6 +49,7 @@ class ChatMessage {
     this.webxdcJsonPayload,
     this.encryptionProtocol,
     this.encryptionError,
+    this.plaintext,
   });
 
   final String from;
@@ -134,6 +135,16 @@ class ChatMessage {
   // encrypted). When set, the UI should render an "undecryptable message"
   // placeholder instead of [body].
   final String? encryptionError;
+  // The actual decrypted plaintext of this message, when known, kept
+  // separate from [body] (which, for an encrypted message, may instead
+  // hold the wire-level XEP-0380 fallback text copied verbatim from the
+  // original/replayed stanza - see e.g. a MAM catch-up or carbon replay of
+  // an already-decrypted message, which never re-runs decryption and so
+  // only ever knows the fallback text). Once set for a given messageId, a
+  // later merge must never clear or replace it with that fallback text;
+  // this is what keeps a successfully decrypted message's text stable
+  // (both inbound and outbound) across restarts and history replays.
+  final String? plaintext;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -189,6 +200,7 @@ class ChatMessage {
     Object? webxdcJsonPayload = _absent,
     Object? encryptionProtocol = _absent,
     Object? encryptionError = _absent,
+    Object? plaintext = _absent,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -299,6 +311,9 @@ class ChatMessage {
       encryptionError: identical(encryptionError, _absent)
           ? this.encryptionError
           : encryptionError as String?,
+      plaintext: identical(plaintext, _absent)
+          ? this.plaintext
+          : plaintext as String?,
     );
   }
 
@@ -353,6 +368,7 @@ class ChatMessage {
       'webxdcJsonPayload': webxdcJsonPayload,
       'encryptionProtocol': encryptionProtocol,
       'encryptionError': encryptionError,
+      'plaintext': plaintext,
     };
   }
 
@@ -423,6 +439,7 @@ class ChatMessage {
     final webxdcJsonPayload = map['webxdcJsonPayload']?.toString();
     final encryptionProtocol = map['encryptionProtocol']?.toString();
     final encryptionError = map['encryptionError']?.toString();
+    final plaintext = map['plaintext']?.toString();
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -500,6 +517,7 @@ class ChatMessage {
       webxdcJsonPayload: webxdcJsonPayload,
       encryptionProtocol: encryptionProtocol,
       encryptionError: encryptionError,
+      plaintext: plaintext,
     );
   }
 

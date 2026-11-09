@@ -147,4 +147,57 @@ void main() {
       expect(merged.encryptionError, isNull);
     },
   );
+
+  test(
+    'a later MAM catch-up/carbon replay of an already-decrypted *outgoing* '
+    'message - which never re-attempts decryption and so carries neither '
+    'an encryptionProtocol nor an encryptionError, only the wire-level '
+    'XEP-0380 fallback body - does not revert its body back to that '
+    'fallback text',
+    () {
+      final service = XmppService();
+      const bareJid = 'erin@example.com';
+      const from = 'me@example.com';
+      const to = 'erin@example.com';
+      const messageId = 'msg-4';
+      final timestamp = DateTime.utc(2026, 1, 1);
+      const fallbackBody =
+          'I sent you an OMEMO encrypted message but your client '
+          "doesn't seem to support that.";
+
+      // First add: our own locally-composed-and-sent message, recorded
+      // with its known plaintext and encryption protocol.
+      service.addMessageForTesting(
+        bareJid: bareJid,
+        from: from,
+        to: to,
+        body: 'the message I actually typed',
+        outgoing: true,
+        timestamp: timestamp,
+        messageId: messageId,
+        encryptionProtocol: 'omemo',
+        plaintext: 'the message I actually typed',
+      );
+
+      // Second add for the same messageId: a MAM catch-up/carbon replay of
+      // our own outgoing stanza after a restart. Outgoing messages never
+      // go through decryptIncoming, so this call carries only the wire
+      // fallback body, with no encryptionProtocol/encryptionError/
+      // plaintext at all.
+      service.addMessageForTesting(
+        bareJid: bareJid,
+        from: from,
+        to: to,
+        body: fallbackBody,
+        outgoing: true,
+        timestamp: timestamp,
+        messageId: messageId,
+      );
+
+      final merged = service.messagesFor(bareJid).single;
+      expect(merged.body, 'the message I actually typed');
+      expect(merged.plaintext, 'the message I actually typed');
+      expect(merged.encryptionProtocol, 'omemo');
+    },
+  );
 }

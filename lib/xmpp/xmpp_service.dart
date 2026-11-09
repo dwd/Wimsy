@@ -2775,6 +2775,14 @@ class XmppService extends ChangeNotifier {
         locallyOriginated: true,
         encryptionProtocol: protocolId,
         encryptionError: null,
+        // We composed this message ourselves, so the plaintext is already
+        // known with certainty. Recording it separately from [body] means
+        // a later MAM catch-up/carbon replay of this exact outgoing
+        // stanza -- which never re-attempts decryption and only ever sees
+        // the wire-level XEP-0380 fallback body -- cannot clobber it (see
+        // the merge logic in [_addMessage]), fixing outgoing messages
+        // reverting to that fallback text after an app restart.
+        plaintext: trimmed,
       );
     }
     final chatManager = _chatManager;
@@ -7098,6 +7106,7 @@ class XmppService extends ChangeNotifier {
     String? stanzaId,
     String? encryptionProtocol,
     String? encryptionError,
+    String? plaintext,
   }) {
     _addMessage(
       bareJid: bareJid,
@@ -7112,6 +7121,7 @@ class XmppService extends ChangeNotifier {
       stanzaId: stanzaId,
       encryptionProtocol: encryptionProtocol,
       encryptionError: encryptionError,
+      plaintext: plaintext,
     );
   }
 
@@ -10530,6 +10540,7 @@ class XmppService extends ChangeNotifier {
           securityLabelIsFallback: securityLabelIsFallback,
           encryptionProtocol: result?.protocolId,
           encryptionError: result?.error,
+          plaintext: (result?.error == null) ? result?.plaintext : null,
         );
       }());
       return;
@@ -10591,6 +10602,7 @@ class XmppService extends ChangeNotifier {
     bool locallyOriginated = false,
     String? encryptionProtocol,
     String? encryptionError,
+    String? plaintext,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
@@ -10629,9 +10641,23 @@ class XmppService extends ChangeNotifier {
             (encryptionProtocol == null || encryptionProtocol.isEmpty) &&
             encryptionError != null &&
             encryptionError.isNotEmpty;
-        final nextBody = isFailedRedecryptOfDecryptedMessage
-            ? existing.body
-            : (body.isNotEmpty ? body : existing.body);
+        // [plaintext] is the authoritative decrypted text for this
+        // message, once known - unlike [body], a later call that doesn't
+        // carry a freshly-decrypted result (e.g. a MAM catch-up/carbon
+        // replay of an already-handled message, which for *outgoing*
+        // messages never attempts decryption at all and only ever sees the
+        // wire-level XEP-0380 fallback text) must never clear or replace
+        // it. This is what keeps both inbound and outbound decrypted
+        // message text stable across restarts/history replays, regardless
+        // of what the replay's own body/encryptionError happen to be.
+        final nextPlaintext = (plaintext != null && plaintext.isNotEmpty)
+            ? plaintext
+            : existing.plaintext;
+        final nextBody = (nextPlaintext != null && nextPlaintext.isNotEmpty)
+            ? nextPlaintext
+            : (isFailedRedecryptOfDecryptedMessage
+                ? existing.body
+                : (body.isNotEmpty ? body : existing.body));
         final nextEncryptionProtocol = isFailedRedecryptOfDecryptedMessage
             ? existing.encryptionProtocol
             : (encryptionProtocol != null && encryptionProtocol.isNotEmpty)
@@ -10740,9 +10766,11 @@ class XmppService extends ChangeNotifier {
             nextWebxdcDocument != existing.webxdcDocument ||
             nextWebxdcSummary != existing.webxdcSummary ||
             nextWebxdcJsonPayload != existing.webxdcJsonPayload ||
-            nextLocallyOriginated != existing.locallyOriginated) {
+            nextLocallyOriginated != existing.locallyOriginated ||
+            nextPlaintext != existing.plaintext) {
           list[existingIndex] = existing.copyWith(
             body: nextBody,
+            plaintext: nextPlaintext,
             encryptionProtocol: nextEncryptionProtocol,
             encryptionError: nextEncryptionError,
             mamId: nextMamId,
@@ -10840,7 +10868,7 @@ class XmppService extends ChangeNotifier {
         ChatMessage(
           from: from,
           to: to,
-          body: body,
+          body: (plaintext != null && plaintext.isNotEmpty) ? plaintext : body,
           outgoing: outgoing,
           // An outgoing message returned by MAM reached the server.
           receiptReceived: outgoing,
@@ -10867,6 +10895,7 @@ class XmppService extends ChangeNotifier {
           locallyOriginated: locallyOriginated,
           encryptionProtocol: encryptionProtocol,
           encryptionError: encryptionError,
+          plaintext: plaintext,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -10880,7 +10909,7 @@ class XmppService extends ChangeNotifier {
     final newMessage = ChatMessage(
       from: from,
       to: to,
-      body: body,
+      body: (plaintext != null && plaintext.isNotEmpty) ? plaintext : body,
       outgoing: outgoing,
       // An outgoing message returned by MAM reached the server.
       receiptReceived: outgoing && mamId != null && mamId.isNotEmpty,
@@ -10906,6 +10935,7 @@ class XmppService extends ChangeNotifier {
       webxdcJsonPayload: webxdcJsonPayload,
       encryptionProtocol: encryptionProtocol,
       encryptionError: encryptionError,
+      plaintext: plaintext,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
