@@ -836,12 +836,22 @@ class _FingerprintVerificationScreenState
     );
   }
 
-  /// Wraps a cryptosystem's section ([children]) in an [ExpansionTile] so
-  /// contacts' unsupported cryptosystems (per
+  /// Wraps a cryptosystem's section ([children]) in a foldable
+  /// [_FoldableSection] so contacts' unsupported cryptosystems (per
   /// `XmppService.isEncryptionProtocolLikelySupported`) are folded away
   /// by default, instead of always showing every protocol's full
   /// fingerprint/device list regardless of whether the contact ever
   /// announced support for it.
+  ///
+  /// Note: a real [ExpansionTile] was tried here first, but Flutter has a
+  /// long-standing framework bug (flutter/flutter#97583) where an
+  /// [ExpansionTile]'s PageStorage-backed expanded state (a `bool`) can
+  /// collide with a descendant [Scrollable]'s PageStorage-backed scroll
+  /// offset (a `double`) -- e.g. the implicit [Scrollable] created by the
+  /// [SelectableText] fingerprint widgets below -- throwing
+  /// `type 'bool' is not a subtype of type 'double?'` when expanding.
+  /// [_FoldableSection] sidesteps this entirely by managing its own
+  /// expand/collapse state instead of relying on [PageStorage].
   Widget _foldableSection({
     required BuildContext context,
     required EncryptionProtocol protocol,
@@ -852,22 +862,91 @@ class _FingerprintVerificationScreenState
       widget.peerBareJid,
       protocol,
     );
-    return ExpansionTile(
-      key: PageStorageKey(protocol),
+    return _FoldableSection(
+      title: title,
       initiallyExpanded: isSupported,
-      title: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
       subtitle: isSupported
           ? null
-          : Text(
-              'Not known to be supported by ${widget.peerBareJid}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(bottom: 8),
+          : 'Not known to be supported by ${widget.peerBareJid}',
       children: children,
+    );
+  }
+}
+
+/// A simple, self-contained expand/collapse section used in place of
+/// [ExpansionTile] to avoid a Flutter framework bug where [ExpansionTile]'s
+/// [PageStorage]-backed expanded state can collide with a descendant
+/// [Scrollable]'s stored scroll offset (see the explanation at
+/// `_FingerprintVerificationScreenState._foldableSection`).
+class _FoldableSection extends StatefulWidget {
+  const _FoldableSection({
+    required this.title,
+    required this.initiallyExpanded,
+    required this.children,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool initiallyExpanded;
+  final List<Widget> children;
+
+  @override
+  State<_FoldableSection> createState() => _FoldableSectionState();
+}
+
+class _FoldableSectionState extends State<_FoldableSection> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (widget.subtitle != null)
+                        Text(
+                          widget.subtitle!,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: _expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(Icons.expand_more),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          child: _expanded
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: widget.children,
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 }
