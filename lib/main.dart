@@ -2020,12 +2020,13 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                   protocol,
                                 ),
                           ),
-                          if (service.encryptionProtocolFor(activeChat) !=
-                              EncryptionProtocol.none)
-                            _TrustIndicator(
-                              service: service,
-                              peerBareJid: activeChat,
-                            ),
+                          _TrustIndicator(
+                            service: service,
+                            peerBareJid: activeChat,
+                            isEncrypted:
+                                service.encryptionProtocolFor(activeChat) !=
+                                EncryptionProtocol.none,
+                          ),
                         ],
                       );
                     },
@@ -6841,16 +6842,25 @@ class MessageBubble extends StatelessWidget {
 }
 
 /// A small padlock/trust indicator shown in the chat header next to
-/// [EncryptionSelector] once encryption is turned on for a conversation,
-/// reflecting the aggregate [TrustState] of [peerBareJid]'s known OMEMO2
-/// devices (e.g. all verified vs. some still unverified/trust-on-first-use).
-/// Tapping it opens [FingerprintVerificationScreen] so the user can review
-/// and verify fingerprints.
+/// [EncryptionSelector], reflecting the aggregate [TrustState] of
+/// [peerBareJid]'s known OMEMO2 devices (e.g. all verified vs. some still
+/// unverified/trust-on-first-use). Always shown, even when encryption is
+/// off for the conversation ([isEncrypted] is false) - in that case it's
+/// rendered as an outline-only icon to indicate there's currently nothing
+/// to verify, while still letting the user tap through to review any
+/// previously-known fingerprints. Tapping it opens
+/// [FingerprintVerificationScreen] so the user can review and verify
+/// fingerprints.
 class _TrustIndicator extends StatefulWidget {
-  const _TrustIndicator({required this.service, required this.peerBareJid});
+  const _TrustIndicator({
+    required this.service,
+    required this.peerBareJid,
+    required this.isEncrypted,
+  });
 
   final XmppService service;
   final String peerBareJid;
+  final bool isEncrypted;
 
   @override
   State<_TrustIndicator> createState() => _TrustIndicatorState();
@@ -6886,15 +6896,26 @@ class _TrustIndicatorState extends State<_TrustIndicator> {
   Widget build(BuildContext context) {
     final trust = _trust;
     final verified = trust == TrustState.verified;
+    final isEncrypted = widget.isEncrypted;
+    final tooltip = !isEncrypted
+        ? 'Encryption is off. Tap to review fingerprints.'
+        : verified
+        ? 'All known devices verified. Tap to review fingerprints.'
+        : 'Some devices unverified. Tap to verify fingerprints.';
+    final iconData = !isEncrypted
+        ? Icons.shield_outlined
+        : verified
+        ? Icons.verified_user
+        : Icons.gpp_maybe;
+    final iconColor = !isEncrypted
+        ? Theme.of(context).disabledColor
+        : verified
+        ? Colors.green
+        : Colors.orange;
     return IconButton(
       key: const Key('trust-indicator'),
-      tooltip: verified
-          ? 'All known devices verified. Tap to review fingerprints.'
-          : 'Some devices unverified. Tap to verify fingerprints.',
-      icon: Icon(
-        verified ? Icons.verified_user : Icons.gpp_maybe,
-        color: verified ? Colors.green : Colors.orange,
-      ),
+      tooltip: tooltip,
+      icon: Icon(iconData, color: iconColor),
       onPressed: () async {
         await Navigator.of(context).push(
           MaterialPageRoute(
