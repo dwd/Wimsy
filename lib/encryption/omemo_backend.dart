@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
@@ -953,15 +954,29 @@ class OmemoBackend implements EncryptionBackend {
       // ignore: invalid_use_of_internal_member
       await _trustManager.onNewSession(bareSenderJid, sid);
       // Consume the one-time prekey (libsignal semantics) and republish the
-      // bundle so peers don't try to use it again.
-      try {
-        await _omemoManager.replaceOnetimePrekey(pre.preKeyId);
-        await pep.publishLegacyBundle(
-          await _legacyBundleFromDevice(await _omemoManager.getDevice()),
-        );
-      } catch (e) {
-        Log.w('OmemoBackend', 'Failed to rotate used one-time prekey: $e');
-      }
+      // bundle so peers don't try to use it again. This is deliberately NOT
+      // awaited: it involves a network round-trip (PEP publish) which can
+      // stall or never complete (e.g. a slow/unresponsive server), and we
+      // must not let that block returning the plaintext we have *already*
+      // successfully decrypted. Blocking here previously caused the whole
+      // decrypt call to hang forever whenever the publish stalled, which
+      // looked like a repeat of the earlier RatchetAccessQueue deadlock but
+      // was actually this unrelated network await.
+      unawaited(
+        () async {
+          try {
+            await _omemoManager.replaceOnetimePrekey(pre.preKeyId);
+            await pep.publishLegacyBundle(
+              await _legacyBundleFromDevice(await _omemoManager.getDevice()),
+            );
+          } catch (e) {
+            Log.w(
+              'OmemoBackend',
+              'Failed to rotate used one-time prekey: $e',
+            );
+          }
+        }(),
+      );
       return (keyMaterial: plaintext, error: null);
     } on LegacyRatchetException catch (e) {
       Log.w(
