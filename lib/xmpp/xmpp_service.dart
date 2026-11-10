@@ -708,6 +708,27 @@ class XmppService extends ChangeNotifier {
     return _callRemoteVideoEnabledBySid[key] ?? true;
   }
 
+  /// Whether the call with [bareJid] currently has video actually flowing in
+  /// at least one direction. A call negotiated with video (`session.video`)
+  /// can still end up effectively audio-only once both sides' video has been
+  /// switched off (we stopped sending our own video *and* asked the remote
+  /// end to stop sending theirs, e.g. to save bandwidth). In that case the UX
+  /// should look like a plain audio call, even though the video `m=` section
+  /// is still negotiated under the hood so either side can resume video
+  /// later without renegotiating from scratch.
+  bool isCallEffectivelyVideo(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    final session = key == null ? null : _callSessions[key];
+    if (key == null || session == null || !session.video) {
+      return false;
+    }
+    final sendingVideo =
+        (_callVideoEnabledBySid[key] ?? true) &&
+        (_callRemoteAllowsVideoBySid[key] ?? true);
+    final receivingVideo = _callRemoteVideoEnabledBySid[key] ?? true;
+    return sendingVideo || receivingVideo;
+  }
+
   int callLocalVideoRevisionFor(String bareJid) {
     final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
     return key == null ? 0 : (_callLocalVideoRevisionBySid[key] ?? 0);

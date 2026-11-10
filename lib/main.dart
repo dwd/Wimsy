@@ -1092,9 +1092,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
             ? null
             : service.callSessionFor(activeChat);
         final hasVisibleVideoCall =
-            activeCall?.video == true &&
-            (activeCall?.state == CallState.ringing ||
-                activeCall?.state == CallState.active);
+            activeCall != null &&
+            (activeCall.state == CallState.ringing
+                ? activeCall.video
+                : service.isCallEffectivelyVideo(activeCall.peerBareJid)) &&
+            (activeCall.state == CallState.ringing ||
+                activeCall.state == CallState.active);
         if (activeChat != null &&
             activeCall != null &&
             usesFullscreenLandscapeCall(
@@ -3318,7 +3321,10 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     final theme = Theme.of(context);
     final isIncoming = session.direction == CallDirection.incoming;
     final isActive = session.state == CallState.active;
-    final typeLabel = session.video ? 'video' : 'voice';
+    final effectivelyVideo = isActive
+        ? service.isCallEffectivelyVideo(bareJid)
+        : session.video;
+    final typeLabel = effectivelyVideo ? 'video' : 'voice';
     final title = isActive
         ? 'In $typeLabel call'
         : isIncoming
@@ -3349,7 +3355,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
             Row(
               children: [
                 Icon(
-                  session.video ? Icons.videocam : Icons.call,
+                  effectivelyVideo ? Icons.videocam : Icons.call,
                   color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: 8),
@@ -3371,7 +3377,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                   ),
               ],
             ),
-            if (session.video) ...[
+            if (effectivelyVideo) ...[
               const SizedBox(height: 12),
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -3547,7 +3553,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                 },
               ),
             ],
-            if (isActive && !session.video) ...[
+            if (isActive && !effectivelyVideo) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
