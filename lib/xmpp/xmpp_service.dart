@@ -473,6 +473,13 @@ class XmppService extends ChangeNotifier {
   final Map<String, bool> _callRemoteSpeakingBySid = {};
   final Set<String> _callAcceptedBySid = {};
   final Set<String> _callAcceptingBySid = {};
+  // Tracks audio-only calls that are mid-upgrade to video (a Jingle
+  // content-add for the video section was sent and we're waiting for the
+  // remote's content-accept/content-reject), and the pending completers used
+  // to resolve upgradeCallToVideo() once that response arrives.
+  final Set<String> _callVideoUpgradePendingBySid = {};
+  final Map<String, Completer<JingleSessionEvent?>>
+  _pendingContentAddCompleters = {};
   final Set<String> _callLoggedIceQueueBySid = {};
   final Map<String, String> _callSelectedCandidateSummaryBySid = {};
   final Map<String, String> _callCandidatePairSummaryBySid = {};
@@ -4565,6 +4572,15 @@ class XmppService extends ChangeNotifier {
       case JingleAction.contentModify:
         _handleJingleContentModify(event);
         return;
+      case JingleAction.contentAdd:
+        unawaited(_handleJingleContentAdd(event));
+        return;
+      case JingleAction.contentAccept:
+        _handleJingleContentAccept(event);
+        return;
+      case JingleAction.contentReject:
+        _handleJingleContentReject(event);
+        return;
       case JingleAction.transportInfo:
         _handleJingleTransportInfo(event);
         return;
@@ -4671,6 +4687,186 @@ class XmppService extends ChangeNotifier {
           senders == 'both' || senders == localRole;
       _applyLocalVideoTrackEnabled(event.sid);
     }
+    notifyListeners();
+  }
+
+  /// Handles an incoming Jingle `content-add` (XEP-0166 §7.2.6): the remote
+  /// end wants to add a brand-new media section (video) to an
+  /// already-established, audio-only call — e.g. because they're upgrading
+  /// the call to video. We accept it by applying the offered video `m=`
+  /// section to our peer connection and, if we have a working camera,
+  /// answer with our own video too; if we have no camera (or anything else
+  /// goes wrong), we still accept receive-only so the remote can send us
+  /// video, falling back to a reject only if the SDP itself can't be
+  /// negotiated.
+  Future<void> _handleJingleContentAdd(JingleSessionEvent event) async {
+    final session = _callSessions[event.sid];
+    final pc = _callPeerConnections[event.sid];
+    final jingle = _jingleManager;
+    final content = event.content;
+    final description = content?.rtpDescription;
+    if (session == null ||
+        pc == null ||
+        jingle == null ||
+        content == null ||
+        description == null ||
+        description.media.toLowerCase() != 'video' ||
+        session.video) {
+      return;
+    }
+    _storeRemoteCallContents(event.sid, [content]);
+    final remoteDescriptions = _callRemoteDescriptionsBySid[event.sid] ?? {};
+    final remoteTransports = _callRemoteTransportsBySid[event.sid] ?? {};
+    final target = _callPeerJidForSid(event.sid, session.peerBareJid);
+    try {
+      final offerSdp = buildMinimalSdpFromJingleContents(
+        contents: _buildCallContents(remoteDescriptions, remoteTransports),
+        bundle: _callRemoteBundleBySid[event.sid] ?? false,
+      );
+      await pc.setRemoteDescription(RTCSessionDescription(offerSdp, 'offer'));
+      _markRemoteDescriptionSet(event.sid, pc);
+    } catch (error) {
+      Log.w(
+        'XmppService',
+        'Call ${event.sid} unable to apply incoming video content-add: $error',
+      );
+      if (target != null) {
+        unawaited(
+          _sendIqAndAwait(
+            jingle.buildContentReject(
+              to: target,
+              sid: event.sid,
+              contentName: content.name,
+              creator: content.creator,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    WebRtcMediaStreamHandle? capture;
+    try {
+      final handle = await _mediaSession.createAdditionalStream(
+        audio: false,
+        video: true,
+        videoDeviceId: _preferredVideoInputId,
+      );
+      if (handle is WebRtcMediaStreamHandle &&
+          handle.stream.getVideoTracks().isNotEmpty) {
+        capture = handle;
+      } else {
+        await handle.dispose();
+      }
+    } catch (error) {
+      Log.w(
+        'XmppService',
+        'Call ${event.sid} no camera available to answer video upgrade: $error',
+      );
+    }
+    if (capture != null) {
+      await pc.addTrack(capture.stream.getVideoTracks().first, capture.stream);
+      _callLocalPreviewStreamBySid[event.sid] = capture.stream;
+    }
+    final answer = await pc.createAnswer({
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': true,
+    });
+    await pc.setLocalDescription(answer);
+    final mappings = mapSdpToJingleContents(sdp: answer.sdp ?? '');
+    final videoMapping = mappings
+        .where((mapping) => mapping.description.media == 'video')
+        .firstOrNull;
+    if (videoMapping == null || target == null) {
+      return;
+    }
+    final localDescriptions = Map<String, JingleRtpDescription>.from(
+      _callLocalDescriptionsBySid[event.sid] ?? const {},
+    );
+    final localTransports = Map<String, JingleIceTransport>.from(
+      _callLocalTransportsBySid[event.sid] ?? const {},
+    );
+    localDescriptions[videoMapping.contentName] = videoMapping.description;
+    localTransports[videoMapping.contentName] = videoMapping.transport;
+    _callLocalDescriptionsBySid[event.sid] = localDescriptions;
+    _callLocalTransportsBySid[event.sid] = localTransports;
+    _callContentNamesBySid[event.sid] = localDescriptions.keys.toList(
+      growable: false,
+    );
+    unawaited(
+      _sendIqAndAwait(
+        jingle.buildContentAccept(
+          to: target,
+          sid: event.sid,
+          content: JingleContent(
+            name: videoMapping.contentName,
+            creator: content.creator,
+            rtpDescription: videoMapping.description,
+            iceTransport: videoMapping.transport,
+            senders: 'both',
+          ),
+        ),
+      ),
+    );
+    _promoteCallSessionToVideo(event.sid);
+  }
+
+  /// Handles a Jingle `content-accept` (XEP-0166 §7.2.7): the remote
+  /// accepted our earlier `content-add`, so we apply their answer for the
+  /// new content and complete the matching [upgradeCallToVideo] call.
+  void _handleJingleContentAccept(JingleSessionEvent event) {
+    final completer = _pendingContentAddCompleters.remove(event.sid);
+    final content = event.content;
+    if (content?.rtpDescription != null) {
+      _storeRemoteCallContents(event.sid, [content!]);
+      final pc = _callPeerConnections[event.sid];
+      if (pc != null) {
+        final remoteDescriptions = _callRemoteDescriptionsBySid[event.sid] ?? {};
+        final remoteTransports = _callRemoteTransportsBySid[event.sid] ?? {};
+        final answerSdp = buildMinimalSdpFromJingleContents(
+          contents: _buildCallContents(remoteDescriptions, remoteTransports),
+          bundle: _callRemoteBundleBySid[event.sid] ?? false,
+        );
+        unawaited(
+          pc.setRemoteDescription(RTCSessionDescription(answerSdp, 'answer')).then((
+            _,
+          ) {
+            _markRemoteDescriptionSet(event.sid, pc);
+          }),
+        );
+      }
+      _promoteCallSessionToVideo(event.sid);
+    }
+    completer?.complete(event);
+  }
+
+  /// Handles a Jingle `content-reject` (XEP-0166 §7.2.8): the remote
+  /// declined our `content-add`, so we fail the matching
+  /// [upgradeCallToVideo] call (it will roll back the local camera track).
+  void _handleJingleContentReject(JingleSessionEvent event) {
+    _pendingContentAddCompleters.remove(event.sid)?.complete(null);
+  }
+
+  /// Flips a call session that was negotiated audio-only over to video once
+  /// a Jingle content-add for its video section has been accepted (by
+  /// either side), updating all the related call-state maps the same way a
+  /// call negotiated with video from the start would have been.
+  void _promoteCallSessionToVideo(String sid) {
+    final session = _callSessions[sid];
+    if (session == null || session.video) {
+      return;
+    }
+    _callSessions[sid] = CallSession(
+      sid: session.sid,
+      peerBareJid: session.peerBareJid,
+      direction: session.direction,
+      video: true,
+      state: session.state,
+    );
+    _callMediaKindBySid[sid] = CallMediaKind.video;
+    _callVideoEnabledBySid[sid] = true;
+    _callRemoteVideoEnabledBySid[sid] = true;
+    _callRemoteAllowsVideoBySid[sid] = true;
+    _applyLocalVideoTrackEnabled(sid);
     notifyListeners();
   }
 
@@ -5900,6 +6096,133 @@ class XmppService extends ChangeNotifier {
       for (final track in stream.getVideoTracks()) {
         track.enabled = enabled;
       }
+    }
+  }
+
+  /// Whether the call with [bareJid] was negotiated as audio-only but is
+  /// active and could be upgraded to video via [upgradeCallToVideo].
+  bool canUpgradeCallToVideo(String bareJid) {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    final session = key == null ? null : _callSessions[key];
+    return key != null &&
+        session != null &&
+        !session.video &&
+        session.state == CallState.active &&
+        _callPeerConnections.containsKey(key) &&
+        !_callVideoUpgradePendingBySid.contains(key);
+  }
+
+  /// Upgrades an audio-only call with [bareJid] to video, by negotiating a
+  /// brand-new video `m=` section into the already-established session via
+  /// Jingle `content-add`/`content-accept` (XEP-0166 §7.2), instead of
+  /// renegotiating the whole call. We never force the remote to send video
+  /// back — we only offer to add our own camera and let them accept,
+  /// receive-only, or reject it. Returns `null` on success, or a
+  /// user-facing error message on failure (the local camera track and any
+  /// state changes are rolled back in that case).
+  Future<String?> upgradeCallToVideo(String bareJid) async {
+    final key = _callSessionByPeerKey[_callPeerKeyForJid(bareJid)];
+    final session = key == null ? null : _callSessions[key];
+    final pc = key == null ? null : _callPeerConnections[key];
+    final jingle = _jingleManager;
+    if (key == null || session == null || pc == null || jingle == null) {
+      return 'No active call.';
+    }
+    if (session.state != CallState.active) {
+      return 'Call is not active.';
+    }
+    if (session.video) {
+      return null;
+    }
+    if (!_callVideoUpgradePendingBySid.add(key)) {
+      return 'Video upgrade already in progress.';
+    }
+    WebRtcMediaStreamHandle? capture;
+    try {
+      final handle = await _mediaSession.createAdditionalStream(
+        audio: false,
+        video: true,
+        videoDeviceId: _preferredVideoInputId,
+      );
+      if (handle is! WebRtcMediaStreamHandle ||
+          handle.stream.getVideoTracks().isEmpty) {
+        await handle.dispose();
+        return 'Unable to access the camera.';
+      }
+      capture = handle;
+      final videoTrack = capture.stream.getVideoTracks().first;
+      await pc.addTrack(videoTrack, capture.stream);
+      final offer = await pc.createOffer({
+        'offerToReceiveAudio': true,
+        'offerToReceiveVideo': true,
+      });
+      await pc.setLocalDescription(offer);
+      final mappings = mapSdpToJingleContents(sdp: offer.sdp ?? '');
+      final videoMapping = mappings
+          .where((mapping) => mapping.description.media == 'video')
+          .firstOrNull;
+      if (videoMapping == null) {
+        return 'Unable to build a video offer.';
+      }
+      final localDescriptions = Map<String, JingleRtpDescription>.from(
+        _callLocalDescriptionsBySid[key] ?? const {},
+      );
+      final localTransports = Map<String, JingleIceTransport>.from(
+        _callLocalTransportsBySid[key] ?? const {},
+      );
+      localDescriptions[videoMapping.contentName] = videoMapping.description;
+      localTransports[videoMapping.contentName] = videoMapping.transport;
+      _callLocalDescriptionsBySid[key] = localDescriptions;
+      _callLocalTransportsBySid[key] = localTransports;
+      _callContentNamesBySid[key] = localDescriptions.keys.toList(
+        growable: false,
+      );
+      _callLocalPreviewStreamBySid[key] = capture.stream;
+      notifyListeners();
+      final target = _callPeerJidForSid(key, session.peerBareJid);
+      if (target == null) {
+        return 'Unable to resolve the peer.';
+      }
+      final localRole = session.direction == CallDirection.outgoing
+          ? 'initiator'
+          : 'responder';
+      final completer = Completer<JingleSessionEvent?>();
+      _pendingContentAddCompleters[key] = completer;
+      final iq = jingle.buildContentAdd(
+        to: target,
+        sid: key,
+        content: JingleContent(
+          name: videoMapping.contentName,
+          creator: localRole,
+          rtpDescription: videoMapping.description,
+          iceTransport: videoMapping.transport,
+          senders: 'both',
+        ),
+      );
+      unawaited(_sendIqAndAwait(iq));
+      final response = await completer.future.timeout(
+        const Duration(seconds: 20),
+        onTimeout: () => null,
+      );
+      _pendingContentAddCompleters.remove(key);
+      if (response == null) {
+        _callLocalPreviewStreamBySid.remove(key);
+        final senders = await pc.getSenders();
+        final matchingSender = senders
+            .where((rtpSender) => rtpSender.track?.id == videoTrack.id)
+            .firstOrNull;
+        if (matchingSender != null) {
+          await pc.removeTrack(matchingSender);
+        }
+        notifyListeners();
+        return 'The other side did not accept video.';
+      }
+      return null;
+    } catch (error) {
+      Log.w('XmppService', 'Unable to upgrade call $key to video: $error');
+      return 'Unable to start video.';
+    } finally {
+      _callVideoUpgradePendingBySid.remove(key);
     }
   }
 

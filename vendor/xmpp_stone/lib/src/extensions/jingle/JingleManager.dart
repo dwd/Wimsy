@@ -13,6 +13,9 @@ enum JingleAction {
   sessionAccept,
   sessionTerminate,
   contentModify,
+  contentAdd,
+  contentAccept,
+  contentReject,
   transportInfo,
   unknown,
 }
@@ -631,6 +634,12 @@ class JingleManager {
         return JingleAction.sessionTerminate;
       case 'content-modify':
         return JingleAction.contentModify;
+      case 'content-add':
+        return JingleAction.contentAdd;
+      case 'content-accept':
+        return JingleAction.contentAccept;
+      case 'content-reject':
+        return JingleAction.contentReject;
       case 'transport-info':
         return JingleAction.transportInfo;
       default:
@@ -809,6 +818,65 @@ class JingleManager {
       action: 'content-modify',
       sid: sid,
       contents: [content],
+    ));
+    return stanza;
+  }
+
+  /// Builds a `content-add` request (XEP-0166 §7.2.6), used to negotiate a
+  /// brand-new media section (e.g. video) into an already-established
+  /// session, without renegotiating the whole session from scratch.
+  IqStanza buildContentAdd({
+    required Jid to,
+    required String sid,
+    required JingleContent content,
+  }) {
+    final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+    stanza.toJid = to;
+    stanza.fromJid = _connection.fullJid;
+    stanza.addChild(_buildRtpJinglePayloadMulti(
+      action: 'content-add',
+      sid: sid,
+      contents: [content],
+    ));
+    return stanza;
+  }
+
+  /// Builds a `content-accept` response (XEP-0166 §7.2.7) acknowledging a
+  /// previously received `content-add`, carrying our own description and
+  /// transport for the newly accepted content.
+  IqStanza buildContentAccept({
+    required Jid to,
+    required String sid,
+    required JingleContent content,
+  }) {
+    final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+    stanza.toJid = to;
+    stanza.fromJid = _connection.fullJid;
+    stanza.addChild(_buildRtpJinglePayloadMulti(
+      action: 'content-accept',
+      sid: sid,
+      contents: [content],
+    ));
+    return stanza;
+  }
+
+  /// Builds a `content-reject` response (XEP-0166 §7.2.8) declining a
+  /// previously received `content-add`.
+  IqStanza buildContentReject({
+    required Jid to,
+    required String sid,
+    required String contentName,
+    required String creator,
+  }) {
+    final stanza = IqStanza(AbstractStanza.getRandomId(), IqStanzaType.SET);
+    stanza.toJid = to;
+    stanza.fromJid = _connection.fullJid;
+    stanza.addChild(_buildRtpJinglePayloadMulti(
+      action: 'content-reject',
+      sid: sid,
+      contents: [
+        JingleContent(name: contentName, creator: creator),
+      ],
     ));
     return stanza;
   }

@@ -3620,6 +3620,18 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     );
   }
 
+  // Upgrades an audio-only call to video (XEP-0166 content-add): grabs the
+  // camera and offers to add a video section to the already-established
+  // call, without forcing the remote end to send video back. Surfaces any
+  // failure (no camera, remote declined, etc.) via a snackbar.
+  Future<void> _startCallVideoUpgrade(XmppService service, String bareJid) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final error = await service.upgradeCallToVideo(bareJid);
+    if (error != null && mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
+
   Widget _buildCallControls(
     XmppService service,
     String bareJid,
@@ -3664,6 +3676,14 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           icon: const Icon(Icons.headphones),
           tooltip: 'Select audio output',
         ),
+        if (!session.video)
+          IconButton(
+            onPressed: service.canUpgradeCallToVideo(bareJid)
+                ? () => _startCallVideoUpgrade(service, bareJid)
+                : null,
+            icon: const Icon(Icons.videocam),
+            tooltip: 'Start video',
+          ),
         if (session.video)
           IconButton(
             onPressed: () => service.toggleCallVideo(bareJid),

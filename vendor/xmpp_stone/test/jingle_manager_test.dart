@@ -94,6 +94,97 @@ void main() {
     expect(event.content?.senders, 'responder');
   });
 
+  test('Jingle content-add parses new video content', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account)..socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+    final completer = Completer<JingleSessionEvent>();
+    manager.sessionStream.listen(completer.complete);
+
+    final iq = '<iq type="set" id="add1" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="content-add" sid="sidAdd">'
+        '<content creator="initiator" name="video" senders="both">'
+        '<description xmlns="urn:xmpp:jingle:apps:rtp:1" media="video">'
+        '<payload-type id="96" name="VP8" clockrate="90000" />'
+        '</description>'
+        '</content>'
+        '</jingle></iq>';
+    connection.handleResponse(connection.prepareStreamResponse(iq));
+
+    final event = await completer.future.timeout(const Duration(seconds: 1));
+    expect(event.action, JingleAction.contentAdd);
+    expect(event.content?.name, 'video');
+    expect(event.content?.senders, 'both');
+    expect(event.content?.rtpDescription?.media, 'video');
+  });
+
+  test('Jingle content-accept and content-reject actions parse', () async {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account)..socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+    final events = <JingleSessionEvent>[];
+    manager.sessionStream.listen(events.add);
+
+    final acceptIq = '<iq type="set" id="accept1" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="content-accept" sid="sidAdd">'
+        '<content creator="initiator" name="video"/>'
+        '</jingle></iq>';
+    connection.handleResponse(connection.prepareStreamResponse(acceptIq));
+
+    final rejectIq = '<iq type="set" id="reject1" from="peer@example.com/res">'
+        '<jingle xmlns="urn:xmpp:jingle:1" action="content-reject" sid="sidAdd">'
+        '<content creator="initiator" name="video"/>'
+        '</jingle></iq>';
+    connection.handleResponse(connection.prepareStreamResponse(rejectIq));
+
+    await Future<void>.delayed(Duration.zero);
+    expect(events, hasLength(2));
+    expect(events[0].action, JingleAction.contentAccept);
+    expect(events[1].action, JingleAction.contentReject);
+  });
+
+  test('Jingle manager builds content-add/content-accept/content-reject', () {
+    final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
+    final connection = Connection(account)..socket = _FakeSocket();
+    final manager = JingleManager.getInstance(connection);
+
+    final addStanza = manager.buildContentAdd(
+      to: account.fullJid,
+      sid: 'sidAdd',
+      content: const JingleContent(
+        name: 'video',
+        creator: 'initiator',
+        rtpDescription: JingleRtpDescription(
+          media: 'video',
+          payloadTypes: [JingleRtpPayloadType(id: 96, name: 'VP8')],
+        ),
+      ),
+    );
+    final addJingle = addStanza.getChild('jingle');
+    expect(addJingle?.getAttribute('action')?.value, 'content-add');
+    expect(addJingle?.getChild('content')?.getChild('description'), isNotNull);
+
+    final acceptStanza = manager.buildContentAccept(
+      to: account.fullJid,
+      sid: 'sidAdd',
+      content: const JingleContent(name: 'video', creator: 'initiator'),
+    );
+    expect(
+      acceptStanza.getChild('jingle')?.getAttribute('action')?.value,
+      'content-accept',
+    );
+
+    final rejectStanza = manager.buildContentReject(
+      to: account.fullJid,
+      sid: 'sidAdd',
+      contentName: 'video',
+      creator: 'initiator',
+    );
+    final rejectJingle = rejectStanza.getChild('jingle');
+    expect(rejectJingle?.getAttribute('action')?.value, 'content-reject');
+    expect(rejectJingle?.getChild('content')?.getAttribute('name')?.value, 'video');
+  });
+
   test('Jingle manager builds content-modify senders', () {
     final account = XmppAccountSettings.fromJid('user@example.com/res', 'pass');
     final connection = Connection(account)..socket = _FakeSocket();
