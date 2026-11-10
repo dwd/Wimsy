@@ -52,6 +52,7 @@ import 'mam_fin_page.dart';
 import 'muc_invite.dart';
 import 'muc_self_ping.dart';
 import 'muc_config.dart';
+import 'room_config.dart';
 import 'jid_discovery.dart';
 import 'chat_message_mutations.dart';
 import 'pep_publish.dart';
@@ -8786,6 +8787,59 @@ class XmppService extends ChangeNotifier {
     iqStanza.addChild(pubsub);
     final result = await _sendIqAndAwait(iqStanza);
     return parsePepNodeItems(result);
+  }
+
+  /// Room administration: fetches [roomJid]'s configuration form via a
+  /// `muc#owner` `<query/>` GET IQ (XEP-0045 §10.2).
+  Future<List<RoomConfigField>> fetchRoomConfig(String roomJid) async {
+    final result = await _fetchRoomConfigResult(roomJid);
+    return parseRoomConfig(result);
+  }
+
+  /// Room administration: fetches [roomJid]'s `FORM_TYPE` (needed to submit
+  /// an edited configuration back, since it must be echoed unchanged),
+  /// alongside the room's current configuration form.
+  Future<String?> fetchRoomConfigFormType(String roomJid) async {
+    final result = await _fetchRoomConfigResult(roomJid);
+    return parseRoomConfigFormType(result);
+  }
+
+  Future<IqStanza?> _fetchRoomConfigResult(String roomJid) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.GET);
+    iqStanza.toJid = Jid.fromFullJid(roomJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', mucOwnerXmlns));
+    iqStanza.addChild(query);
+    return _sendIqAndAwait(iqStanza);
+  }
+
+  /// Room administration: submits an edited configuration for [roomJid] via
+  /// a `muc#owner` `<query/>` SET IQ carrying a `submit` data form
+  /// (XEP-0045 §10.2). [formType] should be the value previously obtained
+  /// from [fetchRoomConfigFormType], and is echoed back as required.
+  ///
+  /// Returns `null` on success, or a human-readable error condition (see
+  /// [roomConfigIqErrorCondition]) on failure.
+  Future<String?> submitRoomConfig(
+    String roomJid,
+    String? formType,
+    List<RoomConfigField> fields,
+  ) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(roomJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', mucOwnerXmlns));
+    query.addChild(buildRoomConfigSubmitForm(formType, fields));
+    iqStanza.addChild(query);
+    final result = await _sendIqAndAwait(iqStanza);
+    final condition = roomConfigIqErrorCondition(result);
+    if (condition == null) {
+      return null;
+    }
+    final text = roomConfigIqErrorText(result);
+    return text != null ? '$condition: $text' : condition;
   }
 
   Future<List<JidSuggestion>> _requestJidSearch(

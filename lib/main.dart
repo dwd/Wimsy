@@ -26,6 +26,7 @@ import 'keepalive_settings_screen.dart';
 import 'login_screen.dart';
 import 'login_link.dart';
 import 'pep_explorer_screen.dart';
+import 'room_config_screen.dart';
 import 'login_export.dart';
 import 'models/chat_message.dart';
 import 'models/contact_entry.dart';
@@ -1926,6 +1927,20 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     onPressed: () => _showInviteDialog(activeChat),
                     icon: const Icon(Icons.person_add),
                     tooltip: 'Invite to room',
+                  ),
+                if (isBookmark && (roomEntry?.joined ?? false))
+                  IconButton(
+                    key: const Key('room-config-button'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => RoomConfigScreen(
+                          service: service,
+                          roomJid: activeChat,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.settings),
+                    tooltip: 'Configure room',
                   ),
                 if (showBack && isBookmark)
                   IconButton(
