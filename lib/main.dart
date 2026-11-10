@@ -2189,6 +2189,22 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             onAddToRoster: canAddOccupantToRoster
                                 ? () => _addOccupantToRoster(occupantRosterJid)
                                 : null,
+                            onKick:
+                                (isBookmark &&
+                                    !message.outgoing &&
+                                    _canConfigureRoom(service, activeChat))
+                                ? () => _kickOccupant(activeChat, message.from)
+                                : null,
+                            onBan:
+                                (isBookmark &&
+                                    !message.outgoing &&
+                                    _canConfigureRoom(service, activeChat))
+                                ? () => _banOccupant(
+                                    activeChat,
+                                    message.from,
+                                    occupantRosterJid,
+                                  )
+                                : null,
                             selfReactionSenderId: service.reactionSenderForChat(
                               activeChat,
                               isRoom: isBookmark,
@@ -4616,6 +4632,80 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     return affiliation == 'owner' || affiliation == 'admin';
   }
 
+  /// Kicks [nick] from [roomJid] (sets their role to `none`, XEP-0045
+  /// §8.2), after a confirmation dialog. Reachable from a MUC message's
+  /// menu as "Kick", gated on [_canConfigureRoom].
+  Future<void> _kickOccupant(String roomJid, String nick) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Kick $nick?'),
+        content: Text(
+          '$nick will be removed from the room, but can rejoin unless also banned.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Kick'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    final error = await widget.service.kickRoomOccupant(roomJid, nick);
+    if (error != null) {
+      _showSnack('Failed to kick $nick: $error');
+    }
+  }
+
+  /// Bans [nick] (real JID [jid]) from [roomJid] by setting their
+  /// affiliation to `outcast` (XEP-0045 §9.1), after a confirmation
+  /// dialog. Reachable from a MUC message's menu as "Ban", gated on
+  /// [_canConfigureRoom]. [jid] must be known (the room must disclose real
+  /// JIDs) since affiliation changes are keyed by JID, not by nick.
+  Future<void> _banOccupant(String roomJid, String nick, String? jid) async {
+    if (jid == null || jid.trim().isEmpty) {
+      _showSnack('Cannot ban $nick: their real JID is unknown.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Ban $nick?'),
+        content: Text(
+          '$jid will be banned from the room and will not be able to rejoin.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Ban'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    final error = await widget.service.setRoomOccupantAffiliation(
+      roomJid,
+      jid,
+      'outcast',
+    );
+    if (error != null) {
+      _showSnack('Failed to ban $nick: $error');
+    }
+  }
+
   Future<void> _showInviteDialog(String? roomJid) async {
     if (roomJid == null || roomJid.trim().isEmpty) {
       return;
@@ -5964,6 +6054,8 @@ class MessageBubble extends StatelessWidget {
     required this.inviteReason,
     required this.onJoinInvite,
     this.onAddToRoster,
+    this.onKick,
+    this.onBan,
     required this.selfReactionSenderId,
     required this.recentReactionOptions,
     required this.onReact,
@@ -5992,6 +6084,14 @@ class MessageBubble extends StatelessWidget {
   final String? inviteReason;
   final VoidCallback? onJoinInvite;
   final VoidCallback? onAddToRoster;
+  /// Shown as "Kick" in the message menu for MUC messages when the local
+  /// user is an owner/admin of the room (XEP-0045 §8.2); sets the sender's
+  /// role to `none`, removing them from the room without banning them.
+  final VoidCallback? onKick;
+  /// Shown as "Ban" in the message menu for MUC messages when the local
+  /// user is an owner/admin of the room; sets the sender's affiliation to
+  /// `outcast` (XEP-0045 §9.1), preventing them from rejoining.
+  final VoidCallback? onBan;
   final String selfReactionSenderId;
   final List<String> recentReactionOptions;
   final void Function(String emoji)? onReact;
@@ -6042,6 +6142,8 @@ class MessageBubble extends StatelessWidget {
               onEdit: onEdit,
               onReply: onReply,
               onAddToRoster: onAddToRoster,
+              onKick: onKick,
+              onBan: onBan,
               child: AvatarWithPresence(
                 label: senderName,
                 bytes: avatarBytes,
@@ -8424,6 +8526,10 @@ class _RoomOccupantTile extends StatelessWidget {
         _RoleAffiliationChip(label: occupant.affiliation!),
     ];
     final status = occupant.status?.trim() ?? '';
+    final ownAffiliation = service.ownRoomAffiliation(roomJid);
+    final canManage =
+        !occupant.isSelf &&
+        (ownAffiliation == 'owner' || ownAffiliation == 'admin');
     return ListTile(
       leading: AvatarWithPresence(
         label: occupant.nick,
@@ -8431,6 +8537,46 @@ class _RoomOccupantTile extends StatelessWidget {
         showPresenceDot: true,
         presenceShow: occupant.show ?? PresenceShowElement.CHAT,
       ),
+      trailing: canManage
+          ? PopupMenuButton<String>(
+              tooltip: 'Manage ${occupant.nick}',
+              onSelected: (value) => _handleManageAction(context, value),
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'role_moderator',
+                  child: Text('Make moderator'),
+                ),
+                PopupMenuItem(
+                  value: 'role_participant',
+                  child: Text('Make participant'),
+                ),
+                PopupMenuItem(
+                  value: 'role_visitor',
+                  child: Text('Make visitor'),
+                ),
+                PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'affiliation_owner',
+                  child: Text('Make owner'),
+                ),
+                PopupMenuItem(
+                  value: 'affiliation_admin',
+                  child: Text('Make admin'),
+                ),
+                PopupMenuItem(
+                  value: 'affiliation_member',
+                  child: Text('Make member'),
+                ),
+                PopupMenuItem(
+                  value: 'affiliation_none',
+                  child: Text('Remove affiliation'),
+                ),
+                PopupMenuDivider(),
+                PopupMenuItem(value: 'kick', child: Text('Kick')),
+                PopupMenuItem(value: 'ban', child: Text('Ban')),
+              ],
+            )
+          : null,
       title: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 6,
@@ -8464,6 +8610,143 @@ class _RoomOccupantTile extends StatelessWidget {
               ),
             ),
     );
+  }
+
+  /// Dispatches a selected entry from the "manage occupant" popup menu
+  /// (role/affiliation changes, kick, ban) to the matching
+  /// [XmppService] call.
+  Future<void> _handleManageAction(BuildContext context, String value) async {
+    switch (value) {
+      case 'role_moderator':
+        await _changeRole(context, 'moderator');
+      case 'role_participant':
+        await _changeRole(context, 'participant');
+      case 'role_visitor':
+        await _changeRole(context, 'visitor');
+      case 'affiliation_owner':
+        await _changeAffiliation(context, 'owner');
+      case 'affiliation_admin':
+        await _changeAffiliation(context, 'admin');
+      case 'affiliation_member':
+        await _changeAffiliation(context, 'member');
+      case 'affiliation_none':
+        await _changeAffiliation(context, 'none');
+      case 'kick':
+        await _kick(context);
+      case 'ban':
+        await _ban(context);
+    }
+  }
+
+  Future<void> _changeRole(BuildContext context, String role) async {
+    final error = await service.setRoomOccupantRole(
+      roomJid,
+      occupant.nick,
+      role,
+    );
+    if (context.mounted) {
+      _reportError(context, error, 'Failed to change role');
+    }
+  }
+
+  Future<void> _changeAffiliation(BuildContext context, String affiliation) async {
+    final jid = occupant.realJid;
+    if (jid == null || jid.isEmpty) {
+      _showSnack(context, 'Cannot change affiliation: real JID unknown.');
+      return;
+    }
+    final error = await service.setRoomOccupantAffiliation(
+      roomJid,
+      jid,
+      affiliation,
+    );
+    if (context.mounted) {
+      _reportError(context, error, 'Failed to change affiliation');
+    }
+  }
+
+  Future<void> _kick(BuildContext context) async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Kick ${occupant.nick}?',
+      message:
+          '${occupant.nick} will be removed from the room, but can rejoin unless also banned.',
+      confirmLabel: 'Kick',
+    );
+    if (!confirmed) {
+      return;
+    }
+    final error = await service.kickRoomOccupant(roomJid, occupant.nick);
+    if (context.mounted) {
+      _reportError(context, error, 'Failed to kick occupant');
+    }
+  }
+
+  Future<void> _ban(BuildContext context) async {
+    final jid = occupant.realJid;
+    if (jid == null || jid.isEmpty) {
+      _showSnack(context, 'Cannot ban: real JID unknown.');
+      return;
+    }
+    final confirmed = await _confirm(
+      context,
+      title: 'Ban ${occupant.nick}?',
+      message: '$jid will be banned from the room and will not be able to rejoin.',
+      confirmLabel: 'Ban',
+    );
+    if (!confirmed) {
+      return;
+    }
+    final error = await service.setRoomOccupantAffiliation(
+      roomJid,
+      jid,
+      'outcast',
+    );
+    if (context.mounted) {
+      _reportError(context, error, 'Failed to ban occupant');
+    }
+  }
+
+  Future<bool> _confirm(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  void _reportError(BuildContext context, String? error, String failurePrefix) {
+    if (error == null || !context.mounted) {
+      return;
+    }
+    _showSnack(context, '$failurePrefix: $error');
+  }
+
+  void _showSnack(BuildContext context, String message) {
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
@@ -8505,6 +8788,8 @@ class _MessageMenuButton extends StatefulWidget {
     required this.onEdit,
     required this.onReply,
     this.onAddToRoster,
+    this.onKick,
+    this.onBan,
     this.child,
   });
 
@@ -8515,6 +8800,8 @@ class _MessageMenuButton extends StatefulWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onReply;
   final VoidCallback? onAddToRoster;
+  final VoidCallback? onKick;
+  final VoidCallback? onBan;
   final Widget? child;
 
   @override
@@ -8564,6 +8851,10 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
           value: 'add_to_roster',
           child: Text('Add to contacts'),
         ),
+      if (widget.onKick != null)
+        const PopupMenuItem(value: 'kick_occupant', child: Text('Kick')),
+      if (widget.onBan != null)
+        const PopupMenuItem(value: 'ban_occupant', child: Text('Ban')),
       if (widget.onReact != null)
         const PopupMenuItem(value: 'add_reaction', child: Text('Add reaction')),
       if (reactions.isNotEmpty)
@@ -8583,6 +8874,10 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
         widget.onReply?.call();
       case 'add_to_roster':
         widget.onAddToRoster?.call();
+      case 'kick_occupant':
+        widget.onKick?.call();
+      case 'ban_occupant':
+        widget.onBan?.call();
       case 'add_reaction':
         _showReactionSheet(context);
       case 'view_reactions':

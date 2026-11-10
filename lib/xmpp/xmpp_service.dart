@@ -8860,6 +8860,111 @@ class XmppService extends ChangeNotifier {
     return text != null ? '$condition: $text' : condition;
   }
 
+  /// Room administration: changes [nick]'s MUC role in [roomJid] (e.g.
+  /// `moderator`, `participant`, `visitor`, or `none` to kick them) via a
+  /// `muc#admin` `<query/>` SET IQ (XEP-0045 §8.2/§9.6).
+  ///
+  /// Returns `null` on success, or a human-readable error condition (see
+  /// [roomConfigIqErrorCondition]) on failure.
+  Future<String?> setRoomOccupantRole(
+    String roomJid,
+    String nick,
+    String role,
+  ) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(roomJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', mucAdminXmlns));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('nick', nick));
+    item.addAttribute(XmppAttribute('role', role));
+    query.addChild(item);
+    iqStanza.addChild(query);
+    final result = await _sendIqAndAwait(iqStanza);
+    final condition = roomConfigIqErrorCondition(result);
+    if (condition == null) {
+      return null;
+    }
+    final text = roomConfigIqErrorText(result);
+    return text != null ? '$condition: $text' : condition;
+  }
+
+  /// Room administration: kicks [nick] from [roomJid] by setting their role
+  /// to `none` (XEP-0045 §8.2), optionally giving a human-readable
+  /// [reason].
+  ///
+  /// Returns `null` on success, or a human-readable error condition on
+  /// failure.
+  Future<String?> kickRoomOccupant(
+    String roomJid,
+    String nick, {
+    String? reason,
+  }) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(roomJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', mucAdminXmlns));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('nick', nick));
+    item.addAttribute(XmppAttribute('role', 'none'));
+    if (reason != null && reason.trim().isNotEmpty) {
+      final reasonElement = XmppElement()..name = 'reason';
+      reasonElement.textValue = reason.trim();
+      item.addChild(reasonElement);
+    }
+    query.addChild(item);
+    iqStanza.addChild(query);
+    final result = await _sendIqAndAwait(iqStanza);
+    final condition = roomConfigIqErrorCondition(result);
+    if (condition == null) {
+      return null;
+    }
+    final text = roomConfigIqErrorText(result);
+    return text != null ? '$condition: $text' : condition;
+  }
+
+  /// Room administration: changes [jid]'s MUC affiliation with [roomJid]
+  /// (e.g. `owner`, `admin`, `member`, `none`, or `outcast` to ban them) via
+  /// a `muc#admin` `<query/>` SET IQ (XEP-0045 §9.1-§9.5), optionally giving
+  /// a human-readable [reason].
+  ///
+  /// [jid] must be the occupant's real bare JID (affiliation changes are
+  /// keyed by JID, not by room nick).
+  ///
+  /// Returns `null` on success, or a human-readable error condition on
+  /// failure.
+  Future<String?> setRoomOccupantAffiliation(
+    String roomJid,
+    String jid,
+    String affiliation, {
+    String? reason,
+  }) async {
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(roomJid);
+    final query = XmppElement()..name = 'query';
+    query.addAttribute(XmppAttribute('xmlns', mucAdminXmlns));
+    final item = XmppElement()..name = 'item';
+    item.addAttribute(XmppAttribute('jid', jid));
+    item.addAttribute(XmppAttribute('affiliation', affiliation));
+    if (reason != null && reason.trim().isNotEmpty) {
+      final reasonElement = XmppElement()..name = 'reason';
+      reasonElement.textValue = reason.trim();
+      item.addChild(reasonElement);
+    }
+    query.addChild(item);
+    iqStanza.addChild(query);
+    final result = await _sendIqAndAwait(iqStanza);
+    final condition = roomConfigIqErrorCondition(result);
+    if (condition == null) {
+      return null;
+    }
+    final text = roomConfigIqErrorText(result);
+    return text != null ? '$condition: $text' : condition;
+  }
+
   Future<List<JidSuggestion>> _requestJidSearch(
     String searchService,
     String term,

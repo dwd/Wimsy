@@ -13,6 +13,10 @@ export 'data_forms.dart' show dataFormXmlns;
 
 const String mucOwnerXmlns = 'http://jabber.org/protocol/muc#owner';
 
+/// Namespace for MUC room administration actions (affiliation/role
+/// changes, kicks, bans) carried in `<query/>` IQs (XEP-0045 §9/§10.1).
+const String mucAdminXmlns = 'http://jabber.org/protocol/muc#admin';
+
 /// A single field from a room's `muc#owner` configuration data form.
 class RoomConfigField {
   const RoomConfigField({
