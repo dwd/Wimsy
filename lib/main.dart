@@ -1928,7 +1928,9 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     icon: const Icon(Icons.person_add),
                     tooltip: 'Invite to room',
                   ),
-                if (isBookmark && (roomEntry?.joined ?? false))
+                if (isBookmark &&
+                    (roomEntry?.joined ?? false) &&
+                    _canConfigureRoom(service, activeChat))
                   IconButton(
                     key: const Key('room-config-button'),
                     onPressed: () => Navigator.of(context).push(
@@ -4599,6 +4601,19 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Whether the "Configure room" button should be shown for [roomJid]:
+  /// only owners (and, on some servers, admins) are permitted to submit a
+  /// `muc#owner` room configuration (XEP-0045 §10.2), so the button is
+  /// hidden for members/visitors/unknown affiliations rather than letting
+  /// them tap it and get a `forbidden` error back from the server.
+  bool _canConfigureRoom(XmppService service, String? roomJid) {
+    if (roomJid == null || roomJid.trim().isEmpty) {
+      return false;
+    }
+    final affiliation = service.ownRoomAffiliation(roomJid);
+    return affiliation == 'owner' || affiliation == 'admin';
   }
 
   Future<void> _showInviteDialog(String? roomJid) async {

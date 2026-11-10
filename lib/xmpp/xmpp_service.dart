@@ -596,6 +596,24 @@ class XmppService extends ChangeNotifier {
     return _roomOccupantRealJids['${_bareJid(roomJid)}/$nick'];
   }
 
+  /// Our own MUC affiliation (e.g. `owner`, `admin`, `member`, `none`) in
+  /// [roomJid], as last reported by the room's presence stanzas (XEP-0045
+  /// §9), or `null` if unknown (e.g. we haven't joined, or no occupant
+  /// details have been received yet).
+  ///
+  /// Used to gate room-administration UI (e.g. the "Configure room" button)
+  /// since only owners (and, on some servers, admins) are allowed to
+  /// configure a room via `muc#owner` (XEP-0045 §10.2).
+  String? ownRoomAffiliation(String roomJid) {
+    final normalized = _bareJid(roomJid);
+    final nick = _roomNickFor(normalized).trim();
+    if (nick.isEmpty) {
+      return null;
+    }
+    final details = _roomOccupantDetails[normalized];
+    return details?[nick]?.affiliation;
+  }
+
   /// Returns the current occupants of [roomJid], sorted by affiliation
   /// (owners, then admins, then members, then others, then outcasts) and
   /// alphabetically by nick within each group. Used by the room occupant
