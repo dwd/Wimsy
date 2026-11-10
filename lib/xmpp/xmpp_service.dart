@@ -4833,8 +4833,21 @@ class XmppService extends ChangeNotifier {
   }
 
   void _storeRemoteCallContents(String sid, List<JingleContent> contents) {
-    final descriptions = <String, JingleRtpDescription>{};
-    final transports = <String, JingleIceTransport>{};
+    // Once a media section (e.g. video) has been negotiated as part of a
+    // BUNDLE group, WebRTC does not allow it to be removed from the SDP in a
+    // later offer/answer ("Answer cannot remove m= section ... from
+    // already-established BUNDLE group"). So instead of replacing the
+    // previously stored descriptions/transports wholesale (which would drop
+    // any content missing from this update, e.g. when the remote side stops
+    // sending video), merge the new contents into the existing maps. A
+    // content that should stop sending media is expressed via a Jingle
+    // content-modify (senders attribute), not by removing its m= line.
+    final descriptions = Map<String, JingleRtpDescription>.from(
+      _callRemoteDescriptionsBySid[sid] ?? const {},
+    );
+    final transports = Map<String, JingleIceTransport>.from(
+      _callRemoteTransportsBySid[sid] ?? const {},
+    );
     for (final content in contents) {
       final description = content.rtpDescription;
       if (description == null) {
@@ -4849,7 +4862,7 @@ class XmppService extends ChangeNotifier {
     }
     if (descriptions.isNotEmpty) {
       _callRemoteDescriptionsBySid[sid] = descriptions;
-      _callContentNamesBySid[sid] = contentNamesFor(contents);
+      _callContentNamesBySid[sid] = descriptions.keys.toList(growable: false);
     }
     if (transports.isNotEmpty) {
       _callRemoteTransportsBySid[sid] = transports;
