@@ -201,7 +201,9 @@ class MessageBubble extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (message.retracted) ...[
-                            _buildRetractedChip(context),
+                            message.moderated
+                                ? _buildModeratedChip(context)
+                                : _buildRetractedChip(context),
                             const SizedBox(width: 6),
                           ]
                           else if (message.edited) ...[
@@ -282,7 +284,7 @@ class MessageBubble extends StatelessWidget {
                       TextSpan(
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: textColor,
-                          decoration: message.retracted
+                          decoration: _strikeThroughBody
                               ? TextDecoration.lineThrough
                               : null,
                         ),
@@ -290,13 +292,13 @@ class MessageBubble extends StatelessWidget {
                           message.body,
                           theme.textTheme.bodyMedium?.copyWith(
                             color: textColor,
-                            decoration: message.retracted
+                            decoration: _strikeThroughBody
                                 ? TextDecoration.lineThrough
                                 : null,
                           ),
                           theme.textTheme.bodyMedium?.copyWith(
                             color: linkColor,
-                            decoration: message.retracted
+                            decoration: _strikeThroughBody
                                 ? TextDecoration.combine([
                                     TextDecoration.underline,
                                     TextDecoration.lineThrough,
@@ -318,6 +320,13 @@ class MessageBubble extends StatelessWidget {
       ),
     );
   }
+
+  // Whether the message body should be rendered struck through: true for
+  // a XEP-0424 retraction or a XEP-0425 moderation without a reason, but
+  // not when a moderation reason replaced the body entirely (that
+  // replacement text is shown plainly rather than struck through).
+  bool get _strikeThroughBody =>
+      message.retracted && (message.moderationReason ?? '').isEmpty;
 
   /// The sender's current MUC role (e.g. `moderator`), looked up by nick
   /// from the room's occupant list, or `null` for non-room chats or
@@ -391,6 +400,32 @@ class MessageBubble extends StatelessWidget {
       ),
       child: Text(
         'Retracted at$suffix',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontStyle: FontStyle.italic,
+        ),
+      ),
+    );
+  }
+
+  // XEP-0425: renders a small chip flagging that this message has been
+  // moderated (retracted by a room moderator, rather than by its original
+  // sender), with the timestamp the moderation notice was observed at.
+  // Shown in place of [_buildRetractedChip] next to the message timestamp.
+  Widget _buildModeratedChip(BuildContext context) {
+    final theme = Theme.of(context);
+    final moderatedAt = message.retractedAt;
+    final suffix = moderatedAt == null
+        ? ''
+        : ' ${formatTimestamp(moderatedAt)}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'Moderated at$suffix',
         style: theme.textTheme.labelSmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           fontStyle: FontStyle.italic,

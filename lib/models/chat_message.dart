@@ -40,6 +40,8 @@ class ChatMessage {
     this.editedAt,
     this.retracted = false,
     this.retractedAt,
+    this.moderated = false,
+    this.moderationReason,
     this.senderOccupantId,
     this.reactions,
     this.replyToId,
@@ -99,6 +101,17 @@ class ChatMessage {
   // observed), and the timestamp at which that retraction was observed.
   final bool retracted;
   final DateTime? retractedAt;
+  // XEP-0425: whether this message was retracted by room moderation
+  // (as opposed to a XEP-0424 self-retraction by its original sender).
+  // Set together with [retracted]/[retractedAt] (moderation is rendered
+  // the same way, struck through, but with a "Moderated" chip instead of
+  // "Retracted"). When the moderator supplied a reason, [body] is
+  // replaced entirely with that reason and is not struck through - see
+  // [moderationReason].
+  final bool moderated;
+  // The moderator-supplied reason for a XEP-0425 moderation action, when
+  // one was given. When present, this text replaces [body] for display.
+  final String? moderationReason;
   // XEP-0421/XEP-0424: the sender's anonymous unique occupant identifier
   // at the time this (MUC) message was sent, when the room discloses one.
   // Used to authorise a later retraction request against the same
@@ -209,6 +222,8 @@ class ChatMessage {
     Object? editedAt = _absent,
     bool? retracted,
     Object? retractedAt = _absent,
+    bool? moderated,
+    Object? moderationReason = _absent,
     Object? senderOccupantId = _absent,
     Object? reactions = _absent,
     Object? replyToId = _absent,
@@ -291,6 +306,10 @@ class ChatMessage {
       retractedAt: identical(retractedAt, _absent)
           ? this.retractedAt
           : retractedAt as DateTime?,
+      moderated: moderated ?? this.moderated,
+      moderationReason: identical(moderationReason, _absent)
+          ? this.moderationReason
+          : moderationReason as String?,
       senderOccupantId: identical(senderOccupantId, _absent)
           ? this.senderOccupantId
           : senderOccupantId as String?,
@@ -389,6 +408,8 @@ class ChatMessage {
       'editedAt': editedAt?.toIso8601String(),
       'retracted': retracted,
       'retractedAt': retractedAt?.toIso8601String(),
+      'moderated': moderated,
+      'moderationReason': moderationReason,
       'senderOccupantId': senderOccupantId,
       'reactions': reactions ?? const {},
       'replyToId': replyToId,
@@ -450,6 +471,8 @@ class ChatMessage {
     final editedAtRaw = map['editedAt']?.toString();
     final retracted = map['retracted'] == true;
     final retractedAtRaw = map['retractedAt']?.toString();
+    final moderated = map['moderated'] == true;
+    final moderationReason = map['moderationReason']?.toString();
     final senderOccupantId = map['senderOccupantId']?.toString();
     final reactions = _parseReactions(map['reactions']);
     final replyToId = map['replyToId']?.toString();
@@ -554,6 +577,8 @@ class ChatMessage {
       editedAt: editedAt,
       retracted: retracted,
       retractedAt: retractedAt,
+      moderated: moderated,
+      moderationReason: moderationReason,
       senderOccupantId: senderOccupantId,
       reactions: reactions,
       replyToId: replyToId,

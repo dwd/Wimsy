@@ -239,6 +239,112 @@ void main() {
   );
 
   test(
+    'applyModerationInList (XEP-0425) marks a matching message moderated '
+    'and strikes it through when no reason is given',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice',
+          to: 'room@conference.example.com',
+          body: 'hello room',
+          id: 'm-mod-1',
+          stanzaId: 'archive-stanza-1',
+        ),
+      ];
+      final moderatedAt = DateTime.utc(2026, 1, 4);
+
+      final applied = ChatMessageMutations.applyModerationInList(
+        list,
+        applyToId: 'archive-stanza-1',
+        timestamp: moderatedAt,
+      );
+
+      expect(applied, isTrue);
+      expect(list.single.retracted, isTrue);
+      expect(list.single.moderated, isTrue);
+      expect(list.single.retractedAt, moderatedAt);
+      expect(list.single.moderationReason, isNull);
+      // No reason given, so the original body is preserved (to be struck
+      // through by the UI), rather than being cleared.
+      expect(list.single.body, 'hello room');
+    },
+  );
+
+  test(
+    'applyModerationInList (XEP-0425) replaces the body entirely with the '
+    'moderator-supplied reason, when given',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice',
+          to: 'room@conference.example.com',
+          body: 'hello room',
+          id: 'm-mod-2',
+          stanzaId: 'archive-stanza-2',
+        ),
+      ];
+
+      final applied = ChatMessageMutations.applyModerationInList(
+        list,
+        applyToId: 'archive-stanza-2',
+        timestamp: DateTime.utc(2026, 1, 4),
+        reason: 'Insults',
+      );
+
+      expect(applied, isTrue);
+      expect(list.single.moderated, isTrue);
+      expect(list.single.moderationReason, 'Insults');
+      expect(list.single.body, 'Insults');
+    },
+  );
+
+  test(
+    'applyModerationInList matches by the archive stanza-id, not the '
+    'origin messageId',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice',
+          to: 'room@conference.example.com',
+          body: 'hello room',
+          id: 'm-mod-3',
+          stanzaId: 'archive-stanza-3',
+        ),
+      ];
+
+      final applied = ChatMessageMutations.applyModerationInList(
+        list,
+        applyToId: 'm-mod-3',
+        timestamp: DateTime.utc(2026, 1, 4),
+      );
+
+      expect(applied, isFalse);
+      expect(list.single.moderated, isFalse);
+    },
+  );
+
+  test('applyModerationInList returns false when no message matches', () {
+    final list = <ChatMessage>[
+      _message(
+        from: 'alice',
+        to: 'room@conference.example.com',
+        body: 'hello room',
+        id: 'm-mod-4',
+        stanzaId: 'archive-stanza-4',
+      ),
+    ];
+
+    final applied = ChatMessageMutations.applyModerationInList(
+      list,
+      applyToId: 'does-not-exist',
+      timestamp: DateTime.utc(2026, 1, 4),
+    );
+
+    expect(applied, isFalse);
+    expect(list.single.moderated, isFalse);
+  });
+
+  test(
     'updateReactionsInList rewrites sender reactions for target message',
     () {
       final list = <ChatMessage>[

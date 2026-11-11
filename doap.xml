@@ -320,6 +320,13 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0425.html"/>
+        <xmpp:status>partial</xmpp:status>
+        <xmpp:note xml:lang="en">Renders incoming MUC message moderation notices (the room's XEP-0422 &lt;apply-to/&gt; wrapping a &lt;moderated/&gt;/&lt;retract/&gt; element, sent by the room's own bare JID) the same way as a XEP-0424 retraction - struck-through body text - but with a "Moderated at" chip instead of "Retracted at"; when the moderator supplied a reason, the body is replaced entirely with that reason instead of being struck through. The notice is matched to the original message by its XEP-0359 archive stanza-id. No sender/occupant authorisation check is performed beyond that, since the notice itself only ever arrives from the room, which has already verified the moderator's authority. Does not yet send moderation requests.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0428.html"/>
         <xmpp:status>partial</xmpp:status>
       </xmpp:SupportedXep>

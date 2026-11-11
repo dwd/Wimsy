@@ -216,6 +216,105 @@ void main() {
     },
   );
 
+  test(
+    'MUC groupchat message exposes a XEP-0425 moderation notice',
+    () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final muc = connection.getMucModule();
+
+      final message = MessageStanza('m3c', MessageStanzaType.GROUPCHAT);
+      message.fromJid = Jid.fromFullJid('room@conference.example');
+      final applyTo = XmppElement()..name = 'apply-to';
+      applyTo.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fasten:0'));
+      applyTo.addAttribute(XmppAttribute('id', 'archive-stanza-id-1'));
+      final moderated = XmppElement()..name = 'moderated';
+      moderated.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-moderate:0'),
+      );
+      moderated.addAttribute(
+        XmppAttribute('by', 'room@conference.example/firstwitch'),
+      );
+      final retract = XmppElement()..name = 'retract';
+      retract.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      moderated.addChild(retract);
+      final reason = XmppElement()..name = 'reason';
+      reason.textValue = 'Insults';
+      moderated.addChild(reason);
+      applyTo.addChild(moderated);
+      message.addChild(applyTo);
+
+      final completer = Completer<MucMessage>();
+      final sub = muc.roomMessageStream.listen((event) {
+        completer.complete(event);
+      });
+
+      connection.fireNewStanzaEvent(message);
+
+      final received =
+          await completer.future.timeout(const Duration(seconds: 1));
+      await sub.cancel();
+
+      expect(received.moderateApplyToId, 'archive-stanza-id-1');
+      expect(received.moderatedBy, 'room@conference.example/firstwitch');
+      expect(received.moderationReason, 'Insults');
+    },
+  );
+
+  test(
+    'MUC groupchat moderation notice without a reason exposes null reason',
+    () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final muc = connection.getMucModule();
+
+      final message = MessageStanza('m3d', MessageStanzaType.GROUPCHAT);
+      message.fromJid = Jid.fromFullJid('room@conference.example');
+      final applyTo = XmppElement()..name = 'apply-to';
+      applyTo.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:fasten:0'));
+      applyTo.addAttribute(XmppAttribute('id', 'archive-stanza-id-2'));
+      final moderated = XmppElement()..name = 'moderated';
+      moderated.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-moderate:0'),
+      );
+      final retract = XmppElement()..name = 'retract';
+      retract.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      moderated.addChild(retract);
+      applyTo.addChild(moderated);
+      message.addChild(applyTo);
+
+      final completer = Completer<MucMessage>();
+      final sub = muc.roomMessageStream.listen((event) {
+        completer.complete(event);
+      });
+
+      connection.fireNewStanzaEvent(message);
+
+      final received =
+          await completer.future.timeout(const Duration(seconds: 1));
+      await sub.cancel();
+
+      expect(received.moderateApplyToId, 'archive-stanza-id-2');
+      expect(received.moderationReason, isNull);
+    },
+  );
+
   test('MUC presence emits occupant updates', () async {
     final account = XmppAccountSettings(
       'test',

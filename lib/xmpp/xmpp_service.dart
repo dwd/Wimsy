@@ -4372,6 +4372,18 @@ class XmppService extends ChangeNotifier {
     if (mujiSession != null && message.nick.isNotEmpty) {
       mujiSession.setActiveSpeaker(message.nick);
     }
+    if (message.moderateApplyToId != null &&
+        message.moderateApplyToId!.isNotEmpty) {
+      final applied = _applyRoomMessageModeration(
+        roomJid: message.roomJid,
+        applyToId: message.moderateApplyToId!,
+        timestamp: message.timestamp,
+        reason: message.moderationReason,
+      );
+      if (applied) {
+        return;
+      }
+    }
     if (message.retractId != null && message.retractId!.isNotEmpty) {
       final applied = _applyRoomMessageRetraction(
         roomJid: message.roomJid,
@@ -8708,6 +8720,36 @@ class XmppService extends ChangeNotifier {
       matchSenderBare: false,
       bareJid: _bareJid,
       senderOccupantId: senderOccupantId,
+    );
+    if (applied) {
+      notifyListeners();
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
+  }
+
+  // XEP-0425: marks a room message as moderated (struck through, with a
+  // "Moderated" chip, and its body replaced by the moderator's reason when
+  // one was given) when we observe the room's moderation notice. Unlike
+  // [_applyRoomMessageRetraction], no sender identity to authorise against
+  // is passed in - the notice comes from the room's own bare JID, which
+  // has already verified the moderator's authority before sending it.
+  bool _applyRoomMessageModeration({
+    required String roomJid,
+    required String applyToId,
+    required DateTime timestamp,
+    String? reason,
+  }) {
+    final normalized = _bareJid(roomJid);
+    final list = _roomMessages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = ChatMessageMutations.applyModerationInList(
+      list,
+      applyToId: applyToId,
+      timestamp: timestamp,
+      reason: reason,
     );
     if (applied) {
       notifyListeners();

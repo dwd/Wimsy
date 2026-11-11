@@ -115,6 +115,49 @@ class ChatMessageMutations {
     return false;
   }
 
+  // XEP-0425: finds the message in [list] whose [stanzaId] (the XEP-0359
+  // archive id assigned by the MUC service) matches [applyToId] and marks
+  // it as moderated: struck through (like a XEP-0424 retraction), but
+  // flagged distinctly via [ChatMessage.moderated] so the UI can show a
+  // "Moderated" chip instead of "Retracted". When [reason] is supplied by
+  // the moderator, it replaces the message's body entirely.
+  //
+  // Authorisation: unlike [applyRetractionInList], no sender/occupant
+  // check is needed here - this is only ever called for moderation
+  // notices that the MUC service itself sent from the room's bare JID
+  // (the room has already verified the moderator's authority before
+  // generating and broadcasting the notice), not from an arbitrary
+  // occupant.
+  static bool applyModerationInList(
+    List<ChatMessage> list, {
+    required String applyToId,
+    required DateTime timestamp,
+    String? reason,
+  }) {
+    if (applyToId.isEmpty) {
+      return false;
+    }
+    for (var i = list.length - 1; i >= 0; i--) {
+      final existing = list[i];
+      if (existing.stanzaId != applyToId) {
+        continue;
+      }
+      if (existing.moderated && existing.retractedAt == timestamp) {
+        return true;
+      }
+      final hasReason = reason != null && reason.isNotEmpty;
+      list[i] = existing.copyWith(
+        retracted: true,
+        retractedAt: timestamp,
+        moderated: true,
+        moderationReason: hasReason ? reason : null,
+        body: hasReason ? reason : existing.body,
+      );
+      return true;
+    }
+    return false;
+  }
+
   // XEP-0491: finds the last message in [list] with a matching
   // [webxdcThreadId] and merges any non-null/non-empty document, summary,
   // and json payload into it. Returns true when a matching message was

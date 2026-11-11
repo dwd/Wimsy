@@ -367,6 +367,63 @@ String? _extractOccupantId(XmppElement? element) {
   return id;
 }
 
+// XEP-0425: extracts a room moderator's message moderation notice, when
+// present. The MUC service rewrites a moderation action as a top-level
+// `<apply-to id='<archive-stanza-id>' xmlns='urn:xmpp:fasten:0'>`
+// (XEP-0422 message fastening) targeting the moderated message by its
+// XEP-0359 archive stanza-id, wrapping a `<moderated by='...'
+// xmlns='urn:xmpp:message-moderate:0'>` element that itself wraps a
+// `<retract xmlns='urn:xmpp:message-retract:1'/>` marker and an optional
+// `<reason/>` the moderator supplied. This notice is sent by the room
+// itself (from its bare JID), not by the moderator, so no further sender
+// authorisation is needed on our side - the room has already verified the
+// moderator's authority.
+_ModerationInfo? _extractModeration(XmppElement? element) {
+  final applyTo = element?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'apply-to' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:fasten:0',
+  );
+  final applyToId = applyTo?.getAttribute('id')?.value;
+  if (applyToId == null || applyToId.isEmpty) {
+    return null;
+  }
+  final moderated = applyTo?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'moderated' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:message-moderate:0',
+  );
+  if (moderated == null) {
+    return null;
+  }
+  final hasRetract = moderated.children.any(
+    (child) =>
+        child.name == 'retract' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:message-retract:1',
+  );
+  if (!hasRetract) {
+    return null;
+  }
+  final by = moderated.getAttribute('by')?.value;
+  final reasonElement = moderated.children.firstWhereOrNull(
+    (child) => child.name == 'reason',
+  );
+  final reason = reasonElement?.textValue?.trim();
+  return _ModerationInfo(
+    applyToId: applyToId,
+    by: (by != null && by.isNotEmpty) ? by : null,
+    reason: (reason != null && reason.isNotEmpty) ? reason : null,
+  );
+}
+
+class _ModerationInfo {
+  const _ModerationInfo({required this.applyToId, this.by, this.reason});
+
+  final String applyToId;
+  final String? by;
+  final String? reason;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -440,10 +497,13 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       _extractRetractId(forwardedMessage) ?? _extractRetractId(stanza);
   final occupantId =
       _extractOccupantId(forwardedMessage) ?? _extractOccupantId(stanza);
+  final moderation =
+      _extractModeration(forwardedMessage) ?? _extractModeration(stanza);
   if (body.trim().isEmpty &&
       (oobUrl == null || oobUrl.isEmpty) &&
       reactionsInfo == null &&
-      retractId == null) {
+      retractId == null &&
+      moderation == null) {
     return null;
   }
   final timestamp = _extractDelayedTimestamp(forwarded) ??
@@ -468,6 +528,9 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       replaceId: replaceId,
       retractId: retractId,
       occupantId: occupantId,
+      moderateApplyToId: moderation?.applyToId,
+      moderatedBy: moderation?.by,
+      moderationReason: moderation?.reason,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
       replyToId: replyInfo?.id,
@@ -526,6 +589,9 @@ class MucMessage {
     this.replaceId,
     this.retractId,
     this.occupantId,
+    this.moderateApplyToId,
+    this.moderatedBy,
+    this.moderationReason,
     this.reactionTargetId,
     this.reactions = const [],
     this.replyToId,
@@ -557,6 +623,13 @@ class MucMessage {
   // specific stanza (original message or retraction request), when the
   // room discloses one.
   final String? occupantId;
+  // XEP-0425: the XEP-0359 archive stanza-id of the message a room
+  // moderation notice applies to (from its `<apply-to id='.../>`), the
+  // moderator's JID/occupant-id (`<moderated by='.../>`), and the
+  // moderator-supplied reason, when this stanza carried such a notice.
+  final String? moderateApplyToId;
+  final String? moderatedBy;
+  final String? moderationReason;
   final String? reactionTargetId;
   final List<String> reactions;
   final String? replyToId;
