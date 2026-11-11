@@ -1296,6 +1296,7 @@ void main() {
     WidgetTester tester,
   ) async {
     var replied = false;
+    var reactedWith = '';
     late StateSetter rebuild;
     final message = ChatMessage(
       from: 'bob@example.com',
@@ -1330,7 +1331,7 @@ void main() {
                 onJoinInvite: null,
                 selfReactionSenderId: 'alice@example.com',
                 recentReactionOptions: const ['👍'],
-                onReact: (_) {},
+                onReact: (emoji) => reactedWith = emoji,
                 onEdit: null,
                 onReply: () => replied = true,
                 onAcceptFile: null,
@@ -1347,8 +1348,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Reply'), findsOneWidget);
-    expect(find.text('Add reaction'), findsOneWidget);
     expect(find.text('View XML'), findsOneWidget);
+    expect(find.text('👍'), findsOneWidget);
 
     rebuild(() {});
     await tester.pump();
@@ -1360,9 +1361,9 @@ void main() {
     await tester.pumpAndSettle();
     rebuild(() {});
     await tester.pump();
-    await tester.tap(find.text('Add reaction'));
+    await tester.tap(find.text('👍'));
     await tester.pumpAndSettle();
-    expect(find.text('👍'), findsOneWidget);
+    expect(reactedWith, '👍');
   });
 
   testWidgets('message menu can add a known room occupant to contacts', (

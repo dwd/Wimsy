@@ -111,6 +111,54 @@ void main() {
     expect(find.text('👍'), findsNothing);
   });
 
+  testWidgets(
+    'shows quick-pick reaction chips at the bottom and reacts on tap',
+    (WidgetTester tester) async {
+      String? reactedWith;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageActionCard(
+              message: buildMessage(),
+              senderName: 'Juliet',
+              senderJid: 'juliet@example.com',
+              recentReactionOptions: const ['👍', '❤️'],
+              onReact: (emoji) => reactedWith = emoji,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('👍'), findsOneWidget);
+      expect(find.text('❤️'), findsOneWidget);
+
+      await tester.tap(find.text('❤️'));
+      await tester.pump();
+
+      expect(reactedWith, '❤️');
+    },
+  );
+
+  testWidgets(
+    'hides the add-reaction row entirely when onReact is not supplied',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageActionCard(
+              message: buildMessage(),
+              senderName: 'Juliet',
+              senderJid: 'juliet@example.com',
+              recentReactionOptions: const ['👍', '❤️'],
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byIcon(Icons.add_reaction_outlined), findsNothing);
+    },
+  );
+
   testWidgets('shows contact status: "Added to contacts" when isContact', (
     WidgetTester tester,
   ) async {

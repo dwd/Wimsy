@@ -60,3 +60,5 @@ sentry.properties
 # (instead of the default ~/.maestro/tests) via `maestro test --debug-output`
 # so test artifacts stay inside the project directory.
 /.maestro-output/
+# Widget Preview related
+.widget_preview/

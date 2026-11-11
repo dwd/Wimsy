@@ -119,6 +119,10 @@ class MessageActionCard extends StatelessWidget {
                   _buildMessagePreview(theme),
                   const SizedBox(height: 12),
                   _buildReactionsList(theme),
+                  if (onReact != null) ...[
+                    const SizedBox(height: 12),
+                    _buildAddReactionRow(context),
+                  ],
                 ],
               ),
             ),
@@ -241,13 +245,6 @@ class MessageActionCard extends StatelessWidget {
           label: 'Edit message',
           onTap: onEdit!,
         ),
-      if (onReact != null)
-        _CardAction(
-          icon: Icons.add_reaction_outlined,
-          label: 'Add reaction',
-          onTap: onOpenReactionPicker ?? () => _showReactionPicker(context),
-          closesCard: false,
-        ),
     ];
     return Wrap(
       spacing: 8,
@@ -259,11 +256,51 @@ class MessageActionCard extends StatelessWidget {
             label: action.label,
             onTap: () {
               action.onTap();
-              if (action.closesCard) {
-                onDismiss?.call();
-              }
+              onDismiss?.call();
             },
           ),
+      ],
+    );
+  }
+
+  /// The "add a reaction" section at the bottom of the card: quick-pick
+  /// emoji chips (mirroring [recentReactionOptions]) react immediately on
+  /// tap, while the trailing "more" button opens the fuller picker (either
+  /// the caller-supplied [onOpenReactionPicker] or this card's own minimal
+  /// one).
+  Widget _buildAddReactionRow(BuildContext context) {
+    final theme = Theme.of(context);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final emoji in recentReactionOptions)
+          _ReactionChip(
+            emoji: emoji,
+            count: null,
+            selected: ownReactions.contains(emoji),
+            onTap: () {
+              onReact?.call(emoji);
+              onDismiss?.call();
+            },
+          ),
+        InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onOpenReactionPicker ?? () => _showReactionPicker(context),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              Icons.add_reaction_outlined,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -307,21 +344,11 @@ class MessageActionCard extends StatelessWidget {
 }
 
 class _CardAction {
-  _CardAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.closesCard = true,
-  });
+  _CardAction({required this.icon, required this.label, required this.onTap});
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-
-  /// Whether tapping this action should dismiss the card immediately. The
-  /// "Add reaction" action instead opens its own picker sheet and dismisses
-  /// the card only once an emoji is actually chosen.
-  final bool closesCard;
 }
 
 /// A single icon-and-label action button used inside [MessageActionCard].
@@ -369,7 +396,11 @@ class _ReactionChip extends StatelessWidget {
   });
 
   final String emoji;
-  final int count;
+
+  /// How many people reacted with [emoji], or null when this chip is used
+  /// as a quick-pick "add this reaction" affordance rather than a summary
+  /// of an existing reaction (see [MessageActionCard._buildAddReactionRow]).
+  final int? count;
   final bool selected;
   final VoidCallback? onTap;
 
@@ -391,8 +422,10 @@ class _ReactionChip extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(emoji, style: const TextStyle(fontSize: 16)),
-            const SizedBox(width: 4),
-            Text('$count', style: theme.textTheme.labelSmall),
+            if (count != null) ...[
+              const SizedBox(width: 4),
+              Text('$count', style: theme.textTheme.labelSmall),
+            ],
           ],
         ),
       ),
