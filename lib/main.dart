@@ -29,6 +29,7 @@ import 'pep_explorer_screen.dart';
 import 'room_config_screen.dart';
 import 'login_export.dart';
 import 'models/chat_message.dart';
+import 'widgets/message_action_card.dart';
 import 'models/contact_entry.dart';
 import 'models/muc_notify_settings.dart';
 import 'models/room_entry.dart';
@@ -6125,6 +6126,18 @@ class MessageBubble extends StatelessWidget {
     final securityLabelChip = _buildSecurityLabelChip(context);
     final reactions = message.reactions ?? const {};
     final ownReactions = _ownReactions(reactions);
+    final occupantRealJid = isRoom
+        ? service.roomOccupantRealJid(chatBareJid, message.from)
+        : null;
+    final senderBareJid = isRoom
+        ? (occupantRealJid ?? chatBareJid)
+        : (Jid.fromFullJid(message.from).userAtDomain);
+    final senderFullJid = isRoom
+        ? '$chatBareJid/${message.from}'
+        : (message.from != senderBareJid ? message.from : null);
+    final isSenderContact = service.contacts.any(
+      (contact) => contact.jid == senderBareJid,
+    );
 
     return _MessageMenuRegion(
       messageId: message.messageId,
@@ -6136,6 +6149,11 @@ class MessageBubble extends StatelessWidget {
             _MessageMenuButton(
               key: menuKey,
               message: message,
+              senderName: senderName,
+              senderJid: senderBareJid,
+              senderFullJid: senderFullJid,
+              avatarBytes: avatarBytes,
+              isContact: isSenderContact,
               recentReactionOptions: recentReactionOptions,
               ownReactions: ownReactions,
               onReact: onReact,
@@ -8782,6 +8800,11 @@ class _MessageMenuButton extends StatefulWidget {
   const _MessageMenuButton({
     super.key,
     required this.message,
+    required this.senderName,
+    required this.senderJid,
+    this.senderFullJid,
+    this.avatarBytes,
+    this.isContact = false,
     required this.recentReactionOptions,
     required this.ownReactions,
     required this.onReact,
@@ -8794,6 +8817,11 @@ class _MessageMenuButton extends StatefulWidget {
   });
 
   final ChatMessage message;
+  final String senderName;
+  final String senderJid;
+  final String? senderFullJid;
+  final Uint8List? avatarBytes;
+  final bool isContact;
   final List<String> recentReactionOptions;
   final Set<String> ownReactions;
   final void Function(String emoji)? onReact;
@@ -8810,81 +8838,47 @@ class _MessageMenuButton extends StatefulWidget {
 
 class _MessageMenuButtonState extends State<_MessageMenuButton> {
   Future<void> showAt(Offset globalPosition) async {
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final value = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(
-        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
-        Offset.zero & overlay.size,
-      ),
-      items: _items(),
-    );
-    if (value != null && mounted) {
-      _handleSelected(value);
-    }
+    await _showCard();
   }
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-      icon: widget.child == null
-          ? const Icon(Icons.more_horiz, size: 16)
-          : null,
-      onSelected: _handleSelected,
-      itemBuilder: (context) => _items(),
-      child: widget.child,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _showCard,
+      child: widget.child ?? const Icon(Icons.more_horiz, size: 16),
     );
   }
 
-  List<PopupMenuEntry<String>> _items() {
+  Future<void> _showCard() {
     final reactions = widget.message.reactions ?? const {};
-    return [
-      if (widget.onEdit != null)
-        const PopupMenuItem(value: 'edit_message', child: Text('Edit message')),
-      if (widget.onReply != null)
-        const PopupMenuItem(value: 'reply_message', child: Text('Reply')),
-      if (widget.onAddToRoster != null)
-        const PopupMenuItem(
-          value: 'add_to_roster',
-          child: Text('Add to contacts'),
-        ),
-      if (widget.onKick != null)
-        const PopupMenuItem(value: 'kick_occupant', child: Text('Kick')),
-      if (widget.onBan != null)
-        const PopupMenuItem(value: 'ban_occupant', child: Text('Ban')),
-      if (widget.onReact != null)
-        const PopupMenuItem(value: 'add_reaction', child: Text('Add reaction')),
-      if (reactions.isNotEmpty)
-        const PopupMenuItem(
-          value: 'view_reactions',
-          child: Text('View reactions'),
-        ),
-      const PopupMenuItem(value: 'view_xml', child: Text('View XML')),
-    ];
-  }
-
-  void _handleSelected(String value) {
-    switch (value) {
-      case 'edit_message':
-        widget.onEdit?.call();
-      case 'reply_message':
-        widget.onReply?.call();
-      case 'add_to_roster':
-        widget.onAddToRoster?.call();
-      case 'kick_occupant':
-        widget.onKick?.call();
-      case 'ban_occupant':
-        widget.onBan?.call();
-      case 'add_reaction':
-        _showReactionSheet(context);
-      case 'view_reactions':
-        _showReactions(context);
-      case 'view_xml':
-        _showXml(context);
-    }
+    return showMessageActionCard(
+      context,
+      builder: (dismiss) => MessageActionCard(
+        message: widget.message,
+        senderName: widget.senderName,
+        senderJid: widget.senderJid,
+        senderFullJid: widget.senderFullJid,
+        avatarBytes: widget.avatarBytes,
+        isContact: widget.isContact,
+        recentReactionOptions: widget.recentReactionOptions,
+        ownReactions: widget.ownReactions,
+        onEdit: widget.onEdit,
+        onReply: widget.onReply,
+        onReact: widget.onReact,
+        onAddToRoster: widget.onAddToRoster,
+        onKick: widget.onKick,
+        onBan: widget.onBan,
+        onViewReactions: reactions.isEmpty
+            ? null
+            : () => _showReactions(context),
+        onViewXml: () => _showXml(context),
+        onOpenReactionPicker: widget.onReact == null
+            ? null
+            : () => _showReactionSheet(context),
+        onDismiss: dismiss,
+      ),
+    );
   }
 
   void _showReactionSheet(BuildContext context) {
