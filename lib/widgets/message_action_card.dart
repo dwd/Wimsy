@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
+import 'package:xml/xml.dart' as xml;
 
 import '../models/chat_message.dart';
 import 'avatar_with_presence.dart';
@@ -105,11 +106,15 @@ class _MessageActionCardState extends State<MessageActionCard> {
             widget.senderFullJid != widget.senderJid
         ? widget.senderFullJid
         : null;
+    final maxCardHeight = MediaQuery.of(context).size.height - 96;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: BoxConstraints(
+            maxWidth: 420,
+            maxHeight: maxCardHeight < 200 ? 200 : maxCardHeight,
+          ),
           child: Material(
             color: theme.colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
@@ -124,7 +129,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
                   _buildActions(context),
                   const SizedBox(height: 16),
                   if (_showXml)
-                    _buildXmlView(theme)
+                    Flexible(child: _buildXmlView(theme))
                   else ...[
                     _buildJidInfo(theme, fullJid),
                     const SizedBox(height: 12),
@@ -147,12 +152,122 @@ class _MessageActionCardState extends State<MessageActionCard> {
 
   /// Replaces the sender/contact info and message preview with the
   /// message's raw XML, shown while the "View XML" action is toggled on.
+  ///
+  /// The XML is pretty-printed (indented, one node per line) and rendered
+  /// with simple syntax highlighting (tags, attribute names/values, and
+  /// text content each get their own color), scrolling both vertically and
+  /// horizontally so long/deeply-nested stanzas still fit within the card.
   Widget _buildXmlView(ThemeData theme) {
-    final xml = widget.message.rawXml?.trim();
-    return SelectableText(
-      (xml == null || xml.isEmpty) ? 'No XML cached for this message.' : xml,
-      style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+    final rawXml = widget.message.rawXml?.trim();
+    if (rawXml == null || rawXml.isEmpty) {
+      return Text(
+        'No XML cached for this message.',
+        style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+      );
+    }
+    final prettyXml = _prettyPrintXml(rawXml);
+    return Scrollbar(
+      child: SingleChildScrollView(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SelectableText.rich(
+            _highlightXml(prettyXml, theme),
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ),
     );
+  }
+
+  /// Re-formats [rawXml] with one node per line and two-space indentation.
+  /// Falls back to the original string, unchanged, if it doesn't parse as
+  /// well-formed XML (e.g. a truncated or otherwise malformed cached
+  /// stanza) so the viewer still shows *something* useful.
+  String _prettyPrintXml(String rawXml) {
+    try {
+      return xml.XmlDocument.parse(rawXml).toXmlString(pretty: true);
+    } on Exception {
+      return rawXml;
+    }
+  }
+
+  /// Builds a syntax-highlighted [TextSpan] for [prettyXml], coloring
+  /// element delimiters/names, attribute names, attribute values, and text
+  /// content distinctly.
+  TextSpan _highlightXml(String prettyXml, ThemeData theme) {
+    final tagColor = theme.colorScheme.primary;
+    final attrNameColor = theme.colorScheme.tertiary;
+    final attrValueColor = theme.colorScheme.secondary;
+    final textColor = theme.colorScheme.onSurface;
+    final punctuationColor = theme.colorScheme.onSurfaceVariant;
+
+    final spans = <TextSpan>[];
+    final pattern = RegExp(
+      r'(</?[a-zA-Z_][\w:.-]*)' // 1: opening tag start + name
+      r'|(/?>)' // 2: tag end
+      r'|([a-zA-Z_][\w:.-]*)(=)("[^"]*"|' "'[^']*')" // 3,4,5: attr name/=/value
+      r'|(<!--.*?-->)', // 6: comments
+      dotAll: true,
+    );
+
+    var lastEnd = 0;
+    for (final match in pattern.allMatches(prettyXml)) {
+      if (match.start > lastEnd) {
+        spans.add(
+          TextSpan(
+            text: prettyXml.substring(lastEnd, match.start),
+            style: TextStyle(color: textColor),
+          ),
+        );
+      }
+      if (match.group(1) != null) {
+        spans.add(
+          TextSpan(
+            text: match.group(1),
+            style: TextStyle(color: tagColor, fontWeight: FontWeight.bold),
+          ),
+        );
+      } else if (match.group(2) != null) {
+        spans.add(
+          TextSpan(
+            text: match.group(2),
+            style: TextStyle(color: tagColor, fontWeight: FontWeight.bold),
+          ),
+        );
+      } else if (match.group(3) != null) {
+        spans.add(
+          TextSpan(text: match.group(3), style: TextStyle(color: attrNameColor)),
+        );
+        spans.add(
+          TextSpan(text: match.group(4), style: TextStyle(color: punctuationColor)),
+        );
+        spans.add(
+          TextSpan(text: match.group(5), style: TextStyle(color: attrValueColor)),
+        );
+      } else if (match.group(6) != null) {
+        spans.add(
+          TextSpan(
+            text: match.group(6),
+            style: TextStyle(
+              color: punctuationColor,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        );
+      }
+      lastEnd = match.end;
+    }
+    if (lastEnd < prettyXml.length) {
+      spans.add(
+        TextSpan(
+          text: prettyXml.substring(lastEnd),
+          style: TextStyle(color: textColor),
+        ),
+      );
+    }
+    return TextSpan(children: spans);
   }
 
   /// A non-interactive rendering of the sender + message body, intentionally

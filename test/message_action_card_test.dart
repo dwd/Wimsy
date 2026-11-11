@@ -294,6 +294,49 @@ void main() {
     },
   );
 
+  testWidgets(
+    'View XML pretty-prints nested stanzas and applies syntax highlighting',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageActionCard(
+              message: ChatMessage(
+                from: 'juliet@example.com',
+                to: 'romeo@example.com',
+                body: 'Wherefore art thou, Romeo?',
+                timestamp: DateTime.utc(2026),
+                outgoing: false,
+                messageId: 'card-test-message',
+                rawXml:
+                    '<message id="card-test-message" type="chat"><body>Hi</body></message>',
+              ),
+              senderName: 'Juliet',
+              senderJid: 'juliet@example.com',
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('View XML'));
+      await tester.pump();
+
+      // Pretty-printing should put the nested <body> element on its own,
+      // indented line rather than inline with the parent tag.
+      expect(find.textContaining('<message'), findsOneWidget);
+      expect(find.textContaining('  <body>Hi</body>'), findsOneWidget);
+
+      // Syntax highlighting should render the text as multiple differently
+      // styled spans rather than one flat span.
+      final selectableText = tester.widget<SelectableText>(
+        find.byType(SelectableText),
+      );
+      final rootSpan = selectableText.textSpan!;
+      expect(rootSpan.children, isNotNull);
+      expect(rootSpan.children!.length, greaterThan(1));
+    },
+  );
+
   testWidgets('shows a placeholder when no raw XML is cached', (
     WidgetTester tester,
   ) async {
