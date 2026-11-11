@@ -63,27 +63,52 @@ void main() {
     expect(replied, isTrue);
   });
 
-  testWidgets('shows "View reactions" only when the message has reactions', (
+  testWidgets(
+    'expands the full reaction set inline when the message has reactions',
+    (WidgetTester tester) async {
+      var viewed = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageActionCard(
+              message: buildMessage(
+                reactions: {
+                  '👍': ['romeo@example.com', 'tybalt@example.com'],
+                },
+              ),
+              senderName: 'Juliet',
+              senderJid: 'juliet@example.com',
+              onViewReactions: () => viewed = true,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('👍'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+
+      await tester.tap(find.text('👍'));
+      await tester.pump();
+      expect(viewed, isTrue);
+    },
+  );
+
+  testWidgets('shows no reaction chips when the message has no reactions', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: MessageActionCard(
-            message: buildMessage(
-              reactions: {
-                '👍': ['romeo@example.com'],
-              },
-            ),
+            message: buildMessage(),
             senderName: 'Juliet',
             senderJid: 'juliet@example.com',
-            onViewReactions: () {},
           ),
         ),
       ),
     );
 
-    expect(find.text('View reactions'), findsOneWidget);
+    expect(find.text('👍'), findsNothing);
   });
 
   testWidgets('shows contact status: "Added to contacts" when isContact', (

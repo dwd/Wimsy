@@ -112,11 +112,13 @@ class MessageActionCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _buildActions(context),
+                  const SizedBox(height: 16),
+                  _buildJidInfo(theme, fullJid),
+                  const SizedBox(height: 12),
                   _buildMessagePreview(theme),
                   const SizedBox(height: 12),
-                  _buildJidInfo(theme, fullJid),
-                  const SizedBox(height: 16),
-                  _buildActions(context),
+                  _buildReactionsList(theme),
                 ],
               ),
             ),
@@ -166,6 +168,30 @@ class MessageActionCard extends StatelessWidget {
     );
   }
 
+  /// Expands the full reaction set inline beneath the message preview,
+  /// showing every emoji used together with how many people reacted with
+  /// it. Each chip is tappable (calling [onViewReactions], when supplied)
+  /// to see exactly who reacted with that emoji.
+  Widget _buildReactionsList(ThemeData theme) {
+    final reactions = message.reactions ?? const {};
+    if (reactions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final entry in reactions.entries)
+          _ReactionChip(
+            emoji: entry.key,
+            count: entry.value.length,
+            selected: ownReactions.contains(entry.key),
+            onTap: onViewReactions,
+          ),
+      ],
+    );
+  }
+
   Widget _buildJidInfo(ThemeData theme, String? fullJid) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -196,29 +222,9 @@ class MessageActionCard extends StatelessWidget {
   }
 
   Widget _buildActions(BuildContext context) {
-    final reactions = message.reactions ?? const {};
     final actions = <_CardAction>[
-      if (onEdit != null)
-        _CardAction(
-          icon: Icons.edit_outlined,
-          label: 'Edit message',
-          onTap: onEdit!,
-        ),
       if (onReply != null)
         _CardAction(icon: Icons.reply, label: 'Reply', onTap: onReply!),
-      if (onReact != null)
-        _CardAction(
-          icon: Icons.add_reaction_outlined,
-          label: 'Add reaction',
-          onTap: onOpenReactionPicker ?? () => _showReactionPicker(context),
-          closesCard: false,
-        ),
-      if (reactions.isNotEmpty && onViewReactions != null)
-        _CardAction(
-          icon: Icons.emoji_emotions_outlined,
-          label: 'View reactions',
-          onTap: onViewReactions!,
-        ),
       if (onKick != null)
         _CardAction(
           icon: Icons.person_remove_outlined,
@@ -229,6 +235,19 @@ class MessageActionCard extends StatelessWidget {
         _CardAction(icon: Icons.block, label: 'Ban', onTap: onBan!),
       if (onViewXml != null)
         _CardAction(icon: Icons.code, label: 'View XML', onTap: onViewXml!),
+      if (onEdit != null)
+        _CardAction(
+          icon: Icons.edit_outlined,
+          label: 'Edit message',
+          onTap: onEdit!,
+        ),
+      if (onReact != null)
+        _CardAction(
+          icon: Icons.add_reaction_outlined,
+          label: 'Add reaction',
+          onTap: onOpenReactionPicker ?? () => _showReactionPicker(context),
+          closesCard: false,
+        ),
     ];
     return Wrap(
       spacing: 8,
@@ -331,6 +350,49 @@ class _ActionButton extends StatelessWidget {
             Icon(icon, color: theme.colorScheme.primary),
             const SizedBox(height: 4),
             Text(label, style: theme.textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A single emoji/count chip used by [MessageActionCard._buildReactionsList]
+/// to show one entry of the message's full reaction set. Highlighted when
+/// the local user is among the reactors for that emoji.
+class _ReactionChip extends StatelessWidget {
+  const _ReactionChip({
+    required this.emoji,
+    required this.count,
+    required this.selected,
+    this.onTap,
+  });
+
+  final String emoji;
+  final int count;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 16)),
+            const SizedBox(width: 4),
+            Text('$count', style: theme.textTheme.labelSmall),
           ],
         ),
       ),
