@@ -614,6 +614,17 @@ class XmppService extends ChangeNotifier {
     return details?[nick]?.affiliation;
   }
 
+  /// The MUC role (e.g. `moderator`, `participant`, `visitor`) last reported
+  /// for the occupant with the given [nick] in [roomJid], or `null` if
+  /// unknown (e.g. no presence has been received for that occupant yet).
+  ///
+  /// Used to show a "moderator" chip next to the sender's name in rendered
+  /// messages, mirroring the chip already shown in the occupant list.
+  String? roomOccupantRole(String roomJid, String nick) {
+    final details = _roomOccupantDetails[_bareJid(roomJid)];
+    return details?[nick]?.role;
+  }
+
   /// Returns the current occupants of [roomJid], sorted by affiliation
   /// (owners, then admins, then members, then others, then outcasts) and
   /// alphabetically by nick within each group. Used by the room occupant

@@ -6177,7 +6177,7 @@ class MessageBubble extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
+                      Flexible(
                         child: Text(
                           senderName,
                           style: theme.textTheme.labelMedium?.copyWith(
@@ -6186,6 +6186,11 @@ class MessageBubble extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (_senderRoomRole() == 'moderator') ...[
+                        const SizedBox(width: 6),
+                        const _RoleAffiliationChip(label: 'moderator'),
+                      ],
+                      const Spacer(),
                       const SizedBox(width: 8),
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -6298,6 +6303,18 @@ class MessageBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// The sender's current MUC role (e.g. `moderator`), looked up by nick
+  /// from the room's occupant list, or `null` for non-room chats or
+  /// occupants we don't have presence details for yet. Used to show a
+  /// "moderator" chip next to the sender's name, mirroring the occupant
+  /// list's own role chip.
+  String? _senderRoomRole() {
+    if (!isRoom) {
+      return null;
+    }
+    return service.roomOccupantRole(chatBareJid, message.from);
   }
 
   // XEP-0258: renders this message's security label marking as a small
