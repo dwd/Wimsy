@@ -6208,6 +6208,10 @@ class MessageBubble extends StatelessWidget {
                           if (message.retracted) ...[
                             _buildRetractedChip(context),
                             const SizedBox(width: 6),
+                          ]
+                          else if (message.edited) ...[
+                            const SizedBox(width: 6),
+                            _buildEditedChip(context),
                           ],
                           Text(
                             timestamp,
@@ -6215,10 +6219,6 @@ class MessageBubble extends StatelessWidget {
                               color: textColor.withValues(alpha: 0.7),
                             ),
                           ),
-                          if (message.edited) ...[
-                            const SizedBox(width: 6),
-                            _buildEditedChip(context),
-                          ],
                           if (tickIcon != null) ...[
                             const SizedBox(width: 6),
                             tickIcon,
