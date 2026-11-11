@@ -8536,7 +8536,9 @@ class _RoomOccupantTile extends StatelessWidget {
         ? null
         : service.avatarBytesFor(avatarJid);
     final chips = <Widget>[
-      if (occupant.role != null && occupant.role!.isNotEmpty)
+      if (occupant.role != null &&
+          occupant.role!.isNotEmpty &&
+          occupant.role != 'participant')
         _RoleAffiliationChip(label: occupant.role!),
       if (occupant.affiliation != null &&
           occupant.affiliation!.isNotEmpty &&
