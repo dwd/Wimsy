@@ -64,6 +64,17 @@ class ChatMessageMutations {
   // deliberately keeps the original body so the UI can render it struck
   // through rather than clearing it. Returns true when a matching message
   // was found (whether or not it was already marked retracted).
+  //
+  // Authorisation: a retraction is only honoured when [sender] (and, for
+  // MUC, [senderOccupantId]) matches the identity that sent the original
+  // message - otherwise any occupant/contact could forge a retraction for
+  // someone else's message. For 1:1 chats ([matchSenderBare] is true) the
+  // bare JID of the retraction's sender must match the bare JID of the
+  // original message's sender. For MUC ([matchSenderBare] is false), when
+  // both the original message and the retraction request disclose a
+  // XEP-0421 occupant-id, those must match (robust against nickname
+  // changes); otherwise this falls back to an exact nickname (full JID)
+  // match, as recommended by XEP-0424 when occupant-id is unavailable.
   static bool applyRetractionInList(
     List<ChatMessage> list, {
     required String sender,
@@ -71,6 +82,7 @@ class ChatMessageMutations {
     required DateTime timestamp,
     required bool matchSenderBare,
     required String Function(String jid) bareJid,
+    String? senderOccupantId,
   }) {
     for (var i = list.length - 1; i >= 0; i--) {
       final existing = list[i];
@@ -82,7 +94,15 @@ class ChatMessageMutations {
           continue;
         }
       } else {
-        if (existing.from != sender) {
+        final existingOccupantId = existing.senderOccupantId;
+        if (existingOccupantId != null &&
+            existingOccupantId.isNotEmpty &&
+            senderOccupantId != null &&
+            senderOccupantId.isNotEmpty) {
+          if (existingOccupantId != senderOccupantId) {
+            continue;
+          }
+        } else if (existing.from != sender) {
           continue;
         }
       }

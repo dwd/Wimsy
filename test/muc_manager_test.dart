@@ -171,6 +171,51 @@ void main() {
     expect(received.retractId, 'orig-2');
   });
 
+  test(
+    'MUC groupchat retraction exposes the sender occupant-id, for '
+    'XEP-0424 retraction authorisation',
+    () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final muc = connection.getMucModule();
+
+      final message = MessageStanza('m3b', MessageStanzaType.GROUPCHAT);
+      message.fromJid = Jid.fromFullJid('room@conference.example/alice');
+      final retract = XmppElement()..name = 'retract';
+      retract.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      retract.addAttribute(XmppAttribute('id', 'orig-2b'));
+      message.addChild(retract);
+      final occupantId = XmppElement()..name = 'occupant-id';
+      occupantId.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:occupant-id:0'),
+      );
+      occupantId.addAttribute(XmppAttribute('id', 'occ-alice-1'));
+      message.addChild(occupantId);
+
+      final completer = Completer<MucMessage>();
+      final sub = muc.roomMessageStream.listen((event) {
+        completer.complete(event);
+      });
+
+      connection.fireNewStanzaEvent(message);
+
+      final received =
+          await completer.future.timeout(const Duration(seconds: 1));
+      await sub.cancel();
+
+      expect(received.retractId, 'orig-2b');
+      expect(received.occupantId, 'occ-alice-1');
+    },
+  );
+
   test('MUC presence emits occupant updates', () async {
     final account = XmppAccountSettings(
       'test',

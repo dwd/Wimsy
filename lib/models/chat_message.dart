@@ -40,6 +40,7 @@ class ChatMessage {
     this.editedAt,
     this.retracted = false,
     this.retractedAt,
+    this.senderOccupantId,
     this.reactions,
     this.replyToId,
     this.replyToJid,
@@ -98,6 +99,11 @@ class ChatMessage {
   // observed), and the timestamp at which that retraction was observed.
   final bool retracted;
   final DateTime? retractedAt;
+  // XEP-0421/XEP-0424: the sender's anonymous unique occupant identifier
+  // at the time this (MUC) message was sent, when the room discloses one.
+  // Used to authorise a later retraction request against the same
+  // occupant identity, even if the sender's nickname later changes.
+  final String? senderOccupantId;
   final Map<String, List<String>>? reactions;
   final String? replyToId;
   final String? replyToJid;
@@ -203,6 +209,7 @@ class ChatMessage {
     Object? editedAt = _absent,
     bool? retracted,
     Object? retractedAt = _absent,
+    Object? senderOccupantId = _absent,
     Object? reactions = _absent,
     Object? replyToId = _absent,
     Object? replyToJid = _absent,
@@ -284,6 +291,9 @@ class ChatMessage {
       retractedAt: identical(retractedAt, _absent)
           ? this.retractedAt
           : retractedAt as DateTime?,
+      senderOccupantId: identical(senderOccupantId, _absent)
+          ? this.senderOccupantId
+          : senderOccupantId as String?,
       reactions: identical(reactions, _absent)
           ? this.reactions
           : reactions as Map<String, List<String>>?,
@@ -379,6 +389,7 @@ class ChatMessage {
       'editedAt': editedAt?.toIso8601String(),
       'retracted': retracted,
       'retractedAt': retractedAt?.toIso8601String(),
+      'senderOccupantId': senderOccupantId,
       'reactions': reactions ?? const {},
       'replyToId': replyToId,
       'replyToJid': replyToJid,
@@ -439,6 +450,7 @@ class ChatMessage {
     final editedAtRaw = map['editedAt']?.toString();
     final retracted = map['retracted'] == true;
     final retractedAtRaw = map['retractedAt']?.toString();
+    final senderOccupantId = map['senderOccupantId']?.toString();
     final reactions = _parseReactions(map['reactions']);
     final replyToId = map['replyToId']?.toString();
     final replyToJid = map['replyToJid']?.toString();
@@ -542,6 +554,7 @@ class ChatMessage {
       editedAt: editedAt,
       retracted: retracted,
       retractedAt: retractedAt,
+      senderOccupantId: senderOccupantId,
       reactions: reactions,
       replyToId: replyToId,
       replyToJid: replyToJid,

@@ -4378,6 +4378,7 @@ class XmppService extends ChangeNotifier {
         sender: message.nick,
         retractId: message.retractId!,
         timestamp: message.timestamp,
+        senderOccupantId: message.occupantId,
       );
       if (applied) {
         return;
@@ -4467,6 +4468,7 @@ class XmppService extends ChangeNotifier {
           webxdcSummary: webxdcUpdate?.summary,
           webxdcJsonPayload: webxdcUpdate?.json,
           source: message.source,
+          senderOccupantId: message.occupantId,
         );
         return;
       }
@@ -4500,6 +4502,7 @@ class XmppService extends ChangeNotifier {
           fromMamResult:
               message.mamResultId != null && message.mamResultId!.isNotEmpty,
           source: message.source,
+          senderOccupantId: message.occupantId,
         );
       }
       return;
@@ -4528,6 +4531,7 @@ class XmppService extends ChangeNotifier {
       securityLabelBgColor: securityLabel?.bgColor,
       securityLabelIsFallback: securityLabel?.isFallback ?? false,
       source: message.source,
+      senderOccupantId: message.occupantId,
     );
   }
 
@@ -8689,6 +8693,7 @@ class XmppService extends ChangeNotifier {
     required String sender,
     required String retractId,
     required DateTime timestamp,
+    String? senderOccupantId,
   }) {
     final normalized = _bareJid(roomJid);
     final list = _roomMessages[normalized];
@@ -8702,6 +8707,7 @@ class XmppService extends ChangeNotifier {
       timestamp: timestamp,
       matchSenderBare: false,
       bareJid: _bareJid,
+      senderOccupantId: senderOccupantId,
     );
     if (applied) {
       notifyListeners();
@@ -11796,6 +11802,7 @@ class XmppService extends ChangeNotifier {
     bool locallyOriginated = false,
     bool fromMamResult = true,
     String source = MessageSource.live,
+    String? senderOccupantId,
   }) {
     final normalized = _bareJid(roomJid);
     // Advance the persisted per-scope mam-id cursor regardless of how this
@@ -11985,6 +11992,7 @@ class XmppService extends ChangeNotifier {
           webxdcJsonPayload: webxdcJsonPayload,
           locallyOriginated: locallyOriginated,
           source: source,
+          senderOccupantId: senderOccupantId,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -12037,6 +12045,7 @@ class XmppService extends ChangeNotifier {
       webxdcJsonPayload: webxdcJsonPayload,
       locallyOriginated: locallyOriginated,
       source: source,
+      senderOccupantId: senderOccupantId,
     );
     _insertMessageOrdered(list, newMessage);
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so

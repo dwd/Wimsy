@@ -350,6 +350,23 @@ String? _extractRetractId(XmppElement? element) {
   return id;
 }
 
+// XEP-0421: extracts the sender's anonymous unique occupant identifier
+// from a message stanza's `<occupant-id/>` element, when present. Used to
+// authorise XEP-0424 retraction requests against the occupant that sent
+// the original message, independent of (and more robust than) nickname.
+String? _extractOccupantId(XmppElement? element) {
+  final occupantId = element?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'occupant-id' &&
+        child.getAttribute('xmlns')?.value == MucManager._occupantIdNs,
+  );
+  final id = occupantId?.getAttribute('id')?.value;
+  if (id == null || id.isEmpty) {
+    return null;
+  }
+  return id;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -421,6 +438,8 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
   }
   final retractId =
       _extractRetractId(forwardedMessage) ?? _extractRetractId(stanza);
+  final occupantId =
+      _extractOccupantId(forwardedMessage) ?? _extractOccupantId(stanza);
   if (body.trim().isEmpty &&
       (oobUrl == null || oobUrl.isEmpty) &&
       reactionsInfo == null &&
@@ -448,6 +467,7 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       source: (mamResultId != null && mamResultId.isNotEmpty) ? 'mam' : 'live',
       replaceId: replaceId,
       retractId: retractId,
+      occupantId: occupantId,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
       replyToId: replyInfo?.id,
@@ -505,6 +525,7 @@ class MucMessage {
     this.rawStanza,
     this.replaceId,
     this.retractId,
+    this.occupantId,
     this.reactionTargetId,
     this.reactions = const [],
     this.replyToId,
@@ -532,6 +553,10 @@ class MucMessage {
   // XEP-0424: the `id` of a live `<retract/>` request's target message,
   // when this message carried such a request.
   final String? retractId;
+  // XEP-0421: the sender's anonymous unique occupant identifier for this
+  // specific stanza (original message or retraction request), when the
+  // room discloses one.
+  final String? occupantId;
   final String? reactionTargetId;
   final List<String> reactions;
   final String? replyToId;

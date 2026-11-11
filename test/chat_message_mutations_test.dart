@@ -11,6 +11,7 @@ ChatMessage _message({
   String? stanzaId,
   Map<String, List<String>>? reactions,
   bool edited = false,
+  String? senderOccupantId,
 }) {
   return ChatMessage(
     from: from,
@@ -23,6 +24,7 @@ ChatMessage _message({
     rawXml: '<message/>',
     reactions: reactions,
     edited: edited,
+    senderOccupantId: senderOccupantId,
   );
 }
 
@@ -139,6 +141,100 @@ void main() {
 
       expect(applied, isFalse);
       expect(list.single.retracted, isFalse);
+    },
+  );
+
+  test(
+    'applyRetractionInList (MUC) matches by occupant-id even if the '
+    'nickname changed',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice-old-nick',
+          to: 'room@conference.example.com',
+          body: 'hello room',
+          id: 'm-retract-occ-1',
+          senderOccupantId: 'occ-alice-1',
+        ),
+      ];
+
+      final applied = ChatMessageMutations.applyRetractionInList(
+        list,
+        sender: 'alice-new-nick',
+        retractId: 'm-retract-occ-1',
+        timestamp: DateTime.utc(2026, 1, 3),
+        matchSenderBare: false,
+        bareJid: (jid) => jid,
+        senderOccupantId: 'occ-alice-1',
+      );
+
+      expect(applied, isTrue);
+      expect(list.single.retracted, isTrue);
+    },
+  );
+
+  test(
+    'applyRetractionInList (MUC) rejects a retraction from a different '
+    'occupant-id, even if the nickname matches (impersonation/reused nick)',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice',
+          to: 'room@conference.example.com',
+          body: 'hello room',
+          id: 'm-retract-occ-2',
+          senderOccupantId: 'occ-alice-1',
+        ),
+      ];
+
+      final applied = ChatMessageMutations.applyRetractionInList(
+        list,
+        sender: 'alice',
+        retractId: 'm-retract-occ-2',
+        timestamp: DateTime.utc(2026, 1, 3),
+        matchSenderBare: false,
+        bareJid: (jid) => jid,
+        senderOccupantId: 'occ-mallory-1',
+      );
+
+      expect(applied, isFalse);
+      expect(list.single.retracted, isFalse);
+    },
+  );
+
+  test(
+    'applyRetractionInList (MUC) falls back to nickname match when no '
+    'occupant-id is available',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice',
+          to: 'room@conference.example.com',
+          body: 'hello room',
+          id: 'm-retract-occ-3',
+        ),
+      ];
+
+      final rejected = ChatMessageMutations.applyRetractionInList(
+        list,
+        sender: 'mallory',
+        retractId: 'm-retract-occ-3',
+        timestamp: DateTime.utc(2026, 1, 3),
+        matchSenderBare: false,
+        bareJid: (jid) => jid,
+      );
+      expect(rejected, isFalse);
+
+      final applied = ChatMessageMutations.applyRetractionInList(
+        list,
+        sender: 'alice',
+        retractId: 'm-retract-occ-3',
+        timestamp: DateTime.utc(2026, 1, 3),
+        matchSenderBare: false,
+        bareJid: (jid) => jid,
+      );
+      expect(applied, isTrue);
+      expect(list.single.retracted, isTrue);
     },
   );
 
