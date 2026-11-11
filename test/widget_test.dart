@@ -1292,6 +1292,67 @@ void main() {
     expect(find.byIcon(Icons.done), findsOneWidget);
   });
 
+  testWidgets('message timestamp stays right-justified in the header row', (
+    WidgetTester tester,
+  ) async {
+    // Regression test: the sender-name `Flexible` and the right-aligned
+    // `Spacer` previously both defaulted to flex: 1, so the leftover width
+    // was split evenly between them instead of all going to the `Spacer`.
+    // Since the name shrinks to its own content width, that meant roughly
+    // half of the space meant to push the timestamp to the right margin
+    // went unused, leaving it stranded mid-row instead of right-justified.
+    final message = ChatMessage(
+      from: 'alice@example.com',
+      to: 'bob@example.com',
+      body: 'Hi',
+      timestamp: DateTime.utc(2026),
+      outgoing: true,
+      messageId: 'alignment-test',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: message,
+            senderName: 'You',
+            timestamp: '12:00',
+            avatarBytes: null,
+            chatBareJid: 'bob@example.com',
+            isRoom: false,
+            service: XmppService(),
+            replySenderName: null,
+            replyBody: null,
+            onReplyTargetTap: null,
+            inviteRoomJid: null,
+            inviteRoomName: null,
+            inviteAvatarBytes: null,
+            inviteReason: null,
+            onJoinInvite: null,
+            selfReactionSenderId: 'alice@example.com',
+            recentReactionOptions: const [],
+            onReact: null,
+            onEdit: null,
+            onReply: null,
+            onAcceptFile: null,
+            onDeclineFile: null,
+            onFallbackUpload: null,
+          ),
+        ),
+      ),
+    );
+
+    final timestampBox =
+        tester.renderObject(find.text('12:00')) as RenderBox;
+    final timestampRight =
+        timestampBox.localToGlobal(Offset.zero).dx + timestampBox.size.width;
+    // The message list in the real UI pads itself by 16 either side; here
+    // the bubble fills the whole 800-wide test viewport, so the timestamp
+    // (followed only by its status tick) should sit close to the right
+    // edge rather than stranded around the middle of the row.
+    expect(timestampRight, greaterThan(750));
+  });
+
   testWidgets('long pressing a message opens its complete action menu', (
     WidgetTester tester,
   ) async {

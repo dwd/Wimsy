@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widget_previews.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
@@ -6176,21 +6177,29 @@ class MessageBubble extends StatelessWidget {
                 children: [
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Flexible(
-                        child: Text(
-                          senderName,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: nameColor,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                senderName,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: nameColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            if (_senderRoomRole() == 'moderator') ...[
+                              const SizedBox(width: 6),
+                              const _RoleAffiliationChip(label: 'moderator'),
+                            ],
+                          ],
                         ),
                       ),
-                      if (_senderRoomRole() == 'moderator') ...[
-                        const SizedBox(width: 6),
-                        const _RoleAffiliationChip(label: 'moderator'),
-                      ],
-                      const Spacer(),
                       const SizedBox(width: 8),
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -7089,11 +7098,116 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
           ),
+        ),
       ],
     );
   }
+}
+
+void _previewMessageBubbleNoop() {}
+
+void _previewMessageBubbleNoopEmoji(String emoji) {}
+
+/// Sample data for the [MessageBubble] previews below: a plain incoming
+/// text message.
+ChatMessage _previewIncomingBubbleMessage() {
+  return ChatMessage(
+    from: 'juliet@example.com',
+    to: 'romeo@example.com',
+    body: 'Wherefore art thou, Romeo?',
+    timestamp: DateTime(2026, 1, 1, 12, 30),
+    outgoing: false,
+    messageId: 'preview-bubble-incoming',
+  );
+}
+
+/// Sample data for the [MessageBubble] previews below: a retracted
+/// (XEP-0424) outgoing message, shown struck through with a "Retracted at"
+/// chip next to the timestamp.
+ChatMessage _previewRetractedBubbleMessage() {
+  return ChatMessage(
+    from: 'romeo@example.com',
+    to: 'juliet@example.com',
+    body: 'Oops, wrong chat',
+    timestamp: DateTime(2026, 1, 1, 12, 31),
+    outgoing: true,
+    messageId: 'preview-bubble-retracted',
+    retracted: true,
+    retractedAt: DateTime(2026, 1, 1, 12, 32),
+  );
+}
+
+/// Preview of [MessageBubble] for a plain incoming 1:1 message, used to
+/// sanity-check the message header layout (sender name, timestamp, status
+/// tick) stays right-justified against the available width.
+@Preview(name: 'Message bubble - incoming 1:1')
+Widget previewMessageBubbleIncoming() {
+  return MaterialApp(
+    home: Scaffold(
+      body: MessageBubble(
+        message: _previewIncomingBubbleMessage(),
+        senderName: 'Juliet',
+        timestamp: '12:30',
+        avatarBytes: null,
+        chatBareJid: 'juliet@example.com',
+        isRoom: false,
+        service: XmppService(),
+        replySenderName: null,
+        replyBody: null,
+        onReplyTargetTap: null,
+        inviteRoomJid: null,
+        inviteRoomName: null,
+        inviteAvatarBytes: null,
+        inviteReason: null,
+        onJoinInvite: null,
+        selfReactionSenderId: 'romeo@example.com',
+        recentReactionOptions: const ['👍', '❤️', '😂'],
+        onReact: _previewMessageBubbleNoopEmoji,
+        onEdit: _previewMessageBubbleNoop,
+        onReply: _previewMessageBubbleNoop,
+        onAcceptFile: null,
+        onDeclineFile: null,
+        onFallbackUpload: null,
+      ),
+    ),
+  );
+}
+
+/// Preview of [MessageBubble] for a retracted (XEP-0424) outgoing message:
+/// struck-through body plus the "Retracted at" chip to the left of the
+/// (right-justified) timestamp.
+@Preview(name: 'Message bubble - retracted')
+Widget previewMessageBubbleRetracted() {
+  return MaterialApp(
+    home: Scaffold(
+      body: MessageBubble(
+        message: _previewRetractedBubbleMessage(),
+        senderName: 'You',
+        timestamp: '12:31',
+        avatarBytes: null,
+        chatBareJid: 'juliet@example.com',
+        isRoom: false,
+        service: XmppService(),
+        replySenderName: null,
+        replyBody: null,
+        onReplyTargetTap: null,
+        inviteRoomJid: null,
+        inviteRoomName: null,
+        inviteAvatarBytes: null,
+        inviteReason: null,
+        onJoinInvite: null,
+        selfReactionSenderId: 'romeo@example.com',
+        recentReactionOptions: const ['👍', '❤️', '😂'],
+        onReact: _previewMessageBubbleNoopEmoji,
+        onEdit: _previewMessageBubbleNoop,
+        onReply: _previewMessageBubbleNoop,
+        onAcceptFile: null,
+        onDeclineFile: null,
+        onFallbackUpload: null,
+      ),
+    ),
+  );
 }
 
 /// A small padlock/trust indicator shown in the chat header next to
