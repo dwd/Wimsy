@@ -226,6 +226,95 @@ void main() {
     );
   });
 
+  testWidgets('View XML is off by default, showing the message preview', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageActionCard(
+            message: ChatMessage(
+              from: 'juliet@example.com',
+              to: 'romeo@example.com',
+              body: 'Wherefore art thou, Romeo?',
+              timestamp: DateTime.utc(2026),
+              outgoing: false,
+              messageId: 'card-test-message',
+              rawXml: '<message id="card-test-message"/>',
+            ),
+            senderName: 'Juliet',
+            senderJid: 'juliet@example.com',
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Wherefore art thou, Romeo?'), findsOneWidget);
+    expect(find.text('<message id="card-test-message"/>'), findsNothing);
+  });
+
+  testWidgets(
+    'toggling View XML on replaces the JID info and message preview with the raw XML',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageActionCard(
+              message: ChatMessage(
+                from: 'juliet@example.com',
+                to: 'romeo@example.com',
+                body: 'Wherefore art thou, Romeo?',
+                timestamp: DateTime.utc(2026),
+                outgoing: false,
+                messageId: 'card-test-message',
+                rawXml: '<message id="card-test-message"/>',
+              ),
+              senderName: 'Juliet',
+              senderJid: 'juliet@example.com',
+              isContact: true,
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('View XML'));
+      await tester.pump();
+
+      expect(find.text('<message id="card-test-message"/>'), findsOneWidget);
+      expect(find.text('Wherefore art thou, Romeo?'), findsNothing);
+      expect(find.text('juliet@example.com'), findsNothing);
+      expect(find.text('Added to contacts'), findsNothing);
+
+      // Toggling it off again restores the original rendering.
+      await tester.tap(find.text('View XML'));
+      await tester.pump();
+
+      expect(find.text('Wherefore art thou, Romeo?'), findsOneWidget);
+      expect(find.text('<message id="card-test-message"/>'), findsNothing);
+    },
+  );
+
+  testWidgets('shows a placeholder when no raw XML is cached', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageActionCard(
+            message: buildMessage(),
+            senderName: 'Juliet',
+            senderJid: 'juliet@example.com',
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('View XML'));
+    await tester.pump();
+
+    expect(find.text('No XML cached for this message.'), findsOneWidget);
+  });
+
   testWidgets('tapping the scrim dismisses the card', (
     WidgetTester tester,
   ) async {

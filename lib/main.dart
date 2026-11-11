@@ -8872,7 +8872,6 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
         onViewReactions: reactions.isEmpty
             ? null
             : () => _showReactions(context),
-        onViewXml: () => _showXml(context),
         onOpenReactionPicker: widget.onReact == null
             ? null
             : () => _showReactionSheet(context),
@@ -8915,34 +8914,6 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
                     ),
                   if (reactions.isEmpty) const Text('No reactions yet.'),
                 ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showXml(BuildContext context) {
-    final xml = widget.message.rawXml?.trim();
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Message XML'),
-          content: SizedBox(
-            width: 500,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                (xml == null || xml.isEmpty)
-                    ? 'No XML cached for this message.'
-                    : xml,
               ),
             ),
           ),

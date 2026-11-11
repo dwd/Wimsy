@@ -15,7 +15,7 @@ import 'avatar_with_presence.dart';
 /// every action whose corresponding callback is non-null (mirroring the
 /// conditional items the old popup menu used to show), plus the sender's
 /// JID and roster/contact status.
-class MessageActionCard extends StatelessWidget {
+class MessageActionCard extends StatefulWidget {
   const MessageActionCard({
     super.key,
     required this.message,
@@ -33,7 +33,6 @@ class MessageActionCard extends StatelessWidget {
     this.onKick,
     this.onBan,
     this.onViewReactions,
-    this.onViewXml,
     this.onDismiss,
     this.onOpenReactionPicker,
   });
@@ -76,7 +75,6 @@ class MessageActionCard extends StatelessWidget {
   /// See `MessageBubble.onBan` in `lib/main.dart` for XEP-0045 semantics.
   final VoidCallback? onBan;
   final VoidCallback? onViewReactions;
-  final VoidCallback? onViewXml;
 
   /// Overrides the built-in quick-reaction picker sheet with a
   /// caller-supplied one (e.g. the chat screen's own reaction picker, which
@@ -91,10 +89,21 @@ class MessageActionCard extends StatelessWidget {
   final VoidCallback? onDismiss;
 
   @override
+  State<MessageActionCard> createState() => _MessageActionCardState();
+}
+
+class _MessageActionCardState extends State<MessageActionCard> {
+  /// Whether the raw XML view is toggled on, replacing the sender/contact
+  /// info and message preview. Off by default.
+  bool _showXml = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fullJid = senderFullJid != null && senderFullJid != senderJid
-        ? senderFullJid
+    final fullJid =
+        widget.senderFullJid != null &&
+            widget.senderFullJid != widget.senderJid
+        ? widget.senderFullJid
         : null;
     return Center(
       child: Padding(
@@ -114,12 +123,16 @@ class MessageActionCard extends StatelessWidget {
                 children: [
                   _buildActions(context),
                   const SizedBox(height: 16),
-                  _buildJidInfo(theme, fullJid),
-                  const SizedBox(height: 12),
-                  _buildMessagePreview(theme),
+                  if (_showXml)
+                    _buildXmlView(theme)
+                  else ...[
+                    _buildJidInfo(theme, fullJid),
+                    const SizedBox(height: 12),
+                    _buildMessagePreview(theme),
+                  ],
                   const SizedBox(height: 12),
                   _buildReactionsList(theme),
-                  if (onReact != null) ...[
+                  if (widget.onReact != null) ...[
                     const SizedBox(height: 12),
                     _buildAddReactionRow(context),
                   ],
@@ -132,6 +145,16 @@ class MessageActionCard extends StatelessWidget {
     );
   }
 
+  /// Replaces the sender/contact info and message preview with the
+  /// message's raw XML, shown while the "View XML" action is toggled on.
+  Widget _buildXmlView(ThemeData theme) {
+    final xml = widget.message.rawXml?.trim();
+    return SelectableText(
+      (xml == null || xml.isEmpty) ? 'No XML cached for this message.' : xml,
+      style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+    );
+  }
+
   /// A non-interactive rendering of the sender + message body, intentionally
   /// kept minimal and decoupled from `MessageBubble`'s rendering rather than
   /// deeply refactoring it.
@@ -139,24 +162,24 @@ class MessageActionCard extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        AvatarWithPresence(label: senderName, bytes: avatarBytes),
+        AvatarWithPresence(label: widget.senderName, bytes: widget.avatarBytes),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                senderName,
+                widget.senderName,
                 style: theme.textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                message.body.isEmpty ? '(no text)' : message.body,
+                widget.message.body.isEmpty ? '(no text)' : widget.message.body,
                 style: theme.textTheme.bodyMedium,
               ),
-              if (message.edited) ...[
+              if (widget.message.edited) ...[
                 const SizedBox(height: 4),
                 Text(
                   'edited',
@@ -177,7 +200,7 @@ class MessageActionCard extends StatelessWidget {
   /// it. Each chip is tappable (calling [onViewReactions], when supplied)
   /// to see exactly who reacted with that emoji.
   Widget _buildReactionsList(ThemeData theme) {
-    final reactions = message.reactions ?? const {};
+    final reactions = widget.message.reactions ?? const {};
     if (reactions.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -189,8 +212,8 @@ class MessageActionCard extends StatelessWidget {
           _ReactionChip(
             emoji: entry.key,
             count: entry.value.length,
-            selected: ownReactions.contains(entry.key),
-            onTap: onViewReactions,
+            selected: widget.ownReactions.contains(entry.key),
+            onTap: widget.onViewReactions,
           ),
       ],
     );
@@ -201,24 +224,26 @@ class MessageActionCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SelectableText(
-          fullJid == null ? senderJid : '$senderJid ($fullJid)',
+          fullJid == null
+              ? widget.senderJid
+              : '${widget.senderJid} ($fullJid)',
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
         const SizedBox(height: 6),
-        if (isContact)
+        if (widget.isContact)
           Chip(
             avatar: const Icon(Icons.check_circle, size: 16),
             label: const Text('Added to contacts'),
           )
-        else if (onAddToRoster != null)
+        else if (widget.onAddToRoster != null)
           ActionChip(
             avatar: const Icon(Icons.person_add_outlined, size: 16),
             label: const Text('Add to contacts'),
             onPressed: () {
-              onAddToRoster?.call();
-              onDismiss?.call();
+              widget.onAddToRoster?.call();
+              widget.onDismiss?.call();
             },
           ),
       ],
@@ -227,23 +252,21 @@ class MessageActionCard extends StatelessWidget {
 
   Widget _buildActions(BuildContext context) {
     final actions = <_CardAction>[
-      if (onReply != null)
-        _CardAction(icon: Icons.reply, label: 'Reply', onTap: onReply!),
-      if (onKick != null)
+      if (widget.onReply != null)
+        _CardAction(icon: Icons.reply, label: 'Reply', onTap: widget.onReply!),
+      if (widget.onKick != null)
         _CardAction(
           icon: Icons.person_remove_outlined,
           label: 'Kick',
-          onTap: onKick!,
+          onTap: widget.onKick!,
         ),
-      if (onBan != null)
-        _CardAction(icon: Icons.block, label: 'Ban', onTap: onBan!),
-      if (onViewXml != null)
-        _CardAction(icon: Icons.code, label: 'View XML', onTap: onViewXml!),
-      if (onEdit != null)
+      if (widget.onBan != null)
+        _CardAction(icon: Icons.block, label: 'Ban', onTap: widget.onBan!),
+      if (widget.onEdit != null)
         _CardAction(
           icon: Icons.edit_outlined,
           label: 'Edit message',
-          onTap: onEdit!,
+          onTap: widget.onEdit!,
         ),
     ];
     return Wrap(
@@ -256,9 +279,19 @@ class MessageActionCard extends StatelessWidget {
             label: action.label,
             onTap: () {
               action.onTap();
-              onDismiss?.call();
+              widget.onDismiss?.call();
             },
           ),
+        // "View XML" is a toggle (off by default) rather than a one-shot
+        // action: turning it on simply swaps the sender/contact info and
+        // message preview for the message's raw XML, in place, instead of
+        // dismissing the card or opening a separate dialog.
+        _ActionButton(
+          icon: Icons.code,
+          label: 'View XML',
+          selected: _showXml,
+          onTap: () => setState(() => _showXml = !_showXml),
+        ),
       ],
     );
   }
@@ -275,19 +308,21 @@ class MessageActionCard extends StatelessWidget {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        for (final emoji in recentReactionOptions)
+        for (final emoji in widget.recentReactionOptions)
           _ReactionChip(
             emoji: emoji,
             count: null,
-            selected: ownReactions.contains(emoji),
+            selected: widget.ownReactions.contains(emoji),
             onTap: () {
-              onReact?.call(emoji);
-              onDismiss?.call();
+              widget.onReact?.call(emoji);
+              widget.onDismiss?.call();
             },
           ),
         InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: onOpenReactionPicker ?? () => _showReactionPicker(context),
+          onTap:
+              widget.onOpenReactionPicker ??
+              () => _showReactionPicker(context),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -310,7 +345,7 @@ class MessageActionCard extends StatelessWidget {
   /// `_showReactionPickerSheet` in `lib/main.dart`) to keep this widget
   /// decoupled, even though the two look similar.
   void _showReactionPicker(BuildContext context) {
-    final onReact = this.onReact;
+    final onReact = widget.onReact;
     if (onReact == null) {
       return;
     }
@@ -324,14 +359,14 @@ class MessageActionCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final emoji in recentReactionOptions)
+                for (final emoji in widget.recentReactionOptions)
                   FilterChip(
-                    selected: ownReactions.contains(emoji),
+                    selected: widget.ownReactions.contains(emoji),
                     label: Text(emoji, style: const TextStyle(fontSize: 20)),
                     onSelected: (_) {
                       Navigator.of(sheetContext).pop();
                       onReact(emoji);
-                      onDismiss?.call();
+                      widget.onDismiss?.call();
                     },
                   ),
               ],
@@ -357,11 +392,17 @@ class _ActionButton extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.selected = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+
+  /// Whether this button represents an "on" toggle state (used by the
+  /// "View XML" action) rather than a one-shot action. Highlighted to
+  /// match the selected styling used by [_ReactionChip].
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -369,12 +410,21 @@ class _ActionButton extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
-      child: Padding(
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? theme.colorScheme.primaryContainer : null,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: theme.colorScheme.primary),
+            Icon(
+              icon,
+              color: selected
+                  ? theme.colorScheme.onPrimaryContainer
+                  : theme.colorScheme.primary,
+            ),
             const SizedBox(height: 4),
             Text(label, style: theme.textTheme.labelSmall),
           ],
@@ -522,7 +572,6 @@ Widget previewMessageActionCard() {
         onReact: _previewNoopEmoji,
         onAddToRoster: _previewNoop,
         onViewReactions: _previewNoop,
-        onViewXml: _previewNoop,
       ),
     ),
   );
@@ -545,7 +594,6 @@ Widget previewMessageActionCardMuc() {
         onReact: _previewNoopEmoji,
         onKick: _previewNoop,
         onBan: _previewNoop,
-        onViewXml: _previewNoop,
       ),
     ),
   );
