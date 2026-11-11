@@ -22,6 +22,7 @@ import 'package:wimsy/models/room_entry.dart';
 import 'package:wimsy/notifications/notification_service.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
+import 'package:wimsy/widgets/message_bubble.dart';
 import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
 

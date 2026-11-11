@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:xml/xml.dart' as xml;
 
+import '../main.dart' show formatTimestamp;
 import '../models/chat_message.dart';
+import '../xmpp/xmpp_service.dart';
 import 'avatar_with_presence.dart';
+import 'message_bubble.dart';
 
 /// A floating, previewable replacement for the old `PopupMenuButton`-based
 /// message menu.
@@ -38,6 +41,18 @@ class MessageActionCard extends StatefulWidget {
     this.onOpenReactionPicker,
     this.chatPaneRect,
     this.anchorY,
+    this.service,
+    this.chatBareJid,
+    this.isRoom = false,
+    this.timestampText,
+    this.deferOobImages = false,
+    this.selfReactionSenderId = '',
+    this.replySenderName,
+    this.replyBody,
+    this.inviteRoomJid,
+    this.inviteRoomName,
+    this.inviteAvatarBytes,
+    this.inviteReason,
   });
 
   /// The message this card previews and acts on.
@@ -105,6 +120,46 @@ class MessageActionCard extends StatefulWidget {
   /// position, minimizing how much it visually "jumps". Defaults to the
   /// vertical center of [chatPaneRect] when null.
   final double? anchorY;
+
+  /// When supplied (together with [chatBareJid]), the preview is rendered
+  /// using the real [MessageBubble] widget (wrapped in an [IgnorePointer]
+  /// so the card's own action buttons remain the single source of truth
+  /// for interactions), guaranteeing the preview looks pixel-identical to
+  /// how the message appears in the chat. When null, a minimal, static
+  /// fallback preview is used instead (e.g. for widget previews/tests that
+  /// don't have a real [XmppService] to supply).
+  final XmppService? service;
+
+  /// The bare JID of the chat (1:1 correspondent or MUC room) the
+  /// previewed message belongs to. Required together with [service] to
+  /// render the real [MessageBubble] preview.
+  final String? chatBareJid;
+
+  /// Whether [chatBareJid] refers to a MUC room, mirroring
+  /// `MessageBubble.isRoom`.
+  final bool isRoom;
+
+  /// Pre-formatted timestamp string, mirroring `MessageBubble.timestamp`.
+  /// Falls back to a simple local-time rendering when null.
+  final String? timestampText;
+
+  /// Mirrors `MessageBubble.deferOobImages`.
+  final bool deferOobImages;
+
+  /// Mirrors `MessageBubble.selfReactionSenderId`.
+  final String selfReactionSenderId;
+
+  /// Mirrors `MessageBubble.replySenderName`/`replyBody`, used to render
+  /// the quoted-reply card inside the embedded preview, when present.
+  final String? replySenderName;
+  final String? replyBody;
+
+  /// Mirrors `MessageBubble`'s room-invite fields, used to render the
+  /// invite card inside the embedded preview, when present.
+  final String? inviteRoomJid;
+  final String? inviteRoomName;
+  final Uint8List? inviteAvatarBytes;
+  final String? inviteReason;
 
   @override
   State<MessageActionCard> createState() => _MessageActionCardState();
@@ -389,10 +444,58 @@ class _MessageActionCardState extends State<MessageActionCard> {
     return TextSpan(children: spans);
   }
 
+  /// Renders the previewed message. When [MessageActionCard.service] and
+  /// [MessageActionCard.chatBareJid] are supplied, this embeds the real
+  /// [MessageBubble] (wrapped in [IgnorePointer] so the card's own action
+  /// buttons stay the single source of truth for interactions), so the
+  /// preview is visually identical to how the message renders in the chat.
+  /// Otherwise falls back to [_buildStaticMessagePreview], a minimal,
+  /// self-contained rendering used by previews/tests that don't have a
+  /// real `XmppService` to supply.
+  Widget _buildMessagePreview(ThemeData theme) {
+    final service = widget.service;
+    final chatBareJid = widget.chatBareJid;
+    if (service != null && chatBareJid != null) {
+      return IgnorePointer(
+        child: MessageBubble(
+          message: widget.message,
+          senderName: widget.senderName,
+          timestamp: widget.timestampText ?? formatTimestamp(widget.message.timestamp),
+          avatarBytes: widget.avatarBytes,
+          deferOobImages: widget.deferOobImages,
+          chatBareJid: chatBareJid,
+          isRoom: widget.isRoom,
+          service: service,
+          replySenderName: widget.replySenderName,
+          replyBody: widget.replyBody,
+          onReplyTargetTap: null,
+          inviteRoomJid: widget.inviteRoomJid,
+          inviteRoomName: widget.inviteRoomName,
+          inviteAvatarBytes: widget.inviteAvatarBytes,
+          inviteReason: widget.inviteReason,
+          onJoinInvite: null,
+          onAddToRoster: null,
+          onKick: null,
+          onBan: null,
+          selfReactionSenderId: widget.selfReactionSenderId,
+          recentReactionOptions: widget.recentReactionOptions,
+          onReact: null,
+          onEdit: null,
+          onReply: null,
+          onAcceptFile: null,
+          onDeclineFile: null,
+          onFallbackUpload: null,
+          onOpenWebxdc: null,
+        ),
+      );
+    }
+    return _buildStaticMessagePreview(theme);
+  }
+
   /// A non-interactive rendering of the sender + message body, intentionally
   /// kept minimal and decoupled from `MessageBubble`'s rendering rather than
   /// deeply refactoring it.
-  Widget _buildMessagePreview(ThemeData theme) {
+  Widget _buildStaticMessagePreview(ThemeData theme) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
