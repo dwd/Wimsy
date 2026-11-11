@@ -23,6 +23,12 @@ class Message {
   bool? _isDelayed;
   bool? _isForwarded;
   MessageStanzaType? _type;
+  // The actual `<message/>` element this [Message] represents - either
+  // [messageStanza] itself (for a plain, unwrapped stanza), or the inner
+  // `<forwarded><message/></forwarded>` element when [messageStanza] is a
+  // XEP-0280 carbon or XEP-0313 MAM wrapper. Used to serialize/persist
+  // only the real message, not the enclosing envelope.
+  XmppElement? _innerMessageElement;
 
   ChatState? _chatState; // optional element
 
@@ -37,7 +43,8 @@ class Message {
       String? messageId,
       String? mamResultId,
       MessageStanzaType? type,
-      ChatState? chatState}) {
+      ChatState? chatState,
+      XmppElement? innerMessageElement}) {
     _stanzaId = stanzaId;
     _threadId = threadId;
     _isForwarded = isForwarded;
@@ -47,7 +54,22 @@ class Message {
     _mamResultId = mamResultId;
     _type = type;
     _chatState = chatState;
+    _innerMessageElement = innerMessageElement;
   }
+
+  // The actual message stanza to serialize/persist: the inner forwarded
+  // message for a carbon/MAM-wrapped [Message], or [messageStanza] itself
+  // otherwise. Callers that need to drop the carbon/MAM envelope (e.g. when
+  // persisting raw XML for display) should use this instead of
+  // [messageStanza] directly.
+  XmppElement get innerMessageStanza => _innerMessageElement ?? messageStanza;
+
+  // Where this message came from: 'mam' when parsed out of a XEP-0313
+  // `<result/>` archive wrapper, 'live' otherwise (including XEP-0280
+  // carbons, which mirror a live send/receive on another resource rather
+  // than an archived one).
+  String get source =>
+      (_mamResultId != null && _mamResultId!.isNotEmpty) ? 'mam' : 'live';
 
   ChatState? get chatState => _chatState;
 
@@ -100,7 +122,8 @@ class Message {
               isDelayed: delayed,
               messageId: messageId,
               chatState: chatState,
-              type: type);
+              type: type,
+              innerMessageElement: message);
         }
       }
     } catch (e) {
@@ -151,7 +174,8 @@ class Message {
               stanzaId: stanzaId,
               mamResultId: mamResultId,
               chatState: chatState,
-              type: type);
+              type: type,
+              innerMessageElement: message);
         }
       }
     } catch (e) {

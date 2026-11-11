@@ -32,6 +32,12 @@ void main() {
       // extension elements (e.g. XEP-0258 <securitylabel/>) not otherwise
       // surfaced as a dedicated MucMessage field.
       expect(parsed.message!.rawStanza, same(stanza));
+      // The persisted/displayed rawXml must NOT include the <result/> or
+      // <forwarded/> MAM wrapper - only the actual <message/> stanza.
+      expect(parsed.message!.rawXml, isNot(contains('<result')));
+      expect(parsed.message!.rawXml, isNot(contains('<forwarded')));
+      expect(parsed.message!.rawXml, contains('<message'));
+      expect(parsed.message!.source, 'mam');
     });
 
     test('Subject-only message returns subject update', () {
@@ -71,6 +77,7 @@ void main() {
       expect(parsed, isNotNull);
       expect(parsed!.message, isNotNull);
       expect(parsed.message!.stanzaId, 'stanza-55');
+      expect(parsed.message!.source, 'live');
     });
 
     test('stanzaId is null when no XEP-0359 stanza-id element is present', () {

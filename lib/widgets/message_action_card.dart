@@ -247,25 +247,56 @@ class _MessageActionCardState extends State<MessageActionCard> {
   /// horizontally so long/deeply-nested stanzas still fit within the card.
   Widget _buildXmlView(ThemeData theme) {
     final rawXml = widget.message.rawXml?.trim();
+    final sourceChip = Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Chip(
+        avatar: Icon(
+          widget.message.source == MessageSource.mam
+              ? Icons.history
+              : Icons.bolt,
+          size: 16,
+        ),
+        label: Text(
+          'Source: ${widget.message.source == MessageSource.mam ? 'MAM' : 'Live'}',
+        ),
+      ),
+    );
     if (rawXml == null || rawXml.isEmpty) {
-      return Text(
-        'No XML cached for this message.',
-        style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-      );
-    }
-    final prettyXml = _prettyPrintXml(rawXml);
-    return Scrollbar(
-      child: SingleChildScrollView(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SelectableText.rich(
-            _highlightXml(prettyXml, theme),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          sourceChip,
+          Text(
+            'No XML cached for this message.',
             style: theme.textTheme.bodySmall?.copyWith(
               fontFamily: 'monospace',
             ),
           ),
+        ],
+      );
+    }
+    final prettyXml = _prettyPrintXml(rawXml);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        sourceChip,
+        Expanded(
+          child: Scrollbar(
+            child: SingleChildScrollView(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SelectableText.rich(
+                  _highlightXml(prettyXml, theme),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 

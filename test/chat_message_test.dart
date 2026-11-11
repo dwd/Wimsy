@@ -40,11 +40,13 @@ void main() {
       webxdcDocument: 'Our Calendar',
       webxdcSummary: '12 events',
       webxdcJsonPayload: '{"foo":1}',
+      source: MessageSource.mam,
     );
 
     final roundtrip = ChatMessage.fromMap(message.toMap());
     expect(roundtrip, isNotNull);
     expect(roundtrip!.rawXml, contains('<message'));
+    expect(roundtrip.source, MessageSource.mam);
     expect(roundtrip.oobDescription, 'A friendly greeting');
     expect(roundtrip.edited, isTrue);
     expect(roundtrip.editedAt, DateTime.parse('2024-08-09T10:12:13Z'));
@@ -102,6 +104,23 @@ void main() {
     expect(roundtrip.webxdcDocument, isNull);
     expect(roundtrip.webxdcSummary, isNull);
     expect(roundtrip.webxdcJsonPayload, isNull);
+    // A new ChatMessage with no explicit source defaults to live.
+    expect(roundtrip.source, MessageSource.live);
+  });
+
+  test('legacy cached record without a source field defaults to live', () {
+    final roundtrip = ChatMessage.fromMap({
+      'from': 'alice@example.com',
+      'to': 'bob@example.com',
+      'body': 'hello',
+      'timestamp': DateTime.parse('2024-08-09T10:11:12Z').toIso8601String(),
+      'outgoing': false,
+      'rawXml': '<message><body>hello</body></message>',
+      // Deliberately omit 'source', simulating a record persisted before
+      // this field existed.
+    });
+    expect(roundtrip, isNotNull);
+    expect(roundtrip!.source, MessageSource.live);
   });
 
   test(

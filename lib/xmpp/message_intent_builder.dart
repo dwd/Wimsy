@@ -1,5 +1,6 @@
 import 'package:xmpp_stone/xmpp_stone.dart';
 
+import '../models/chat_message.dart';
 import 'jmi.dart';
 import 'webxdc.dart';
 
@@ -136,6 +137,7 @@ class AddMessageIntent extends MessageIntent {
     this.securityLabelFgColor,
     this.securityLabelBgColor,
     this.securityLabelIsFallback = false,
+    this.source = MessageSource.live,
   });
 
   final String bareJid;
@@ -154,6 +156,12 @@ class AddMessageIntent extends MessageIntent {
   final String? securityLabelFgColor;
   final String? securityLabelBgColor;
   final bool securityLabelIsFallback;
+  // Where this message came from: [MessageSource.mam] for MAM-origin
+  // messages, [MessageSource.live] for ones observed live. This builder
+  // only ever produces live `AddMessageIntent`s (archived stanzas bail out
+  // above with an `UnhandledMessageIntent(reason: 'archived')`), so this
+  // always defaults to [MessageSource.live] here.
+  final String source;
 }
 
 class UnhandledMessageIntent extends MessageIntent {

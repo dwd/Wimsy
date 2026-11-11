@@ -37,6 +37,13 @@ void main() {
       expect(message.to?.userAtDomain, 'romeo@example.com');
       expect(message.text, 'Wherefore art thou?');
       expect(message.time, DateTime.parse('2024-01-02T03:04:05Z'));
+      expect(message.source, 'mam');
+      // The inner message stanza (not the <result>/<forwarded> wrapper)
+      // must be what gets persisted/displayed as rawXml.
+      final innerXml = message.innerMessageStanza.buildXmlString();
+      expect(innerXml, isNot(contains('<result')));
+      expect(innerXml, isNot(contains('<forwarded')));
+      expect(innerXml, contains('Wherefore art thou?'));
     });
 
     test('Carbon forwarded message parses metadata', () {
@@ -64,6 +71,12 @@ void main() {
       expect(message.to?.userAtDomain, 'juliet@example.com');
       expect(message.text, 'O Romeo, Romeo!');
       expect(message.time, DateTime.parse('2024-05-06T07:08:09Z'));
+      // Carbons mirror a live send/receive on another resource - they are
+      // not an archived MAM result, so the source stays 'live'.
+      expect(message.source, 'live');
+      final innerXml = message.innerMessageStanza.buildXmlString();
+      expect(innerXml, isNot(contains('<sent')));
+      expect(innerXml, isNot(contains('<forwarded')));
     });
 
     test('Regular message parsing keeps body and jid', () {
@@ -77,6 +90,8 @@ void main() {
       expect(message.text, 'Ping');
       expect(message.from?.userAtDomain, 'mercutio@example.com');
       expect(message.to?.userAtDomain, 'romeo@example.com');
+      expect(message.source, 'live');
+      expect(message.innerMessageStanza, same(stanza));
     });
   });
 }

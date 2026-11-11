@@ -59,6 +59,16 @@ class StorageService {
   // message), so the catalogue is available offline / before the next
   // fetch completes.
   static const _securityLabelCatalogKey = 'security_label_catalog';
+  // Per-scope (1:1 bare JID, or 'room:'+room bare JID) latest confirmed
+  // mam-id, updated as MAM results arrive and (once catch-up for that scope
+  // has completed this session) as trusted live ids arrive. Persisted so a
+  // disconnect or crash mid-catch-up resumes from the last confirmed
+  // position rather than re-deriving it from the message cache.
+  static const _mamLastIdsKey = 'mam_last_ids';
+  // Per-scope flag recording whether MAM catch-up last completed for that
+  // scope, persisted alongside the id above so the two always agree about
+  // how trustworthy the last-known id is.
+  static const _mamCatchUpCompleteKey = 'mam_catchup_complete';
   static const int _maxCachedMessageBytes = 20 * 1024 * 1024;
 
   // ---------------------------------------------------------------------
@@ -197,6 +207,8 @@ class StorageService {
     _vcardAvatarStateKey,
     _lastMamIdSeenKey,
     _securityLabelCatalogKey,
+    _mamLastIdsKey,
+    _mamCatchUpCompleteKey,
   ];
 
   /// [secureStore] is only injected by tests; production code uses the
@@ -1081,6 +1093,72 @@ class StorageService {
       return;
     }
     await box.delete(_lastMamIdSeenKey);
+  }
+
+  /// Loads the per-scope (1:1 bare JID, or `'room:'+roomJid`) latest
+  /// confirmed mam-id, so catch-up can resume from exactly where the
+  /// previous session left off even after a disconnect or crash.
+  Map<String, String> loadMamLastIds() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(_mamLastIdsKey, defaultValue: const <String, dynamic>{});
+    if (data is! Map) {
+      return const {};
+    }
+    final result = <String, String>{};
+    for (final entry in data.entries) {
+      final key = entry.key.toString();
+      final value = entry.value?.toString() ?? '';
+      if (key.isNotEmpty && value.isNotEmpty) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  /// Persists the full per-scope latest-mam-id map (see [loadMamLastIds]).
+  Future<void> storeMamLastIds(Map<String, String> lastIds) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_mamLastIdsKey, Map<String, String>.from(lastIds));
+  }
+
+  /// Loads the set of scopes for which MAM catch-up was marked complete as
+  /// of the last persist.
+  Set<String> loadMamCatchUpCompleteScopes() {
+    final box = _box;
+    if (box == null) {
+      return const {};
+    }
+    final data = box.get(_mamCatchUpCompleteKey, defaultValue: const <dynamic>[]);
+    if (data is! List) {
+      return const {};
+    }
+    return data.map((e) => e.toString()).where((e) => e.isNotEmpty).toSet();
+  }
+
+  /// Persists the set of scopes for which MAM catch-up is currently
+  /// complete (see [loadMamCatchUpCompleteScopes]).
+  Future<void> storeMamCatchUpCompleteScopes(Set<String> scopes) async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.put(_mamCatchUpCompleteKey, scopes.toList(growable: false));
+  }
+
+  /// Clears all persisted per-scope MAM cursor state (forget-account flows).
+  Future<void> clearMamCursors() async {
+    final box = _box;
+    if (box == null) {
+      return;
+    }
+    await box.delete(_mamLastIdsKey);
+    await box.delete(_mamCatchUpCompleteKey);
   }
 
   Future<void> storeAvatarMetadata(
