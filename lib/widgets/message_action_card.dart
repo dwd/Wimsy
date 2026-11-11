@@ -36,6 +36,8 @@ class MessageActionCard extends StatefulWidget {
     this.onViewReactions,
     this.onDismiss,
     this.onOpenReactionPicker,
+    this.chatPaneRect,
+    this.anchorY,
   });
 
   /// The message this card previews and acts on.
@@ -89,8 +91,69 @@ class MessageActionCard extends StatefulWidget {
   /// this callback.
   final VoidCallback? onDismiss;
 
+  /// The global screen rect of the chat window / message list the card is
+  /// being shown over. When provided, the card is stretched to exactly this
+  /// rect's width (matching the chat window) instead of using a fixed
+  /// width, and is positioned within the screen using [anchorY]. When null
+  /// (e.g. widget previews or tests that don't have a real chat layout to
+  /// measure), the card falls back to a centered, fixed-width layout.
+  final Rect? chatPaneRect;
+
+  /// The global vertical coordinate of the message that was tapped or
+  /// long-pressed, used to keep the card (and the message preview inside
+  /// it) as close as possible to the message's original on-screen
+  /// position, minimizing how much it visually "jumps". Defaults to the
+  /// vertical center of [chatPaneRect] when null.
+  final double? anchorY;
+
   @override
   State<MessageActionCard> createState() => _MessageActionCardState();
+}
+
+/// Positions the [MessageActionCard]'s content to exactly match the width
+/// of the chat window it's shown over ([width], starting at [left]), while
+/// keeping it as vertically close as possible to [anchorY] — the on-screen
+/// position of the message that was tapped — so the message appears to
+/// move as little as possible when the card opens. The result is clamped
+/// so the card always stays fully on screen with a small margin.
+class _AnchoredCardLayoutDelegate extends SingleChildLayoutDelegate {
+  const _AnchoredCardLayoutDelegate({
+    required this.left,
+    required this.width,
+    required this.anchorY,
+  });
+
+  final double left;
+  final double width;
+  final double anchorY;
+
+  static const double _verticalMargin = 24;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    final maxHeight = constraints.maxHeight - _verticalMargin * 2;
+    return BoxConstraints(
+      minWidth: width,
+      maxWidth: width,
+      maxHeight: maxHeight < 200 ? 200 : maxHeight,
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final minTop = _verticalMargin;
+    final maxTop = size.height - _verticalMargin - childSize.height;
+    var top = anchorY - childSize.height / 2;
+    top = maxTop < minTop ? minTop : top.clamp(minTop, maxTop);
+    return Offset(left, top);
+  }
+
+  @override
+  bool shouldRelayout(covariant _AnchoredCardLayoutDelegate oldDelegate) {
+    return left != oldDelegate.left ||
+        width != oldDelegate.width ||
+        anchorY != oldDelegate.anchorY;
+  }
 }
 
 class _MessageActionCardState extends State<MessageActionCard> {
@@ -106,6 +169,24 @@ class _MessageActionCardState extends State<MessageActionCard> {
             widget.senderFullJid != widget.senderJid
         ? widget.senderFullJid
         : null;
+    final cardContent = _buildCardContent(context, theme, fullJid);
+    final chatPaneRect = widget.chatPaneRect;
+    if (chatPaneRect != null) {
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: CustomSingleChildLayout(
+              delegate: _AnchoredCardLayoutDelegate(
+                left: chatPaneRect.left,
+                width: chatPaneRect.width,
+                anchorY: widget.anchorY ?? chatPaneRect.center.dy,
+              ),
+              child: cardContent,
+            ),
+          ),
+        ],
+      );
+    }
     final maxCardHeight = MediaQuery.of(context).size.height - 96;
     return Center(
       child: Padding(
@@ -115,36 +196,43 @@ class _MessageActionCardState extends State<MessageActionCard> {
             maxWidth: 420,
             maxHeight: maxCardHeight < 200 ? 200 : maxCardHeight,
           ),
-          child: Material(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(16),
-            clipBehavior: Clip.antiAlias,
-            elevation: 8,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildActions(context),
-                  const SizedBox(height: 16),
-                  if (_showXml)
-                    Flexible(child: _buildXmlView(theme))
-                  else ...[
-                    _buildJidInfo(theme, fullJid),
-                    const SizedBox(height: 12),
-                    _buildMessagePreview(theme),
-                  ],
-                  const SizedBox(height: 12),
-                  _buildReactionsList(theme),
-                  if (widget.onReact != null) ...[
-                    const SizedBox(height: 12),
-                    _buildAddReactionRow(context),
-                  ],
-                ],
-              ),
-            ),
-          ),
+          child: cardContent,
+        ),
+      ),
+    );
+  }
+
+  /// The card's actual visual content (the `Material` surface and its
+  /// children), shared between the anchored (real app) and centered
+  /// (previews/tests) layouts above.
+  Widget _buildCardContent(BuildContext context, ThemeData theme, String? fullJid) {
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      elevation: 8,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildActions(context),
+            const SizedBox(height: 16),
+            if (_showXml)
+              Flexible(child: _buildXmlView(theme))
+            else ...[
+              _buildJidInfo(theme, fullJid),
+              const SizedBox(height: 12),
+              _buildMessagePreview(theme),
+            ],
+            const SizedBox(height: 12),
+            _buildReactionsList(theme),
+            if (widget.onReact != null) ...[
+              const SizedBox(height: 12),
+              _buildAddReactionRow(context),
+            ],
+          ],
         ),
       ),
     );

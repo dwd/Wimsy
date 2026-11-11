@@ -8838,20 +8838,46 @@ class _MessageMenuButton extends StatefulWidget {
 
 class _MessageMenuButtonState extends State<_MessageMenuButton> {
   Future<void> showAt(Offset globalPosition) async {
-    await _showCard();
+    await _showCard(anchorY: globalPosition.dy);
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: _showCard,
+      onTap: () => _showCard(),
       child: widget.child ?? const Icon(Icons.more_horiz, size: 16),
     );
   }
 
-  Future<void> _showCard() {
+  /// Finds the global rect of the chat window / message list the card
+  /// should match the width of, by measuring the nearest enclosing
+  /// scrollable (the message `ListView`). Falls back to null (centered,
+  /// fixed-width card) if no such ancestor can be found or measured yet.
+  Rect? _findChatPaneRect() {
+    final scrollableBox =
+        Scrollable.maybeOf(context)?.context.findRenderObject() as RenderBox?;
+    if (scrollableBox == null || !scrollableBox.hasSize) {
+      return null;
+    }
+    return scrollableBox.localToGlobal(Offset.zero) & scrollableBox.size;
+  }
+
+  /// Approximates where the tapped message currently sits on screen, using
+  /// this button's own position as a fallback for the icon-tap path (the
+  /// long-press path instead passes the exact touch position to [showAt]).
+  double? _findOwnAnchorY() {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) {
+      return null;
+    }
+    return box.localToGlobal(Offset.zero).dy + box.size.height / 2;
+  }
+
+  Future<void> _showCard({double? anchorY}) {
     final reactions = widget.message.reactions ?? const {};
+    final chatPaneRect = _findChatPaneRect();
+    final resolvedAnchorY = anchorY ?? _findOwnAnchorY();
     return showMessageActionCard(
       context,
       builder: (dismiss) => MessageActionCard(
@@ -8876,6 +8902,8 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
             ? null
             : () => _showReactionSheet(context),
         onDismiss: dismiss,
+        chatPaneRect: chatPaneRect,
+        anchorY: resolvedAnchorY,
       ),
     );
   }

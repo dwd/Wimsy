@@ -93,6 +93,44 @@ void main() {
     },
   );
 
+  testWidgets(
+    'matches the width of chatPaneRect and centers near anchorY when both are provided',
+    (WidgetTester tester) async {
+      // A chat pane that starts at x=320 (as if next to a 320px-wide roster
+      // pane) and spans 500px, with the tapped message roughly in the
+      // middle of the screen vertically.
+      const chatPaneRect = Rect.fromLTWH(320, 0, 500, 800);
+      const anchorY = 300.0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageActionCard(
+              message: buildMessage(),
+              senderName: 'Juliet',
+              senderJid: 'juliet@example.com',
+              onReply: () {},
+              chatPaneRect: chatPaneRect,
+              anchorY: anchorY,
+            ),
+          ),
+        ),
+      );
+
+      final materialFinder = find.descendant(
+        of: find.byType(MessageActionCard),
+        matching: find.byType(Material),
+      );
+      final materialRect = tester.getRect(materialFinder.first);
+
+      expect(materialRect.left, chatPaneRect.left);
+      expect(materialRect.width, chatPaneRect.width);
+      // The card should be roughly centered on anchorY (allowing for the
+      // card's own height pushing its center away from the exact anchor
+      // when clamped to stay on screen).
+      expect(materialRect.center.dy, closeTo(anchorY, materialRect.height));
+    },
+  );
+
   testWidgets('shows no reaction chips when the message has no reactions', (
     WidgetTester tester,
   ) async {
