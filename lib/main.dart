@@ -6208,12 +6208,7 @@ class MessageBubble extends StatelessWidget {
                           ),
                           if (message.edited) ...[
                             const SizedBox(width: 6),
-                            Text(
-                              'edited',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: textColor.withValues(alpha: 0.6),
-                              ),
-                            ),
+                            _buildEditedChip(context),
                           ],
                           if (tickIcon != null) ...[
                             const SizedBox(width: 6),
@@ -6348,6 +6343,30 @@ class MessageBubble extends StatelessWidget {
       fgColor: message.securityLabelFgColor,
       bgColor: message.securityLabelBgColor,
       isFallback: message.securityLabelIsFallback,
+    );
+  }
+
+  // XEP-0308: renders a small chip flagging that this message has been
+  // edited (a correction was applied), with the timestamp the correction
+  // was received at. Shown next to the message timestamp, same style as
+  // the retracted chip.
+  Widget _buildEditedChip(BuildContext context) {
+    final theme = Theme.of(context);
+    final editedAt = message.editedAt;
+    final suffix = editedAt == null ? '' : ' ${_formatTimestamp(editedAt)}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'Edited at$suffix',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontStyle: FontStyle.italic,
+        ),
+      ),
     );
   }
 
