@@ -100,7 +100,8 @@ class ChatImpl implements Chat {
 bool isRenderableChatMessage(Message message) {
   return (message.text != null && message.text!.isNotEmpty) ||
       _containsMucDirectInvite(message.messageStanza) ||
-      _containsRetract(message.messageStanza);
+      _containsRetract(message.messageStanza) ||
+      _containsRetracted(message.messageStanza);
 }
 
 bool _containsMucDirectInvite(XmppElement element) {
@@ -119,6 +120,20 @@ bool _containsRetract(XmppElement element) {
     return true;
   }
   return element.children.any(_containsRetract);
+}
+
+/// XEP-0424/XEP-0425: a MAM-replayed "tombstone" - a `<retracted/>` marker
+/// (plain retraction) or `<moderated><retracted/></moderated>`
+/// (moderation) that has already replaced a message's body in the
+/// archive, so it carries no `<body/>` of its own but must still reach
+/// the application so it can render a placeholder in place of the lost
+/// text.
+bool _containsRetracted(XmppElement element) {
+  if (element.name == 'retracted' &&
+      element.getAttribute('xmlns')?.value == 'urn:xmpp:message-retract:1') {
+    return true;
+  }
+  return element.children.any(_containsRetracted);
 }
 
 abstract class Chat {

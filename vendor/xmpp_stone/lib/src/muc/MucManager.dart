@@ -424,6 +424,75 @@ class _ModerationInfo {
   final String? reason;
 }
 
+// XEP-0424/XEP-0425: extracts a MAM-replayed "tombstone" for a message
+// whose own body has already been replaced by the archive - a top-level
+// `<retracted stamp='.../>` (plain retraction) or a `<moderated
+// by='...'><retracted stamp='.../>[<reason/>]</moderated>` (moderation) -
+// since the original body is gone by the time we fetch history. This is
+// distinct from [_extractRetractId]/[_extractModeration], which observe
+// the live request/notice while the original message is still present.
+_TombstoneInfo? _extractTombstone(XmppElement? element) {
+  final moderated = element?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'moderated' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:message-moderate:0',
+  );
+  if (moderated != null) {
+    final retracted = moderated.children.firstWhereOrNull(
+      (child) =>
+          child.name == 'retracted' &&
+          child.getAttribute('xmlns')?.value == 'urn:xmpp:message-retract:1',
+    );
+    if (retracted != null) {
+      final by = moderated.getAttribute('by')?.value;
+      final reason = moderated.getChild('reason')?.textValue?.trim();
+      return _TombstoneInfo(
+        stamp: _parseStamp(retracted.getAttribute('stamp')?.value),
+        isModeration: true,
+        by: (by != null && by.isNotEmpty) ? by : null,
+        reason: (reason != null && reason.isNotEmpty) ? reason : null,
+      );
+    }
+  }
+  final retracted = element?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'retracted' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:message-retract:1',
+  );
+  if (retracted != null) {
+    return _TombstoneInfo(
+      stamp: _parseStamp(retracted.getAttribute('stamp')?.value),
+      isModeration: false,
+    );
+  }
+  return null;
+}
+
+DateTime? _parseStamp(String? stamp) {
+  if (stamp == null || stamp.isEmpty) {
+    return null;
+  }
+  try {
+    return DateTime.parse(stamp);
+  } catch (_) {
+    return null;
+  }
+}
+
+class _TombstoneInfo {
+  const _TombstoneInfo({
+    this.stamp,
+    required this.isModeration,
+    this.by,
+    this.reason,
+  });
+
+  final DateTime? stamp;
+  final bool isModeration;
+  final String? by;
+  final String? reason;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -499,11 +568,14 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       _extractOccupantId(forwardedMessage) ?? _extractOccupantId(stanza);
   final moderation =
       _extractModeration(forwardedMessage) ?? _extractModeration(stanza);
+  final tombstone =
+      _extractTombstone(forwardedMessage) ?? _extractTombstone(stanza);
   if (body.trim().isEmpty &&
       (oobUrl == null || oobUrl.isEmpty) &&
       reactionsInfo == null &&
       retractId == null &&
-      moderation == null) {
+      moderation == null &&
+      tombstone == null) {
     return null;
   }
   final timestamp = _extractDelayedTimestamp(forwarded) ??
@@ -531,6 +603,10 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       moderateApplyToId: moderation?.applyToId,
       moderatedBy: moderation?.by,
       moderationReason: moderation?.reason,
+      retractionTombstoneStamp: tombstone?.stamp,
+      isModerationTombstone: tombstone?.isModeration ?? false,
+      tombstoneModeratedBy: tombstone?.by,
+      tombstoneReason: tombstone?.reason,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
       replyToId: replyInfo?.id,
@@ -592,6 +668,10 @@ class MucMessage {
     this.moderateApplyToId,
     this.moderatedBy,
     this.moderationReason,
+    this.retractionTombstoneStamp,
+    this.isModerationTombstone = false,
+    this.tombstoneModeratedBy,
+    this.tombstoneReason,
     this.reactionTargetId,
     this.reactions = const [],
     this.replyToId,
@@ -630,6 +710,16 @@ class MucMessage {
   final String? moderateApplyToId;
   final String? moderatedBy;
   final String? moderationReason;
+  // XEP-0424/XEP-0425: when this message IS a MAM-replayed tombstone (its
+  // own body has already been replaced by the archive, unlike the live
+  // request/notice above which still arrives alongside the original
+  // message), the timestamp the retraction/moderation took effect at,
+  // whether it was a moderation (vs. a plain self-retraction), and - for
+  // a moderation tombstone - the moderator and reason, when disclosed.
+  final DateTime? retractionTombstoneStamp;
+  final bool isModerationTombstone;
+  final String? tombstoneModeratedBy;
+  final String? tombstoneReason;
   final String? reactionTargetId;
   final List<String> reactions;
   final String? replyToId;

@@ -147,6 +147,64 @@ class MessageStanzaParser {
     return null;
   }
 
+  // XEP-0424/XEP-0425: extracts a MAM-replayed "tombstone" - a message
+  // whose own body has already been replaced by the archive with a
+  // top-level `<retracted stamp='.../>` (plain XEP-0424 retraction) or a
+  // `<moderated by='...'><retracted stamp='.../>[<reason/>]</moderated>`
+  // (XEP-0425 moderation), since the original body is gone by the time we
+  // fetch history - as opposed to a "live retraction", where we observe
+  // the `<retract/>` request itself while the original message (and its
+  // body) is still present. Returns null when the stanza carries neither
+  // form.
+  RetractionTombstone? extractRetractionTombstone(XmppElement stanza) {
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name == 'moderated' &&
+            child.getAttribute('xmlns')?.value ==
+                'urn:xmpp:message-moderate:0') {
+          final retracted = child.children.firstWhere(
+            (c) =>
+                c.name == 'retracted' &&
+                c.getAttribute('xmlns')?.value ==
+                    'urn:xmpp:message-retract:1',
+            orElse: () => XmppElement(),
+          );
+          if (retracted.name != 'retracted') {
+            continue;
+          }
+          final by = child.getAttribute('by')?.value?.trim();
+          final reason = child.getChild('reason')?.textValue?.trim();
+          return RetractionTombstone(
+            stamp: _parseStamp(retracted.getAttribute('stamp')?.value),
+            isModeration: true,
+            moderatedBy: (by == null || by.isEmpty) ? null : by,
+            reason: (reason == null || reason.isEmpty) ? null : reason,
+          );
+        }
+        if (child.name == 'retracted' &&
+            child.getAttribute('xmlns')?.value ==
+                'urn:xmpp:message-retract:1') {
+          return RetractionTombstone(
+            stamp: _parseStamp(child.getAttribute('stamp')?.value),
+            isModeration: false,
+          );
+        }
+      }
+    }
+    return null;
+  }
+
+  DateTime? _parseStamp(String? stamp) {
+    if (stamp == null || stamp.isEmpty) {
+      return null;
+    }
+    try {
+      return DateTime.parse(stamp);
+    } catch (_) {
+      return null;
+    }
+  }
+
   ReplyPayload? extractReplyPayload(XmppElement stanza, {String? body}) {
     for (final candidate in _candidateMessages(stanza)) {
       for (final child in candidate.children) {

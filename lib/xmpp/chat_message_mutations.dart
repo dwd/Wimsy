@@ -158,6 +158,47 @@ class ChatMessageMutations {
     return false;
   }
 
+  // XEP-0424/XEP-0425: marks the message just inserted for [messageId] as
+  // a MAM-replayed "tombstone" - a retraction/moderation whose original
+  // body is already gone by the time we fetch history (the archive
+  // replaced it with a placeholder before insertion), unlike
+  // [applyRetractionInList]/[applyModerationInList] above which mark an
+  // existing, still-bodied message in response to observing the live
+  // request/notice.
+  //
+  // No sender/occupant authorisation check is needed here: the message
+  // being marked is the very one we just inserted for this tombstone, not
+  // a different message being targeted on someone else's behalf.
+  static bool markTombstoneByMessageId(
+    List<ChatMessage> list, {
+    required String messageId,
+    required DateTime timestamp,
+    required bool isModeration,
+    String? reason,
+  }) {
+    if (messageId.isEmpty) {
+      return false;
+    }
+    for (var i = list.length - 1; i >= 0; i--) {
+      final existing = list[i];
+      if (existing.messageId != messageId) {
+        continue;
+      }
+      if (existing.retracted) {
+        return true;
+      }
+      final hasReason = isModeration && reason != null && reason.isNotEmpty;
+      list[i] = existing.copyWith(
+        retracted: true,
+        retractedAt: timestamp,
+        moderated: isModeration,
+        moderationReason: hasReason ? reason : null,
+      );
+      return true;
+    }
+    return false;
+  }
+
   // XEP-0491: finds the last message in [list] with a matching
   // [webxdcThreadId] and merges any non-null/non-empty document, summary,
   // and json payload into it. Returns true when a matching message was

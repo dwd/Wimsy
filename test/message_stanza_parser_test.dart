@@ -362,6 +362,84 @@ void main() {
     expect(parser.extractRetractId(stanza), isNull);
   });
 
+  test(
+    'extractRetractionTombstone reads a plain XEP-0424 MAM tombstone',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-tombstone-1',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final retracted = XmppElement()..name = 'retracted';
+      retracted.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      retracted.addAttribute(
+        XmppAttribute('stamp', '2019-09-20T23:09:32Z'),
+      );
+      stanza.addChild(retracted);
+
+      final tombstone = parser.extractRetractionTombstone(stanza);
+      expect(tombstone, isNotNull);
+      expect(tombstone!.isModeration, isFalse);
+      expect(tombstone.stamp, DateTime.parse('2019-09-20T23:09:32Z'));
+      expect(tombstone.reason, isNull);
+    },
+  );
+
+  test(
+    'extractRetractionTombstone reads a XEP-0425 moderation MAM tombstone '
+    'with a reason',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-tombstone-2',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final moderated = XmppElement()..name = 'moderated';
+      moderated.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-moderate:0'),
+      );
+      moderated.addAttribute(
+        XmppAttribute('by', 'room@conference.example/mod'),
+      );
+      final retracted = XmppElement()..name = 'retracted';
+      retracted.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      retracted.addAttribute(
+        XmppAttribute('stamp', '2019-09-20T23:09:32Z'),
+      );
+      moderated.addChild(retracted);
+      final reason = XmppElement()..name = 'reason';
+      reason.textValue = 'Insults';
+      moderated.addChild(reason);
+      stanza.addChild(moderated);
+
+      final tombstone = parser.extractRetractionTombstone(stanza);
+      expect(tombstone, isNotNull);
+      expect(tombstone!.isModeration, isTrue);
+      expect(tombstone.moderatedBy, 'room@conference.example/mod');
+      expect(tombstone.reason, 'Insults');
+    },
+  );
+
+  test(
+    'extractRetractionTombstone returns null when there is no tombstone',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-tombstone-3',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+        body: 'hi',
+      );
+
+      expect(parser.extractRetractionTombstone(stanza), isNull);
+    },
+  );
+
   test('extractReplyPayload strips feature-fallback body range', () {
     final stanza = _chatStanza(
       id: 'm5',

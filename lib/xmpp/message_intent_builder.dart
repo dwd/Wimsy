@@ -55,6 +55,26 @@ class ReplyPayload {
   final String? cleanedBody;
 }
 
+// XEP-0424/XEP-0425: describes a MAM-replayed "tombstone" message, where
+// the archive has already replaced the original body with a
+// `<retracted/>` (or `<moderated><retracted/></moderated>`) marker by the
+// time we fetch history - as opposed to a "live retraction", where the
+// original message (and body) is still present when we observe the
+// `<retract/>` request.
+class RetractionTombstone {
+  const RetractionTombstone({
+    this.stamp,
+    required this.isModeration,
+    this.moderatedBy,
+    this.reason,
+  });
+
+  final DateTime? stamp;
+  final bool isModeration;
+  final String? moderatedBy;
+  final String? reason;
+}
+
 class MessageScopedId {
   const MessageScopedId({required this.scopeJid, required this.id});
 

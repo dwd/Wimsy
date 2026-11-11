@@ -345,6 +345,87 @@ void main() {
   });
 
   test(
+    'markTombstoneByMessageId marks a just-inserted plain retraction '
+    'tombstone',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'This message was retracted.',
+          id: 'm-tombstone-1',
+        ),
+      ];
+      final stamp = DateTime.utc(2026, 1, 5);
+
+      final applied = ChatMessageMutations.markTombstoneByMessageId(
+        list,
+        messageId: 'm-tombstone-1',
+        timestamp: stamp,
+        isModeration: false,
+      );
+
+      expect(applied, isTrue);
+      expect(list.single.retracted, isTrue);
+      expect(list.single.retractedAt, stamp);
+      expect(list.single.moderated, isFalse);
+      expect(list.single.moderationReason, isNull);
+      expect(list.single.body, 'This message was retracted.');
+    },
+  );
+
+  test(
+    'markTombstoneByMessageId marks a just-inserted moderation tombstone '
+    'with a reason',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice',
+          to: 'room@conference.example.com',
+          body: 'Insults',
+          id: 'm-tombstone-2',
+        ),
+      ];
+      final stamp = DateTime.utc(2026, 1, 5);
+
+      final applied = ChatMessageMutations.markTombstoneByMessageId(
+        list,
+        messageId: 'm-tombstone-2',
+        timestamp: stamp,
+        isModeration: true,
+        reason: 'Insults',
+      );
+
+      expect(applied, isTrue);
+      expect(list.single.retracted, isTrue);
+      expect(list.single.moderated, isTrue);
+      expect(list.single.moderationReason, 'Insults');
+      expect(list.single.body, 'Insults');
+    },
+  );
+
+  test('markTombstoneByMessageId returns false when no message matches', () {
+    final list = <ChatMessage>[
+      _message(
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'hello',
+        id: 'm-tombstone-3',
+      ),
+    ];
+
+    final applied = ChatMessageMutations.markTombstoneByMessageId(
+      list,
+      messageId: 'does-not-exist',
+      timestamp: DateTime.utc(2026, 1, 5),
+      isModeration: false,
+    );
+
+    expect(applied, isFalse);
+    expect(list.single.retracted, isFalse);
+  });
+
+  test(
     'updateReactionsInList rewrites sender reactions for target message',
     () {
       final list = <ChatMessage>[

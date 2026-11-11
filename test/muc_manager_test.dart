@@ -315,6 +315,101 @@ void main() {
     },
   );
 
+  test(
+    'MUC groupchat message exposes a plain XEP-0424 MAM retraction '
+    'tombstone',
+    () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final muc = connection.getMucModule();
+
+      final message = MessageStanza('m3e', MessageStanzaType.GROUPCHAT);
+      message.fromJid = Jid.fromFullJid('room@conference.example');
+      final retracted = XmppElement()..name = 'retracted';
+      retracted.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      retracted.addAttribute(
+        XmppAttribute('stamp', '2019-09-20T23:09:32Z'),
+      );
+      message.addChild(retracted);
+
+      final completer = Completer<MucMessage>();
+      final sub = muc.roomMessageStream.listen((event) {
+        completer.complete(event);
+      });
+
+      connection.fireNewStanzaEvent(message);
+
+      final received =
+          await completer.future.timeout(const Duration(seconds: 1));
+      await sub.cancel();
+
+      expect(received.retractionTombstoneStamp, DateTime.parse('2019-09-20T23:09:32Z'));
+      expect(received.isModerationTombstone, isFalse);
+    },
+  );
+
+  test(
+    'MUC groupchat message exposes a XEP-0425 MAM moderation tombstone '
+    'with a reason',
+    () async {
+      final account = XmppAccountSettings(
+        'test',
+        'user',
+        'example.com',
+        'pass',
+        5222,
+      );
+      final connection = TestConnection(account);
+      final muc = connection.getMucModule();
+
+      final message = MessageStanza('m3f', MessageStanzaType.GROUPCHAT);
+      message.fromJid = Jid.fromFullJid('room@conference.example');
+      final moderated = XmppElement()..name = 'moderated';
+      moderated.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-moderate:0'),
+      );
+      moderated.addAttribute(
+        XmppAttribute('by', 'room@conference.example/thirdwitch'),
+      );
+      final retracted = XmppElement()..name = 'retracted';
+      retracted.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      retracted.addAttribute(
+        XmppAttribute('stamp', '2019-09-20T23:09:32Z'),
+      );
+      moderated.addChild(retracted);
+      final reason = XmppElement()..name = 'reason';
+      reason.textValue = 'Insults';
+      moderated.addChild(reason);
+      message.addChild(moderated);
+
+      final completer = Completer<MucMessage>();
+      final sub = muc.roomMessageStream.listen((event) {
+        completer.complete(event);
+      });
+
+      connection.fireNewStanzaEvent(message);
+
+      final received =
+          await completer.future.timeout(const Duration(seconds: 1));
+      await sub.cancel();
+
+      expect(received.isModerationTombstone, isTrue);
+      expect(received.tombstoneModeratedBy, 'room@conference.example/thirdwitch');
+      expect(received.tombstoneReason, 'Insults');
+      expect(received.retractionTombstoneStamp, DateTime.parse('2019-09-20T23:09:32Z'));
+    },
+  );
+
   test('MUC presence emits occupant updates', () async {
     final account = XmppAccountSettings(
       'test',

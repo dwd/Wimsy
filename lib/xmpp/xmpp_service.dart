@@ -4372,6 +4372,43 @@ class XmppService extends ChangeNotifier {
     if (mujiSession != null && message.nick.isNotEmpty) {
       mujiSession.setActiveSpeaker(message.nick);
     }
+    if (message.retractionTombstoneStamp != null ||
+        message.isModerationTombstone) {
+      final tombstoneMessageId = message.messageId ?? message.stanzaId;
+      if (tombstoneMessageId != null && tombstoneMessageId.isNotEmpty) {
+        final timestamp = message.retractionTombstoneStamp ?? message.timestamp;
+        final tombstone = RetractionTombstone(
+          stamp: timestamp,
+          isModeration: message.isModerationTombstone,
+          moderatedBy: message.tombstoneModeratedBy,
+          reason: message.tombstoneReason,
+        );
+        _addRoomMessage(
+          roomJid: message.roomJid,
+          from: message.nick,
+          body: _tombstoneBody(tombstone),
+          rawXml: message.rawXml ?? _buildIncomingGroupFallbackXml(message),
+          outgoing: _isRoomSelfReflection(message.roomJid, message.nick),
+          receivedFromRoom: true,
+          timestamp: timestamp,
+          messageId: tombstoneMessageId,
+          mamId: message.mamResultId ?? message.stanzaId,
+          stanzaId: message.stanzaId,
+          fromMamResult:
+              message.mamResultId != null && message.mamResultId!.isNotEmpty,
+          source: message.source,
+          senderOccupantId: message.occupantId,
+        );
+        _markRoomTombstone(
+          roomJid: message.roomJid,
+          messageId: tombstoneMessageId,
+          timestamp: timestamp,
+          isModeration: tombstone.isModeration,
+          reason: tombstone.reason,
+        );
+      }
+      return;
+    }
     if (message.moderateApplyToId != null &&
         message.moderateApplyToId!.isNotEmpty) {
       final applied = _applyRoomMessageModeration(
@@ -8670,6 +8707,89 @@ class XmppService extends ChangeNotifier {
     );
   }
 
+  // XEP-0424/XEP-0425: a placeholder body shown in place of a retracted or
+  // moderated message's original text when that text was never seen - the
+  // archive had already replaced it with a `<retracted/>` tombstone by the
+  // time we fetched history (unlike a "live" retraction/moderation, where
+  // we still see the original body and merely strike it through).
+  static const String _retractionTombstonePlaceholder =
+      'This message was retracted.';
+  static const String _moderationTombstonePlaceholder =
+      'This message was removed by a moderator.';
+
+  // XEP-0424/XEP-0425: the body to show for a MAM tombstone - the
+  // moderator's reason when a moderation tombstone discloses one,
+  // otherwise the generic placeholder matching the retraction/moderation
+  // kind.
+  String _tombstoneBody(RetractionTombstone tombstone) {
+    if (tombstone.isModeration) {
+      final reason = tombstone.reason;
+      if (reason != null && reason.isNotEmpty) {
+        return reason;
+      }
+      return _moderationTombstonePlaceholder;
+    }
+    return _retractionTombstonePlaceholder;
+  }
+
+  // XEP-0424/XEP-0425: marks the 1:1 message just inserted for [messageId]
+  // as a MAM-replayed tombstone - see
+  // [ChatMessageMutations.markTombstoneByMessageId].
+  bool _markDmTombstone({
+    required String bareJid,
+    required String messageId,
+    required DateTime timestamp,
+    required bool isModeration,
+    String? reason,
+  }) {
+    final normalized = _bareJid(bareJid);
+    final list = _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = ChatMessageMutations.markTombstoneByMessageId(
+      list,
+      messageId: messageId,
+      timestamp: timestamp,
+      isModeration: isModeration,
+      reason: reason,
+    );
+    if (applied) {
+      notifyListeners();
+      _messagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
+  }
+
+  // XEP-0424/XEP-0425: marks the room message just inserted for
+  // [messageId] as a MAM-replayed tombstone - see
+  // [ChatMessageMutations.markTombstoneByMessageId].
+  bool _markRoomTombstone({
+    required String roomJid,
+    required String messageId,
+    required DateTime timestamp,
+    required bool isModeration,
+    String? reason,
+  }) {
+    final normalized = _bareJid(roomJid);
+    final list = _roomMessages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = ChatMessageMutations.markTombstoneByMessageId(
+      list,
+      messageId: messageId,
+      timestamp: timestamp,
+      isModeration: isModeration,
+      reason: reason,
+    );
+    if (applied) {
+      notifyListeners();
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
+  }
+
   // XEP-0424: marks a 1:1 message as retracted when we observe the live
   // `<retract/>` request, mirroring [_applyMessageCorrection].
   bool _applyMessageRetraction({
@@ -11085,6 +11205,9 @@ class XmppService extends ChangeNotifier {
         final retractId = _messageStanzaParser.extractRetractId(
           message.messageStanza,
         );
+        final tombstone = _messageStanzaParser.extractRetractionTombstone(
+          message.messageStanza,
+        );
         final reaction = _messageStanzaParser.extractReactionUpdate(
           message.messageStanza,
         );
@@ -11101,6 +11224,34 @@ class XmppService extends ChangeNotifier {
         }
         final outgoing = from == (_currentUserBareJid ?? '');
         final targetBare = outgoing ? to : from;
+        if (tombstone != null && targetBare.isNotEmpty) {
+          final tombstoneMessageId = message.messageId;
+          if (tombstoneMessageId != null && tombstoneMessageId.isNotEmpty) {
+            final timestamp = tombstone.stamp ?? message.time;
+            _addIncomingDmMessage(
+              bareJid: targetBare,
+              from: from,
+              to: to,
+              body: _tombstoneBody(tombstone),
+              rawXml: rawXml,
+              outgoing: outgoing,
+              timestamp: timestamp,
+              messageId: tombstoneMessageId,
+              mamId: message.mamResultId,
+              stanzaId: message.stanzaId,
+              stanza: message.messageStanza,
+              source: message.source,
+            );
+            _markDmTombstone(
+              bareJid: targetBare,
+              messageId: tombstoneMessageId,
+              timestamp: timestamp,
+              isModeration: tombstone.isModeration,
+              reason: tombstone.reason,
+            );
+          }
+          continue;
+        }
         if (retractId != null &&
             retractId.isNotEmpty &&
             targetBare.isNotEmpty) {
@@ -11189,6 +11340,9 @@ class XmppService extends ChangeNotifier {
       final retractId = _messageStanzaParser.extractRetractId(
         message.messageStanza,
       );
+      final tombstone = _messageStanzaParser.extractRetractionTombstone(
+        message.messageStanza,
+      );
       final reaction = _messageStanzaParser.extractReactionUpdate(
         message.messageStanza,
       );
@@ -11198,6 +11352,34 @@ class XmppService extends ChangeNotifier {
       }
       final outgoing = from == (_currentUserBareJid ?? '');
       final targetBare = outgoing ? to : from;
+      if (tombstone != null && targetBare.isNotEmpty) {
+        final tombstoneMessageId = message.messageId;
+        if (tombstoneMessageId != null && tombstoneMessageId.isNotEmpty) {
+          final timestamp = tombstone.stamp ?? message.time;
+          _addIncomingDmMessage(
+            bareJid: targetBare,
+            from: from,
+            to: to,
+            body: _tombstoneBody(tombstone),
+            rawXml: rawXml,
+            outgoing: outgoing,
+            timestamp: timestamp,
+            messageId: tombstoneMessageId,
+            mamId: message.mamResultId,
+            stanzaId: message.stanzaId,
+            stanza: message.messageStanza,
+            source: message.source,
+          );
+          _markDmTombstone(
+            bareJid: targetBare,
+            messageId: tombstoneMessageId,
+            timestamp: timestamp,
+            isModeration: tombstone.isModeration,
+            reason: tombstone.reason,
+          );
+        }
+        return;
+      }
       if (retractId != null && retractId.isNotEmpty && targetBare.isNotEmpty) {
         final applied = _applyMessageRetraction(
           bareJid: targetBare,
