@@ -6196,6 +6196,10 @@ class MessageBubble extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (message.retracted) ...[
+                            _buildRetractedChip(context),
+                            const SizedBox(width: 6),
+                          ],
                           Text(
                             timestamp,
                             style: theme.textTheme.labelSmall?.copyWith(
@@ -6222,10 +6226,6 @@ class MessageBubble extends StatelessWidget {
                   const SizedBox(height: 6),
                   if (securityLabelChip != null) ...[
                     securityLabelChip,
-                    const SizedBox(height: 6),
-                  ],
-                  if (message.retracted) ...[
-                    _buildRetractedChip(context),
                     const SizedBox(height: 6),
                   ],
                   if ((message.replyToId ?? '').isNotEmpty) ...[
