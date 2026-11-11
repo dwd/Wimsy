@@ -45,6 +45,7 @@ class MessageBubble extends StatelessWidget {
     required this.recentReactionOptions,
     required this.onReact,
     required this.onEdit,
+    this.onRetract,
     required this.onReply,
     required this.onAcceptFile,
     required this.onDeclineFile,
@@ -81,6 +82,9 @@ class MessageBubble extends StatelessWidget {
   final List<String> recentReactionOptions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
+  // XEP-0424: shown as "Retract" in the message action card; only ever
+  // non-null for our own outgoing messages (see `main.dart`'s wiring).
+  final VoidCallback? onRetract;
   final VoidCallback? onReply;
   final VoidCallback? onAcceptFile;
   final VoidCallback? onDeclineFile;
@@ -142,6 +146,7 @@ class MessageBubble extends StatelessWidget {
               ownReactions: ownReactions,
               onReact: onReact,
               onEdit: onEdit,
+              onRetract: onRetract,
               onReply: onReply,
               onAddToRoster: onAddToRoster,
               onKick: onKick,
@@ -1665,6 +1670,7 @@ class _MessageMenuButton extends StatefulWidget {
     required this.ownReactions,
     required this.onReact,
     required this.onEdit,
+    this.onRetract,
     required this.onReply,
     this.onAddToRoster,
     this.onKick,
@@ -1694,6 +1700,7 @@ class _MessageMenuButton extends StatefulWidget {
   final Set<String> ownReactions;
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
+  final VoidCallback? onRetract;
   final VoidCallback? onReply;
   final VoidCallback? onAddToRoster;
   final VoidCallback? onKick;
@@ -1774,6 +1781,7 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
         recentReactionOptions: widget.recentReactionOptions,
         ownReactions: widget.ownReactions,
         onEdit: widget.onEdit,
+        onRetract: widget.onRetract,
         onReply: widget.onReply,
         onReact: widget.onReact,
         onAddToRoster: widget.onAddToRoster,

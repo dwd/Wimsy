@@ -2217,6 +2217,16 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                     isRoom: isBookmark,
                                   )
                                 : null,
+                            onRetract:
+                                (message.outgoing &&
+                                    !message.retracted &&
+                                    (message.messageId ?? '').isNotEmpty)
+                                ? () => _retractMessage(
+                                    activeChat: activeChat,
+                                    message: message,
+                                    isRoom: isBookmark,
+                                  )
+                                : null,
                             onReply:
                                 ((isBookmark
                                             ? message.stanzaId ?? message.mamId
@@ -4693,6 +4703,55 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     );
     if (error != null) {
       _showSnack('Failed to ban $nick: $error');
+    }
+  }
+
+  /// Retracts (XEP-0424) our own message [message] in [activeChat], after a
+  /// confirmation dialog. Reachable from the message action card as a
+  /// "Retract" icon, shown only for our own outgoing messages.
+  Future<void> _retractMessage({
+    required String activeChat,
+    required ChatMessage message,
+    required bool isRoom,
+  }) async {
+    final retractId = message.messageId;
+    if (retractId == null || retractId.isEmpty) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Retract message?'),
+        content: const Text(
+          'This message will be struck through for everyone who receives '
+          'the retraction, but may still be visible to anyone who already '
+          "saw it, or whose client doesn't support retractions.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Retract'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    if (isRoom) {
+      widget.service.retractRoomMessage(
+        roomJid: activeChat,
+        retractId: retractId,
+      );
+    } else {
+      widget.service.retractMessage(
+        toBareJid: activeChat,
+        retractId: retractId,
+      );
     }
   }
 

@@ -357,6 +357,7 @@ class XmppService extends ChangeNotifier {
   static const String _capsHash = 'sha-1';
   static const String _replyNamespace = 'urn:xmpp:reply:0';
   static const String _fallbackNamespace = 'urn:xmpp:fallback:0';
+  static const String _retractNamespace = 'urn:xmpp:message-retract:1';
   static const String _jingleNamespace = 'urn:xmpp:jingle:1';
   static const String _jingleRtpNamespace = 'urn:xmpp:jingle:apps:rtp:1';
   static const String _jingleGroupingNamespace =
@@ -2947,6 +2948,92 @@ class XmppService extends ChangeNotifier {
         timestamp: DateTime.now(),
       );
     }
+  }
+
+  // XEP-0424: a placeholder body shown to clients that don't support
+  // message retraction, per the "legacy clients" fallback recommended by
+  // the spec, alongside the XEP-0428 `<fallback/>` marker so compliant
+  // clients know to hide it.
+  static const String _retractionFallbackBody =
+      'This person attempted to retract a previous message, but it is '
+      'unsupported by your client.';
+
+  // XEP-0424: sends an outgoing retraction for our own 1:1 message
+  // [retractId] (its origin-id/messageId), then immediately applies it
+  // locally so the UI reflects the retraction without waiting for a
+  // server echo/carbon.
+  void retractMessage({required String toBareJid, required String retractId}) {
+    final connection = _connection;
+    if (connection == null) {
+      _setError('Not connected.');
+      return;
+    }
+    if (retractId.isEmpty) {
+      return;
+    }
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.CHAT,
+    );
+    stanza.toJid = Jid.fromFullJid(toBareJid);
+    stanza.fromJid = connection.fullJid;
+    stanza.body = _retractionFallbackBody;
+    stanza.addChild(_buildRetractElement(retractId));
+    stanza.addChild(
+      _buildFallbackElement(
+        start: 0,
+        end: _retractionFallbackBody.runes.length,
+        forNamespace: _retractNamespace,
+      ),
+    );
+    connection.writeStanza(stanza);
+    final sender = _currentUserBareJid ?? connection.fullJid.userAtDomain;
+    if (sender.isNotEmpty) {
+      _applyMessageRetraction(
+        bareJid: toBareJid,
+        sender: sender,
+        retractId: retractId,
+        timestamp: DateTime.now(),
+      );
+    }
+  }
+
+  // XEP-0424: sends an outgoing retraction for our own message [retractId]
+  // (its origin-id/messageId) in room [roomJid], then immediately applies
+  // it locally, mirroring [retractMessage].
+  void retractRoomMessage({required String roomJid, required String retractId}) {
+    final connection = _connection;
+    if (connection == null) {
+      _setError('Not connected.');
+      return;
+    }
+    if (retractId.isEmpty) {
+      return;
+    }
+    final normalized = _bareJid(roomJid);
+    final stanza = MessageStanza(
+      AbstractStanza.getRandomId(),
+      MessageStanzaType.GROUPCHAT,
+    );
+    stanza.toJid = Jid.fromFullJid(normalized);
+    stanza.body = _retractionFallbackBody;
+    stanza.addChild(_buildRetractElement(retractId));
+    stanza.addChild(
+      _buildFallbackElement(
+        start: 0,
+        end: _retractionFallbackBody.runes.length,
+        forNamespace: _retractNamespace,
+      ),
+    );
+    connection.writeStanza(stanza);
+    final nick = _roomNickFor(normalized);
+    _applyRoomMessageRetraction(
+      roomJid: normalized,
+      sender: nick,
+      retractId: retractId,
+      timestamp: DateTime.now(),
+      senderOccupantId: _roomSelfOccupantIds[normalized],
+    );
   }
 
   void setMyChatState(String bareJid, ChatState state) {
@@ -9605,6 +9692,15 @@ class XmppService extends ChangeNotifier {
     replace.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:message-correct:0'));
     replace.addAttribute(XmppAttribute('id', replaceId));
     return replace;
+  }
+
+  // XEP-0424: builds the `<retract id='.../>` element targeting the
+  // origin-id/messageId of the message we're retracting.
+  XmppElement _buildRetractElement(String retractId) {
+    final retract = XmppElement()..name = 'retract';
+    retract.addAttribute(XmppAttribute('xmlns', _retractNamespace));
+    retract.addAttribute(XmppAttribute('id', retractId));
+    return retract;
   }
 
   // XEP-0491: derives a simple display filename for a widget offer's

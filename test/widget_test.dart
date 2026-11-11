@@ -1428,6 +1428,118 @@ void main() {
     expect(reactedWith, '👍');
   });
 
+  testWidgets(
+    'message action card shows a Retract action only for outgoing messages',
+    (WidgetTester tester) async {
+      var retracted = false;
+      final outgoingMessage = ChatMessage(
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'Oops, wrong chat',
+        timestamp: DateTime.utc(2026),
+        outgoing: true,
+        messageId: 'outgoing-retract-test',
+        // Avoid the perpetually-animating pending-message clock (shown for
+        // unacked outgoing messages), which would otherwise keep
+        // `pumpAndSettle` from ever settling.
+        acked: true,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageBubble(
+              message: outgoingMessage,
+              senderName: 'Alice',
+              timestamp: '12:00',
+              avatarBytes: null,
+              chatBareJid: 'bob@example.com',
+              isRoom: false,
+              service: XmppService(),
+              replySenderName: null,
+              replyBody: null,
+              onReplyTargetTap: null,
+              inviteRoomJid: null,
+              inviteRoomName: null,
+              inviteAvatarBytes: null,
+              inviteReason: null,
+              onJoinInvite: null,
+              selfReactionSenderId: 'alice@example.com',
+              recentReactionOptions: const [],
+              onReact: null,
+              onEdit: null,
+              onRetract: () => retracted = true,
+              onReply: null,
+              onAcceptFile: null,
+              onDeclineFile: null,
+              onFallbackUpload: null,
+            ),
+          ),
+        ),
+      );
+
+      await tester.longPress(find.text('Oops, wrong chat'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retract'), findsOneWidget);
+      await tester.tap(find.text('Retract'));
+      await tester.pumpAndSettle();
+      expect(retracted, isTrue);
+    },
+  );
+
+  testWidgets(
+    'message action card hides the Retract action for incoming messages',
+    (WidgetTester tester) async {
+      final incomingMessage = ChatMessage(
+        from: 'bob@example.com',
+        to: 'alice@example.com',
+        body: 'Someone else said this',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        messageId: 'incoming-retract-test',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageBubble(
+              message: incomingMessage,
+              senderName: 'Bob',
+              timestamp: '12:00',
+              avatarBytes: null,
+              chatBareJid: 'bob@example.com',
+              isRoom: false,
+              service: XmppService(),
+              replySenderName: null,
+              replyBody: null,
+              onReplyTargetTap: null,
+              inviteRoomJid: null,
+              inviteRoomName: null,
+              inviteAvatarBytes: null,
+              inviteReason: null,
+              onJoinInvite: null,
+              selfReactionSenderId: 'alice@example.com',
+              recentReactionOptions: const [],
+              onReact: null,
+              onEdit: null,
+              onRetract: null,
+              onReply: null,
+              onAcceptFile: null,
+              onDeclineFile: null,
+              onFallbackUpload: null,
+            ),
+          ),
+        ),
+      );
+
+      await tester.longPress(find.text('Someone else said this'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retract'), findsNothing);
+    },
+  );
+
   testWidgets('message menu can add a known room occupant to contacts', (
     WidgetTester tester,
   ) async {

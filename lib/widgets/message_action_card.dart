@@ -32,6 +32,7 @@ class MessageActionCard extends StatefulWidget {
     this.ownReactions = const {},
     this.onReply,
     this.onEdit,
+    this.onRetract,
     this.onReact,
     this.onAddToRoster,
     this.onKick,
@@ -84,6 +85,11 @@ class MessageActionCard extends StatefulWidget {
 
   final VoidCallback? onReply;
   final VoidCallback? onEdit;
+
+  /// XEP-0424: shown as a "Retract" icon action; only ever non-null for
+  /// our own outgoing messages (see `MessageBubble.onRetract`'s wiring in
+  /// `lib/main.dart`).
+  final VoidCallback? onRetract;
   final void Function(String emoji)? onReact;
   final VoidCallback? onAddToRoster;
 
@@ -604,6 +610,12 @@ class _MessageActionCardState extends State<MessageActionCard> {
           icon: Icons.edit_outlined,
           label: 'Edit message',
           onTap: widget.onEdit!,
+        ),
+      if (widget.onRetract != null)
+        _CardAction(
+          icon: Icons.undo_outlined,
+          label: 'Retract',
+          onTap: widget.onRetract!,
         ),
     ];
     return Wrap(
