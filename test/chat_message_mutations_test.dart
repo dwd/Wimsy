@@ -63,6 +63,86 @@ void main() {
   );
 
   test(
+    'applyRetractionInList marks a matching message retracted and keeps body',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice@example.com/phone',
+          to: 'bob@example.com/desktop',
+          body: 'oops, wrong channel',
+          id: 'm-retract-1',
+        ),
+      ];
+      final retractedAt = DateTime.utc(2026, 1, 3);
+
+      final applied = ChatMessageMutations.applyRetractionInList(
+        list,
+        sender: 'alice@example.com/laptop',
+        retractId: 'm-retract-1',
+        timestamp: retractedAt,
+        matchSenderBare: true,
+        bareJid: (jid) => jid.split('/').first,
+      );
+
+      expect(applied, isTrue);
+      expect(list.single.retracted, isTrue);
+      expect(list.single.retractedAt, retractedAt);
+      // The original body is preserved so the UI can render it struck
+      // through, rather than being cleared.
+      expect(list.single.body, 'oops, wrong channel');
+    },
+  );
+
+  test('applyRetractionInList returns false when no message matches', () {
+    final list = <ChatMessage>[
+      _message(
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'hello',
+        id: 'm-retract-2',
+      ),
+    ];
+
+    final applied = ChatMessageMutations.applyRetractionInList(
+      list,
+      sender: 'alice@example.com',
+      retractId: 'does-not-exist',
+      timestamp: DateTime.utc(2026, 1, 3),
+      matchSenderBare: false,
+      bareJid: (jid) => jid,
+    );
+
+    expect(applied, isFalse);
+    expect(list.single.retracted, isFalse);
+  });
+
+  test(
+    'applyRetractionInList does not match when sender differs',
+    () {
+      final list = <ChatMessage>[
+        _message(
+          from: 'alice@example.com',
+          to: 'bob@example.com',
+          body: 'hello',
+          id: 'm-retract-3',
+        ),
+      ];
+
+      final applied = ChatMessageMutations.applyRetractionInList(
+        list,
+        sender: 'mallory@example.com',
+        retractId: 'm-retract-3',
+        timestamp: DateTime.utc(2026, 1, 3),
+        matchSenderBare: true,
+        bareJid: (jid) => jid,
+      );
+
+      expect(applied, isFalse);
+      expect(list.single.retracted, isFalse);
+    },
+  );
+
+  test(
     'updateReactionsInList rewrites sender reactions for target message',
     () {
       final list = <ChatMessage>[

@@ -93,10 +93,14 @@ class ChatImpl implements Chat {
 /// Whether a chat message carries visible content for the conversation.
 ///
 /// XEP-0249 invitations commonly omit `<body>`, but still need to reach the
-/// application so it can render the invitation card.
+/// application so it can render the invitation card. Likewise, a XEP-0424
+/// `<retract/>` request often carries no `<body>` of its own (only an
+/// optional fallback body for non-supporting clients), but must still
+/// reach the application so it can mark the retracted message as such.
 bool isRenderableChatMessage(Message message) {
   return (message.text != null && message.text!.isNotEmpty) ||
-      _containsMucDirectInvite(message.messageStanza);
+      _containsMucDirectInvite(message.messageStanza) ||
+      _containsRetract(message.messageStanza);
 }
 
 bool _containsMucDirectInvite(XmppElement element) {
@@ -106,6 +110,15 @@ bool _containsMucDirectInvite(XmppElement element) {
     return true;
   }
   return element.children.any(_containsMucDirectInvite);
+}
+
+bool _containsRetract(XmppElement element) {
+  if (element.name == 'retract' &&
+      element.getAttribute('xmlns')?.value == 'urn:xmpp:message-retract:1' &&
+      (element.getAttribute('id')?.value?.isNotEmpty ?? false)) {
+    return true;
+  }
+  return element.children.any(_containsRetract);
 }
 
 abstract class Chat {

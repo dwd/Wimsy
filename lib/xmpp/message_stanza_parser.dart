@@ -126,6 +126,27 @@ class MessageStanzaParser {
     return null;
   }
 
+  // XEP-0424: extracts the `id` of the `<retract/>` request's target
+  // message - the "live retraction" case, where we observe the retraction
+  // request itself (as opposed to replaying an already-tombstoned message
+  // from MAM). Returns null if the stanza carries no such request.
+  String? extractRetractId(XmppElement stanza) {
+    for (final candidate in _candidateMessages(stanza)) {
+      for (final child in candidate.children) {
+        if (child.name != 'retract' ||
+            child.getAttribute('xmlns')?.value !=
+                'urn:xmpp:message-retract:1') {
+          continue;
+        }
+        final id = child.getAttribute('id')?.value;
+        if (id != null && id.isNotEmpty) {
+          return id;
+        }
+      }
+    }
+    return null;
+  }
+
   ReplyPayload? extractReplyPayload(XmppElement stanza, {String? body}) {
     for (final candidate in _candidateMessages(stanza)) {
       for (final child in candidate.children) {

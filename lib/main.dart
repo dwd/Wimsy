@@ -6224,6 +6224,10 @@ class MessageBubble extends StatelessWidget {
                     securityLabelChip,
                     const SizedBox(height: 6),
                   ],
+                  if (message.retracted) ...[
+                    _buildRetractedChip(context),
+                    const SizedBox(height: 6),
+                  ],
                   if ((message.replyToId ?? '').isNotEmpty) ...[
                     _buildReplyCard(context),
                     const SizedBox(height: 8),
@@ -6279,15 +6283,26 @@ class MessageBubble extends StatelessWidget {
                       TextSpan(
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: textColor,
+                          decoration: message.retracted
+                              ? TextDecoration.lineThrough
+                              : null,
                         ),
                         children: _linkifyText(
                           message.body,
                           theme.textTheme.bodyMedium?.copyWith(
                             color: textColor,
+                            decoration: message.retracted
+                                ? TextDecoration.lineThrough
+                                : null,
                           ),
                           theme.textTheme.bodyMedium?.copyWith(
                             color: linkColor,
-                            decoration: TextDecoration.underline,
+                            decoration: message.retracted
+                                ? TextDecoration.combine([
+                                    TextDecoration.underline,
+                                    TextDecoration.lineThrough,
+                                  ])
+                                : TextDecoration.underline,
                           ),
                         ),
                       ),
@@ -6333,6 +6348,31 @@ class MessageBubble extends StatelessWidget {
       fgColor: message.securityLabelFgColor,
       bgColor: message.securityLabelBgColor,
       isFallback: message.securityLabelIsFallback,
+    );
+  }
+
+  // XEP-0424: renders a small chip flagging that this message has been
+  // retracted, with the timestamp the retraction was observed at. Shown
+  // above the (struck-through) message body.
+  Widget _buildRetractedChip(BuildContext context) {
+    final theme = Theme.of(context);
+    final retractedAt = message.retractedAt;
+    final suffix = retractedAt == null
+        ? ''
+        : ' ${_formatTimestamp(retractedAt)}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        'Retracted at$suffix',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontStyle: FontStyle.italic,
+        ),
+      ),
     );
   }
 

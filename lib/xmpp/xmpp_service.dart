@@ -367,6 +367,23 @@ class XmppService extends ChangeNotifier {
   CsiOverrideMode _csiOverrideMode = CsiOverrideMode.auto;
   final MamCursorStore _mamCursorStore = MamCursorStore();
   final Map<String, Timer> _mamCatchUpTimers = {};
+  // Snapshot of a room's latest known mam-id taken immediately before
+  // sending the join stanza (see joinRoom). Consumed once by the first
+  // post-join catch-up request so the cursor can't be shifted forward by
+  // live messages received while the join is still in flight.
+  final Map<String, String> _roomJoinMamCursor = {};
+  // Per-scope (see _mamScopeKey) latest confirmed mam-id, persisted to disk
+  // so a disconnect or crash mid-catch-up resumes from exactly where the
+  // previous session left off instead of relying solely on whatever got
+  // merged into the in-memory/persisted message cache before the crash.
+  // Only ids that arrived via an actual MAM result are trusted here until
+  // catch-up for that scope completes; see _bumpScopeLastMamId.
+  final Map<String, String> _scopeLastMamId = {};
+  // Scopes for which MAM catch-up last completed, persisted alongside
+  // _scopeLastMamId so a restart knows whether the id above was advanced
+  // only by confirmed MAM results (not yet complete) or may also include
+  // trusted live ids (complete).
+  final Set<String> _scopeCatchUpComplete = {};
   DateTime? _lastGlobalMamSyncAt;
   StorageService? _storage;
 
@@ -971,6 +988,15 @@ class XmppService extends ChangeNotifier {
     _controlMessageOutbox.restore(storage.loadControlMessageOutbox());
     // R2.1: seed the globally-newest MAM id anchor.
     _lastMamIdSeen = storage.loadLastMamIdSeen();
+    // Seed the per-scope MAM cursor state so catch-up can resume from
+    // exactly where the previous session left off after a disconnect or
+    // crash (see _bumpScopeLastMamId).
+    _scopeLastMamId
+      ..clear()
+      ..addAll(storage.loadMamLastIds());
+    _scopeCatchUpComplete
+      ..clear()
+      ..addAll(storage.loadMamCatchUpCompleteScopes());
   }
 
   /// R2.1: returns the globally newest account-archive MAM id we have
@@ -2446,12 +2472,16 @@ class XmppService extends ChangeNotifier {
       timer.cancel();
     }
     _mamCatchUpTimers.clear();
+    _roomJoinMamCursor.clear();
+    _scopeLastMamId.clear();
+    _scopeCatchUpComplete.clear();
     if (persist) {
       _messagePersistor?.call('', const []);
       _roomMessagePersistor?.call('', const []);
       _rosterPersistor?.call(const []);
       _bookmarkPersistor?.call(const []);
       _storage?.storeRosterVersion(null);
+      _storage?.clearMamCursors();
     }
     _displayedStanzaIdByChat.clear();
     _displayedSyncPending.clear();
@@ -3145,6 +3175,16 @@ class XmppService extends ChangeNotifier {
       mucSpan.setTag('xmpp.room', normalized);
       _mucJoinTransactions[normalized] = mucSpan;
     }
+    // Snapshot the last known mam-id *before* sending the join stanza, so
+    // the MAM catch-up cursor is anchored to what we knew prior to joining
+    // and is unaffected by any live messages that arrive while the join
+    // is in flight. Any such live messages are still safely merged into
+    // cache by the normal de-dupe logic if they overlap the catch-up
+    // results (see doc/mam-sync.md, "De-duplication strategy").
+    final latestRoomMamId = _latestRoomMamIdFor(normalized);
+    if (latestRoomMamId != null && latestRoomMamId.isNotEmpty) {
+      _roomJoinMamCursor[normalized] = latestRoomMamId;
+    }
     muc.joinRoom(
       Jid.fromFullJid(normalized),
       resolvedNick,
@@ -3162,7 +3202,6 @@ class XmppService extends ChangeNotifier {
     notifyListeners();
     final latestRoomTs = _latestRoomTimestamp(normalized);
     _roomHistoryCutoffAt[normalized] = latestRoomTs ?? DateTime.now();
-    final latestRoomMamId = _latestRoomMamIdFor(normalized);
     if (latestRoomMamId != null && latestRoomMamId.isNotEmpty) {
       _startMamCatchUp(normalized, isRoom: true);
     } else {
@@ -4333,6 +4372,17 @@ class XmppService extends ChangeNotifier {
     if (mujiSession != null && message.nick.isNotEmpty) {
       mujiSession.setActiveSpeaker(message.nick);
     }
+    if (message.retractId != null && message.retractId!.isNotEmpty) {
+      final applied = _applyRoomMessageRetraction(
+        roomJid: message.roomJid,
+        sender: message.nick,
+        retractId: message.retractId!,
+        timestamp: message.timestamp,
+      );
+      if (applied) {
+        return;
+      }
+    }
     if (message.replaceId != null && message.replaceId!.isNotEmpty) {
       final applied = _applyRoomMessageCorrection(
         roomJid: message.roomJid,
@@ -4393,8 +4443,17 @@ class XmppService extends ChangeNotifier {
           receivedFromRoom: true,
           timestamp: message.timestamp,
           messageId: message.messageId ?? message.stanzaId,
-          mamId: message.mamResultId,
+          // XEP-0359 guarantees the archive assigns the same id it stamps
+          // on the live stanza-id, so a room-scoped stanza-id can be
+          // trusted as the mam-id immediately, without waiting for a MAM
+          // <result> to confirm it. If the room isn't MAM-capable there is
+          // no stanza-id to begin with, so this has no effect there.
+          mamId: message.mamResultId ?? message.stanzaId,
           stanzaId: message.stanzaId,
+          // Only a real MAM <result> id may advance the persisted cursor
+          // while catch-up is in flight; see _bumpScopeLastMamId.
+          fromMamResult:
+              message.mamResultId != null && message.mamResultId!.isNotEmpty,
           replyToId: message.replyToId,
           replyToJid: message.replyToJid,
           replyFallback: message.replyFallback,
@@ -4407,6 +4466,7 @@ class XmppService extends ChangeNotifier {
           webxdcDocument: webxdcUpdate?.document,
           webxdcSummary: webxdcUpdate?.summary,
           webxdcJsonPayload: webxdcUpdate?.json,
+          source: message.source,
         );
         return;
       }
@@ -4433,8 +4493,13 @@ class XmppService extends ChangeNotifier {
           receivedFromRoom: true,
           timestamp: message.timestamp,
           messageId: message.messageId ?? message.stanzaId,
-          mamId: message.mamResultId,
+          // See the mamId note above: a room-scoped stanza-id is trusted
+          // as the mam-id per XEP-0359, no MAM result required.
+          mamId: message.mamResultId ?? message.stanzaId,
           stanzaId: message.stanzaId,
+          fromMamResult:
+              message.mamResultId != null && message.mamResultId!.isNotEmpty,
+          source: message.source,
         );
       }
       return;
@@ -4449,8 +4514,12 @@ class XmppService extends ChangeNotifier {
       receivedFromRoom: true,
       timestamp: message.timestamp,
       messageId: message.messageId ?? message.stanzaId,
-      mamId: message.mamResultId,
+      // See the mamId note above: a room-scoped stanza-id is trusted
+      // as the mam-id per XEP-0359, no MAM result required.
+      mamId: message.mamResultId ?? message.stanzaId,
       stanzaId: message.stanzaId,
+      fromMamResult:
+          message.mamResultId != null && message.mamResultId!.isNotEmpty,
       replyToId: message.replyToId,
       replyToJid: message.replyToJid,
       replyFallback: message.replyFallback,
@@ -4458,6 +4527,7 @@ class XmppService extends ChangeNotifier {
       securityLabelFgColor: securityLabel?.fgColor,
       securityLabelBgColor: securityLabel?.bgColor,
       securityLabelIsFallback: securityLabel?.isFallback ?? false,
+      source: message.source,
     );
   }
 
@@ -7551,6 +7621,7 @@ class XmppService extends ChangeNotifier {
           securityLabelFgColor: intent.securityLabelFgColor,
           securityLabelBgColor: intent.securityLabelBgColor,
           securityLabelIsFallback: intent.securityLabelIsFallback,
+          source: intent.source,
         );
       } else if (intent is ApplyWebxdcUpdateIntent) {
         _applyWebxdcUpdateIntent(stanza, intent);
@@ -8581,6 +8652,62 @@ class XmppService extends ChangeNotifier {
       oobUrl: oobUrl,
       oobDescription: oobDescription,
     );
+  }
+
+  // XEP-0424: marks a 1:1 message as retracted when we observe the live
+  // `<retract/>` request, mirroring [_applyMessageCorrection].
+  bool _applyMessageRetraction({
+    required String bareJid,
+    required String sender,
+    required String retractId,
+    required DateTime timestamp,
+  }) {
+    final normalized = _bareJid(bareJid);
+    final list = _messages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = ChatMessageMutations.applyRetractionInList(
+      list,
+      sender: sender,
+      retractId: retractId,
+      timestamp: timestamp,
+      matchSenderBare: true,
+      bareJid: _bareJid,
+    );
+    if (applied) {
+      notifyListeners();
+      _messagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
+  }
+
+  // XEP-0424: marks a room message as retracted when we observe the live
+  // `<retract/>` request, mirroring [_applyRoomMessageCorrection].
+  bool _applyRoomMessageRetraction({
+    required String roomJid,
+    required String sender,
+    required String retractId,
+    required DateTime timestamp,
+  }) {
+    final normalized = _bareJid(roomJid);
+    final list = _roomMessages[normalized];
+    if (list == null || list.isEmpty) {
+      return false;
+    }
+    final applied = ChatMessageMutations.applyRetractionInList(
+      list,
+      sender: sender,
+      retractId: retractId,
+      timestamp: timestamp,
+      matchSenderBare: false,
+      bareJid: _bareJid,
+    );
+    if (applied) {
+      notifyListeners();
+      _roomMessagePersistor?.call(normalized, List.unmodifiable(list));
+    }
+    return applied;
   }
 
   void _applyRoomReactionUpdate(
@@ -10903,8 +11030,11 @@ class XmppService extends ChangeNotifier {
         final securityLabel = _messageStanzaParser.extractSecurityLabel(
           message.messageStanza,
         );
-        final rawXml = _serializeStanza(message.messageStanza);
+        final rawXml = _serializeStanza(message.innerMessageStanza);
         final replaceId = _messageStanzaParser.extractReplaceId(
+          message.messageStanza,
+        );
+        final retractId = _messageStanzaParser.extractRetractId(
           message.messageStanza,
         );
         final reaction = _messageStanzaParser.extractReactionUpdate(
@@ -10921,13 +11051,26 @@ class XmppService extends ChangeNotifier {
           }
           continue;
         }
+        final outgoing = from == (_currentUserBareJid ?? '');
+        final targetBare = outgoing ? to : from;
+        if (retractId != null &&
+            retractId.isNotEmpty &&
+            targetBare.isNotEmpty) {
+          final applied = _applyMessageRetraction(
+            bareJid: targetBare,
+            sender: from,
+            retractId: retractId,
+            timestamp: message.time,
+          );
+          if (applied) {
+            continue;
+          }
+        }
         if (body.trim().isEmpty &&
             (oobUrl == null || oobUrl.isEmpty) &&
             invite == null) {
           continue;
         }
-        final outgoing = from == (_currentUserBareJid ?? '');
-        final targetBare = outgoing ? to : from;
         if (replaceId != null &&
             replaceId.isNotEmpty &&
             targetBare.isNotEmpty) {
@@ -10969,6 +11112,7 @@ class XmppService extends ChangeNotifier {
           securityLabelBgColor: securityLabel?.bgColor,
           securityLabelIsFallback: securityLabel?.isFallback ?? false,
           stanza: message.messageStanza,
+          source: message.source,
         );
       }
     }
@@ -10990,8 +11134,11 @@ class XmppService extends ChangeNotifier {
       final securityLabel = _messageStanzaParser.extractSecurityLabel(
         message.messageStanza,
       );
-      final rawXml = _serializeStanza(message.messageStanza);
+      final rawXml = _serializeStanza(message.innerMessageStanza);
       final replaceId = _messageStanzaParser.extractReplaceId(
+        message.messageStanza,
+      );
+      final retractId = _messageStanzaParser.extractRetractId(
         message.messageStanza,
       );
       final reaction = _messageStanzaParser.extractReactionUpdate(
@@ -11003,6 +11150,17 @@ class XmppService extends ChangeNotifier {
       }
       final outgoing = from == (_currentUserBareJid ?? '');
       final targetBare = outgoing ? to : from;
+      if (retractId != null && retractId.isNotEmpty && targetBare.isNotEmpty) {
+        final applied = _applyMessageRetraction(
+          bareJid: targetBare,
+          sender: from,
+          retractId: retractId,
+          timestamp: message.time,
+        );
+        if (applied) {
+          return;
+        }
+      }
       if (replaceId != null && replaceId.isNotEmpty && targetBare.isNotEmpty) {
         final applied = _applyMessageCorrection(
           bareJid: targetBare,
@@ -11054,6 +11212,7 @@ class XmppService extends ChangeNotifier {
         securityLabelBgColor: securityLabel?.bgColor,
         securityLabelIsFallback: securityLabel?.isFallback ?? false,
         stanza: message.messageStanza,
+        source: message.source,
       );
     });
 
@@ -11096,6 +11255,7 @@ class XmppService extends ChangeNotifier {
     String? securityLabelBgColor,
     bool securityLabelIsFallback = false,
     required MessageStanza stanza,
+    String source = MessageSource.live,
   }) {
     final encryptionManager = _encryptionManager;
     final hasEncrypted = stanza.getChild('encrypted') != null;
@@ -11152,6 +11312,7 @@ class XmppService extends ChangeNotifier {
           encryptionProtocol: result?.protocolId,
           encryptionError: result?.error,
           plaintext: (result?.error == null) ? result?.plaintext : null,
+          source: source,
         );
       }());
       return;
@@ -11179,6 +11340,7 @@ class XmppService extends ChangeNotifier {
       securityLabelFgColor: securityLabelFgColor,
       securityLabelBgColor: securityLabelBgColor,
       securityLabelIsFallback: securityLabelIsFallback,
+      source: source,
     );
   }
 
@@ -11214,9 +11376,19 @@ class XmppService extends ChangeNotifier {
     String? encryptionProtocol,
     String? encryptionError,
     String? plaintext,
+    bool fromMamResult = true,
+    String source = MessageSource.live,
   }) {
     final normalized = _bareJid(bareJid);
     _ensureContact(normalized);
+    // Advance the persisted per-scope mam-id cursor regardless of how this
+    // message ends up being merged/deduped below - what matters is that we
+    // have now observed this id (see _bumpScopeLastMamId).
+    _bumpScopeLastMamId(
+      _mamScopeKey(normalized, isRoom: false),
+      mamId,
+      fromMamResult: fromMamResult,
+    );
 
     final list = _messages.putIfAbsent(normalized, () => <ChatMessage>[]);
     if (messageId != null && messageId.isNotEmpty) {
@@ -11405,6 +11577,7 @@ class XmppService extends ChangeNotifier {
             webxdcSummary: nextWebxdcSummary,
             webxdcJsonPayload: nextWebxdcJsonPayload,
             locallyOriginated: nextLocallyOriginated,
+            source: source,
           );
           notifyListeners();
           _messagePersistor?.call(normalized, List.unmodifiable(list));
@@ -11507,6 +11680,7 @@ class XmppService extends ChangeNotifier {
           encryptionProtocol: encryptionProtocol,
           encryptionError: encryptionError,
           plaintext: plaintext,
+          source: source,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -11547,6 +11721,7 @@ class XmppService extends ChangeNotifier {
       encryptionProtocol: encryptionProtocol,
       encryptionError: encryptionError,
       plaintext: plaintext,
+      source: source,
     );
     _insertMessageOrdered(list, newMessage);
     if (!outgoing) {
@@ -11619,8 +11794,20 @@ class XmppService extends ChangeNotifier {
     String? webxdcSummary,
     String? webxdcJsonPayload,
     bool locallyOriginated = false,
+    bool fromMamResult = true,
+    String source = MessageSource.live,
   }) {
     final normalized = _bareJid(roomJid);
+    // Advance the persisted per-scope mam-id cursor regardless of how this
+    // message ends up being merged/deduped below - what matters is that we
+    // have now observed this id (see _bumpScopeLastMamId). Rooms pass
+    // fromMamResult: false for ids only trusted via a live stanza-id, not
+    // yet confirmed by an actual MAM result.
+    _bumpScopeLastMamId(
+      _mamScopeKey(normalized, isRoom: true),
+      mamId,
+      fromMamResult: fromMamResult,
+    );
     final list = _roomMessages.putIfAbsent(normalized, () => <ChatMessage>[]);
     if (messageId != null && messageId.isNotEmpty) {
       final existingIndex = list.indexWhere(
@@ -11740,6 +11927,7 @@ class XmppService extends ChangeNotifier {
             webxdcSummary: nextWebxdcSummary,
             webxdcJsonPayload: nextWebxdcJsonPayload,
             locallyOriginated: nextLocallyOriginated,
+            source: source,
           );
           if (firstReflection) {
             list.removeAt(existingIndex);
@@ -11796,6 +11984,7 @@ class XmppService extends ChangeNotifier {
           webxdcSummary: webxdcSummary,
           webxdcJsonPayload: webxdcJsonPayload,
           locallyOriginated: locallyOriginated,
+          source: source,
         ),
       );
       _mamCursorStore.incrementPrependOffset(normalized);
@@ -11847,6 +12036,7 @@ class XmppService extends ChangeNotifier {
       webxdcSummary: webxdcSummary,
       webxdcJsonPayload: webxdcJsonPayload,
       locallyOriginated: locallyOriginated,
+      source: source,
     );
     _insertMessageOrdered(list, newMessage);
     // R1.3: resolve pending displayed-sync marker BEFORE notifyListeners so
@@ -13105,6 +13295,11 @@ class XmppService extends ChangeNotifier {
   void _markMamCatchUpStarted(String bareJid, {required bool isRoom}) {
     final normalized = _bareJid(bareJid);
     final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
+    // A new catch-up is starting for this scope: until it completes again,
+    // only ids confirmed by an actual MAM result may advance the persisted
+    // cursor (see _bumpScopeLastMamId) - trusted-but-unconfirmed live ids
+    // must not shift it forward while a catch-up is in flight.
+    _setScopeCatchUpComplete(scopeKey, false);
     final displayedId = _displayedStanzaIdByChat[normalized];
     if (displayedId == null || displayedId.isEmpty) {
       _mamCursorStore.clearCatchUpPending(scopeKey);
@@ -13122,6 +13317,50 @@ class XmppService extends ChangeNotifier {
     if (_mamCursorStore.clearCatchUpPending(scopeKey)) {
       notifyListeners();
     }
+    _setScopeCatchUpComplete(scopeKey, true);
+  }
+
+  void _setScopeCatchUpComplete(String scopeKey, bool complete) {
+    final changed = complete
+        ? _scopeCatchUpComplete.add(scopeKey)
+        : _scopeCatchUpComplete.remove(scopeKey);
+    if (changed) {
+      _storage?.storeMamCatchUpCompleteScopes(
+        Set<String>.from(_scopeCatchUpComplete),
+      );
+    }
+  }
+
+  /// Advances the persisted "latest confirmed mam-id" cursor for [scopeKey]
+  /// (see _mamScopeKey), used to resume catch-up correctly across a
+  /// disconnect or crash.
+  ///
+  /// [fromMamResult] must be true when [mamId] came from an actual MAM
+  /// `<result>` (initial/catch-up/backfill), and false when it is only a
+  /// trusted-but-unconfirmed id attached to a live message (e.g. a room's
+  /// XEP-0359 stanza-id, trusted ahead of a MAM result per the spec
+  /// guarantee - see doc/mam-sync.md). Live ids are only allowed to
+  /// advance the cursor once catch-up for this scope has completed in the
+  /// current session; otherwise a live message with a later timestamp than
+  /// an in-flight catch-up batch could shift the cursor past messages the
+  /// catch-up hasn't fetched yet, causing them to be skipped permanently.
+  void _bumpScopeLastMamId(
+    String scopeKey,
+    String? mamId, {
+    required bool fromMamResult,
+  }) {
+    if (mamId == null || mamId.isEmpty) {
+      return;
+    }
+    if (!fromMamResult && !_scopeCatchUpComplete.contains(scopeKey)) {
+      return;
+    }
+    final current = _scopeLastMamId[scopeKey];
+    if (current != null && current.compareTo(mamId) >= 0) {
+      return;
+    }
+    _scopeLastMamId[scopeKey] = mamId;
+    _storage?.storeMamLastIds(Map<String, String>.from(_scopeLastMamId));
   }
 
   String _callPeerKeyForJid(String jid) {
@@ -13419,10 +13658,22 @@ class XmppService extends ChangeNotifier {
       return;
     }
     final normalized = _bareJid(bareJid);
-    final latest = isRoom
-        ? _latestRoomMamIdFor(normalized)
-        : latestMamIdFor(normalized);
     final scopeKey = _mamScopeKey(normalized, isRoom: isRoom);
+    // On the very first (non-continuation) step right after a room join,
+    // prefer the pre-join snapshot over the live-updated cursor, so the
+    // catch-up request is anchored to what we knew before joining (see
+    // joinRoom). Any overlap with live messages seen since is resolved by
+    // the normal de-dupe logic. The snapshot is consumed once here.
+    final joinCursor =
+        (isRoom && !continuation) ? _roomJoinMamCursor.remove(normalized) : null;
+    // Prefer the persisted per-scope cursor (see _bumpScopeLastMamId) so a
+    // disconnect or crash mid-catch-up resumes from exactly where it left
+    // off, falling back to the value derived from the message cache when
+    // no persisted cursor is recorded yet (e.g. before this feature
+    // existed, or scopes never previously confirmed via MAM).
+    final derived =
+        isRoom ? _latestRoomMamIdFor(normalized) : latestMamIdFor(normalized);
+    final latest = joinCursor ?? _scopeLastMamId[scopeKey] ?? derived;
     final requestedLatest = _mamCoordinator.requestCatchUpStep(
       bareJid: normalized,
       isRoom: isRoom,

@@ -335,6 +335,21 @@ String? _extractReplaceId(XmppElement? element) {
   return id;
 }
 
+// XEP-0424: extracts the `id` of a live `<retract/>` request's target
+// message, when present.
+String? _extractRetractId(XmppElement? element) {
+  final retract = element?.children.firstWhereOrNull(
+    (child) =>
+        child.name == 'retract' &&
+        child.getAttribute('xmlns')?.value == 'urn:xmpp:message-retract:1',
+  );
+  final id = retract?.getAttribute('id')?.value;
+  if (id == null || id.isEmpty) {
+    return null;
+  }
+  return id;
+}
+
 Jid? _parseForwardedFrom(XmppElement? message) {
   final from = message?.getAttribute('from')?.value;
   if (from == null || from.isEmpty) {
@@ -404,9 +419,12 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       MucSubjectUpdate(roomJid: roomJid, subject: subject),
     );
   }
+  final retractId =
+      _extractRetractId(forwardedMessage) ?? _extractRetractId(stanza);
   if (body.trim().isEmpty &&
       (oobUrl == null || oobUrl.isEmpty) &&
-      reactionsInfo == null) {
+      reactionsInfo == null &&
+      retractId == null) {
     return null;
   }
   final timestamp = _extractDelayedTimestamp(forwarded) ??
@@ -425,9 +443,11 @@ MucParsedGroupMessage? parseMucGroupMessage(MessageStanza stanza) {
       nick: nick ?? '',
       body: body,
       oobUrl: oobUrl,
-      rawXml: stanza.buildXmlString(),
+      rawXml: (forwardedMessage ?? stanza).buildXmlString(),
       rawStanza: stanza,
+      source: (mamResultId != null && mamResultId.isNotEmpty) ? 'mam' : 'live',
       replaceId: replaceId,
+      retractId: retractId,
       reactionTargetId: reactionsInfo?.targetId,
       reactions: reactionsInfo?.reactions ?? const [],
       replyToId: replyInfo?.id,
@@ -484,11 +504,13 @@ class MucMessage {
     this.rawXml,
     this.rawStanza,
     this.replaceId,
+    this.retractId,
     this.reactionTargetId,
     this.reactions = const [],
     this.replyToId,
     this.replyToJid,
     this.replyFallback,
+    this.source = 'live',
   });
 
   final String roomJid;
@@ -507,11 +529,18 @@ class MucMessage {
   // otherwise surfaced as dedicated fields here.
   final XmppElement? rawStanza;
   final String? replaceId;
+  // XEP-0424: the `id` of a live `<retract/>` request's target message,
+  // when this message carried such a request.
+  final String? retractId;
   final String? reactionTargetId;
   final List<String> reactions;
   final String? replyToId;
   final String? replyToJid;
   final String? replyFallback;
+  // Where this message came from: 'mam' when replayed from a XEP-0313
+  // archive `<result/>` wrapper, 'live' when observed live on the room's
+  // groupchat stream.
+  final String source;
 }
 
 _ReplyInfo? _extractReplyInfo(XmppElement? message) {

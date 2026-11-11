@@ -1,3 +1,19 @@
+// The origin of a [ChatMessage], used to distinguish messages replayed
+// from XEP-0313 Message Archive Management (MAM) from ones observed live
+// on the wire. Represented as a plain String (rather than a Dart enum) to
+// stay consistent with the rest of this class's simple-string-field style
+// and to keep storage/serialization trivial. Room for future sources such
+// as 'offline' or 'history' if/when those are distinguished.
+class MessageSource {
+  MessageSource._();
+
+  // A message replayed from a XEP-0313 MAM `<result/>` archive query.
+  static const String mam = 'mam';
+
+  // A message observed live (incoming or outgoing) on the current stream.
+  static const String live = 'live';
+}
+
 class ChatMessage {
   ChatMessage({
     required this.from,
@@ -22,6 +38,8 @@ class ChatMessage {
     this.fileState,
     this.edited = false,
     this.editedAt,
+    this.retracted = false,
+    this.retractedAt,
     this.reactions,
     this.replyToId,
     this.replyToJid,
@@ -50,6 +68,7 @@ class ChatMessage {
     this.encryptionProtocol,
     this.encryptionError,
     this.plaintext,
+    this.source = MessageSource.live,
   });
 
   final String from;
@@ -74,6 +93,11 @@ class ChatMessage {
   final String? fileState;
   final bool edited;
   final DateTime? editedAt;
+  // XEP-0424: whether this message has been retracted (currently only set
+  // for "live retractions", i.e. when the `<retract/>` request itself was
+  // observed), and the timestamp at which that retraction was observed.
+  final bool retracted;
+  final DateTime? retractedAt;
   final Map<String, List<String>>? reactions;
   final String? replyToId;
   final String? replyToJid;
@@ -145,6 +169,10 @@ class ChatMessage {
   // this is what keeps a successfully decrypted message's text stable
   // (both inbound and outbound) across restarts and history replays.
   final String? plaintext;
+  // Where this message came from: [MessageSource.mam] when replayed from a
+  // MAM archive query, [MessageSource.live] when observed live. Defaults
+  // to [MessageSource.live], matching historical (pre-this-field) behaviour.
+  final String source;
 
   // Sentinel object used to distinguish "caller passed null explicitly" from
   // "caller did not pass this parameter" in copyWith.
@@ -173,6 +201,8 @@ class ChatMessage {
     Object? fileState = _absent,
     bool? edited,
     Object? editedAt = _absent,
+    bool? retracted,
+    Object? retractedAt = _absent,
     Object? reactions = _absent,
     Object? replyToId = _absent,
     Object? replyToJid = _absent,
@@ -201,6 +231,7 @@ class ChatMessage {
     Object? encryptionProtocol = _absent,
     Object? encryptionError = _absent,
     Object? plaintext = _absent,
+    String? source,
   }) {
     return ChatMessage(
       from: from ?? this.from,
@@ -249,6 +280,10 @@ class ChatMessage {
       editedAt: identical(editedAt, _absent)
           ? this.editedAt
           : editedAt as DateTime?,
+      retracted: retracted ?? this.retracted,
+      retractedAt: identical(retractedAt, _absent)
+          ? this.retractedAt
+          : retractedAt as DateTime?,
       reactions: identical(reactions, _absent)
           ? this.reactions
           : reactions as Map<String, List<String>>?,
@@ -314,6 +349,7 @@ class ChatMessage {
       plaintext: identical(plaintext, _absent)
           ? this.plaintext
           : plaintext as String?,
+      source: source ?? this.source,
     );
   }
 
@@ -341,6 +377,8 @@ class ChatMessage {
       'fileState': fileState,
       'edited': edited,
       'editedAt': editedAt?.toIso8601String(),
+      'retracted': retracted,
+      'retractedAt': retractedAt?.toIso8601String(),
       'reactions': reactions ?? const {},
       'replyToId': replyToId,
       'replyToJid': replyToJid,
@@ -369,6 +407,7 @@ class ChatMessage {
       'encryptionProtocol': encryptionProtocol,
       'encryptionError': encryptionError,
       'plaintext': plaintext,
+      'source': source,
     };
   }
 
@@ -398,6 +437,8 @@ class ChatMessage {
     final fileState = map['fileState']?.toString();
     final edited = map['edited'] == true;
     final editedAtRaw = map['editedAt']?.toString();
+    final retracted = map['retracted'] == true;
+    final retractedAtRaw = map['retractedAt']?.toString();
     final reactions = _parseReactions(map['reactions']);
     final replyToId = map['replyToId']?.toString();
     final replyToJid = map['replyToJid']?.toString();
@@ -440,6 +481,12 @@ class ChatMessage {
     final encryptionProtocol = map['encryptionProtocol']?.toString();
     final encryptionError = map['encryptionError']?.toString();
     final plaintext = map['plaintext']?.toString();
+    // Older cache records predate this field. A restored message with no
+    // recorded source can't be proven to have come from MAM, so default it
+    // to [MessageSource.live] to preserve the pre-existing (unwrapped-live)
+    // behaviour for messages persisted before this field existed.
+    final source = map['source']?.toString();
+    final hasSource = source != null && source.isNotEmpty;
     final fileSize = fileSizeRaw is int
         ? fileSizeRaw
         : int.tryParse(fileSizeRaw?.toString() ?? '');
@@ -467,6 +514,9 @@ class ChatMessage {
     final editedAt = editedAtRaw == null
         ? null
         : DateTime.tryParse(editedAtRaw);
+    final retractedAt = retractedAtRaw == null
+        ? null
+        : DateTime.tryParse(retractedAtRaw);
     return ChatMessage(
       from: from,
       to: to,
@@ -490,6 +540,8 @@ class ChatMessage {
       fileState: fileState,
       edited: edited,
       editedAt: editedAt,
+      retracted: retracted,
+      retractedAt: retractedAt,
       reactions: reactions,
       replyToId: replyToId,
       replyToJid: replyToJid,
@@ -518,6 +570,7 @@ class ChatMessage {
       encryptionProtocol: encryptionProtocol,
       encryptionError: encryptionError,
       plaintext: plaintext,
+      source: hasSource ? source : MessageSource.live,
     );
   }
 

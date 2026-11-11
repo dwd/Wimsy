@@ -58,6 +58,43 @@ class ChatMessageMutations {
     return false;
   }
 
+  // XEP-0424: finds the message in [list] whose [messageId] (origin-id)
+  // matches [retractId] and marks it retracted. This only covers "live
+  // retractions" - i.e. observing the `<retract/>` request itself - and
+  // deliberately keeps the original body so the UI can render it struck
+  // through rather than clearing it. Returns true when a matching message
+  // was found (whether or not it was already marked retracted).
+  static bool applyRetractionInList(
+    List<ChatMessage> list, {
+    required String sender,
+    required String retractId,
+    required DateTime timestamp,
+    required bool matchSenderBare,
+    required String Function(String jid) bareJid,
+  }) {
+    for (var i = list.length - 1; i >= 0; i--) {
+      final existing = list[i];
+      if (existing.messageId != retractId) {
+        continue;
+      }
+      if (matchSenderBare) {
+        if (bareJid(existing.from) != bareJid(sender)) {
+          continue;
+        }
+      } else {
+        if (existing.from != sender) {
+          continue;
+        }
+      }
+      if (existing.retracted && existing.retractedAt == timestamp) {
+        return true;
+      }
+      list[i] = existing.copyWith(retracted: true, retractedAt: timestamp);
+      return true;
+    }
+    return false;
+  }
+
   // XEP-0491: finds the last message in [list] with a matching
   // [webxdcThreadId] and merges any non-null/non-empty document, summary,
   // and json payload into it. Returns true when a matching message was

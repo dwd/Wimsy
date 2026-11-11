@@ -331,6 +331,37 @@ void main() {
     },
   );
 
+  test(
+    'extractRetractId reads a live XEP-0424 retraction request',
+    () {
+      final stanza = _chatStanza(
+        id: 'm-retract-1',
+        from: 'alice@example.com/phone',
+        to: 'bob@example.com/desktop',
+      );
+
+      final retract = XmppElement()..name = 'retract';
+      retract.addAttribute(
+        XmppAttribute('xmlns', 'urn:xmpp:message-retract:1'),
+      );
+      retract.addAttribute(XmppAttribute('id', 'orig-456'));
+      stanza.addChild(retract);
+
+      expect(parser.extractRetractId(stanza), 'orig-456');
+    },
+  );
+
+  test('extractRetractId returns null when there is no retract element', () {
+    final stanza = _chatStanza(
+      id: 'm-retract-2',
+      from: 'alice@example.com/phone',
+      to: 'bob@example.com/desktop',
+      body: 'hi',
+    );
+
+    expect(parser.extractRetractId(stanza), isNull);
+  });
+
   test('extractReplyPayload strips feature-fallback body range', () {
     final stanza = _chatStanza(
       id: 'm5',

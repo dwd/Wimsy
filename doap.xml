@@ -313,6 +313,13 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0424.html"/>
+        <xmpp:status>partial</xmpp:status>
+        <xmpp:note xml:lang="en">Renders incoming "live retractions" (observing the &lt;retract/&gt; request itself) with struck-through body text and a "Retracted at" timestamp chip, for both 1:1 chats and MUC rooms. Does not yet send retractions or apply tombstones replayed from MAM.</xmpp:note>
+      </xmpp:SupportedXep>
+    </doap:implements>
+    <doap:implements>
+      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0428.html"/>
         <xmpp:status>partial</xmpp:status>
       </xmpp:SupportedXep>
