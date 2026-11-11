@@ -46,6 +46,7 @@ class MessageBubble extends StatelessWidget {
     required this.onReact,
     required this.onEdit,
     this.onRetract,
+    this.onModerate,
     required this.onReply,
     required this.onAcceptFile,
     required this.onDeclineFile,
@@ -85,6 +86,10 @@ class MessageBubble extends StatelessWidget {
   // XEP-0424: shown as "Retract" in the message action card; only ever
   // non-null for our own outgoing messages (see `main.dart`'s wiring).
   final VoidCallback? onRetract;
+  // XEP-0425: shown as "Moderate" in the message action card; only ever
+  // non-null for other occupants' messages in a MUC room where we hold
+  // the `moderator` role (see `main.dart`'s wiring).
+  final VoidCallback? onModerate;
   final VoidCallback? onReply;
   final VoidCallback? onAcceptFile;
   final VoidCallback? onDeclineFile;
@@ -147,6 +152,7 @@ class MessageBubble extends StatelessWidget {
               onReact: onReact,
               onEdit: onEdit,
               onRetract: onRetract,
+              onModerate: onModerate,
               onReply: onReply,
               onAddToRoster: onAddToRoster,
               onKick: onKick,
@@ -1671,6 +1677,7 @@ class _MessageMenuButton extends StatefulWidget {
     required this.onReact,
     required this.onEdit,
     this.onRetract,
+    this.onModerate,
     required this.onReply,
     this.onAddToRoster,
     this.onKick,
@@ -1701,6 +1708,7 @@ class _MessageMenuButton extends StatefulWidget {
   final void Function(String emoji)? onReact;
   final VoidCallback? onEdit;
   final VoidCallback? onRetract;
+  final VoidCallback? onModerate;
   final VoidCallback? onReply;
   final VoidCallback? onAddToRoster;
   final VoidCallback? onKick;
@@ -1782,6 +1790,7 @@ class _MessageMenuButtonState extends State<_MessageMenuButton> {
         ownReactions: widget.ownReactions,
         onEdit: widget.onEdit,
         onRetract: widget.onRetract,
+        onModerate: widget.onModerate,
         onReply: widget.onReply,
         onReact: widget.onReact,
         onAddToRoster: widget.onAddToRoster,

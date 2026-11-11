@@ -2227,6 +2227,18 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                     isRoom: isBookmark,
                                   )
                                 : null,
+                            onModerate:
+                                (isBookmark &&
+                                    !message.outgoing &&
+                                    !message.retracted &&
+                                    (message.stanzaId ?? '').isNotEmpty &&
+                                    service.ownRoomRole(activeChat) ==
+                                        'moderator')
+                                ? () => _moderateMessage(
+                                    roomJid: activeChat,
+                                    message: message,
+                                  )
+                                : null,
                             onReply:
                                 ((isBookmark
                                             ? message.stanzaId ?? message.mamId
@@ -4752,6 +4764,67 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
         toBareJid: activeChat,
         retractId: retractId,
       );
+    }
+  }
+
+  /// Moderates (XEP-0425) another occupant's message [message] in
+  /// [roomJid], after prompting for an optional reason. Reachable from the
+  /// message action card as a "Moderate" icon, shown only for other
+  /// occupants' messages in rooms where we hold the `moderator` role.
+  Future<void> _moderateMessage({
+    required String roomJid,
+    required ChatMessage message,
+  }) async {
+    final stanzaId = message.stanzaId;
+    if (stanzaId == null || stanzaId.isEmpty) {
+      return;
+    }
+    final reasonController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Moderate message?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This message will be struck through for everyone, and '
+              'replaced with your reason if you give one.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Moderate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    final reason = reasonController.text.trim();
+    final error = await widget.service.moderateRoomMessage(
+      roomJid: roomJid,
+      stanzaId: stanzaId,
+      reason: reason.isEmpty ? null : reason,
+    );
+    if (error != null) {
+      _showSnack('Failed to moderate message: $error');
     }
   }
 

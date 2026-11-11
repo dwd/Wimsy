@@ -643,6 +643,22 @@ class XmppService extends ChangeNotifier {
     return details?[nick]?.role;
   }
 
+  /// Our own MUC role (e.g. `moderator`, `participant`, `visitor`) in
+  /// [roomJid], as last reported by the room's presence stanzas (XEP-0045
+  /// §9), or `null` if unknown.
+  ///
+  /// Used to gate the XEP-0425 "Moderate" action-card item, which (unlike
+  /// retraction/affiliation changes) is only permitted for occupants
+  /// holding the `moderator` role.
+  String? ownRoomRole(String roomJid) {
+    final normalized = _bareJid(roomJid);
+    final nick = _roomNickFor(normalized).trim();
+    if (nick.isEmpty) {
+      return null;
+    }
+    return roomOccupantRole(normalized, nick);
+  }
+
   /// Returns the current occupants of [roomJid], sorted by affiliation
   /// (owners, then admins, then members, then others, then outcasts) and
   /// alphabetically by nick within each group. Used by the room occupant
@@ -9356,6 +9372,60 @@ class XmppService extends ChangeNotifier {
     }
     final text = roomConfigIqErrorText(result);
     return text != null ? '$condition: $text' : condition;
+  }
+
+  // XEP-0425: moderates (retracts, on behalf of a moderator) the message
+  // identified by [stanzaId] (the XEP-0359 archive id assigned by the room,
+  // surfaced as `ChatMessage.stanzaId`) in [roomJid], optionally giving a
+  // human-readable [reason]. If [reason] is empty, no `<reason/>` element
+  // is included in the request, per the spec allowing it to be omitted.
+  //
+  // On success, applies the moderation locally immediately (reusing the
+  // same mutation used for the room's own moderation notice) rather than
+  // waiting for that notice to arrive.
+  //
+  // Returns `null` on success, or a human-readable error condition on
+  // failure.
+  Future<String?> moderateRoomMessage({
+    required String roomJid,
+    required String stanzaId,
+    String? reason,
+  }) async {
+    if (stanzaId.isEmpty) {
+      return 'invalid-stanza-id';
+    }
+    final normalized = _bareJid(roomJid);
+    final id = AbstractStanza.getRandomId();
+    final iqStanza = IqStanza(id, IqStanzaType.SET);
+    iqStanza.toJid = Jid.fromFullJid(normalized);
+    final moderate = XmppElement()..name = 'moderate';
+    moderate.addAttribute(XmppAttribute('xmlns', 'urn:xmpp:message-moderate:0'));
+    moderate.addAttribute(XmppAttribute('id', stanzaId));
+    final retract = XmppElement()..name = 'retract';
+    retract.addAttribute(XmppAttribute('xmlns', _retractNamespace));
+    moderate.addChild(retract);
+    final trimmedReason = reason?.trim();
+    if (trimmedReason != null && trimmedReason.isNotEmpty) {
+      final reasonElement = XmppElement()..name = 'reason';
+      reasonElement.textValue = trimmedReason;
+      moderate.addChild(reasonElement);
+    }
+    iqStanza.addChild(moderate);
+    final result = await _sendIqAndAwait(iqStanza);
+    final condition = roomConfigIqErrorCondition(result);
+    if (condition != null) {
+      final text = roomConfigIqErrorText(result);
+      return text != null ? '$condition: $text' : condition;
+    }
+    _applyRoomMessageModeration(
+      roomJid: normalized,
+      applyToId: stanzaId,
+      timestamp: DateTime.now(),
+      reason: (trimmedReason != null && trimmedReason.isNotEmpty)
+          ? trimmedReason
+          : null,
+    );
+    return null;
   }
 
   Future<List<JidSuggestion>> _requestJidSearch(

@@ -33,6 +33,7 @@ class MessageActionCard extends StatefulWidget {
     this.onReply,
     this.onEdit,
     this.onRetract,
+    this.onModerate,
     this.onReact,
     this.onAddToRoster,
     this.onKick,
@@ -90,6 +91,12 @@ class MessageActionCard extends StatefulWidget {
   /// our own outgoing messages (see `MessageBubble.onRetract`'s wiring in
   /// `lib/main.dart`).
   final VoidCallback? onRetract;
+
+  /// XEP-0425: shown as a "Moderate" icon action; only ever non-null for
+  /// other occupants' messages in a MUC room where we hold the
+  /// `moderator` role (see `MessageBubble.onModerate`'s wiring in
+  /// `lib/main.dart`).
+  final VoidCallback? onModerate;
   final void Function(String emoji)? onReact;
   final VoidCallback? onAddToRoster;
 
@@ -616,6 +623,12 @@ class _MessageActionCardState extends State<MessageActionCard> {
           icon: Icons.undo_outlined,
           label: 'Retract',
           onTap: widget.onRetract!,
+        ),
+      if (widget.onModerate != null)
+        _CardAction(
+          icon: Icons.gavel_outlined,
+          label: 'Moderate',
+          onTap: widget.onModerate!,
         ),
     ];
     return Wrap(

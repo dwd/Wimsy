@@ -1489,6 +1489,114 @@ void main() {
   );
 
   testWidgets(
+    'message action card shows a Moderate action when supplied for a MUC message',
+    (WidgetTester tester) async {
+      var moderated = false;
+      final otherMessage = ChatMessage(
+        from: 'carol',
+        to: 'room@conference.example.com',
+        body: 'Spam spam spam',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        stanzaId: 'archive-moderate-test',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageBubble(
+              message: otherMessage,
+              senderName: 'Carol',
+              timestamp: '12:00',
+              avatarBytes: null,
+              chatBareJid: 'room@conference.example.com',
+              isRoom: true,
+              service: XmppService(),
+              replySenderName: null,
+              replyBody: null,
+              onReplyTargetTap: null,
+              inviteRoomJid: null,
+              inviteRoomName: null,
+              inviteAvatarBytes: null,
+              inviteReason: null,
+              onJoinInvite: null,
+              selfReactionSenderId: 'alice@example.com',
+              recentReactionOptions: const [],
+              onReact: null,
+              onEdit: null,
+              onModerate: () => moderated = true,
+              onReply: null,
+              onAcceptFile: null,
+              onDeclineFile: null,
+              onFallbackUpload: null,
+            ),
+          ),
+        ),
+      );
+
+      await tester.longPress(find.text('Spam spam spam'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Moderate'), findsOneWidget);
+      await tester.tap(find.text('Moderate'));
+      await tester.pumpAndSettle();
+      expect(moderated, isTrue);
+    },
+  );
+
+  testWidgets(
+    'message action card hides the Moderate action when not supplied',
+    (WidgetTester tester) async {
+      final otherMessage = ChatMessage(
+        from: 'carol',
+        to: 'room@conference.example.com',
+        body: 'Just chatting',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        stanzaId: 'archive-moderate-test-2',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageBubble(
+              message: otherMessage,
+              senderName: 'Carol',
+              timestamp: '12:00',
+              avatarBytes: null,
+              chatBareJid: 'room@conference.example.com',
+              isRoom: true,
+              service: XmppService(),
+              replySenderName: null,
+              replyBody: null,
+              onReplyTargetTap: null,
+              inviteRoomJid: null,
+              inviteRoomName: null,
+              inviteAvatarBytes: null,
+              inviteReason: null,
+              onJoinInvite: null,
+              selfReactionSenderId: 'alice@example.com',
+              recentReactionOptions: const [],
+              onReact: null,
+              onEdit: null,
+              onModerate: null,
+              onReply: null,
+              onAcceptFile: null,
+              onDeclineFile: null,
+              onFallbackUpload: null,
+            ),
+          ),
+        ),
+      );
+
+      await tester.longPress(find.text('Just chatting'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Moderate'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'message action card hides the Retract action for incoming messages',
     (WidgetTester tester) async {
       final incomingMessage = ChatMessage(
