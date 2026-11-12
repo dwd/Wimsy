@@ -49,8 +49,10 @@ import 'utils/display_layout.dart';
 import 'utils/physical_display_size.dart';
 import 'encryption/encryption_manager.dart';
 import 'widgets/avatar_with_presence.dart';
+import 'widgets/chat_entry_header.dart';
 import 'widgets/encryption_selector.dart';
 import 'widgets/encryption_settings_screen.dart';
+import 'utils/xep0392_color.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -1416,227 +1418,197 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                               ),
                               child: Opacity(
                                 opacity: isServerNotFound ? 0.5 : 1.0,
-                                child: Row(
-                                  children: [
-                                    _ContactMenuButton(
-                                      key: menuKey,
-                                      isBookmark: isBookmark,
-                                      isBlocked: service.isBlocked(jid),
-                                      onEditContact: () =>
-                                          _showContactDialog(contact: contact),
-                                      onRemoveContact: () =>
-                                          _confirmRemoveContact(contact),
-                                      onBlockContact: () =>
-                                          _blockContact(contact),
-                                      onUnblockContact: () =>
-                                          _unblockContact(contact),
-                                      onEditBookmark: () =>
-                                          _showBookmarkDialog(contact),
-                                      onRemoveBookmark: () =>
-                                          _confirmRemoveBookmark(contact),
-                                      child: AvatarWithPresence(
-                                        label: contact.displayName,
-                                        bytes: avatarBytes,
-                                        showPresenceDot: !isBookmark,
-                                        presenceShow: isBookmark ? null : show,
-                                        badge: isBookmark
-                                            ? Container(
-                                                padding: const EdgeInsets.all(
-                                                  2,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      theme.colorScheme.surface,
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(
-                                                    color: theme
-                                                        .colorScheme
-                                                        .primary,
-                                                    width: 1.2,
-                                                  ),
-                                                ),
-                                                child: Icon(
-                                                  Icons.meeting_room,
-                                                  size: 12,
+                                child: ChatEntryHeader(
+                                  avatar: _ContactMenuButton(
+                                    key: menuKey,
+                                    isBookmark: isBookmark,
+                                    isBlocked: service.isBlocked(jid),
+                                    onEditContact: () =>
+                                        _showContactDialog(contact: contact),
+                                    onRemoveContact: () =>
+                                        _confirmRemoveContact(contact),
+                                    onBlockContact: () =>
+                                        _blockContact(contact),
+                                    onUnblockContact: () =>
+                                        _unblockContact(contact),
+                                    onEditBookmark: () =>
+                                        _showBookmarkDialog(contact),
+                                    onRemoveBookmark: () =>
+                                        _confirmRemoveBookmark(contact),
+                                    child: AvatarWithPresence(
+                                      label: contact.displayName,
+                                      bytes: avatarBytes,
+                                      showPresenceDot: !isBookmark,
+                                      presenceShow: isBookmark ? null : show,
+                                      badge: isBookmark
+                                          ? Container(
+                                              padding: const EdgeInsets.all(2),
+                                              decoration: BoxDecoration(
+                                                color:
+                                                    theme.colorScheme.surface,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
                                                   color:
                                                       theme.colorScheme.primary,
-                                                ),
-                                              )
-                                            : null,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  contact.displayName,
-                                                  style: theme
-                                                      .textTheme
-                                                      .titleMedium
-                                                      ?.copyWith(
-                                                        fontWeight: isUnread
-                                                            ? FontWeight.w600
-                                                            : null,
-                                                      ),
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
+                                                  width: 1.2,
                                                 ),
                                               ),
-                                              if (isBookmark) ...[
-                                                const SizedBox(width: 6),
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 6,
-                                                        vertical: 2,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: theme
-                                                        .colorScheme
-                                                        .primary
-                                                        .withValues(alpha: 0.1),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          10,
-                                                        ),
-                                                  ),
-                                                  child: Text(
-                                                    'ROOM',
-                                                    style: theme
-                                                        .textTheme
-                                                        .labelSmall
-                                                        ?.copyWith(
-                                                          color: theme
-                                                              .colorScheme
-                                                              .primary,
-                                                          letterSpacing: 0.6,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
+                                              child: Icon(
+                                                Icons.meeting_room,
+                                                size: 12,
+                                                color:
+                                                    theme.colorScheme.primary,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
+                                  ),
+                                  avatarSpacing: 10,
+                                  accentColor: xep0392ColorForLabel(
+                                    contact.displayName,
+                                  ),
+                                  header: NameChipsRow(
+                                    name: contact.displayName,
+                                    nameColor: xep0392ColorForLabel(
+                                      contact.displayName,
+                                    ),
+                                    nameBold: isUnread,
+                                    nameChips: [
+                                      if (isBookmark)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
                                           ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            isBookmark
-                                                ? bookmarkStatusText
-                                                : ((effectiveStatusText
-                                                              ?.isNotEmpty ==
-                                                          true)
-                                                      ? effectiveStatusText!
-                                                      : service
-                                                            .presenceLabelFor(
-                                                              jid,
-                                                            )),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodySmall
+                                          decoration: BoxDecoration(
+                                            color: theme.colorScheme.primary
+                                                .withValues(alpha: 0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                          ),
+                                          child: Text(
+                                            'ROOM',
+                                            style: theme.textTheme.labelSmall
                                                 ?.copyWith(
-                                                  color: roomJoinError
-                                                      ? theme.colorScheme.error
-                                                      : theme
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
+                                                  color: theme
+                                                      .colorScheme
+                                                      .primary,
+                                                  letterSpacing: 0.6,
                                                 ),
                                           ),
-                                          if (latest != null) ...[
-                                            const SizedBox(height: 2),
-                                            Builder(
-                                              builder: (context) {
-                                                final previewText = isBookmark
-                                                    ? '${_roomPreviewSenderLabel(latest)}: ${_messagePreviewText(service, latest)}'
-                                                    : _messagePreviewText(
-                                                        service,
-                                                        latest,
-                                                      );
-                                                final isOutgoingPreview =
-                                                    latest.outgoing;
-                                                final isUnreadIncomingPreview =
-                                                    !latest.outgoing &&
-                                                    unreadCount > 0;
-                                                return Text(
-                                                  previewText,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: theme
-                                                      .textTheme
-                                                      .bodySmall
-                                                      ?.copyWith(
-                                                        color: theme
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
-                                                        fontStyle:
-                                                            isOutgoingPreview
-                                                            ? FontStyle.italic
-                                                            : null,
-                                                        fontWeight:
-                                                            isUnreadIncomingPreview
-                                                            ? FontWeight.w700
-                                                            : null,
-                                                      ),
-                                                );
-                                              },
+                                        ),
+                                    ],
+                                  ),
+                                  body: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        isBookmark
+                                            ? bookmarkStatusText
+                                            : ((effectiveStatusText
+                                                          ?.isNotEmpty ==
+                                                      true)
+                                                  ? effectiveStatusText!
+                                                  : service.presenceLabelFor(
+                                                      jid,
+                                                    )),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                              color: roomJoinError
+                                                  ? theme.colorScheme.error
+                                                  : theme
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
                                             ),
-                                          ],
-                                          if (!isBookmark &&
-                                              contact.groups.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              contact.groups
-                                                  .map(
-                                                    (group) =>
-                                                        '#${group.trim()}',
-                                                  )
-                                                  .join(' '),
+                                      ),
+                                      if (latest != null) ...[
+                                        const SizedBox(height: 2),
+                                        Builder(
+                                          builder: (context) {
+                                            final previewText = isBookmark
+                                                ? '${_roomPreviewSenderLabel(latest)}: ${_messagePreviewText(service, latest)}'
+                                                : _messagePreviewText(
+                                                    service,
+                                                    latest,
+                                                  );
+                                            final isOutgoingPreview =
+                                                latest.outgoing;
+                                            final isUnreadIncomingPreview =
+                                                !latest.outgoing &&
+                                                unreadCount > 0;
+                                            return Text(
+                                              previewText,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.labelSmall
+                                              style: theme.textTheme.bodySmall
                                                   ?.copyWith(
                                                     color: theme
                                                         .colorScheme
-                                                        .primary,
-                                                    letterSpacing: 0.2,
+                                                        .onSurfaceVariant,
+                                                    fontStyle:
+                                                        isOutgoingPreview
+                                                        ? FontStyle.italic
+                                                        : null,
+                                                    fontWeight:
+                                                        isUnreadIncomingPreview
+                                                        ? FontWeight.w700
+                                                        : null,
                                                   ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    if (unreadCount > 0)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
+                                            );
+                                          },
                                         ),
-                                        decoration: BoxDecoration(
-                                          color: theme.colorScheme.primary,
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          unreadCount > 99
-                                              ? '99+'
-                                              : unreadCount.toString(),
+                                      ],
+                                      if (!isBookmark &&
+                                          contact.groups.isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          contact.groups
+                                              .map(
+                                                (group) =>
+                                                    '#${group.trim()}',
+                                              )
+                                              .join(' '),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                           style: theme.textTheme.labelSmall
                                               ?.copyWith(
-                                                color:
-                                                    theme.colorScheme.onPrimary,
-                                                fontWeight: FontWeight.w600,
+                                                color: theme
+                                                    .colorScheme
+                                                    .primary,
+                                                letterSpacing: 0.2,
                                               ),
                                         ),
-                                      ),
-                                    if (unreadCount > 0)
-                                      const SizedBox(width: 8),
-                                  ],
+                                      ],
+                                    ],
+                                  ),
+                                  rowTrailing: unreadCount > 0
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: theme.colorScheme.primary,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          child: Text(
+                                            unreadCount > 99
+                                                ? '99+'
+                                                : unreadCount.toString(),
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onPrimary,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                          ),
+                                        )
+                                      : null,
                                 ),
                               ),
                             ),

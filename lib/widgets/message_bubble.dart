@@ -20,6 +20,7 @@ import '../main.dart'
         RoleAffiliationChip,
         formatTimestamp;
 import 'avatar_with_presence.dart';
+import 'chat_entry_header.dart';
 import 'fingerprint_verification_screen.dart';
 import 'message_action_card.dart';
 
@@ -187,8 +188,15 @@ class MessageBubble extends StatelessWidget {
     // nested one would always also trigger this message's own region.
     final replyCardKey = GlobalKey();
 
+    // When the header (avatar + name row) is elided for a follow-on
+    // message, the placeholder only needs to reserve the avatar's width so
+    // the body column still lines up with non-elided messages above it; it
+    // must not also force the avatar's height, or the whole row (and thus
+    // the bubble) would be padded out to the avatar's height even when the
+    // message body is just a single short line, leaving an oversized gap
+    // below short follow-on messages.
     final avatarWidget = elideHeader
-        ? const SizedBox(width: 36, height: 36)
+        ? const SizedBox(width: 36)
         : AvatarWithPresence(
             label: senderName,
             bytes: avatarBytes,
@@ -210,207 +218,166 @@ class MessageBubble extends StatelessWidget {
       margin: isReplyPreview
           ? EdgeInsets.zero
           : EdgeInsets.only(top: elideHeader ? 2 : 8, bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (!isReplyPreview) ...[
-            menuKey == null
-                ? avatarWidget
-                : _MessageMenuButton(
-                    key: menuKey,
-                    message: message,
-                    senderName: senderName,
-                    senderJid: senderBareJid,
-                    senderFullJid: senderFullJid,
-                    avatarBytes: avatarBytes,
-                    isContact: isSenderContact,
-                    recentReactionOptions: recentReactionOptions,
-                    ownReactions: ownReactions,
-                    onReact: onReact,
-                    onEdit: onEdit,
-                    onRetract: onRetract,
-                    onModerate: onModerate,
-                    onReply: onReply,
-                    onAddToRoster: onAddToRoster,
-                    onKick: onKick,
-                    onBan: onBan,
-                    chatBareJid: chatBareJid,
-                    isRoom: isRoom,
-                    service: service,
-                    timestampText: timestamp,
-                    deferOobImages: deferOobImages,
-                    selfReactionSenderId: selfReactionSenderId,
-                    replySenderName: replySenderName,
-                    replyBody: replyBody,
-                    inviteRoomJid: inviteRoomJid,
-                    inviteRoomName: inviteRoomName,
-                    inviteAvatarBytes: inviteAvatarBytes,
-                    inviteReason: inviteReason,
-                    child: avatarWidget,
+      child: ChatEntryHeader(
+        avatar: isReplyPreview
+            ? null
+            : (menuKey == null
+                  ? avatarWidget
+                  : _MessageMenuButton(
+                      key: menuKey,
+                      message: message,
+                      senderName: senderName,
+                      senderJid: senderBareJid,
+                      senderFullJid: senderFullJid,
+                      avatarBytes: avatarBytes,
+                      isContact: isSenderContact,
+                      recentReactionOptions: recentReactionOptions,
+                      ownReactions: ownReactions,
+                      onReact: onReact,
+                      onEdit: onEdit,
+                      onRetract: onRetract,
+                      onModerate: onModerate,
+                      onReply: onReply,
+                      onAddToRoster: onAddToRoster,
+                      onKick: onKick,
+                      onBan: onBan,
+                      chatBareJid: chatBareJid,
+                      isRoom: isRoom,
+                      service: service,
+                      timestampText: timestamp,
+                      deferOobImages: deferOobImages,
+                      selfReactionSenderId: selfReactionSenderId,
+                      replySenderName: replySenderName,
+                      replyBody: replyBody,
+                      inviteRoomJid: inviteRoomJid,
+                      inviteRoomName: inviteRoomName,
+                      inviteAvatarBytes: inviteAvatarBytes,
+                      inviteReason: inviteReason,
+                      child: avatarWidget,
+                    )),
+        avatarSpacing: 12,
+        accentColor: nameColor,
+        header: elideHeader
+            ? null
+            : NameChipsRow(
+                name: senderName,
+                nameColor: nameColor,
+                nameChips: [
+                  if (_senderRoomRole() == 'moderator')
+                    const RoleAffiliationChip(label: 'moderator'),
+                ],
+                trailing: [
+                  if (message.retracted)
+                    message.moderated
+                        ? _buildModeratedChip(context)
+                        : _buildRetractedChip(context)
+                  else if (message.edited)
+                    _buildEditedChip(context),
+                  Text(
+                    timestamp,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: textColor.withValues(alpha: 0.7),
+                    ),
                   ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.only(left: 8),
-              decoration: BoxDecoration(
-                border: Border(left: BorderSide(color: nameColor, width: 3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!elideHeader) ...[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  senderName,
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: nameColor,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              if (_senderRoomRole() == 'moderator') ...[
-                                const SizedBox(width: 6),
-                                const RoleAffiliationChip(label: 'moderator'),
-                              ],
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (message.retracted) ...[
-                              message.moderated
-                                  ? _buildModeratedChip(context)
-                                  : _buildRetractedChip(context),
-                              const SizedBox(width: 6),
-                            ] else if (message.edited) ...[
-                              const SizedBox(width: 6),
-                              _buildEditedChip(context),
-                            ],
-                            Text(
-                              timestamp,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: textColor.withValues(alpha: 0.7),
-                              ),
-                            ),
-                            if (tickIcon != null) ...[
-                              const SizedBox(width: 6),
-                              tickIcon,
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-                  if (securityLabelChip != null) ...[
-                    securityLabelChip,
-                    const SizedBox(height: 6),
-                  ],
-                  if (!isReplyPreview &&
-                      (message.replyToId ?? '').isNotEmpty) ...[
-                    KeyedSubtree(
-                      key: replyCardKey,
-                      child: _buildReplyCard(context),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (fileTransferCard != null) ...[
-                    fileTransferCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (inviteCard != null) ...[
-                    inviteCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (callCard != null) ...[
-                    callCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (oobImage != null) ...[
-                    oobImage,
-                    const SizedBox(height: 8),
-                  ],
-                  if (webxdcCard != null) ...[
-                    webxdcCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (oobFileCard != null) ...[
-                    oobFileCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (message.callSid != null)
-                    const SizedBox.shrink()
-                  else if (message.encryptionError != null)
-                    SelectableText(
-                      'Undecryptable message '
-                      '(${message.encryptionError})',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else if (_meCommandAction(message.body) != null)
-                    SelectableText(
-                      _formatMeCommand(
-                        senderName,
-                        _meCommandAction(message.body)!,
-                      ),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else if (_shouldShowBody(message.body, message.oobUrl))
-                    SelectableText.rich(
-                      TextSpan(
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: textColor,
-                          decoration: _strikeThroughBody
-                              ? TextDecoration.lineThrough
-                              : null,
-                        ),
-                        children: _linkifyText(
-                          message.body,
-                          theme.textTheme.bodyMedium?.copyWith(
-                            color: textColor,
-                            decoration: _strikeThroughBody
-                                ? TextDecoration.lineThrough
-                                : null,
-                          ),
-                          theme.textTheme.bodyMedium?.copyWith(
-                            color: linkColor,
-                            decoration: _strikeThroughBody
-                                ? TextDecoration.combine([
-                                    TextDecoration.underline,
-                                    TextDecoration.lineThrough,
-                                  ])
-                                : TextDecoration.underline,
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (reactions.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    _buildReactionRow(context, reactions, ownReactions),
-                  ],
+                  if (tickIcon != null) tickIcon,
                 ],
               ),
-            ),
-          ),
-        ],
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (securityLabelChip != null) ...[
+              securityLabelChip,
+              const SizedBox(height: 6),
+            ],
+            if (!isReplyPreview &&
+                (message.replyToId ?? '').isNotEmpty) ...[
+              KeyedSubtree(
+                key: replyCardKey,
+                child: _buildReplyCard(context),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (fileTransferCard != null) ...[
+              fileTransferCard,
+              const SizedBox(height: 8),
+            ],
+            if (inviteCard != null) ...[
+              inviteCard,
+              const SizedBox(height: 8),
+            ],
+            if (callCard != null) ...[
+              callCard,
+              const SizedBox(height: 8),
+            ],
+            if (oobImage != null) ...[
+              oobImage,
+              const SizedBox(height: 8),
+            ],
+            if (webxdcCard != null) ...[
+              webxdcCard,
+              const SizedBox(height: 8),
+            ],
+            if (oobFileCard != null) ...[
+              oobFileCard,
+              const SizedBox(height: 8),
+            ],
+            if (message.callSid != null)
+              const SizedBox.shrink()
+            else if (message.encryptionError != null)
+              SelectableText(
+                'Undecryptable message '
+                '(${message.encryptionError})',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: textColor,
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            else if (_meCommandAction(message.body) != null)
+              SelectableText(
+                _formatMeCommand(
+                  senderName,
+                  _meCommandAction(message.body)!,
+                ),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: textColor,
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            else if (_shouldShowBody(message.body, message.oobUrl))
+              SelectableText.rich(
+                TextSpan(
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: textColor,
+                    decoration: _strikeThroughBody
+                        ? TextDecoration.lineThrough
+                        : null,
+                  ),
+                  children: _linkifyText(
+                    message.body,
+                    theme.textTheme.bodyMedium?.copyWith(
+                      color: textColor,
+                      decoration: _strikeThroughBody
+                          ? TextDecoration.lineThrough
+                          : null,
+                    ),
+                    theme.textTheme.bodyMedium?.copyWith(
+                      color: linkColor,
+                      decoration: _strikeThroughBody
+                          ? TextDecoration.combine([
+                              TextDecoration.underline,
+                              TextDecoration.lineThrough,
+                            ])
+                          : TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+            if (reactions.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              _buildReactionRow(context, reactions, ownReactions),
+            ],
+          ],
+        ),
       ),
     );
 
