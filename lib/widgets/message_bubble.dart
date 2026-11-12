@@ -435,47 +435,22 @@ class MessageBubble extends StatelessWidget {
   // was received at. Shown next to the message timestamp, same style as
   // the retracted chip.
   Widget _buildEditedChip(BuildContext context) {
-    final theme = Theme.of(context);
     final editedAt = message.editedAt;
     final suffix = editedAt == null ? '' : ' ${formatTimestamp(editedAt)}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        'Edited at$suffix',
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-          fontStyle: FontStyle.italic,
-        ),
-      ),
-    );
+    return RoleAffiliationChip(label: 'Edited at$suffix', uppercase: false);
   }
 
   // XEP-0424: renders a small chip flagging that this message has been
   // retracted, with the timestamp the retraction was observed at. Shown
   // above the (struck-through) message body.
   Widget _buildRetractedChip(BuildContext context) {
-    final theme = Theme.of(context);
     final retractedAt = message.retractedAt;
     final suffix = retractedAt == null
         ? ''
         : ' ${formatTimestamp(retractedAt)}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        'Retracted at$suffix',
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-          fontStyle: FontStyle.italic,
-        ),
-      ),
+    return RoleAffiliationChip(
+      label: 'Retracted at$suffix',
+      uppercase: false,
     );
   }
 
@@ -484,24 +459,13 @@ class MessageBubble extends StatelessWidget {
   // sender), with the timestamp the moderation notice was observed at.
   // Shown in place of [_buildRetractedChip] next to the message timestamp.
   Widget _buildModeratedChip(BuildContext context) {
-    final theme = Theme.of(context);
     final moderatedAt = message.retractedAt;
     final suffix = moderatedAt == null
         ? ''
         : ' ${formatTimestamp(moderatedAt)}';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        'Moderated at$suffix',
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-          fontStyle: FontStyle.italic,
-        ),
-      ),
+    return RoleAffiliationChip(
+      label: 'Moderated at$suffix',
+      uppercase: false,
     );
   }
 

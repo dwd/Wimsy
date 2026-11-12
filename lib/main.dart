@@ -7383,9 +7383,15 @@ class _RoomOccupantTile extends StatelessWidget {
 /// affiliation next to their nickname, styled to match the "ROOM" chip
 /// shown against bookmarked room names in the roster.
 class RoleAffiliationChip extends StatelessWidget {
-  const RoleAffiliationChip({required this.label});
+  const RoleAffiliationChip({required this.label, this.uppercase = true});
 
   final String label;
+  // Whether [label] is rendered upper-cased with wide letter spacing (the
+  // default, used for short single-word role/affiliation names) or as-is
+  // (used by callers passing longer, mixed-case text such as a status
+  // message with a timestamp appended, e.g. message_bubble.dart's
+  // "Edited"/"Retracted"/"Moderated" chips).
+  final bool uppercase;
 
   @override
   Widget build(BuildContext context) {
@@ -7397,10 +7403,10 @@ class RoleAffiliationChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
-        label.toUpperCase(),
+        uppercase ? label.toUpperCase() : label,
         style: theme.textTheme.labelSmall?.copyWith(
           color: theme.colorScheme.primary,
-          letterSpacing: 0.6,
+          letterSpacing: uppercase ? 0.6 : 0,
         ),
       ),
     );
