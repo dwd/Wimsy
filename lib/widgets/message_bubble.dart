@@ -14,7 +14,11 @@ import '../models/chat_message.dart';
 import '../xmpp/xmpp_service.dart';
 import '../utils/xep0392_color.dart';
 import '../main.dart'
-    show buildSecurityLabelChip, WebxdcHostPanel, RoleAffiliationChip, formatTimestamp;
+    show
+        buildSecurityLabelChip,
+        WebxdcHostPanel,
+        RoleAffiliationChip,
+        formatTimestamp;
 import 'avatar_with_presence.dart';
 import 'fingerprint_verification_screen.dart';
 import 'message_action_card.dart';
@@ -71,10 +75,12 @@ class MessageBubble extends StatelessWidget {
   final String? inviteReason;
   final VoidCallback? onJoinInvite;
   final VoidCallback? onAddToRoster;
+
   /// Shown as "Kick" in the message menu for MUC messages when the local
   /// user is an owner/admin of the room (XEP-0045 §8.2); sets the sender's
   /// role to `none`, removing them from the room without banning them.
   final VoidCallback? onKick;
+
   /// Shown as "Ban" in the message menu for MUC messages when the local
   /// user is an owner/admin of the room; sets the sender's affiliation to
   /// `outcast` (XEP-0045 §9.1), preventing them from rejoining.
@@ -178,152 +184,157 @@ class MessageBubble extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: Row(
+              child: Container(
+                padding: const EdgeInsets.only(left: 8),
+                decoration: BoxDecoration(
+                  border: Border(left: BorderSide(color: nameColor, width: 3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  senderName,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: nameColor,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              if (_senderRoomRole() == 'moderator') ...[
+                                const SizedBox(width: 6),
+                                const RoleAffiliationChip(label: 'moderator'),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Row(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Flexible(
-                              child: Text(
-                                senderName,
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: nameColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                            if (message.retracted) ...[
+                              message.moderated
+                                  ? _buildModeratedChip(context)
+                                  : _buildRetractedChip(context),
+                              const SizedBox(width: 6),
+                            ] else if (message.edited) ...[
+                              const SizedBox(width: 6),
+                              _buildEditedChip(context),
+                            ],
+                            Text(
+                              timestamp,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: textColor.withValues(alpha: 0.7),
                               ),
                             ),
-                            if (_senderRoomRole() == 'moderator') ...[
+                            if (tickIcon != null) ...[
                               const SizedBox(width: 6),
-                              const RoleAffiliationChip(label: 'moderator'),
+                              tickIcon,
                             ],
                           ],
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (message.retracted) ...[
-                            message.moderated
-                                ? _buildModeratedChip(context)
-                                : _buildRetractedChip(context),
-                            const SizedBox(width: 6),
-                          ]
-                          else if (message.edited) ...[
-                            const SizedBox(width: 6),
-                            _buildEditedChip(context),
-                          ],
-                          Text(
-                            timestamp,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: textColor.withValues(alpha: 0.7),
-                            ),
-                          ),
-                          if (tickIcon != null) ...[
-                            const SizedBox(width: 6),
-                            tickIcon,
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  if (securityLabelChip != null) ...[
-                    securityLabelChip,
+                      ],
+                    ),
                     const SizedBox(height: 6),
-                  ],
-                  if ((message.replyToId ?? '').isNotEmpty) ...[
-                    _buildReplyCard(context),
-                    const SizedBox(height: 8),
-                  ],
-                  if (fileTransferCard != null) ...[
-                    fileTransferCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (inviteCard != null) ...[
-                    inviteCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (callCard != null) ...[
-                    callCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (oobImage != null) ...[
-                    oobImage,
-                    const SizedBox(height: 8),
-                  ],
-                  if (webxdcCard != null) ...[
-                    webxdcCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (oobFileCard != null) ...[
-                    oobFileCard,
-                    const SizedBox(height: 8),
-                  ],
-                  if (message.callSid != null)
-                    const SizedBox.shrink()
-                  else if (message.encryptionError != null)
-                    SelectableText(
-                      'Undecryptable message '
-                      '(${message.encryptionError})',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else if (_meCommandAction(message.body) != null)
-                    SelectableText(
-                      _formatMeCommand(
-                        senderName,
-                        _meCommandAction(message.body)!,
-                      ),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    )
-                  else if (_shouldShowBody(message.body, message.oobUrl))
-                    SelectableText.rich(
-                      TextSpan(
+                    if (securityLabelChip != null) ...[
+                      securityLabelChip,
+                      const SizedBox(height: 6),
+                    ],
+                    if ((message.replyToId ?? '').isNotEmpty) ...[
+                      _buildReplyCard(context),
+                      const SizedBox(height: 8),
+                    ],
+                    if (fileTransferCard != null) ...[
+                      fileTransferCard,
+                      const SizedBox(height: 8),
+                    ],
+                    if (inviteCard != null) ...[
+                      inviteCard,
+                      const SizedBox(height: 8),
+                    ],
+                    if (callCard != null) ...[
+                      callCard,
+                      const SizedBox(height: 8),
+                    ],
+                    if (oobImage != null) ...[
+                      oobImage,
+                      const SizedBox(height: 8),
+                    ],
+                    if (webxdcCard != null) ...[
+                      webxdcCard,
+                      const SizedBox(height: 8),
+                    ],
+                    if (oobFileCard != null) ...[
+                      oobFileCard,
+                      const SizedBox(height: 8),
+                    ],
+                    if (message.callSid != null)
+                      const SizedBox.shrink()
+                    else if (message.encryptionError != null)
+                      SelectableText(
+                        'Undecryptable message '
+                        '(${message.encryptionError})',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: textColor,
-                          decoration: _strikeThroughBody
-                              ? TextDecoration.lineThrough
-                              : null,
+                          fontStyle: FontStyle.italic,
                         ),
-                        children: _linkifyText(
-                          message.body,
-                          theme.textTheme.bodyMedium?.copyWith(
+                      )
+                    else if (_meCommandAction(message.body) != null)
+                      SelectableText(
+                        _formatMeCommand(
+                          senderName,
+                          _meCommandAction(message.body)!,
+                        ),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: textColor,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      )
+                    else if (_shouldShowBody(message.body, message.oobUrl))
+                      SelectableText.rich(
+                        TextSpan(
+                          style: theme.textTheme.bodyMedium?.copyWith(
                             color: textColor,
                             decoration: _strikeThroughBody
                                 ? TextDecoration.lineThrough
                                 : null,
                           ),
-                          theme.textTheme.bodyMedium?.copyWith(
-                            color: linkColor,
-                            decoration: _strikeThroughBody
-                                ? TextDecoration.combine([
-                                    TextDecoration.underline,
-                                    TextDecoration.lineThrough,
-                                  ])
-                                : TextDecoration.underline,
+                          children: _linkifyText(
+                            message.body,
+                            theme.textTheme.bodyMedium?.copyWith(
+                              color: textColor,
+                              decoration: _strikeThroughBody
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
+                            theme.textTheme.bodyMedium?.copyWith(
+                              color: linkColor,
+                              decoration: _strikeThroughBody
+                                  ? TextDecoration.combine([
+                                      TextDecoration.underline,
+                                      TextDecoration.lineThrough,
+                                    ])
+                                  : TextDecoration.underline,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  if (reactions.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    _buildReactionRow(context, reactions, ownReactions),
+                    if (reactions.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _buildReactionRow(context, reactions, ownReactions),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ],
@@ -1139,8 +1150,8 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
           ),
-        ),
       ],
     );
   }
