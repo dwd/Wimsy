@@ -2174,6 +2174,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             service: service,
                             replySenderName: replySenderName,
                             replyBody: replyBody,
+                            replyTargetMessage: replyTarget,
                             onReplyTargetTap: (message.replyToId ?? '').isEmpty
                                 ? null
                                 : () => _scrollToMessageById(

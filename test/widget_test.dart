@@ -1300,6 +1300,96 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+    'reply card renders the replied-to message as a nested bubble without '
+    'its own avatar or a further nested reply, and tapping it scrolls '
+    'instead of opening the action card',
+    (WidgetTester tester) async {
+      final grandparent = ChatMessage(
+        from: 'carol@example.com',
+        to: 'bob@example.com',
+        body: 'Original message',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        messageId: 'grandparent-message',
+      );
+      final parent = ChatMessage(
+        from: 'alice@example.com',
+        to: 'bob@example.com',
+        body: 'Replying to carol',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        messageId: 'parent-message',
+        replyToId: grandparent.messageId,
+      );
+      final child = ChatMessage(
+        from: 'bob@example.com',
+        to: 'alice@example.com',
+        body: 'Replying to alice',
+        timestamp: DateTime.utc(2026),
+        outgoing: true,
+        messageId: 'child-message',
+        replyToId: parent.messageId,
+      );
+
+      var scrolledToId = '';
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageBubble(
+              message: child,
+              senderName: 'You',
+              timestamp: '12:00',
+              avatarBytes: null,
+              chatBareJid: 'alice@example.com',
+              isRoom: false,
+              service: XmppService(),
+              replySenderName: 'alice',
+              replyBody: parent.body,
+              replyTargetMessage: parent,
+              onReplyTargetTap: () => scrolledToId = parent.messageId!,
+              inviteRoomJid: null,
+              inviteRoomName: null,
+              inviteAvatarBytes: null,
+              inviteReason: null,
+              onJoinInvite: null,
+              selfReactionSenderId: 'bob@example.com',
+              recentReactionOptions: const [],
+              onReact: null,
+              onEdit: null,
+              onReply: null,
+              onAcceptFile: null,
+              onDeclineFile: null,
+              onFallbackUpload: null,
+            ),
+          ),
+        ),
+      );
+
+      // The nested bubble shows the replied-to message's own body...
+      expect(find.text(parent.body), findsOneWidget);
+      // ...and the top-level message's own body is still shown too.
+      expect(find.text(child.body), findsOneWidget);
+      // The grandparent message (parent's own reply target) must not be
+      // rendered anywhere - replies are only ever nested one level deep.
+      expect(find.text(grandparent.body), findsNothing);
+      // Only the outer message's avatar is shown; the nested reply bubble
+      // suppresses its own.
+      expect(find.byType(AvatarWithPresence), findsOneWidget);
+
+      await tester.tap(find.text(parent.body));
+      await tester.pump();
+
+      // Tapping the nested bubble scrolled to the original message...
+      expect(scrolledToId, parent.messageId);
+      // ...instead of opening the message action card.
+      expect(find.byType(MessageActionCard), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('confirmed outgoing message replaces the pending clock', (
     WidgetTester tester,
   ) async {

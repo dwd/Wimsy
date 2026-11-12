@@ -32,12 +32,14 @@ class MessageBubble extends StatelessWidget {
     required this.avatarBytes,
     this.elideHeader = false,
     this.interactive = true,
+    this.isReplyPreview = false,
     this.deferOobImages = false,
     required this.chatBareJid,
     required this.isRoom,
     required this.service,
     required this.replySenderName,
     required this.replyBody,
+    this.replyTargetMessage,
     required this.onReplyTargetTap,
     required this.inviteRoomJid,
     required this.inviteRoomName,
@@ -82,12 +84,30 @@ class MessageBubble extends StatelessWidget {
   /// selectable regardless, since that only depends on [SelectableText]
   /// itself rather than on this flag.
   final bool interactive;
+
+  /// Set when this bubble is rendering the replied-to message nested
+  /// inside another message's reply card (see [_buildReplyCard]). The
+  /// avatar is suppressed, the colored bar has no top/bottom margin so it
+  /// sits flush with the rest of the card, and - crucially - this bubble
+  /// never renders its own reply card even if its [message] is itself a
+  /// reply, so chains of replies are never nested more than one level
+  /// deep. A tap on it is instead handled by the enclosing message's own
+  /// [_MessageMenuRegion], which scrolls to the original message (see
+  /// [_buildReplyCard]).
+  final bool isReplyPreview;
   final bool deferOobImages;
   final String chatBareJid;
   final bool isRoom;
   final XmppService service;
   final String? replySenderName;
   final String? replyBody;
+
+  /// The full replied-to message, when it's still known locally. When
+  /// present, the reply card renders this via a nested, non-interactive
+  /// [MessageBubble] (see [_buildReplyCard]) instead of the plain-text
+  /// fallback preview, so it looks identical to how that message renders
+  /// in the chat (minus its own avatar and any reply card of its own).
+  final ChatMessage? replyTargetMessage;
   final VoidCallback? onReplyTargetTap;
   final String? inviteRoomJid;
   final String? inviteRoomName;
@@ -158,6 +178,15 @@ class MessageBubble extends StatelessWidget {
       (contact) => contact.jid == senderBareJid,
     );
 
+    // Wraps the reply card (see [_buildReplyCard]) so [_MessageMenuRegion]
+    // can tell whether a tap landed inside it and should scroll to the
+    // original message instead of opening this message's own action card.
+    // A plain nested gesture region can't be used for that purpose here,
+    // since raw pointer `Listener`s (used so taps work over selectable
+    // text) are dispatched to every ancestor along the hit-test path, so a
+    // nested one would always also trigger this message's own region.
+    final replyCardKey = GlobalKey();
+
     final avatarWidget = elideHeader
         ? const SizedBox(width: 36, height: 36)
         : AvatarWithPresence(
@@ -178,45 +207,49 @@ class MessageBubble extends StatelessWidget {
     Widget buildContent(
       GlobalKey<_MessageMenuButtonState>? menuKey,
     ) => Container(
-      margin: EdgeInsets.only(top: elideHeader ? 2 : 8, bottom: 8),
+      margin: isReplyPreview
+          ? EdgeInsets.zero
+          : EdgeInsets.only(top: elideHeader ? 2 : 8, bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          menuKey == null
-              ? avatarWidget
-              : _MessageMenuButton(
-                  key: menuKey,
-                  message: message,
-                  senderName: senderName,
-                  senderJid: senderBareJid,
-                  senderFullJid: senderFullJid,
-                  avatarBytes: avatarBytes,
-                  isContact: isSenderContact,
-                  recentReactionOptions: recentReactionOptions,
-                  ownReactions: ownReactions,
-                  onReact: onReact,
-                  onEdit: onEdit,
-                  onRetract: onRetract,
-                  onModerate: onModerate,
-                  onReply: onReply,
-                  onAddToRoster: onAddToRoster,
-                  onKick: onKick,
-                  onBan: onBan,
-                  chatBareJid: chatBareJid,
-                  isRoom: isRoom,
-                  service: service,
-                  timestampText: timestamp,
-                  deferOobImages: deferOobImages,
-                  selfReactionSenderId: selfReactionSenderId,
-                  replySenderName: replySenderName,
-                  replyBody: replyBody,
-                  inviteRoomJid: inviteRoomJid,
-                  inviteRoomName: inviteRoomName,
-                  inviteAvatarBytes: inviteAvatarBytes,
-                  inviteReason: inviteReason,
-                  child: avatarWidget,
-                ),
-          const SizedBox(width: 12),
+          if (!isReplyPreview) ...[
+            menuKey == null
+                ? avatarWidget
+                : _MessageMenuButton(
+                    key: menuKey,
+                    message: message,
+                    senderName: senderName,
+                    senderJid: senderBareJid,
+                    senderFullJid: senderFullJid,
+                    avatarBytes: avatarBytes,
+                    isContact: isSenderContact,
+                    recentReactionOptions: recentReactionOptions,
+                    ownReactions: ownReactions,
+                    onReact: onReact,
+                    onEdit: onEdit,
+                    onRetract: onRetract,
+                    onModerate: onModerate,
+                    onReply: onReply,
+                    onAddToRoster: onAddToRoster,
+                    onKick: onKick,
+                    onBan: onBan,
+                    chatBareJid: chatBareJid,
+                    isRoom: isRoom,
+                    service: service,
+                    timestampText: timestamp,
+                    deferOobImages: deferOobImages,
+                    selfReactionSenderId: selfReactionSenderId,
+                    replySenderName: replySenderName,
+                    replyBody: replyBody,
+                    inviteRoomJid: inviteRoomJid,
+                    inviteRoomName: inviteRoomName,
+                    inviteAvatarBytes: inviteAvatarBytes,
+                    inviteReason: inviteReason,
+                    child: avatarWidget,
+                  ),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             child: Container(
               padding: const EdgeInsets.only(left: 8),
@@ -286,8 +319,12 @@ class MessageBubble extends StatelessWidget {
                     securityLabelChip,
                     const SizedBox(height: 6),
                   ],
-                  if ((message.replyToId ?? '').isNotEmpty) ...[
-                    _buildReplyCard(context),
+                  if (!isReplyPreview &&
+                      (message.replyToId ?? '').isNotEmpty) ...[
+                    KeyedSubtree(
+                      key: replyCardKey,
+                      child: _buildReplyCard(context),
+                    ),
                     const SizedBox(height: 8),
                   ],
                   if (fileTransferCard != null) ...[
@@ -377,11 +414,13 @@ class MessageBubble extends StatelessWidget {
       ),
     );
 
-    if (!interactive) {
+    if (isReplyPreview || !interactive) {
       return buildContent(null);
     }
     return _MessageMenuRegion(
       messageId: message.messageId,
+      replyCardKey: replyCardKey,
+      onReplyTargetTap: onReplyTargetTap,
       builder: buildContent,
     );
   }
@@ -499,7 +538,47 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
+  // Renders the replied-to message above this message's own body. When the
+  // full original message is still known locally ([replyTargetMessage]),
+  // it's rendered via a nested [MessageBubble] (with [isReplyPreview] set)
+  // so it looks pixel-identical to how it renders in the chat, just
+  // without its own avatar, margin, or (per [isReplyPreview]'s contract)
+  // a further nested reply card of its own - so a chain of replies never
+  // shows more than one level deep. Tapping it scrolls the chat to that
+  // message rather than opening the action card. Falls back to a minimal,
+  // plain-text preview when the original message isn't known locally
+  // (e.g. it hasn't synced yet).
   Widget _buildReplyCard(BuildContext context) {
+    final target = replyTargetMessage;
+    if (target != null) {
+      return MessageBubble(
+        message: target,
+        senderName: replySenderName ?? 'original message',
+        timestamp: formatTimestamp(target.timestamp),
+        avatarBytes: null,
+        isReplyPreview: true,
+        deferOobImages: deferOobImages,
+        chatBareJid: chatBareJid,
+        isRoom: isRoom,
+        service: service,
+        replySenderName: null,
+        replyBody: null,
+        onReplyTargetTap: null,
+        inviteRoomJid: null,
+        inviteRoomName: null,
+        inviteAvatarBytes: null,
+        inviteReason: null,
+        onJoinInvite: null,
+        selfReactionSenderId: selfReactionSenderId,
+        recentReactionOptions: const [],
+        onReact: null,
+        onEdit: null,
+        onReply: null,
+        onAcceptFile: null,
+        onDeclineFile: null,
+        onFallbackUpload: null,
+      );
+    }
     final theme = Theme.of(context);
     final cardBody = (replyBody ?? message.replyFallback ?? '').trim();
     final text = cardBody.isEmpty ? '(original message unavailable)' : cardBody;
@@ -1596,9 +1675,22 @@ class _PendingMessageClockPainter extends CustomPainter {
 }
 
 class _MessageMenuRegion extends StatefulWidget {
-  const _MessageMenuRegion({required this.messageId, required this.builder});
+  const _MessageMenuRegion({
+    required this.messageId,
+    this.replyCardKey,
+    this.onReplyTargetTap,
+    required this.builder,
+  });
 
   final String? messageId;
+
+  /// Key of the reply card nested within [builder]'s content (see
+  /// [MessageBubble._buildReplyCard]), used to tell whether a tap landed
+  /// on it so it can scroll to the original message (via
+  /// [onReplyTargetTap]) instead of opening this message's own action
+  /// card.
+  final GlobalKey? replyCardKey;
+  final VoidCallback? onReplyTargetTap;
   final Widget Function(GlobalKey<_MessageMenuButtonState> menuKey) builder;
 
   @override
@@ -1608,12 +1700,33 @@ class _MessageMenuRegion extends StatefulWidget {
 class _MessageMenuRegionState extends State<_MessageMenuRegion> {
   final _menuKey = GlobalKey<_MessageMenuButtonState>();
 
+  /// Whether [globalPosition] falls within the reply card's bounds, used so
+  /// a tap/long-press there is routed to [_MessageMenuRegion.onReplyTargetTap]
+  /// instead of opening this message's own action card.
+  bool _isInsideReplyCard(Offset globalPosition) {
+    final box =
+        widget.replyCardKey?.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) {
+      return false;
+    }
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    return rect.contains(globalPosition);
+  }
+
+  void _handleTap(Offset position) {
+    if (_isInsideReplyCard(position)) {
+      widget.onReplyTargetTap?.call();
+      return;
+    }
+    _menuKey.currentState?.showAt(position);
+  }
+
   @override
   Widget build(BuildContext context) {
     return TouchLongPressRegion(
       key: Key('message-bubble-${widget.messageId}'),
-      onLongPress: (position) => _menuKey.currentState?.showAt(position),
-      onTap: (position) => _menuKey.currentState?.showAt(position),
+      onLongPress: _handleTap,
+      onTap: _handleTap,
       child: widget.builder(_menuKey),
     );
   }
