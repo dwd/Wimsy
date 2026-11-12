@@ -314,6 +314,73 @@ void main() {
     expect(find.text(message.body), findsOneWidget);
   });
 
+  testWidgets(
+    'elideHeader does not pad a short single-line follow-on message out to '
+    "the avatar's height",
+    (WidgetTester tester) async {
+      final message = ChatMessage(
+        from: 'bob@example.com',
+        to: 'alice@example.com',
+        body: 'Hi',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        messageId: 'elide-header-height-test',
+      );
+
+      Widget buildBubble({required bool elideHeader}) => MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            // IntrinsicHeight forces the bubble to report its true natural
+            // height, rather than being stretched to fill the Scaffold's
+            // available height (which would mask the bug being tested for).
+            child: IntrinsicHeight(
+              child: MessageBubble(
+                message: message,
+                senderName: 'Bob',
+                timestamp: '12:00',
+                avatarBytes: null,
+                elideHeader: elideHeader,
+                chatBareJid: 'bob@example.com',
+                isRoom: false,
+                service: XmppService(),
+                replySenderName: null,
+                replyBody: null,
+                onReplyTargetTap: null,
+                inviteRoomJid: null,
+                inviteRoomName: null,
+                inviteAvatarBytes: null,
+                inviteReason: null,
+                onJoinInvite: null,
+                selfReactionSenderId: 'alice@example.com',
+                recentReactionOptions: const [],
+                onReact: null,
+                onEdit: null,
+                onReply: null,
+                onAcceptFile: null,
+                onDeclineFile: null,
+                onFallbackUpload: null,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(buildBubble(elideHeader: false));
+      final fullHeaderHeight = tester
+          .getSize(find.byType(MessageBubble))
+          .height;
+
+      await tester.pumpWidget(buildBubble(elideHeader: true));
+      final elidedHeight = tester.getSize(find.byType(MessageBubble)).height;
+
+      // The elided (follow-on) bubble must be noticeably shorter than the
+      // one with the full avatar + name header, not merely padded out to
+      // the avatar's own height by its invisible placeholder.
+      expect(elidedHeight, lessThan(fullHeaderHeight - 10));
+    },
+  );
+
   test('window title includes the active bare JID', () {
     expect(windowTitleFor(null), 'Wimsy');
     expect(windowTitleFor(''), 'Wimsy');
