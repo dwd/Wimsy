@@ -1397,7 +1397,21 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                           contactKey: jid,
                           builder: (menuKey) => InkWell(
                             onTap: () => service.selectChat(jid),
-                            child: Padding(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isActiveChat
+                                    ? theme.colorScheme.primary.withValues(
+                                        alpha: 0.12,
+                                      )
+                                    : null,
+                                borderRadius: BorderRadius.circular(8),
+                                border: isActiveChat
+                                    ? Border.all(
+                                        color: theme.colorScheme.primary
+                                            .withValues(alpha: 0.4),
+                                      )
+                                    : null,
+                              ),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                                 vertical: 10,
