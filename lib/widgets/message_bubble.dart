@@ -30,6 +30,7 @@ class MessageBubble extends StatelessWidget {
     required this.senderName,
     required this.timestamp,
     required this.avatarBytes,
+    this.elideHeader = false,
     this.deferOobImages = false,
     required this.chatBareJid,
     required this.isRoom,
@@ -62,6 +63,15 @@ class MessageBubble extends StatelessWidget {
   final String senderName;
   final String timestamp;
   final Uint8List? avatarBytes;
+
+  /// When true, this message is a continuation of the previous one (same
+  /// sender, sent less than two minutes apart): the avatar and the name
+  /// row are elided, since they'd just repeat what's already shown above.
+  /// The nickname-colored bar is still drawn alongside the body so
+  /// consecutive messages from the same sender remain visually grouped,
+  /// but each bubble's bar is its own separate segment rather than one
+  /// continuous line.
+  final bool elideHeader;
   final bool deferOobImages;
   final String chatBareJid;
   final bool isRoom;
@@ -141,7 +151,7 @@ class MessageBubble extends StatelessWidget {
     return _MessageMenuRegion(
       messageId: message.messageId,
       builder: (menuKey) => Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
+        margin: EdgeInsets.only(top: elideHeader ? 2 : 8, bottom: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -175,12 +185,14 @@ class MessageBubble extends StatelessWidget {
               inviteRoomName: inviteRoomName,
               inviteAvatarBytes: inviteAvatarBytes,
               inviteReason: inviteReason,
-              child: AvatarWithPresence(
-                label: senderName,
-                bytes: avatarBytes,
-                showPresenceDot: true,
-                presenceShow: _resolveSenderPresenceShow(),
-              ),
+              child: elideHeader
+                  ? const SizedBox(width: 36, height: 36)
+                  : AvatarWithPresence(
+                      label: senderName,
+                      bytes: avatarBytes,
+                      showPresenceDot: true,
+                      presenceShow: _resolveSenderPresenceShow(),
+                    ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -192,60 +204,63 @@ class MessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: Row(
+                    if (!elideHeader) ...[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Flexible(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    senderName,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: nameColor,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                  ),
+                                ),
+                                if (_senderRoomRole() == 'moderator') ...[
+                                  const SizedBox(width: 6),
+                                  const RoleAffiliationChip(label: 'moderator'),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Row(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Flexible(
-                                child: Text(
-                                  senderName,
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: nameColor,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                              if (message.retracted) ...[
+                                message.moderated
+                                    ? _buildModeratedChip(context)
+                                    : _buildRetractedChip(context),
+                                const SizedBox(width: 6),
+                              ] else if (message.edited) ...[
+                                const SizedBox(width: 6),
+                                _buildEditedChip(context),
+                              ],
+                              Text(
+                                timestamp,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: textColor.withValues(alpha: 0.7),
                                 ),
                               ),
-                              if (_senderRoomRole() == 'moderator') ...[
+                              if (tickIcon != null) ...[
                                 const SizedBox(width: 6),
-                                const RoleAffiliationChip(label: 'moderator'),
+                                tickIcon,
                               ],
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (message.retracted) ...[
-                              message.moderated
-                                  ? _buildModeratedChip(context)
-                                  : _buildRetractedChip(context),
-                              const SizedBox(width: 6),
-                            ] else if (message.edited) ...[
-                              const SizedBox(width: 6),
-                              _buildEditedChip(context),
-                            ],
-                            Text(
-                              timestamp,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: textColor.withValues(alpha: 0.7),
-                              ),
-                            ),
-                            if (tickIcon != null) ...[
-                              const SizedBox(width: 6),
-                              tickIcon,
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                    ],
                     if (securityLabelChip != null) ...[
                       securityLabelChip,
                       const SizedBox(height: 6),

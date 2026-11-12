@@ -22,6 +22,7 @@ import 'package:wimsy/models/room_entry.dart';
 import 'package:wimsy/notifications/notification_service.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
+import 'package:wimsy/widgets/avatar_with_presence.dart';
 import 'package:wimsy/widgets/message_bubble.dart';
 import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
@@ -256,6 +257,60 @@ void main() {
 
     expect(find.text('View photo'), findsOneWidget);
     expect(find.byType(Image), findsNothing);
+  });
+
+  testWidgets('elideHeader hides the avatar and name row', (
+    WidgetTester tester,
+  ) async {
+    final message = ChatMessage(
+      from: 'bob@example.com',
+      to: 'alice@example.com',
+      body: 'Second message, sent right after the first',
+      timestamp: DateTime.utc(2026),
+      outgoing: false,
+      messageId: 'elide-header-test',
+    );
+
+    Widget buildBubble({required bool elideHeader}) => MaterialApp(
+      home: Scaffold(
+        body: MessageBubble(
+          message: message,
+          senderName: 'Bob',
+          timestamp: '12:00',
+          avatarBytes: null,
+          elideHeader: elideHeader,
+          chatBareJid: 'bob@example.com',
+          isRoom: false,
+          service: XmppService(),
+          replySenderName: null,
+          replyBody: null,
+          onReplyTargetTap: null,
+          inviteRoomJid: null,
+          inviteRoomName: null,
+          inviteAvatarBytes: null,
+          inviteReason: null,
+          onJoinInvite: null,
+          selfReactionSenderId: 'alice@example.com',
+          recentReactionOptions: const [],
+          onReact: null,
+          onEdit: null,
+          onReply: null,
+          onAcceptFile: null,
+          onDeclineFile: null,
+          onFallbackUpload: null,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(buildBubble(elideHeader: false));
+    expect(find.text('Bob'), findsOneWidget);
+    expect(find.byType(AvatarWithPresence), findsOneWidget);
+    expect(find.text(message.body), findsOneWidget);
+
+    await tester.pumpWidget(buildBubble(elideHeader: true));
+    expect(find.text('Bob'), findsNothing);
+    expect(find.byType(AvatarWithPresence), findsNothing);
+    expect(find.text(message.body), findsOneWidget);
   });
 
   test('window title includes the active bare JID', () {
@@ -1343,8 +1398,7 @@ void main() {
       ),
     );
 
-    final timestampBox =
-        tester.renderObject(find.text('12:00')) as RenderBox;
+    final timestampBox = tester.renderObject(find.text('12:00')) as RenderBox;
     final timestampRight =
         timestampBox.localToGlobal(Offset.zero).dx + timestampBox.size.width;
     // The message list in the real UI pads itself by 16 either side; here
@@ -2010,7 +2064,10 @@ void main() {
       // Verify the single '+' attachments button exists and distinct attachment buttons are not directly in composer.
       final attachmentButton = find.byTooltip('Attachments');
       expect(attachmentButton, findsOneWidget);
-      expect(find.descendant(of: attachmentButton, matching: find.byIcon(Icons.add)), findsOneWidget);
+      expect(
+        find.descendant(of: attachmentButton, matching: find.byIcon(Icons.add)),
+        findsOneWidget,
+      );
       expect(find.byTooltip('Send file'), findsNothing);
       expect(find.byTooltip('Send photo'), findsNothing);
       expect(find.byTooltip('Send mini app'), findsNothing);
@@ -2035,43 +2092,42 @@ void main() {
     },
   );
 
-  testWidgets(
-    'attachments button is disabled when chat cannot be sent to',
-    (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(412, 915);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets('attachments button is disabled when chat cannot be sent to', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
 
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await PreferencesService.load();
-      final room = RoomEntry(
-        roomJid: 'inactive@conference.example.com',
-        nick: 'tester',
-        joined: false,
-      );
-      final service = XmppService();
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await PreferencesService.load();
+    final room = RoomEntry(
+      roomJid: 'inactive@conference.example.com',
+      nick: 'tester',
+      joined: false,
+    );
+    final service = XmppService();
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: WimsyHome(
-            service: service,
-            storage: StorageService(),
-            notifications: NotificationService(),
-            preferences: prefs,
-          ),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WimsyHome(
+          service: service,
+          storage: StorageService(),
+          notifications: NotificationService(),
+          preferences: prefs,
         ),
-      );
-      await tester.pump();
-      service.seedConnectedRoomForTesting(room, name: 'Inactive Room');
-      await tester.pump();
+      ),
+    );
+    await tester.pump();
+    service.seedConnectedRoomForTesting(room, name: 'Inactive Room');
+    await tester.pump();
 
-      final popup = tester.widget<PopupMenuButton<dynamic>>(
-        find.byWidgetPredicate(
-          (w) => w is PopupMenuButton && w.tooltip == 'Attachments',
-        ),
-      );
-      expect(popup.enabled, isFalse);
-    },
-  );
+    final popup = tester.widget<PopupMenuButton<dynamic>>(
+      find.byWidgetPredicate(
+        (w) => w is PopupMenuButton && w.tooltip == 'Attachments',
+      ),
+    );
+    expect(popup.enabled, isFalse);
+  });
 }

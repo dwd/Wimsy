@@ -56,7 +56,6 @@ import 'web_update_monitor.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:logging/logging.dart' as logging;
 
-
 @pragma('vm:entry-point')
 void startCallback() {
   FlutterForegroundTask.setTaskHandler(WimsyForegroundTaskHandler());
@@ -2016,17 +2015,15 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             tooltip: 'Start video call',
                           ),
                           EncryptionSelector(
-                            selected: service.encryptionProtocolFor(
-                              activeChat,
-                            ),
+                            selected: service.encryptionProtocolFor(activeChat),
                             onSelected: (protocol) {
                               service.setEncryptionProtocolFor(
                                 activeChat,
                                 protocol,
                               );
                             },
-                            isProtocolSupported: (protocol) => service
-                                .isEncryptionProtocolLikelySupported(
+                            isProtocolSupported: (protocol) =>
+                                service.isEncryptionProtocolLikelySupported(
                                   activeChat,
                                   protocol,
                                 ),
@@ -2092,6 +2089,17 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             message,
                             isRoom: isBookmark,
                           );
+                          final previousMessage = index > 0
+                              ? messages[index - 1]
+                              : null;
+                          final elideHeader =
+                              previousMessage != null &&
+                              previousMessage.from == message.from &&
+                              previousMessage.outgoing == message.outgoing &&
+                              message.timestamp
+                                      .difference(previousMessage.timestamp)
+                                      .abs() <
+                                  const Duration(minutes: 2);
                           final senderName = isBookmark
                               ? (message.outgoing ? 'You' : message.from)
                               : message.outgoing
@@ -2159,6 +2167,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                             senderName: senderName,
                             timestamp: timestamp,
                             avatarBytes: avatarBytes,
+                            elideHeader: elideHeader,
                             deferOobImages: service.lowBandwidthMode,
                             chatBareJid: activeChat,
                             isRoom: isBookmark,
@@ -3656,9 +3665,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
           padding: const EdgeInsets.all(8),
           child: SelectableText(
             text,
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontFamily: 'monospace',
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
           ),
         ),
       ),
@@ -3669,7 +3676,10 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
   // camera and offers to add a video section to the already-established
   // call, without forcing the remote end to send video back. Surfaces any
   // failure (no camera, remote declined, etc.) via a snackbar.
-  Future<void> _startCallVideoUpgrade(XmppService service, String bareJid) async {
+  Future<void> _startCallVideoUpgrade(
+    XmppService service,
+    String bareJid,
+  ) async {
     final messenger = ScaffoldMessenger.of(context);
     final error = await service.upgradeCallToVideo(bareJid);
     if (error != null && mounted) {
@@ -4796,9 +4806,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
             TextField(
               controller: reasonController,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Reason (optional)',
-              ),
+              decoration: const InputDecoration(labelText: 'Reason (optional)'),
             ),
           ],
         ),
@@ -5713,8 +5721,6 @@ class _PhotoSelection {
   final String? mimeType;
 }
 
-
-
 /// The text entry field used by the chat composer.
 ///
 /// Its text input hints intentionally describe ordinary prose so mobile
@@ -5916,10 +5922,7 @@ XmppElement buildOutgoingSecurityLabelElement(spiffing.Label label) {
 }
 
 class SecurityLabelPolicyOption {
-  const SecurityLabelPolicyOption({
-    required this.ref,
-    required this.spif,
-  });
+  const SecurityLabelPolicyOption({required this.ref, required this.spif});
 
   final SecurityLabelPolicyRef ref;
   final spiffing.Spif spif;
@@ -5975,8 +5978,9 @@ class _SecurityLabelEditorScreenState extends State<SecurityLabelEditorScreen> {
     if (newPolicyId == null || newPolicyId == _selectedPolicy.ref.id) {
       return;
     }
-    final newPolicy =
-        widget.policies.firstWhere((p) => p.ref.id == newPolicyId);
+    final newPolicy = widget.policies.firstWhere(
+      (p) => p.ref.id == newPolicyId,
+    );
     setState(() {
       _selectedPolicy = newPolicy;
       _label = spiffing.Label.forPolicy(newPolicy.spif);
@@ -6008,9 +6012,7 @@ class _SecurityLabelEditorScreenState extends State<SecurityLabelEditorScreen> {
               DropdownButtonFormField<String>(
                 key: const Key('security-policy-selector'),
                 initialValue: _selectedPolicy.ref.id,
-                decoration: const InputDecoration(
-                  labelText: 'Security policy',
-                ),
+                decoration: const InputDecoration(labelText: 'Security policy'),
                 items: [
                   for (final policy in widget.policies)
                     DropdownMenuItem(
@@ -6051,7 +6053,6 @@ class _SecurityLabelEditorScreenState extends State<SecurityLabelEditorScreen> {
     return 'en';
   }
 }
-
 
 // XEP-0491: embeddable host for an opened WebXDC mini-app session. By
 // default this is shown as a card within the chat window (see
@@ -6185,10 +6186,7 @@ class _WebxdcHostPanelState extends State<WebxdcHostPanel> {
           Material(
             color: theme.colorScheme.surfaceContainerHighest,
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 4,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               child: Row(
                 children: [
                   Expanded(
@@ -7290,7 +7288,10 @@ class _RoomOccupantTile extends StatelessWidget {
     }
   }
 
-  Future<void> _changeAffiliation(BuildContext context, String affiliation) async {
+  Future<void> _changeAffiliation(
+    BuildContext context,
+    String affiliation,
+  ) async {
     final jid = occupant.realJid;
     if (jid == null || jid.isEmpty) {
       _showSnack(context, 'Cannot change affiliation: real JID unknown.');
@@ -7332,7 +7333,8 @@ class _RoomOccupantTile extends StatelessWidget {
     final confirmed = await _confirm(
       context,
       title: 'Ban ${occupant.nick}?',
-      message: '$jid will be banned from the room and will not be able to rejoin.',
+      message:
+          '$jid will be banned from the room and will not be able to rejoin.',
       confirmLabel: 'Ban',
     );
     if (!confirmed) {
@@ -7814,8 +7816,7 @@ class _PresenceMenu extends StatelessWidget {
               case _PresenceAction.pepExplorer:
                 await Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (context) =>
-                        PepExplorerScreen(service: service),
+                    builder: (context) => PepExplorerScreen(service: service),
                   ),
                 );
                 break;
@@ -8367,11 +8368,7 @@ String? _guessImageMimeType(String fileName) {
   }
 }
 
-enum _AttachmentAction {
-  file,
-  photo,
-  webxdc,
-}
+enum _AttachmentAction { file, photo, webxdc }
 
 enum _PresenceAction {
   online,
