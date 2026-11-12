@@ -14,9 +14,10 @@ import 'message_bubble.dart';
 /// message menu.
 ///
 /// Shown over a dimmed scrim (see [showMessageActionCard]) when the user
-/// taps or long-presses a message's avatar, [MessageActionCard] renders a
-/// non-interactive preview of the message alongside direct icon buttons for
-/// every action whose corresponding callback is non-null (mirroring the
+/// taps or long-presses anywhere on a message, [MessageActionCard] renders
+/// a preview of the message (with a selectable/copyable body, but
+/// otherwise non-interactive) alongside direct icon buttons for every
+/// action whose corresponding callback is non-null (mirroring the
 /// conditional items the old popup menu used to show), plus the sender's
 /// JID and roster/contact status.
 class MessageActionCard extends StatefulWidget {
@@ -135,12 +136,13 @@ class MessageActionCard extends StatefulWidget {
   final double? anchorY;
 
   /// When supplied (together with [chatBareJid]), the preview is rendered
-  /// using the real [MessageBubble] widget (wrapped in an [IgnorePointer]
-  /// so the card's own action buttons remain the single source of truth
-  /// for interactions), guaranteeing the preview looks pixel-identical to
-  /// how the message appears in the chat. When null, a minimal, static
-  /// fallback preview is used instead (e.g. for widget previews/tests that
-  /// don't have a real [XmppService] to supply).
+  /// using the real [MessageBubble] widget (with `interactive: false` so
+  /// the card's own action buttons remain the single source of truth for
+  /// actions, though the body text stays selectable/copyable),
+  /// guaranteeing the preview looks pixel-identical to how the message
+  /// appears in the chat. When null, a minimal, static fallback preview is
+  /// used instead (e.g. for widget previews/tests that don't have a real
+  /// [XmppService] to supply).
   final XmppService? service;
 
   /// The bare JID of the chat (1:1 correspondent or MUC room) the
@@ -233,8 +235,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final fullJid =
-        widget.senderFullJid != null &&
-            widget.senderFullJid != widget.senderJid
+        widget.senderFullJid != null && widget.senderFullJid != widget.senderJid
         ? widget.senderFullJid
         : null;
     final cardContent = _buildCardContent(context, theme, fullJid);
@@ -273,7 +274,11 @@ class _MessageActionCardState extends State<MessageActionCard> {
   /// The card's actual visual content (the `Material` surface and its
   /// children), shared between the anchored (real app) and centered
   /// (previews/tests) layouts above.
-  Widget _buildCardContent(BuildContext context, ThemeData theme, String? fullJid) {
+  Widget _buildCardContent(
+    BuildContext context,
+    ThemeData theme,
+    String? fullJid,
+  ) {
     return Material(
       color: theme.colorScheme.surface,
       borderRadius: BorderRadius.circular(16),
@@ -337,9 +342,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
           sourceChip,
           Text(
             'No XML cached for this message.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontFamily: 'monospace',
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
           ),
         ],
       );
@@ -394,7 +397,8 @@ class _MessageActionCardState extends State<MessageActionCard> {
     final pattern = RegExp(
       r'(</?[a-zA-Z_][\w:.-]*)' // 1: opening tag start + name
       r'|(/?>)' // 2: tag end
-      r'|([a-zA-Z_][\w:.-]*)(=)("[^"]*"|' "'[^']*')" // 3,4,5: attr name/=/value
+      r'|([a-zA-Z_][\w:.-]*)(=)("[^"]*"|'
+      "'[^']*')" // 3,4,5: attr name/=/value
       r'|(<!--.*?-->)', // 6: comments
       dotAll: true,
     );
@@ -425,13 +429,22 @@ class _MessageActionCardState extends State<MessageActionCard> {
         );
       } else if (match.group(3) != null) {
         spans.add(
-          TextSpan(text: match.group(3), style: TextStyle(color: attrNameColor)),
+          TextSpan(
+            text: match.group(3),
+            style: TextStyle(color: attrNameColor),
+          ),
         );
         spans.add(
-          TextSpan(text: match.group(4), style: TextStyle(color: punctuationColor)),
+          TextSpan(
+            text: match.group(4),
+            style: TextStyle(color: punctuationColor),
+          ),
         );
         spans.add(
-          TextSpan(text: match.group(5), style: TextStyle(color: attrValueColor)),
+          TextSpan(
+            text: match.group(5),
+            style: TextStyle(color: attrValueColor),
+          ),
         );
       } else if (match.group(6) != null) {
         spans.add(
@@ -459,9 +472,12 @@ class _MessageActionCardState extends State<MessageActionCard> {
 
   /// Renders the previewed message. When [MessageActionCard.service] and
   /// [MessageActionCard.chatBareJid] are supplied, this embeds the real
-  /// [MessageBubble] (wrapped in [IgnorePointer] so the card's own action
-  /// buttons stay the single source of truth for interactions), so the
-  /// preview is visually identical to how the message renders in the chat.
+  /// [MessageBubble] (with `interactive: false`, so it doesn't try to open
+  /// another action card itself and its own action callbacks stay disabled,
+  /// leaving the card's own buttons as the single source of truth for
+  /// actions), so the preview is visually identical to how the message
+  /// renders in the chat. Its message body stays selectable/copyable
+  /// though, via [SelectableText], since that isn't gated by `interactive`.
   /// Otherwise falls back to [_buildStaticMessagePreview], a minimal,
   /// self-contained rendering used by previews/tests that don't have a
   /// real `XmppService` to supply.
@@ -469,37 +485,37 @@ class _MessageActionCardState extends State<MessageActionCard> {
     final service = widget.service;
     final chatBareJid = widget.chatBareJid;
     if (service != null && chatBareJid != null) {
-      return IgnorePointer(
-        child: MessageBubble(
-          message: widget.message,
-          senderName: widget.senderName,
-          timestamp: widget.timestampText ?? formatTimestamp(widget.message.timestamp),
-          avatarBytes: widget.avatarBytes,
-          deferOobImages: widget.deferOobImages,
-          chatBareJid: chatBareJid,
-          isRoom: widget.isRoom,
-          service: service,
-          replySenderName: widget.replySenderName,
-          replyBody: widget.replyBody,
-          onReplyTargetTap: null,
-          inviteRoomJid: widget.inviteRoomJid,
-          inviteRoomName: widget.inviteRoomName,
-          inviteAvatarBytes: widget.inviteAvatarBytes,
-          inviteReason: widget.inviteReason,
-          onJoinInvite: null,
-          onAddToRoster: null,
-          onKick: null,
-          onBan: null,
-          selfReactionSenderId: widget.selfReactionSenderId,
-          recentReactionOptions: widget.recentReactionOptions,
-          onReact: null,
-          onEdit: null,
-          onReply: null,
-          onAcceptFile: null,
-          onDeclineFile: null,
-          onFallbackUpload: null,
-          onOpenWebxdc: null,
-        ),
+      return MessageBubble(
+        message: widget.message,
+        senderName: widget.senderName,
+        timestamp:
+            widget.timestampText ?? formatTimestamp(widget.message.timestamp),
+        avatarBytes: widget.avatarBytes,
+        interactive: false,
+        deferOobImages: widget.deferOobImages,
+        chatBareJid: chatBareJid,
+        isRoom: widget.isRoom,
+        service: service,
+        replySenderName: widget.replySenderName,
+        replyBody: widget.replyBody,
+        onReplyTargetTap: null,
+        inviteRoomJid: widget.inviteRoomJid,
+        inviteRoomName: widget.inviteRoomName,
+        inviteAvatarBytes: widget.inviteAvatarBytes,
+        inviteReason: widget.inviteReason,
+        onJoinInvite: null,
+        onAddToRoster: null,
+        onKick: null,
+        onBan: null,
+        selfReactionSenderId: widget.selfReactionSenderId,
+        recentReactionOptions: widget.recentReactionOptions,
+        onReact: null,
+        onEdit: null,
+        onReply: null,
+        onAcceptFile: null,
+        onDeclineFile: null,
+        onFallbackUpload: null,
+        onOpenWebxdc: null,
       );
     }
     return _buildStaticMessagePreview(theme);
@@ -574,9 +590,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SelectableText(
-          fullJid == null
-              ? widget.senderJid
-              : '${widget.senderJid} ($fullJid)',
+          fullJid == null ? widget.senderJid : '${widget.senderJid} ($fullJid)',
           style: theme.textTheme.labelSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -683,8 +697,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
         InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap:
-              widget.onOpenReactionPicker ??
-              () => _showReactionPicker(context),
+              widget.onOpenReactionPicker ?? () => _showReactionPicker(context),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -874,9 +887,10 @@ Future<void> showMessageActionCard(
       return FadeTransition(
         opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
         child: ScaleTransition(
-          scale: Tween<double>(begin: 0.95, end: 1).animate(
-            CurvedAnimation(parent: animation, curve: Curves.easeOut),
-          ),
+          scale: Tween<double>(
+            begin: 0.95,
+            end: 1,
+          ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
           child: child,
         ),
       );

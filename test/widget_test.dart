@@ -23,6 +23,7 @@ import 'package:wimsy/notifications/notification_service.dart';
 import 'package:wimsy/storage/preferences_service.dart';
 import 'package:wimsy/storage/storage_service.dart';
 import 'package:wimsy/widgets/avatar_with_presence.dart';
+import 'package:wimsy/widgets/message_action_card.dart';
 import 'package:wimsy/widgets/message_bubble.dart';
 import 'package:wimsy/xmpp/jid_discovery.dart';
 import 'package:wimsy/xmpp/xmpp_service.dart';
@@ -1481,6 +1482,78 @@ void main() {
     await tester.pumpAndSettle();
     expect(reactedWith, '👍');
   });
+
+  testWidgets(
+    'tapping anywhere on a message opens the action card with selectable text',
+    (WidgetTester tester) async {
+      final message = ChatMessage(
+        from: 'bob@example.com',
+        to: 'alice@example.com',
+        body: 'Tap this message to select its text',
+        timestamp: DateTime.utc(2026),
+        outgoing: false,
+        messageId: 'tap-anywhere-test',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MessageBubble(
+              message: message,
+              senderName: 'Bob',
+              timestamp: '12:00',
+              avatarBytes: null,
+              chatBareJid: 'bob@example.com',
+              isRoom: false,
+              service: XmppService(),
+              replySenderName: null,
+              replyBody: null,
+              onReplyTargetTap: null,
+              inviteRoomJid: null,
+              inviteRoomName: null,
+              inviteAvatarBytes: null,
+              inviteReason: null,
+              onJoinInvite: null,
+              selfReactionSenderId: 'alice@example.com',
+              recentReactionOptions: const [],
+              onReact: null,
+              onEdit: null,
+              onReply: null,
+              onAcceptFile: null,
+              onDeclineFile: null,
+              onFallbackUpload: null,
+            ),
+          ),
+        ),
+      );
+
+      // A plain tap anywhere in the message body - not a long-press, and
+      // not on the avatar/menu icon - should bring up the action card.
+      await tester.tap(find.text('Tap this message to select its text'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('View XML'), findsOneWidget);
+      // The previewed message body is rendered through a real, interactive
+      // MessageBubble (no longer wrapped in an actively-ignoring
+      // IgnorePointer), so its text remains selectable.
+      final ignorePointers = tester
+          .widgetList<IgnorePointer>(
+            find.ancestor(
+              of: find.text('Tap this message to select its text'),
+              matching: find.byType(IgnorePointer),
+            ),
+          )
+          .toList();
+      expect(ignorePointers.every((widget) => !widget.ignoring), isTrue);
+      expect(
+        find.descendant(
+          of: find.byType(MessageActionCard),
+          matching: find.byType(SelectableText),
+        ),
+        findsWidgets,
+      );
+    },
+  );
 
   testWidgets(
     'message action card shows a Retract action only for outgoing messages',

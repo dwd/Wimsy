@@ -31,6 +31,7 @@ class MessageBubble extends StatelessWidget {
     required this.timestamp,
     required this.avatarBytes,
     this.elideHeader = false,
+    this.interactive = true,
     this.deferOobImages = false,
     required this.chatBareJid,
     required this.isRoom,
@@ -72,6 +73,15 @@ class MessageBubble extends StatelessWidget {
   /// but each bubble's bar is its own separate segment rather than one
   /// continuous line.
   final bool elideHeader;
+
+  /// Whether this bubble should respond to taps/long-presses to open the
+  /// message action card, and whether tapping the avatar does the same.
+  /// Set to false for the non-interactive preview rendered *inside* an
+  /// already-open [MessageActionCard], so the embedded bubble doesn't try
+  /// to pop open another card on top of itself; its message body remains
+  /// selectable regardless, since that only depends on [SelectableText]
+  /// itself rather than on this flag.
+  final bool interactive;
   final bool deferOobImages;
   final String chatBareJid;
   final bool isRoom;
@@ -148,213 +158,231 @@ class MessageBubble extends StatelessWidget {
       (contact) => contact.jid == senderBareJid,
     );
 
-    return _MessageMenuRegion(
-      messageId: message.messageId,
-      builder: (menuKey) => Container(
-        margin: EdgeInsets.only(top: elideHeader ? 2 : 8, bottom: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _MessageMenuButton(
-              key: menuKey,
-              message: message,
-              senderName: senderName,
-              senderJid: senderBareJid,
-              senderFullJid: senderFullJid,
-              avatarBytes: avatarBytes,
-              isContact: isSenderContact,
-              recentReactionOptions: recentReactionOptions,
-              ownReactions: ownReactions,
-              onReact: onReact,
-              onEdit: onEdit,
-              onRetract: onRetract,
-              onModerate: onModerate,
-              onReply: onReply,
-              onAddToRoster: onAddToRoster,
-              onKick: onKick,
-              onBan: onBan,
-              chatBareJid: chatBareJid,
-              isRoom: isRoom,
-              service: service,
-              timestampText: timestamp,
-              deferOobImages: deferOobImages,
-              selfReactionSenderId: selfReactionSenderId,
-              replySenderName: replySenderName,
-              replyBody: replyBody,
-              inviteRoomJid: inviteRoomJid,
-              inviteRoomName: inviteRoomName,
-              inviteAvatarBytes: inviteAvatarBytes,
-              inviteReason: inviteReason,
-              child: elideHeader
-                  ? const SizedBox(width: 36, height: 36)
-                  : AvatarWithPresence(
-                      label: senderName,
-                      bytes: avatarBytes,
-                      showPresenceDot: true,
-                      presenceShow: _resolveSenderPresenceShow(),
-                    ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.only(left: 8),
-                decoration: BoxDecoration(
-                  border: Border(left: BorderSide(color: nameColor, width: 3)),
+    final avatarWidget = elideHeader
+        ? const SizedBox(width: 36, height: 36)
+        : AvatarWithPresence(
+            label: senderName,
+            bytes: avatarBytes,
+            showPresenceDot: true,
+            presenceShow: _resolveSenderPresenceShow(),
+          );
+
+    // Builds the bubble's row of [avatar, body column]. When [menuKey] is
+    // supplied (i.e. [interactive] is true), the avatar is wrapped so
+    // tapping/long-pressing it opens the message action card, and the body
+    // column is itself wrapped so a plain tap anywhere on the message
+    // (not just the avatar) opens the same card too - letting the user
+    // select/copy the message text from there. When null, the bubble is a
+    // plain, non-interactive rendering (used for the preview embedded
+    // inside an already-open card).
+    Widget buildContent(
+      GlobalKey<_MessageMenuButtonState>? menuKey,
+    ) => Container(
+      margin: EdgeInsets.only(top: elideHeader ? 2 : 8, bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          menuKey == null
+              ? avatarWidget
+              : _MessageMenuButton(
+                  key: menuKey,
+                  message: message,
+                  senderName: senderName,
+                  senderJid: senderBareJid,
+                  senderFullJid: senderFullJid,
+                  avatarBytes: avatarBytes,
+                  isContact: isSenderContact,
+                  recentReactionOptions: recentReactionOptions,
+                  ownReactions: ownReactions,
+                  onReact: onReact,
+                  onEdit: onEdit,
+                  onRetract: onRetract,
+                  onModerate: onModerate,
+                  onReply: onReply,
+                  onAddToRoster: onAddToRoster,
+                  onKick: onKick,
+                  onBan: onBan,
+                  chatBareJid: chatBareJid,
+                  isRoom: isRoom,
+                  service: service,
+                  timestampText: timestamp,
+                  deferOobImages: deferOobImages,
+                  selfReactionSenderId: selfReactionSenderId,
+                  replySenderName: replySenderName,
+                  replyBody: replyBody,
+                  inviteRoomJid: inviteRoomJid,
+                  inviteRoomName: inviteRoomName,
+                  inviteAvatarBytes: inviteAvatarBytes,
+                  inviteReason: inviteReason,
+                  child: avatarWidget,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (!elideHeader) ...[
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    senderName,
-                                    style: theme.textTheme.labelMedium
-                                        ?.copyWith(
-                                          color: nameColor,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                  ),
-                                ),
-                                if (_senderRoomRole() == 'moderator') ...[
-                                  const SizedBox(width: 6),
-                                  const RoleAffiliationChip(label: 'moderator'),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Row(
+          const SizedBox(width: 12),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.only(left: 8),
+              decoration: BoxDecoration(
+                border: Border(left: BorderSide(color: nameColor, width: 3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!elideHeader) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (message.retracted) ...[
-                                message.moderated
-                                    ? _buildModeratedChip(context)
-                                    : _buildRetractedChip(context),
-                                const SizedBox(width: 6),
-                              ] else if (message.edited) ...[
-                                const SizedBox(width: 6),
-                                _buildEditedChip(context),
-                              ],
-                              Text(
-                                timestamp,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: textColor.withValues(alpha: 0.7),
+                              Flexible(
+                                child: Text(
+                                  senderName,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: nameColor,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                              if (tickIcon != null) ...[
+                              if (_senderRoomRole() == 'moderator') ...[
                                 const SizedBox(width: 6),
-                                tickIcon,
+                                const RoleAffiliationChip(label: 'moderator'),
                               ],
                             ],
                           ),
-                        ],
+                        ),
+                        const SizedBox(width: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (message.retracted) ...[
+                              message.moderated
+                                  ? _buildModeratedChip(context)
+                                  : _buildRetractedChip(context),
+                              const SizedBox(width: 6),
+                            ] else if (message.edited) ...[
+                              const SizedBox(width: 6),
+                              _buildEditedChip(context),
+                            ],
+                            Text(
+                              timestamp,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: textColor.withValues(alpha: 0.7),
+                              ),
+                            ),
+                            if (tickIcon != null) ...[
+                              const SizedBox(width: 6),
+                              tickIcon,
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  if (securityLabelChip != null) ...[
+                    securityLabelChip,
+                    const SizedBox(height: 6),
+                  ],
+                  if ((message.replyToId ?? '').isNotEmpty) ...[
+                    _buildReplyCard(context),
+                    const SizedBox(height: 8),
+                  ],
+                  if (fileTransferCard != null) ...[
+                    fileTransferCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (inviteCard != null) ...[
+                    inviteCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (callCard != null) ...[
+                    callCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (oobImage != null) ...[
+                    oobImage,
+                    const SizedBox(height: 8),
+                  ],
+                  if (webxdcCard != null) ...[
+                    webxdcCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (oobFileCard != null) ...[
+                    oobFileCard,
+                    const SizedBox(height: 8),
+                  ],
+                  if (message.callSid != null)
+                    const SizedBox.shrink()
+                  else if (message.encryptionError != null)
+                    SelectableText(
+                      'Undecryptable message '
+                      '(${message.encryptionError})',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: textColor,
+                        fontStyle: FontStyle.italic,
                       ),
-                      const SizedBox(height: 6),
-                    ],
-                    if (securityLabelChip != null) ...[
-                      securityLabelChip,
-                      const SizedBox(height: 6),
-                    ],
-                    if ((message.replyToId ?? '').isNotEmpty) ...[
-                      _buildReplyCard(context),
-                      const SizedBox(height: 8),
-                    ],
-                    if (fileTransferCard != null) ...[
-                      fileTransferCard,
-                      const SizedBox(height: 8),
-                    ],
-                    if (inviteCard != null) ...[
-                      inviteCard,
-                      const SizedBox(height: 8),
-                    ],
-                    if (callCard != null) ...[
-                      callCard,
-                      const SizedBox(height: 8),
-                    ],
-                    if (oobImage != null) ...[
-                      oobImage,
-                      const SizedBox(height: 8),
-                    ],
-                    if (webxdcCard != null) ...[
-                      webxdcCard,
-                      const SizedBox(height: 8),
-                    ],
-                    if (oobFileCard != null) ...[
-                      oobFileCard,
-                      const SizedBox(height: 8),
-                    ],
-                    if (message.callSid != null)
-                      const SizedBox.shrink()
-                    else if (message.encryptionError != null)
-                      SelectableText(
-                        'Undecryptable message '
-                        '(${message.encryptionError})',
+                    )
+                  else if (_meCommandAction(message.body) != null)
+                    SelectableText(
+                      _formatMeCommand(
+                        senderName,
+                        _meCommandAction(message.body)!,
+                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: textColor,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  else if (_shouldShowBody(message.body, message.oobUrl))
+                    SelectableText.rich(
+                      TextSpan(
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: textColor,
-                          fontStyle: FontStyle.italic,
+                          decoration: _strikeThroughBody
+                              ? TextDecoration.lineThrough
+                              : null,
                         ),
-                      )
-                    else if (_meCommandAction(message.body) != null)
-                      SelectableText(
-                        _formatMeCommand(
-                          senderName,
-                          _meCommandAction(message.body)!,
-                        ),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: textColor,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      )
-                    else if (_shouldShowBody(message.body, message.oobUrl))
-                      SelectableText.rich(
-                        TextSpan(
-                          style: theme.textTheme.bodyMedium?.copyWith(
+                        children: _linkifyText(
+                          message.body,
+                          theme.textTheme.bodyMedium?.copyWith(
                             color: textColor,
                             decoration: _strikeThroughBody
                                 ? TextDecoration.lineThrough
                                 : null,
                           ),
-                          children: _linkifyText(
-                            message.body,
-                            theme.textTheme.bodyMedium?.copyWith(
-                              color: textColor,
-                              decoration: _strikeThroughBody
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                            ),
-                            theme.textTheme.bodyMedium?.copyWith(
-                              color: linkColor,
-                              decoration: _strikeThroughBody
-                                  ? TextDecoration.combine([
-                                      TextDecoration.underline,
-                                      TextDecoration.lineThrough,
-                                    ])
-                                  : TextDecoration.underline,
-                            ),
+                          theme.textTheme.bodyMedium?.copyWith(
+                            color: linkColor,
+                            decoration: _strikeThroughBody
+                                ? TextDecoration.combine([
+                                    TextDecoration.underline,
+                                    TextDecoration.lineThrough,
+                                  ])
+                                : TextDecoration.underline,
                           ),
                         ),
                       ),
-                    if (reactions.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      _buildReactionRow(context, reactions, ownReactions),
-                    ],
+                    ),
+                  if (reactions.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    _buildReactionRow(context, reactions, ownReactions),
                   ],
-                ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+
+    if (!interactive) {
+      return buildContent(null);
+    }
+    return _MessageMenuRegion(
+      messageId: message.messageId,
+      builder: buildContent,
     );
   }
 
@@ -1512,6 +1540,7 @@ class _PendingMessageClockState extends State<_PendingMessageClock>
   Widget build(BuildContext context) {
     return Semantics(
       label: 'Message sending',
+      container: true,
       child: ExcludeSemantics(
         child: RepaintBoundary(
           child: SizedBox.square(
@@ -1584,20 +1613,33 @@ class _MessageMenuRegionState extends State<_MessageMenuRegion> {
     return TouchLongPressRegion(
       key: Key('message-bubble-${widget.messageId}'),
       onLongPress: (position) => _menuKey.currentState?.showAt(position),
+      onTap: (position) => _menuKey.currentState?.showAt(position),
       child: widget.builder(_menuKey),
     );
   }
 }
 
-/// Detects touch long presses without competing with selectable message text.
+/// Detects taps and long presses anywhere in [child] without competing with
+/// selectable message text's own gesture recognizers (e.g. its tap-to-place-
+/// cursor or drag-to-select gestures), since those are resolved through the
+/// Flutter gesture arena while this widget watches raw pointer events
+/// instead. This lets the entire message - including its selectable body -
+/// respond to a plain tap/click (opening the message action card) as well
+/// as a long press, without the two competing for the same gesture.
 class TouchLongPressRegion extends StatefulWidget {
   const TouchLongPressRegion({
     super.key,
     required this.onLongPress,
+    this.onTap,
     required this.child,
   });
 
   final ValueChanged<Offset> onLongPress;
+
+  /// Called with the release position when the pointer goes up before the
+  /// long-press timeout, without having moved past [kTouchSlop] - i.e. a
+  /// plain tap/click rather than a long press.
+  final ValueChanged<Offset>? onTap;
   final Widget child;
 
   @override
@@ -1613,7 +1655,8 @@ class _TouchLongPressRegionState extends State<TouchLongPressRegion> {
   void _handlePointerDown(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.touch &&
         event.kind != PointerDeviceKind.stylus &&
-        event.kind != PointerDeviceKind.invertedStylus) {
+        event.kind != PointerDeviceKind.invertedStylus &&
+        event.kind != PointerDeviceKind.mouse) {
       return;
     }
     _cancel();
@@ -1638,6 +1681,7 @@ class _TouchLongPressRegionState extends State<TouchLongPressRegion> {
     if (event.pointer == _pointer) {
       final position = _startPosition;
       final recognized = _longPressRecognized;
+      final timerStillPending = _timer != null;
       _cancel();
       // Do not insert the popup route while Android is still dispatching the
       // pointer sequence which recognized this long press. Otherwise the
@@ -1646,6 +1690,12 @@ class _TouchLongPressRegionState extends State<TouchLongPressRegion> {
       // gesture sequence.
       if (recognized && position != null && event is PointerUpEvent) {
         widget.onLongPress(position);
+      } else if (timerStillPending &&
+          position != null &&
+          event is PointerUpEvent) {
+        // Released before the long-press timeout, without moving past the
+        // touch slop: a plain tap/click.
+        widget.onTap?.call(position);
       }
     }
   }
