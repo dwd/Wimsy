@@ -89,7 +89,12 @@ class NameChipsRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
+        // The name (plus its chips) gets priority over the available space:
+        // a higher flex factor than the trailing widgets means it keeps as
+        // much room as it needs, pushing the trailing content to shrink
+        // (and ellipsize) first instead of overlapping or overflowing it.
         Flexible(
+          flex: 3,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,15 +118,17 @@ class NameChipsRow extends StatelessWidget {
         ),
         if (trailing.isNotEmpty) ...[
           const SizedBox(width: 8),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < trailing.length; i++) ...[
-                if (i > 0) const SizedBox(width: 6),
-                trailing[i],
+          Flexible(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < trailing.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Flexible(child: trailing[i]),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ],
