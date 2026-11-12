@@ -1391,30 +1391,16 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                         final bookmarkStatusText = roomJoinError
                             ? _mucJoinErrorLabel(roomJoinErrorCondition)
                             : (contact.bookmarkAutoJoin
-                                  ? 'Auto-join room'
+                                  ? null
                                   : 'Room bookmark');
                         return _ContactMenuRegion(
                           contactKey: jid,
                           builder: (menuKey) => InkWell(
                             onTap: () => service.selectChat(jid),
-                            child: Container(
+                            child: Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
                                 vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surface,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: roomJoinError
-                                      ? theme.colorScheme.error.withValues(
-                                          alpha: 0.5,
-                                        )
-                                      : (isBookmark
-                                            ? theme.colorScheme.primary
-                                                  .withValues(alpha: 0.35)
-                                            : theme.colorScheme.outlineVariant),
-                                ),
                               ),
                               child: Opacity(
                                 opacity: isServerNotFound ? 0.5 : 1.0,
@@ -1498,32 +1484,45 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                           ),
                                         ),
                                     ],
+                                    trailing: [
+                                      if (!isBookmark)
+                                        Text(
+                                          (effectiveStatusText
+                                                      ?.isNotEmpty ==
+                                                  true)
+                                              ? effectiveStatusText!
+                                              : service.presenceLabelFor(jid),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: theme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                        ),
+                                    ],
                                   ),
                                   body: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        isBookmark
-                                            ? bookmarkStatusText
-                                            : ((effectiveStatusText
-                                                          ?.isNotEmpty ==
-                                                      true)
-                                                  ? effectiveStatusText!
-                                                  : service.presenceLabelFor(
-                                                      jid,
-                                                    )),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.bodySmall
-                                            ?.copyWith(
-                                              color: roomJoinError
-                                                  ? theme.colorScheme.error
-                                                  : theme
-                                                        .colorScheme
-                                                        .onSurfaceVariant,
-                                            ),
-                                      ),
+                                      if (isBookmark &&
+                                          bookmarkStatusText != null) ...[
+                                        Text(
+                                          bookmarkStatusText,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: roomJoinError
+                                                    ? theme.colorScheme.error
+                                                    : theme
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ],
                                       if (latest != null) ...[
                                         const SizedBox(height: 2),
                                         Builder(
