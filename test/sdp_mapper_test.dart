@@ -217,6 +217,44 @@ void main() {
     expect(sdp, contains('m=video 9 UDP/TLS/RTP/SAVPF 96'));
   });
 
+  test(
+    'buildMinimalSdpFromJingleContents excludes incomplete contents from '
+    'bundle group',
+    () {
+      final sdp = buildMinimalSdpFromJingleContents(
+        contents: const [
+          // This content has no rtpDescription/iceTransport (e.g. an
+          // offered content whose details were never captured), so it
+          // must not end up in the m= section list nor in the BUNDLE
+          // group, otherwise the group would reference a mid with no
+          // matching m= section.
+          JingleContent(name: 'audio', creator: 'initiator'),
+          JingleContent(
+            name: 'video0',
+            creator: 'initiator',
+            rtpDescription: JingleRtpDescription(
+              media: 'video',
+              payloadTypes: [
+                JingleRtpPayloadType(id: 96, name: 'VP8', clockRate: 90000),
+              ],
+            ),
+            iceTransport: JingleIceTransport(
+              ufrag: 'uf',
+              password: 'pw',
+              candidates: [],
+            ),
+          ),
+        ],
+        bundle: true,
+      );
+
+      expect(sdp, contains('a=group:BUNDLE video0'));
+      expect(sdp, isNot(contains('a=group:BUNDLE audio')));
+      expect(sdp, isNot(contains('a=mid:audio\n')));
+      expect(sdp, contains('m=video 9 UDP/TLS/RTP/SAVPF 96'));
+    },
+  );
+
   test('buildMinimalSdpFromJingleContents keeps single-content bundle', () {
     final sdp = buildMinimalSdpFromJingleContents(
       contents: const [

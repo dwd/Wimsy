@@ -313,6 +313,10 @@ String buildMinimalSdpFromJingleContents({
   buffer.writeln('t=0 0');
   if (bundle) {
     final bundle = contents
+        .where(
+          (content) =>
+              content.rtpDescription != null && content.iceTransport != null,
+        )
         .map(
           (content) => content.name.isEmpty
               ? content.rtpDescription?.media ?? ''
