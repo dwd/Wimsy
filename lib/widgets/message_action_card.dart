@@ -231,6 +231,22 @@ class _MessageActionCardState extends State<MessageActionCard> {
   /// info and message preview. Off by default.
   bool _showXml = false;
 
+  /// Dismisses the card first, then runs [action] on the next frame.
+  ///
+  /// Used by every one-shot action button (reply, edit, react, etc.)
+  /// instead of running the action and dismissing afterwards: several of
+  /// these actions (e.g. replying moves keyboard focus to the chat's
+  /// compose field) trigger their own rebuilds/focus changes, and doing
+  /// that while this card's modal route is still in the middle of being
+  /// popped can make the pop silently get dropped or immediately undone,
+  /// leaving the card either stuck open or flashing back up right after
+  /// closing. Popping the route first, then letting [action] run only
+  /// once that's done, avoids the two fighting over the same frame.
+  void _dismissThen(VoidCallback action) {
+    widget.onDismiss?.call();
+    WidgetsBinding.instance.addPostFrameCallback((_) => action());
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -605,10 +621,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
           ActionChip(
             avatar: const Icon(Icons.person_add_outlined, size: 16),
             label: const Text('Add to contacts'),
-            onPressed: () {
-              widget.onAddToRoster?.call();
-              widget.onDismiss?.call();
-            },
+            onPressed: () => _dismissThen(widget.onAddToRoster!),
           ),
       ],
     );
@@ -653,10 +666,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
           _ActionButton(
             icon: action.icon,
             label: action.label,
-            onTap: () {
-              action.onTap();
-              widget.onDismiss?.call();
-            },
+            onTap: () => _dismissThen(action.onTap),
           ),
         // "View XML" is a toggle (off by default) rather than a one-shot
         // action: turning it on simply swaps the sender/contact info and
@@ -689,10 +699,7 @@ class _MessageActionCardState extends State<MessageActionCard> {
             emoji: emoji,
             count: null,
             selected: widget.ownReactions.contains(emoji),
-            onTap: () {
-              widget.onReact?.call(emoji);
-              widget.onDismiss?.call();
-            },
+            onTap: () => _dismissThen(() => widget.onReact?.call(emoji)),
           ),
         InkWell(
           borderRadius: BorderRadius.circular(16),

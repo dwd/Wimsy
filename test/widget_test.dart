@@ -1983,6 +1983,7 @@ void main() {
     expect(find.text('Add to contacts'), findsOneWidget);
 
     await tester.tap(find.text('Add to contacts'));
+    await tester.pump();
     expect(added, isTrue);
   });
 

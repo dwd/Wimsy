@@ -64,6 +64,62 @@ void main() {
   });
 
   testWidgets(
+    'tapping an action dismisses the card even when the action itself '
+    'triggers a rebuild (e.g. moving focus), without it reappearing',
+    (WidgetTester tester) async {
+      var replied = false;
+      final focusNode = FocusNode();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                return Column(
+                  children: [
+                    ElevatedButton(
+                      onPressed: () {
+                        showMessageActionCard(
+                          context,
+                          builder: (dismiss) => MessageActionCard(
+                            message: buildMessage(),
+                            senderName: 'Juliet',
+                            senderJid: 'juliet@example.com',
+                            onDismiss: dismiss,
+                            onReply: () {
+                              // Mimic the real app: replying moves focus to
+                              // the compose field and rebuilds the screen.
+                              replied = true;
+                              focusNode.requestFocus();
+                            },
+                          ),
+                        );
+                      },
+                      child: const Text('Open'),
+                    ),
+                    TextField(focusNode: focusNode),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reply'), findsOneWidget);
+
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+
+      expect(replied, isTrue);
+      // The card must actually be gone, and stay gone, rather than
+      // flashing back up right after closing.
+      expect(find.text('Reply'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'expands the full reaction set inline when the message has reactions',
     (WidgetTester tester) async {
       var viewed = false;
