@@ -10,6 +10,27 @@
       Wimsy is a cross-platform XMPP client focused on modern server support and TLS-first connections.
     </doap:description>
 
+    <doap:homepage rdf:resource="https://github.com/dwd/Wimsy"/>
+    <doap:download-page rdf:resource="https://github.com/dwd/Wimsy/releases"/>
+    <doap:bug-database rdf:resource="https://github.com/dwd/Wimsy/issues"/>
+    <doap:logo rdf:resource="https://raw.githubusercontent.com/dwd/Wimsy/main/web/icons/Icon-512.png"/>
+
+    <doap:repository>
+      <doap:GitRepository>
+        <doap:location rdf:resource="https://github.com/dwd/Wimsy.git"/>
+        <doap:browse rdf:resource="https://github.com/dwd/Wimsy"/>
+      </doap:GitRepository>
+    </doap:repository>
+
+    <doap:programming-language>Dart</doap:programming-language>
+    <doap:license rdf:resource="https://opensource.org/licenses/MIT"/>
+
+    <doap:os>Android</doap:os>
+    <doap:os>Linux</doap:os>
+    <doap:os>macOS</doap:os>
+    <doap:os>Windows</doap:os>
+    <doap:os>Web</doap:os>
+
     <doap:implements>
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0004.html"/>
