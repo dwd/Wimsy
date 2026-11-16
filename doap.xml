@@ -351,13 +351,6 @@
     </doap:implements>
     <doap:implements>
       <xmpp:SupportedXep>
-        <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0467.html"/>
-        <xmpp:status>partial</xmpp:status>
-        <xmpp:note xml:lang="en">Unlike StartTLS/Direct TLS, an untrusted certificate is not surfaced via an interactive dialog; instead the user can pin the server's expected SHA-256 certificate fingerprint (the same value/format used for WebTransport certificate pinning) and the connection is accepted only if the presented certificate matches, either via standard CA validation or that pinned fingerprint.</xmpp:note>
-      </xmpp:SupportedXep>
-    </doap:implements>
-    <doap:implements>
-      <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0490.html"/>
         <xmpp:status>complete</xmpp:status>
       </xmpp:SupportedXep>
@@ -385,9 +378,9 @@
     <doap:implements>
       <xmpp:SupportedXep>
         <!-- XEP number TBD; tracked as urn:xmpp:webtransport:0 -->
-        <xmpp:xep rdf:resource="https://xmpp.org/extensions/inbox/xmpp-over-webtransport.html"/>
+        <xmpp:xep rdf:resource="https://xmpp.org/extensions/inbox/xmpp-quic-redux.html"/>
         <xmpp:status>partial</xmpp:status>
-        <xmpp:note xml:lang="en">Reliable multi-stream support on the web platform, including client- and server-initiated bidirectional streams with the same bare-JID routing policy as XMPP over QUIC. Discovery uses the host-meta link relation urn:xmpp:webtransport:0. Datagrams are not supported.</xmpp:note>
+        <xmpp:note xml:lang="en">Reliable multi-stream XMPP over QUIC and WebTransport. Discovery uses the host-meta link relation urn:xmpp:webtransport:0. Datagrams are not supported.</xmpp:note>
       </xmpp:SupportedXep>
     </doap:implements>
   </doap:Project>
