@@ -12511,8 +12511,41 @@ class XmppService extends ChangeNotifier {
     if (settings.mode == MucNotifyMode.all) {
       return true;
     }
+    return roomMessageIsMention(normalized, message);
+  }
+
+  /// Returns true if [message] should be considered a mention of the
+  /// current user within [roomJid]: either its body mentions the user's
+  /// in-room nickname (see [MucNotifySettings.bodyMentionsNick]), or it is a
+  /// reply to a message that the user themself previously sent to the room.
+  bool roomMessageIsMention(String roomJid, ChatMessage message) {
+    final normalized = _bareJid(roomJid);
     final nick = _roomNickFor(normalized);
-    return MucNotifySettings.bodyMentionsNick(message.body, nick);
+    if (MucNotifySettings.bodyMentionsNick(message.body, nick)) {
+      return true;
+    }
+    return _isReplyToOwnRoomMessage(normalized, message);
+  }
+
+  /// Returns true if [message]'s [ChatMessage.replyToId] refers to a message
+  /// in [roomJid] that was sent by the current user.
+  bool _isReplyToOwnRoomMessage(String roomJid, ChatMessage message) {
+    final replyToId = message.replyToId;
+    if (replyToId == null || replyToId.isEmpty) {
+      return false;
+    }
+    final list = _roomMessages[roomJid];
+    if (list == null) {
+      return false;
+    }
+    for (final candidate in list) {
+      if (candidate.messageId == replyToId ||
+          candidate.stanzaId == replyToId ||
+          candidate.mamId == replyToId) {
+        return candidate.outgoing;
+      }
+    }
+    return false;
   }
 
   bool _shouldNotifyRoomMessage(String roomJid, DateTime timestamp) {

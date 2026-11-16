@@ -155,23 +155,33 @@ class MucNotifySettings {
   }
 
   /// Returns true if a message with the given [body] should be considered a
-  /// mention of the given in-room [nick], following the convention that a
-  /// mention either begins with the nickname followed by punctuation (e.g.
-  /// "dave: hi", "dave, hi"), or contains "@" followed by the nickname
-  /// anywhere in the body (e.g. "hi @dave").
+  /// mention of the given in-room [nick].
+  ///
+  /// A mention is either:
+  ///  - the nickname appearing at the very beginning of the message,
+  ///    immediately followed by a non-alphanumeric character (or the end of
+  ///    the message) - e.g. "dave: hi", "dave, hi" - but *not* "davedave: hi"
+  ///    or "davely, hi"; or
+  ///  - the nickname appearing immediately after an "@" sign anywhere in the
+  ///    body, again followed by a non-alphanumeric character or the end of
+  ///    the message - e.g. "hi @dave", "hi @dave!", or "hi @dave" at the very
+  ///    end of the message.
   static bool bodyMentionsNick(String body, String nick) {
     if (nick.trim().isEmpty || body.trim().isEmpty) {
       return false;
     }
     final escapedNick = RegExp.escape(nick.trim());
     final leadingPattern = RegExp(
-      '^\\s*$escapedNick\\s*[:,-]',
+      '^\\s*$escapedNick(?![a-zA-Z0-9])',
       caseSensitive: false,
     );
     if (leadingPattern.hasMatch(body)) {
       return true;
     }
-    final atPattern = RegExp('@$escapedNick\\b', caseSensitive: false);
+    final atPattern = RegExp(
+      '@$escapedNick(?![a-zA-Z0-9])',
+      caseSensitive: false,
+    );
     return atPattern.hasMatch(body);
   }
 

@@ -154,4 +154,48 @@ void main() {
 
     expect(service.shouldNotifyForRoomContent(roomJid, earlier), isFalse);
   });
+
+  test('mode=mentions also notifies for replies to our own messages', () {
+    final service = XmppService();
+    service.seedBookmarks([
+      ContactEntry(
+        jid: roomJid,
+        isBookmark: true,
+        bookmarkNick: 'dave',
+        mucNotifySettings: const MucNotifySettings(mode: MucNotifyMode.mentions),
+      ),
+    ]);
+    final ownMessage = ChatMessage(
+      from: 'dave',
+      to: roomJid,
+      body: 'anyone around?',
+      timestamp: DateTime(2026, 1, 1, 12),
+      outgoing: true,
+      messageId: 'own-message-1',
+    );
+    service.seedRoomMessages({
+      roomJid: [ownMessage],
+    });
+
+    final reply = ChatMessage(
+      from: 'someone',
+      to: roomJid,
+      body: 'yes, I am!',
+      timestamp: DateTime(2026, 1, 1, 12, 1),
+      outgoing: false,
+      replyToId: 'own-message-1',
+    );
+    final unrelatedReply = ChatMessage(
+      from: 'someone',
+      to: roomJid,
+      body: 'not related',
+      timestamp: DateTime(2026, 1, 1, 12, 1),
+      outgoing: false,
+      replyToId: 'someone-elses-message',
+    );
+
+    expect(service.shouldNotifyForRoomContent(roomJid, reply), isTrue);
+    expect(service.roomMessageIsMention(roomJid, reply), isTrue);
+    expect(service.shouldNotifyForRoomContent(roomJid, unrelatedReply), isFalse);
+  });
 }

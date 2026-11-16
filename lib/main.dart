@@ -1367,6 +1367,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                   ? displayedAt
                                   : localReadAt);
                         var unreadCount = 0;
+                        var unreadHasMention = false;
                         if (!isActiveChat &&
                             service.isMamCatchUpCompleteFor(jid)) {
                           for (final message in messages) {
@@ -1378,10 +1379,19 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                 continue;
                               }
                               unreadCount += 1;
+                              if (isBookmark &&
+                                  service.roomMessageIsMention(jid, message)) {
+                                unreadHasMention = true;
+                              }
                             }
                           }
                         }
                         final isUnread = unreadCount > 0;
+                        final unreadBadgeText = unreadCount > 99
+                            ? '99+'
+                            : (unreadHasMention
+                                  ? '@$unreadCount'
+                                  : unreadCount.toString());
                         final roomJoinError = isBookmark
                             ? service.roomFor(jid)?.joinError == true
                             : false;
@@ -1609,9 +1619,7 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                                                 BorderRadius.circular(12),
                                           ),
                                           child: Text(
-                                            unreadCount > 99
-                                                ? '99+'
-                                                : unreadCount.toString(),
+                                            unreadBadgeText,
                                             style: theme.textTheme.labelSmall
                                                 ?.copyWith(
                                                   color: theme

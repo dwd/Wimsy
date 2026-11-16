@@ -95,5 +95,15 @@ void main() {
       expect(MucNotifySettings.bodyMentionsNick('', 'dave'), isFalse);
       expect(MucNotifySettings.bodyMentionsNick('dave: hi', ''), isFalse);
     });
+
+    test('matches the nickname alone with nothing following', () {
+      expect(MucNotifySettings.bodyMentionsNick('dave', 'dave'), isTrue);
+      expect(MucNotifySettings.bodyMentionsNick('hey @dave', 'dave'), isTrue);
+    });
+
+    test('does not match a longer word starting with the nickname', () {
+      expect(MucNotifySettings.bodyMentionsNick('davely, hi', 'dave'), isFalse);
+      expect(MucNotifySettings.bodyMentionsNick('hi @davely', 'dave'), isFalse);
+    });
   });
 }
