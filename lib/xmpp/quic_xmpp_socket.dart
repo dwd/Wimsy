@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:universal_io/io.dart';
 // ignore_for_file: implementation_imports
@@ -9,6 +10,7 @@ import 'package:xmpp_stone/src/connection/XmppWebsocketIo.dart';
 import 'package:xmpp_stone/src/connection/XmppStreamRouting.dart';
 import 'package:xmpp_stone/src/logger/Log.dart';
 import 'dns_cache.dart';
+import 'quic_varint.dart';
 import 'quic_write_tracker.dart';
 import 'package:xmpp_stone/src/connection/XmppEarlyDataSocket.dart';
 import 'quic_early_data.dart';
@@ -19,6 +21,91 @@ export 'package:xmpp_stone/src/connection/XmppStreamRouting.dart'
 
 /// Result of a QUIC connection migration attempt.
 enum MigrationResult { success, failed }
+
+/// QUIC stream header "stream type" values defined by the xmpp-quic-redux
+/// protoXEP. Every QUIC stream (including the first) must begin with a
+/// varint-encoded stream-type octet as the very first byte(s) written on
+/// that stream.
+@visibleForTesting
+const int quicStreamTypePrimary = 0;
+
+/// Ancillary QUIC stream type: immediately followed by the varint-encoded
+/// Session ID (the QUIC stream ID of the parent Primary stream).
+@visibleForTesting
+const int quicStreamTypeAncillary = 1;
+
+/// The Primary QUIC stream is always opened first, as the first
+/// client-initiated bidirectional stream of the connection. Per RFC 9000
+/// §2.1, client-initiated bidirectional stream IDs start at 0, so the
+/// Primary stream's ID is always 0.
+@visibleForTesting
+const int quicPrimaryStreamId = 0;
+
+/// Builds the QUIC stream header that must be the first bytes written on a
+/// newly opened QUIC stream: a varint stream-type (0 = Primary,
+/// 1 = Ancillary) followed, for Ancillary streams, by the varint-encoded
+/// Session ID (the QUIC stream ID of the parent Primary stream).
+@visibleForTesting
+Uint8List buildQuicStreamHeader({required int type, int? sessionId}) {
+  final typeBytes = encodeQuicVarint(type);
+  if (type != quicStreamTypeAncillary) {
+    return typeBytes;
+  }
+  final sessionBytes = encodeQuicVarint(sessionId ?? quicPrimaryStreamId);
+  final combined = Uint8List(typeBytes.length + sessionBytes.length);
+  combined.setRange(0, typeBytes.length, typeBytes);
+  combined.setRange(typeBytes.length, combined.length, sessionBytes);
+  return combined;
+}
+
+/// A successfully parsed QUIC stream header (see [buildQuicStreamHeader]).
+@visibleForTesting
+class QuicStreamHeader {
+  const QuicStreamHeader({
+    required this.type,
+    this.sessionId,
+    required this.bytesConsumed,
+  });
+
+  /// The parsed stream type ([quicStreamTypePrimary] or
+  /// [quicStreamTypeAncillary]).
+  final int type;
+
+  /// The parent Primary stream's QUIC stream ID, only set for Ancillary
+  /// streams.
+  final int? sessionId;
+
+  /// Number of bytes the header occupied at the start of the buffer it was
+  /// parsed from.
+  final int bytesConsumed;
+}
+
+/// Attempts to parse a leading QUIC stream header out of [buffer].
+///
+/// Returns `null` if [buffer] does not yet contain enough bytes to decode a
+/// complete header — the caller should buffer more bytes read from the
+/// stream and retry.
+@visibleForTesting
+QuicStreamHeader? tryParseQuicStreamHeader(Uint8List buffer) {
+  final typeResult = decodeQuicVarint(buffer);
+  if (typeResult == null) {
+    return null;
+  }
+  final (type, typeConsumed) = typeResult;
+  if (type != quicStreamTypeAncillary) {
+    return QuicStreamHeader(type: type, bytesConsumed: typeConsumed);
+  }
+  final sessionResult = decodeQuicVarint(buffer, typeConsumed);
+  if (sessionResult == null) {
+    return null;
+  }
+  final (sessionId, sessionConsumed) = sessionResult;
+  return QuicStreamHeader(
+    type: type,
+    sessionId: sessionId,
+    bytesConsumed: typeConsumed + sessionConsumed,
+  );
+}
 
 class QuicCapableXmppSocket extends XmppWebSocket
     implements XmppEarlyDataSocket {
@@ -933,7 +1020,14 @@ class QuicCapableXmppSocket extends XmppWebSocket
       await connectionClose(connection: connected.$2);
       rethrow;
     }
-    final (sendStream, recvStream) = streams;
+    var (sendStream, recvStream) = streams;
+    // xmpp-quic-redux: the Primary QUIC stream must begin with a 1-byte
+    // varint-encoded stream-type header (type 0) as the very first bytes
+    // written on the stream, before any XML stream data.
+    sendStream = await sendStreamWriteAll(
+      stream: sendStream,
+      data: buildQuicStreamHeader(type: quicStreamTypePrimary),
+    );
     return _QuicConnectResult(
       generation: generation,
       attemptId: attemptId,
@@ -964,10 +1058,20 @@ class QuicCapableXmppSocket extends XmppWebSocket
         if (!accepted) {
           final (send, recv) = await connectionOpenBi(connection: connection);
           if (!_isCurrentGeneration(generation)) return;
-          _sendStream = send;
+          // xmpp-quic-redux: this is a freshly opened Primary stream (the
+          // early-data stream was rejected), so it also needs the Primary
+          // stream-type header as its first bytes.
+          final headered = await sendStreamWriteAll(
+            stream: send,
+            data: buildQuicStreamHeader(type: quicStreamTypePrimary),
+          );
+          _sendStream = headered;
           _recvStream = recv;
           if (replay.isNotEmpty) {
-            _sendStream = await sendStreamWriteAll(stream: send, data: replay);
+            _sendStream = await sendStreamWriteAll(
+              stream: headered,
+              data: replay,
+            );
           }
         }
         debugPrint(
@@ -1136,6 +1240,15 @@ class QuicCapableXmppSocket extends XmppWebSocket
       Future<void>(() async {
         var recvStream = initial;
         var streamEnd = QuicStreamEndObservation.unknown;
+        // xmpp-quic-redux: every QUIC stream starts with a varint-encoded
+        // stream-type header (and, for Ancillary streams, a varint-encoded
+        // Session ID) as the very first bytes. These are buffered here and
+        // parsed off before the remaining bytes are handed to the XML/stanza
+        // parsing logic below. The header may be split across multiple
+        // reads, so parsing is retried as more bytes arrive.
+        final headerBuffer = BytesBuilder();
+        var headerParsed = false;
+        QuicStreamHeader? parsedHeader;
         try {
           while (_isCurrentGeneration(recvGeneration)) {
             final readResult = await recvStreamRead(
@@ -1162,8 +1275,30 @@ class QuicCapableXmppSocket extends XmppWebSocket
             if (bytes.isEmpty) {
               continue;
             }
+            var payload = bytes;
+            if (!headerParsed) {
+              headerBuffer.add(bytes);
+              final buffered = headerBuffer.toBytes();
+              final header = tryParseQuicStreamHeader(buffered);
+              if (header == null) {
+                // Not enough bytes yet to decode the stream-type (and, for
+                // Ancillary streams, Session ID) varint header.
+                continue;
+              }
+              headerParsed = true;
+              parsedHeader = header;
+              debugPrint(
+                'QUIC stream header parsed: $context '
+                'label=${label ?? (isControl ? 'quic-control' : 'quic-aux-${slot ?? '?'}')} '
+                'type=${parsedHeader.type} sessionId=${parsedHeader.sessionId}',
+              );
+              payload = buffered.sublist(parsedHeader.bytesConsumed);
+              if (payload.isEmpty) {
+                continue;
+              }
+            }
             _lastQuicReceiveAt = DateTime.now();
-            final chunk = utf8.decode(bytes, allowMalformed: true);
+            final chunk = utf8.decode(payload, allowMalformed: true);
             if (isControl) {
               _captureBindResult(chunk);
             }
@@ -1489,6 +1624,20 @@ class QuicCapableXmppSocket extends XmppWebSocket
         'QUIC aux stream slot=$slot assigned from server-stream pool '
         '(recv loop already running; ${_serverStreamPool.length} remaining in pool)',
       );
+      if (!pooled.headerSent) {
+        // xmpp-quic-redux: our outbound half of this (server-initiated)
+        // bidi stream is being repurposed as an Ancillary stream, so it
+        // must start with the Ancillary header (type=1 + Session ID of the
+        // Primary stream) before any stanza data.
+        pooled.sendStream = await sendStreamWriteAll(
+          stream: pooled.sendStream,
+          data: buildQuicStreamHeader(
+            type: quicStreamTypeAncillary,
+            sessionId: quicPrimaryStreamId,
+          ),
+        );
+        pooled.headerSent = true;
+      }
       // The recv loop for this stream was started immediately when the server
       // stream was accepted — do NOT start a second one here.
       _auxStreamOpening.remove(slot);
@@ -1549,6 +1698,17 @@ class QuicCapableXmppSocket extends XmppWebSocket
           sendStream: sendStream,
           recvStream: recvStream,
         );
+        // xmpp-quic-redux: this freshly opened Ancillary stream must begin
+        // with the type=1 header followed by the Session ID (the QUIC
+        // stream ID of the parent Primary stream) before any stanza data.
+        channel.sendStream = await sendStreamWriteAll(
+          stream: channel.sendStream,
+          data: buildQuicStreamHeader(
+            type: quicStreamTypeAncillary,
+            sessionId: quicPrimaryStreamId,
+          ),
+        );
+        channel.headerSent = true;
         _auxStreamsBySlot[slot] = channel;
         final elapsed = DateTime.now().difference(openStart);
         debugPrint(
@@ -2089,6 +2249,10 @@ class _QuicStreamChannel {
 
   QuicSendStream sendStream;
   QuicRecvStream recvStream;
+
+  /// Whether the xmpp-quic-redux Ancillary stream header (type=1 + Session
+  /// ID) has already been written as the first bytes on [sendStream].
+  bool headerSent = false;
 }
 
 class _QuicSendTarget {
