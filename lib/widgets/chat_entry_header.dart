@@ -46,10 +46,10 @@ class ChatEntryHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (header != null) header!,
+                ?header,
                 if (header != null && body != null)
                   SizedBox(height: headerSpacing),
-                if (body != null) body!,
+                ?body,
               ],
             ),
           ),

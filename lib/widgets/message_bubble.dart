@@ -279,7 +279,7 @@ class MessageBubble extends StatelessWidget {
                       color: textColor.withValues(alpha: 0.7),
                     ),
                   ),
-                  if (tickIcon != null) tickIcon,
+                  ?tickIcon,
                 ],
               ),
         body: Column(
@@ -1327,6 +1327,7 @@ Widget previewMessageBubbleRetracted() {
 /// fingerprints.
 class TrustIndicator extends StatefulWidget {
   const TrustIndicator({
+    super.key,
     required this.service,
     required this.peerBareJid,
     required this.isEncrypted,

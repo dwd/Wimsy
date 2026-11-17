@@ -4538,6 +4538,12 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     // destination path up front rather than file_picker's saveFile(), which
     // now requires the bytes to already be in memory. Ask for a destination
     // directory instead and build the save path from the suggested name.
+    // getDirectoryPath() is deprecated in favor of pickDirectory(), which
+    // returns a Uri (e.g. a content:// URI on Android) rather than a
+    // filesystem path; switching would require reworking savePath/the
+    // streaming writer below to accept a Uri, so keep the path-based API
+    // for now.
+    // ignore: deprecated_member_use
     final directory = await FilePicker.getDirectoryPath(
       dialogTitle: 'Save file',
     );
@@ -7391,7 +7397,11 @@ class _RoomOccupantTile extends StatelessWidget {
 /// affiliation next to their nickname, styled to match the "ROOM" chip
 /// shown against bookmarked room names in the roster.
 class RoleAffiliationChip extends StatelessWidget {
-  const RoleAffiliationChip({required this.label, this.uppercase = true});
+  const RoleAffiliationChip({
+    super.key,
+    required this.label,
+    this.uppercase = true,
+  });
 
   final String label;
   // Whether [label] is rendered upper-cased with wide letter spacing (the
