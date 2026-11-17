@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -52,6 +52,7 @@ import 'widgets/avatar_with_presence.dart';
 import 'widgets/chat_entry_header.dart';
 import 'widgets/encryption_selector.dart';
 import 'widgets/encryption_settings_screen.dart';
+import 'widgets/legacy_material_bridge.dart';
 import 'utils/xep0392_color.dart';
 import 'browser_reload.dart';
 import 'web_update_monitor.dart';
@@ -623,6 +624,13 @@ class _WimsyAppState extends State<WimsyApp> with WidgetsBindingObserver {
               ),
             ),
           ),
+          // Several dependencies (e.g. `flutter_spiffing`'s XEP-0258 label
+          // editor) still build their widget trees against the legacy
+          // `package:flutter/material.dart`, so wrap the whole app in
+          // [LegacyMaterialBridge] to keep `Theme.of`/
+          // `MaterialLocalizations.of`/`debugCheckHasMaterial` resolvable for
+          // them until they migrate to `package:material_ui`.
+          builder: (context, child) => LegacyMaterialBridge(child: child!),
           home: FutureBuilder<void>(
             future: _initFuture,
             builder: (context, snapshot) {

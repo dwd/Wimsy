@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Shared "avatar / name / chips" layout used by both [MessageBubble] (one
 /// per chat message) and the chat list (one per contact/room), so the two

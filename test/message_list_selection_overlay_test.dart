@@ -15,7 +15,7 @@
 // exercises that exact shape -- a `GlobalKey`-keyed zero-size marker next
 // to a `SelectableText`-bearing bubble, inside a `ListView.builder` whose
 // window slides forward -- and asserts no `FlutterError` is ever reported.
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Mirrors the structure the message list now builds for each row: an

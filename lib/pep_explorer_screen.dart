@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'pep/pep_explorer.dart';
 import 'xmpp/xmpp_service.dart';

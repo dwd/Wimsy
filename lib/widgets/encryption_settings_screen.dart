@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../encryption/encryption_manager.dart';
 import '../xmpp/xmpp_service.dart';

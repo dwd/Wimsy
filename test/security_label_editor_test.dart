@@ -1,9 +1,17 @@
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
+// Used only to type `_LegacySimpleMaterialLocalizationsDelegate` below
+// against the legacy `MaterialLocalizations` type that the legacy `RawChip`
+// (inside `flutter_spiffing`'s `ChoiceChip`) actually looks up -
+// `package:material_ui` defines its own, distinct `MaterialLocalizations`
+// class, which would not satisfy that lookup.
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as legacy;
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_spiffing/flutter_spiffing.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spiffing/spiffing.dart' as spiffing;
 import 'package:wimsy/main.dart';
+import 'package:wimsy/widgets/legacy_material_bridge.dart';
 import 'package:wimsy/xmpp/security_label_policy.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
@@ -52,6 +60,27 @@ class _SimpleCupertinoLocalizationsDelegate
   @override
   bool shouldReload(_SimpleCupertinoLocalizationsDelegate old) => false;
 }
+
+// Legacy-typed counterpart of `_SimpleMaterialLocalizationsDelegate` above:
+// `package:material_ui` defines its own, distinct `MaterialLocalizations`
+// class, so this is needed wherever a legacy widget (e.g. `RawChip` inside
+// `flutter_spiffing`'s `ChoiceChip`, reached via [LegacyMaterialBridge])
+// looks up the legacy type instead.
+class _LegacySimpleMaterialLocalizationsDelegate
+    extends LocalizationsDelegate<legacy.MaterialLocalizations> {
+  const _LegacySimpleMaterialLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => true;
+
+  @override
+  Future<legacy.MaterialLocalizations> load(Locale locale) =>
+      legacy.DefaultMaterialLocalizations.load(locale);
+
+  @override
+  bool shouldReload(_LegacySimpleMaterialLocalizationsDelegate old) => false;
+}
+
 
 class _SimpleWidgetsLocalizationsDelegate
     extends LocalizationsDelegate<WidgetsLocalizations> {
@@ -144,6 +173,7 @@ void main() {
       (WidgetTester tester) async {
         await tester.pumpWidget(
           MaterialApp(
+            builder: (context, child) => LegacyMaterialBridge(child: child!),
             home: SecurityLabelEditorScreen(policies: [policyOption1]),
           ),
         );
@@ -158,6 +188,7 @@ void main() {
       (WidgetTester tester) async {
         await tester.pumpWidget(
           MaterialApp(
+            builder: (context, child) => LegacyMaterialBridge(child: child!),
             home: SecurityLabelEditorScreen(
               policies: [policyOption1, policyOption2],
             ),
@@ -177,6 +208,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
+            builder: (context, child) => LegacyMaterialBridge(child: child!),
             home: Builder(
               builder: (context) => Scaffold(
                 body: ElevatedButton(
@@ -230,6 +262,7 @@ void main() {
       (WidgetTester tester) async {
         await tester.pumpWidget(
           MaterialApp(
+            builder: (context, child) => LegacyMaterialBridge(child: child!),
             home: SecurityLabelEditorScreen(
               policies: [policyOption1, policyOption2],
               initialPolicyId: '1.2.826.0.1.6726289.0.1',
@@ -246,6 +279,7 @@ void main() {
       (WidgetTester tester) async {
         await tester.pumpWidget(
           MaterialApp(
+            builder: (context, child) => LegacyMaterialBridge(child: child!),
             localizationsDelegates: const [
               _SimpleMaterialLocalizationsDelegate(),
               _SimpleCupertinoLocalizationsDelegate(),
@@ -267,6 +301,7 @@ void main() {
       (WidgetTester tester) async {
         await tester.pumpWidget(
           MaterialApp(
+            builder: (context, child) => LegacyMaterialBridge(child: child!),
             localizationsDelegates: const [
               _SimpleMaterialLocalizationsDelegate(),
               _SimpleCupertinoLocalizationsDelegate(),
@@ -293,17 +328,20 @@ void main() {
               locale: const Locale('und'),
               delegates: const [
                 _SimpleMaterialLocalizationsDelegate(),
+                _LegacySimpleMaterialLocalizationsDelegate(),
                 _SimpleWidgetsLocalizationsDelegate(),
               ],
               child: MediaQuery(
                 data: const MediaQueryData(),
-                child: Material(
+                child: LegacyMaterialBridge(
+                  delegates: const [],
                   child: SecurityLabelEditorScreen(policies: [policyOption1]),
                 ),
               ),
             ),
           ),
         );
+        await tester.pump();
 
         final editor = tester.widget<LabelEditor>(find.byType(LabelEditor));
         expect(editor.langTag, 'en');
@@ -320,17 +358,20 @@ void main() {
               locale: const Locale('und'),
               delegates: const [
                 _SimpleMaterialLocalizationsDelegate(),
+                _LegacySimpleMaterialLocalizationsDelegate(),
                 _SimpleWidgetsLocalizationsDelegate(),
               ],
               child: MediaQuery(
                 data: const MediaQueryData(),
-                child: Material(
+                child: LegacyMaterialBridge(
+                  delegates: const [],
                   child: SecurityLabelEditorScreen(policies: [policyOption1]),
                 ),
               ),
             ),
           ),
         );
+        await tester.pump();
 
         final editor = tester.widget<LabelEditor>(find.byType(LabelEditor));
         expect(editor.langTag, 'en');

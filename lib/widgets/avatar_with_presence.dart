@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:xmpp_stone/xmpp_stone.dart';
 
 import '../utils/xep0392_color.dart';

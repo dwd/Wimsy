@@ -113,6 +113,8 @@ dependencies:
   # warnings/errors (e.g. device-list/bundle fetch failures) end up in
   # wimsy.log instead of being silently dropped.
   logging: ^1.2.0
+  material_ui: ^1.11.1
+  cupertino_ui: ^1.1.7
 
 dev_dependencies:
   sentry_dart_plugin: ^3.4.0
