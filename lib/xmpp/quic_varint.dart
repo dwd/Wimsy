@@ -16,7 +16,16 @@ import 'dart:typed_data';
 /// varint-encoded Session ID).
 
 /// Maximum value representable by a QUIC varint (2^62 - 1).
-const int quicVarintMax = 0x3FFFFFFFFFFFFFFF;
+///
+/// Written as a shift-and-mask expression rather than the single integer
+/// literal `0x3FFFFFFFFFFFFFFF`, because that literal cannot be represented
+/// exactly as a JavaScript (IEEE 754 double) number, which breaks `dart2js`/
+/// `dart2wasm` web compilation (`can't be represented exactly in
+/// JavaScript`). The computed value is identical on the Dart VM (64-bit
+/// native ints); on web, Dart ints above 2^53 - 1 already lose precision at
+/// the runtime-number level, which is a pre-existing platform limitation of
+/// compiling to JavaScript, not something this expression introduces.
+const int quicVarintMax = (0x3FFFFFFF << 32) | 0xFFFFFFFF;
 
 /// Encodes [value] as a QUIC variable-length integer.
 ///
