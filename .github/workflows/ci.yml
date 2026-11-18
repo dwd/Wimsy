@@ -406,6 +406,19 @@ jobs:
         run: flutter build macos --release
       - name: Package macOS
         run: tool/package_macos_dmg.sh build/macos/Build/Products/Release/wimsy.app wimsy-macos.dmg
+      - name: Verify macOS package
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only tag builds have a version Flutter passes through unchanged:
+          # pre-release versions like 0.0.6-pre-<sha> are mangled into
+          # CFBundleShortVersionString (non-digits stripped), so skip the
+          # version check for those.
+          expected_version=""
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            expected_version="${GITHUB_REF#refs/tags/v}"
+          fi
+          tool/verify_macos_dmg.sh wimsy-macos.dmg "$expected_version"
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
         with:
