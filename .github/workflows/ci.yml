@@ -247,9 +247,11 @@ jobs:
           tar -C build/linux/x64/release -czf wimsy-linux.tar.gz bundle
       - name: Package Linux (.deb)
         run: |
-          # Display version without the +build suffix now in pubspec.yaml.
-          VERSION="$WIMSY_VERSION"
-          PKG_DIR="wimsy_${VERSION}_amd64"
+          # The package's Version field uses ~ so dpkg sorts pre-releases
+          # before their release; the file name keeps the plain display
+          # version, since ~ in release asset names is best avoided.
+          VERSION="$WIMSY_DEB_VERSION"
+          PKG_DIR="wimsy_${WIMSY_VERSION}_amd64"
           mkdir -p "$PKG_DIR/DEBIAN" \
                    "$PKG_DIR/usr/lib/wimsy" \
                    "$PKG_DIR/usr/bin" \
@@ -358,7 +360,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Build macOS
-        # Numeric-only build name: Flutter mangles the -pre-<sha> display
+        # Numeric-only build name: Flutter mangles a pre-release display
         # version on Apple platforms. The build number comes from pubspec.yaml.
         run: flutter build macos --release --build-name "$WIMSY_VERSION_CORE"
       - name: Package macOS

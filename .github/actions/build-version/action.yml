@@ -1,8 +1,8 @@
 name: Build version
 description: >-
   Works out the build version and stamps it into pubspec.yaml, exporting
-  WIMSY_VERSION, WIMSY_VERSION_CORE, WIMSY_BUILD_NUMBER and WIMSY_MSIX_VERSION
-  to later steps in the job. Maps GitHub's tag ref and run number onto the
+  WIMSY_VERSION, WIMSY_DEB_VERSION, WIMSY_VERSION_CORE, WIMSY_BUILD_NUMBER
+  and WIMSY_MSIX_VERSION to later steps in the job. Maps GitHub's tag ref and run number onto the
   provider-neutral tool/fetch_release_history.sh and tool/build_version.sh.
   The repository must already be checked out.
 runs:

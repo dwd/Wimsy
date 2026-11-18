@@ -74,12 +74,85 @@ file_url() {
   fi
 }
 
-# --- No tags: pre-release from 0.0.0; nothing written by default ---
+# semver_cmp A B: prints -1, 0 or 1 by semver 2.0.0 precedence (build
+# metadata after + is ignored). Kept deliberately small; it is itself tested
+# below against the precedence example from the semver spec.
+semver_cmp() {
+  local a="${1%%+*}" b="${2%%+*}" ap="" bp="" i n x y
+  local -a an bn
+  [[ "$a" == *-* ]] && ap="${a#*-}"
+  [[ "$b" == *-* ]] && bp="${b#*-}"
+  IFS=. read -r -a an <<<"${a%%-*}"
+  IFS=. read -r -a bn <<<"${b%%-*}"
+  for i in 0 1 2; do
+    if ((10#${an[i]} < 10#${bn[i]})); then echo -1; return; fi
+    if ((10#${an[i]} > 10#${bn[i]})); then echo 1; return; fi
+  done
+  # A version without a pre-release ranks above one with.
+  if [[ -z "$ap" && -z "$bp" ]]; then echo 0; return; fi
+  if [[ -z "$ap" ]]; then echo 1; return; fi
+  if [[ -z "$bp" ]]; then echo -1; return; fi
+  local -a ai bi
+  IFS=. read -r -a ai <<<"$ap"
+  IFS=. read -r -a bi <<<"$bp"
+  n=${#ai[@]}
+  ((${#bi[@]} > n)) && n=${#bi[@]}
+  for ((i = 0; i < n; i++)); do
+    x="${ai[i]-}"
+    y="${bi[i]-}"
+    if [[ -z "$x" ]]; then echo -1; return; fi # fewer identifiers ranks lower
+    if [[ -z "$y" ]]; then echo 1; return; fi
+    if [[ "$x" =~ ^[0-9]+$ && "$y" =~ ^[0-9]+$ ]]; then
+      if ((10#$x < 10#$y)); then echo -1; return; fi
+      if ((10#$x > 10#$y)); then echo 1; return; fi
+    elif [[ "$x" =~ ^[0-9]+$ ]]; then echo -1; return # numeric < alphanumeric
+    elif [[ "$y" =~ ^[0-9]+$ ]]; then echo 1; return
+    else
+      if [[ "$x" < "$y" ]]; then echo -1; return; fi
+      if [[ "$x" > "$y" ]]; then echo 1; return; fi
+    fi
+  done
+  echo 0
+}
+
+# check_ascending DESCRIPTION V1 V2 ...: each version sorts strictly before
+# the next, by semver.
+check_ascending() {
+  local desc="$1" prev="$2" v
+  shift 2
+  for v in "$@"; do
+    check "$desc: $prev < $v" "-1" "$(semver_cmp "$prev" "$v")"
+    prev="$v"
+  done
+}
+
+# check_deb_ascending DESCRIPTION V1 V2 ...: as check_ascending, using dpkg's
+# rules. Skipped where dpkg is not installed (it is on the Linux CI runner).
+check_deb_ascending() {
+  local desc="$1" prev="$2" v
+  shift 2
+  if ! command -v dpkg >/dev/null 2>&1; then
+    echo "skip: $desc (dpkg not installed)"
+    return
+  fi
+  for v in "$@"; do
+    check "$desc: $prev < $v" "lt" "$(dpkg --compare-versions "$prev" lt "$v" && echo lt || echo not-lt)"
+    prev="$v"
+  done
+}
+
+# The comparator against the semver 2.0.0 spec's precedence example.
+check_ascending "semver_cmp self-test" 1.0.0-alpha 1.0.0-alpha.1 1.0.0-alpha.beta \
+  1.0.0-beta 1.0.0-beta.2 1.0.0-beta.11 1.0.0-rc.1 1.0.0 1.0.1 1.1.0 2.0.0
+check "semver_cmp self-test: build metadata ignored" "0" "$(semver_cmp 1.0.0+1 1.0.0+2)"
+
+# --- No tags: pre-release of 0.0.1; nothing written by default ---
 r="$work/notags"
 new_repo "$r"
 out="$(bv "$r" --build-number 7)"
-check "no tags: output" "WIMSY_VERSION=0.0.0-pre-$(sha "$r")
-WIMSY_VERSION_CORE=0.0.0
+check "no tags: output" "WIMSY_VERSION=0.0.1-pre.7.g$(sha "$r")
+WIMSY_DEB_VERSION=0.0.1~pre.7.g$(sha "$r")
+WIMSY_VERSION_CORE=0.0.1
 WIMSY_BUILD_NUMBER=7
 WIMSY_MSIX_VERSION=0.0.0.7" "$out"
 check "no tags: pubspec not written without --write-pubspec" "$fixture_pubspec" "$(cat "$r/pubspec.yaml")"
@@ -93,10 +166,11 @@ commit "$r" second
 git -C "$r" tag v0.0.6
 commit "$r" third
 out="$(bv "$r" --tag "" --build-number 12 --write-pubspec)"
-check "pre-release: version" "0.0.6-pre-$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
-check "pre-release: core" "0.0.6" "$(value "$out" WIMSY_VERSION_CORE)"
+check "pre-release: version" "0.0.7-pre.12.g$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
+check "pre-release: deb version" "0.0.7~pre.12.g$(sha "$r")" "$(value "$out" WIMSY_DEB_VERSION)"
+check "pre-release: core" "0.0.7" "$(value "$out" WIMSY_VERSION_CORE)"
 check "pre-release: msix" "0.0.6.12" "$(value "$out" WIMSY_MSIX_VERSION)"
-check "pre-release: pubspec version" "0.0.6-pre-$(sha "$r")+12" "$(line "$r" version)"
+check "pre-release: pubspec version" "0.0.7-pre.12.g$(sha "$r")+12" "$(line "$r" version)"
 check "pre-release: pubspec msix_version" "0.0.6.12" "$(line "$r" msix_version)"
 check "pre-release: rest of pubspec untouched" \
   "$(printf '%s\n' "$fixture_pubspec" | grep -v 'version:')" \
@@ -117,6 +191,9 @@ git -C "$r" tag v1.2.2
 out="$(bv "$r" --tag v1.2.3-rc1 --build-number 5)"
 check "rc tag: version" "1.2.3-rc1" "$(value "$out" WIMSY_VERSION)"
 check "rc tag: core" "1.2.3" "$(value "$out" WIMSY_VERSION_CORE)"
+check "rc tag: deb version" "1.2.3~rc1" "$(value "$out" WIMSY_DEB_VERSION)"
+check "hyphenated rc tag: only the separator becomes ~" "1.2.3~rc-2" \
+  "$(value "$(bv "$r" --tag v1.2.3-rc-2)" WIMSY_DEB_VERSION)"
 # Numbered after the last final release, so the final 1.2.3.0 upgrades it.
 check "rc tag: msix based on last final release" "1.2.2.5" "$(value "$out" WIMSY_MSIX_VERSION)"
 check "rc tag with build number over MSIX limit: fails" "1" \
@@ -131,7 +208,10 @@ commit "$r" second
 git -C "$r" tag v1.1.0-rc1
 commit "$r" third
 out="$(bv "$r" --build-number 40)"
-check "after rc tag: version" "1.1.0-rc1-pre-$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
+after_rc="1.1.0-rc1.pre.40.g$(sha "$r")"
+check "after rc tag: extends the rc" "$after_rc" "$(value "$out" WIMSY_VERSION)"
+check "after rc tag: core" "1.1.0" "$(value "$out" WIMSY_VERSION_CORE)"
+after_rc_deb="$(value "$out" WIMSY_DEB_VERSION)"
 check "after rc tag: msix based on last final release" "1.0.0.40" "$(value "$out" WIMSY_MSIX_VERSION)"
 
 # --- Base is the higher of the nearest tag and the highest final release ---
@@ -157,7 +237,7 @@ dated_commit git -C "$r" merge -q --no-ff -m "merge maint" maint
 check "merge-back: git describe does pick the older tag" "v1.0.1" \
   "$(git -C "$r" describe --tags --abbrev=0 --match 'v[0-9]*')"
 out="$(bv "$r" --build-number 6)"
-check "merge-back: based on the higher release" "2.0.0-pre-$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
+check "merge-back: based on the higher release" "2.0.1-pre.6.g$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
 check "merge-back: msix agrees" "2.0.0.6" "$(value "$out" WIMSY_MSIX_VERSION)"
 
 # An rc superseded by its final release on the same commit. The rc tag is
@@ -169,7 +249,7 @@ GIT_COMMITTER_DATE="2030-01-02T00:00:00Z" git -C "$r" tag -a v2.0.0-rc1 -m rc
 commit "$r" second
 check "superseded rc: git describe does pick the rc" "v2.0.0-rc1" \
   "$(git -C "$r" describe --tags --abbrev=0 --match 'v[0-9]*')"
-check "superseded rc: based on the final release" "2.0.0-pre-$(sha "$r")" \
+check "superseded rc: based on the final release" "2.0.1-pre.3.g$(sha "$r")" \
   "$(value "$(bv "$r" --build-number 3)" WIMSY_VERSION)"
 
 # An rc with no final release at all is not superseded by the implicit 0.0.0.
@@ -178,7 +258,7 @@ new_repo "$r"
 git -C "$r" tag v0.0.0-rc1
 commit "$r" second
 out="$(bv "$r" --build-number 2)"
-check "only an rc tag: based on it" "0.0.0-rc1-pre-$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
+check "only an rc tag: extends it" "0.0.0-rc1.pre.2.g$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
 check "only an rc tag: msix" "0.0.0.2" "$(value "$out" WIMSY_MSIX_VERSION)"
 
 # A v-prefixed tag that is not a release version is ignored.
@@ -186,7 +266,33 @@ r="$work/badtag"
 new_repo "$r"
 git -C "$r" tag v1.2
 commit "$r" second
-check "non-semver tag ignored" "0.0.0-pre-$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
+check "non-semver tag ignored" "0.0.1-pre.1.g$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
+
+# --- Patch bump carries past 9 ---
+r="$work/bump"
+new_repo "$r"
+git -C "$r" tag v1.4.9
+commit "$r" second
+check "bump: 1.4.9 -> 1.4.10" "1.4.10-pre.2.g$(sha "$r")" \
+  "$(value "$(bv "$r" --build-number 2)" WIMSY_VERSION)"
+
+# --- Ordering ---
+# Two successive pre-release builds after v0.0.6. The commit hashes are
+# random, so build 13 may well have a "smaller" hash than build 12; the
+# numeric build identifier must decide the order.
+r="$work/order"
+new_repo "$r"
+git -C "$r" tag v0.0.6
+commit "$r" a
+out12="$(bv "$r" --build-number 12)"
+commit "$r" b
+out13="$(bv "$r" --build-number 13)"
+check_ascending "semver order" 0.0.6 "$(value "$out12" WIMSY_VERSION)" "$(value "$out13" WIMSY_VERSION)" 0.0.7
+check_ascending "semver order, all-digit hash" 0.0.7-pre.12.g0123456 0.0.7-pre.13.gfffffff 0.0.7-pre.14.g0000000
+check_ascending "semver order after rc" 1.1.0-rc1 "$after_rc" 1.1.0-rc2 1.1.0
+check_ascending "semver order, dotted rc numbers" 1.1.0-rc.9 1.1.0-rc.9.pre.40.gabc1234 1.1.0-rc.10 1.1.0
+check_deb_ascending "dpkg order" 0.0.6 "$(value "$out12" WIMSY_DEB_VERSION)" "$(value "$out13" WIMSY_DEB_VERSION)" 0.0.7
+check_deb_ascending "dpkg order after rc" 1.1.0~rc1 "$after_rc_deb" 1.1.0~rc2 1.1.0
 
 # --- Build metadata on the base tag is dropped ---
 r="$work/basemeta"
@@ -194,7 +300,7 @@ new_repo "$r"
 git -C "$r" tag v1.2.3+meta-x
 commit "$r" second
 out="$(bv "$r" --build-number 3)"
-check "base tag +metadata: dropped" "1.2.3-pre-$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
+check "base tag +metadata: dropped" "1.2.4-pre.3.g$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
 check "base tag +metadata: msix" "1.2.3.3" "$(value "$out" WIMSY_MSIX_VERSION)"
 
 # --- pubspec formatting is preserved ---
@@ -266,7 +372,7 @@ r="$work/shallow"
 shallow_clone "$origin" "$r"
 (cd "$r" && WIMSY_HISTORY_STEP=10 bash "$fetch_history" 2>/dev/null)
 out="$(bv "$r" --build-number 9)"
-check "fetched: last tag found" "0.0.6-pre-$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
+check "fetched: last tag found" "0.0.7-pre.9.g$(sha "$r")" "$(value "$out" WIMSY_VERSION)"
 fetched="$(git -C "$r" rev-list --count HEAD)"
 check "fetched: only history back to the last tag (fetched $fetched of $total)" "yes" \
   "$( ((fetched <= 26 + 10 && fetched < total)) && echo yes || echo no)"
@@ -278,14 +384,14 @@ git clone -q --depth 15 --no-tags "$(file_url "$origin")" "$r"
 status=0
 (cd "$r" && WIMSY_HISTORY_STEP=2 bash "$fetch_history" 2>/dev/null) || status=$?
 check "fetched, depth-15 clone: fetch succeeds" "0" "$status"
-check "fetched, depth-15 clone: last tag found" "0.0.6-pre-$(sha "$r")" \
+check "fetched, depth-15 clone: last tag found" "0.0.7-pre.1.g$(sha "$r")" \
   "$(value "$(bv "$r" 2>/dev/null)" WIMSY_VERSION)"
 
 r="$work/shallow-detached"
 shallow_clone "$origin" "$r"
 git -C "$r" checkout -q --detach
 (cd "$r" && bash "$fetch_history" 2>/dev/null)
-check "fetched, detached HEAD (PR merge commit): last tag found" "0.0.6-pre-$(sha "$r")" \
+check "fetched, detached HEAD (PR merge commit): last tag found" "0.0.7-pre.1.g$(sha "$r")" \
   "$(value "$(bv "$r")" WIMSY_VERSION)"
 
 # A pull request merge commit that no ref points to any more: GitHub replaces
@@ -304,7 +410,7 @@ git -C "$r" checkout -q --detach "$stale_merge"
 status=0
 (cd "$r" && WIMSY_HISTORY_STEP=10 bash "$fetch_history" 2>/dev/null) || status=$?
 check "fetched, unreferenced merge commit: fetch succeeds" "0" "$status"
-check "fetched, unreferenced merge commit: last tag found" "0.0.6-pre-$(sha "$r")" \
+check "fetched, unreferenced merge commit: last tag found" "0.0.7-pre.1.g$(sha "$r")" \
   "$(value "$(bv "$r" 2>/dev/null)" WIMSY_VERSION)"
 
 notags_origin="$work/notags-origin"
@@ -316,7 +422,7 @@ status=0
 (cd "$r" && WIMSY_HISTORY_STEP=2 bash "$fetch_history" 2>/dev/null) || status=$?
 check "no tags anywhere: fetch succeeds" "0" "$status"
 check "no tags anywhere: fetches everything" "false" "$(git -C "$r" rev-parse --is-shallow-repository)"
-check "no tags anywhere: 0.0.0 pre-release" "0.0.0-pre-$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
+check "no tags anywhere: 0.0.1 pre-release" "0.0.1-pre.1.g$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
 
 # A branch whose history holds no tag, on a remote that has tags elsewhere
 # (e.g. an orphan branch). This must terminate with HEAD's full history, and
@@ -335,14 +441,14 @@ status=0
 check "unrelated tags: fetch terminates successfully" "0" "$status"
 check "unrelated tags: HEAD history complete (root + 4)" "5" "$(git -C "$r" rev-list --count HEAD)"
 check "unrelated tags: no tags fetched" "" "$(git -C "$r" tag)"
-check "unrelated tags: 0.0.0 pre-release" "0.0.0-pre-$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
+check "unrelated tags: 0.0.1 pre-release" "0.0.1-pre.1.g$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
 
 r="$work/full-notags"
 full_clone_no_tags "$origin" "$r"
 check "full clone without tags: starts with no tags" "" "$(git -C "$r" tag)"
 (cd "$r" && bash "$fetch_history" 2>/dev/null)
 check "full clone without tags: release tags fetched" "v0.0.4 v0.0.5 v0.0.6" "$(git -C "$r" tag | tr '\n' ' ' | sed 's/ $//')"
-check "full clone without tags: version" "0.0.6-pre-$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
+check "full clone without tags: version" "0.0.7-pre.1.g$(sha "$r")" "$(value "$(bv "$r")" WIMSY_VERSION)"
 
 # --- Failures leave the pubspec untouched ---
 expect_failure() { # expect_failure DESCRIPTION DIR ARGS...
