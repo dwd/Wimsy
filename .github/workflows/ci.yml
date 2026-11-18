@@ -405,13 +405,12 @@ jobs:
       - name: Build macOS
         run: flutter build macos --release
       - name: Package macOS
-        run: |
-          tar -C build/macos/Build/Products -czf wimsy-macos.tar.gz Release
+        run: tool/package_macos_dmg.sh build/macos/Build/Products/Release/wimsy.app wimsy-macos.dmg
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-macos
-          path: wimsy-macos.tar.gz
+          path: wimsy-macos.dmg
 
   build-ios:
     needs: analyze
@@ -735,7 +734,7 @@ jobs:
             dist/wimsy-linux-deb/wimsy_*.deb
             dist/wimsy-windows/wimsy-windows.zip
             dist/wimsy-windows-msix/*.msix
-            dist/wimsy-macos/wimsy-macos.tar.gz
+            dist/wimsy-macos/wimsy-macos.dmg
             dist/wimsy-android/app-release.apk
             dist/wimsy-web/wimsy-web.tar.gz
             dist/sbom-linux/sbom-linux.cdx.json
