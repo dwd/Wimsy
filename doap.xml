@@ -2,7 +2,7 @@
 <rdf:RDF
   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
   xmlns:doap="http://usefulinc.com/ns/doap#"
-  xmlns:xmpp="https://xmpp.org/ns/doap#">
+  xmlns:xmpp="https://linkmauve.fr/ns/xmpp-doap#">
   <doap:Project>
     <doap:name>Wimsy</doap:name>
     <doap:shortdesc xml:lang="en">Cross-platform XMPP client built with Flutter.</doap:shortdesc>
