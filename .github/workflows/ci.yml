@@ -405,13 +405,25 @@ jobs:
       - name: Build macOS
         run: flutter build macos --release
       - name: Package macOS
+        run: tool/package_macos_dmg.sh build/macos/Build/Products/Release/wimsy.app wimsy-macos.dmg
+      - name: Verify macOS package
+        shell: bash
         run: |
-          tar -C build/macos/Build/Products -czf wimsy-macos.tar.gz Release
+          set -euo pipefail
+          # Only tag builds have a version Flutter passes through unchanged:
+          # pre-release versions like 0.0.6-pre-<sha> are mangled into
+          # CFBundleShortVersionString (non-digits stripped), so skip the
+          # version check for those.
+          expected_version=""
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            expected_version="${GITHUB_REF#refs/tags/v}"
+          fi
+          tool/verify_macos_dmg.sh wimsy-macos.dmg "$expected_version"
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v6
         with:
           name: wimsy-macos
-          path: wimsy-macos.tar.gz
+          path: wimsy-macos.dmg
 
   build-ios:
     needs: analyze
@@ -735,7 +747,7 @@ jobs:
             dist/wimsy-linux-deb/wimsy_*.deb
             dist/wimsy-windows/wimsy-windows.zip
             dist/wimsy-windows-msix/*.msix
-            dist/wimsy-macos/wimsy-macos.tar.gz
+            dist/wimsy-macos/wimsy-macos.dmg
             dist/wimsy-android/app-release.apk
             dist/wimsy-web/wimsy-web.tar.gz
             dist/sbom-linux/sbom-linux.cdx.json
