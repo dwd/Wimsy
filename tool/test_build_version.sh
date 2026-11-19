@@ -272,12 +272,40 @@ check "fetched: only history back to the last tag (fetched $fetched of $total)" 
   "$( ((fetched <= 26 + 10 && fetched < total)) && echo yes || echo no)"
 check "fetched: still shallow" "true" "$(git -C "$r" rev-parse --is-shallow-repository)"
 
+# A clone deeper than depth 1 (e.g. a CI checkout with a larger fetch depth).
+r="$work/shallow-deeper"
+git clone -q --depth 15 --no-tags "$(file_url "$origin")" "$r"
+status=0
+(cd "$r" && WIMSY_HISTORY_STEP=2 bash "$fetch_history" 2>/dev/null) || status=$?
+check "fetched, depth-15 clone: fetch succeeds" "0" "$status"
+check "fetched, depth-15 clone: last tag found" "0.0.6-pre-$(sha "$r")" \
+  "$(value "$(bv "$r" 2>/dev/null)" WIMSY_VERSION)"
+
 r="$work/shallow-detached"
 shallow_clone "$origin" "$r"
 git -C "$r" checkout -q --detach
 (cd "$r" && bash "$fetch_history" 2>/dev/null)
 check "fetched, detached HEAD (PR merge commit): last tag found" "0.0.6-pre-$(sha "$r")" \
   "$(value "$(bv "$r")" WIMSY_VERSION)"
+
+# A pull request merge commit that no ref points to any more: GitHub replaces
+# it when the base branch moves, but a run created before that still checks
+# it out by id. GitHub serves it by id but will not deepen it with --deepen;
+# local git does deepen it, so this cannot catch that, but it does check that
+# the fetch works on such a commit.
+git -C "$origin" config uploadpack.allowAnySHA1InWant true
+tree="$(git -C "$origin" rev-parse 'HEAD^{tree}')"
+pr_commit="$(git -C "$origin" commit-tree -p HEAD -m "pull request change" "$tree")"
+stale_merge="$(git -C "$origin" commit-tree -p HEAD -p "$pr_commit" -m "stale merge" "$tree")"
+r="$work/shallow-stale-merge"
+shallow_clone "$origin" "$r"
+git -C "$r" fetch -q --depth 1 origin "$stale_merge"
+git -C "$r" checkout -q --detach "$stale_merge"
+status=0
+(cd "$r" && WIMSY_HISTORY_STEP=10 bash "$fetch_history" 2>/dev/null) || status=$?
+check "fetched, unreferenced merge commit: fetch succeeds" "0" "$status"
+check "fetched, unreferenced merge commit: last tag found" "0.0.6-pre-$(sha "$r")" \
+  "$(value "$(bv "$r" 2>/dev/null)" WIMSY_VERSION)"
 
 notags_origin="$work/notags-origin"
 new_repo "$notags_origin"

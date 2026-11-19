@@ -11,7 +11,7 @@
 # but grows with the repository; this instead:
 #   1. lists the remote's v* tags and the commits they point to
 #      (git ls-remote: no history is downloaded);
-#   2. if HEAD's history is cut off, deepens it in steps of
+#   2. if HEAD's history is cut off, fetches more of it in steps of
 #      WIMSY_HISTORY_STEP commits (default 20) until it contains the commit of
 #      a final release tag (vX.Y.Z, no -pre-release part), or HEAD's whole
 #      history is present and no final release is in it;
@@ -19,7 +19,7 @@
 #      HEAD's history, so tags are present even in a full clone made without
 #      them.
 #
-# HEAD is deepened by commit id, so a detached HEAD (e.g. a pull request
+# HEAD is fetched by commit id, so a detached HEAD (e.g. a pull request
 # merge commit) works too. No tag is fetched unless its commit is already in
 # HEAD's history, so tags elsewhere add no shallow boundaries of their own.
 set -euo pipefail
@@ -60,19 +60,29 @@ final_in_history() {
   [[ -n "$final_commits" ]] && grep -qxF -f <(printf '%s\n' "$final_commits") <(git rev-list HEAD)
 }
 
+# HEAD is fetched again with an absolute depth that grows by step each
+# time, rather than with --deepen. GitHub will not deepen a commit that no ref
+# points to any more, which is what a pull request run checks out once the
+# base branch has moved on (GitHub then replaces the merge commit), but it
+# does serve such a commit at a given depth.
+#
+# The starting depth is HEAD's commit count, which is at least the depth the
+# clone was made with: asking for less than a clone already has would cut its
+# history back rather than extend it.
 head="$(git rev-parse HEAD)"
-deepened=0
+depth="$(git rev-list --count HEAD)"
 while head_is_shallow && ! final_in_history; do
   before="$(git rev-list --count HEAD)"
-  git fetch --quiet --deepen="$step" "$remote" "$head"
+  depth=$((depth + step))
+  git fetch --quiet --depth="$depth" "$remote" "$head"
   # No new commits is fine if the fetch only cleared the shallow marker on a
   # root commit (git can leave one there when the depth ends exactly at the
   # root); it is an error if HEAD's history is still cut off.
   if [[ "$(git rev-list --count HEAD)" == "$before" ]] && head_is_shallow; then
-    echo "error: deepening HEAD fetched no new commits; giving up" >&2
+    echo "error: fetching more of HEAD's history ($head) from $remote" \
+      "fetched no new commits; giving up" >&2
     exit 1
   fi
-  deepened=$((deepened + step))
 done
 
 # Their commits are already present, so this transfers only the tag refs
@@ -84,4 +94,4 @@ done <<<"$(tags_in_history)"
 if ((${#refspecs[@]} > 0)); then
   git fetch --quiet --no-tags "$remote" "${refspecs[@]}"
 fi
-echo "Deepened HEAD by $deepened commit(s); fetched ${#refspecs[@]} release tag(s) in its history." >&2
+echo "HEAD has $(git rev-list --count HEAD) commit(s) of history; fetched ${#refspecs[@]} release tag(s) in it." >&2
