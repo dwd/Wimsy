@@ -411,6 +411,17 @@ class QuicCapableXmppSocket extends XmppWebSocket
     }
   }
 
+  // Bandwidth on the non-QUIC fallback transports (TCP, WebSocket and
+  // WebTransport) is estimated from these cumulative byte counters, since
+  // none of them expose connection-level stats the way QUIC does via
+  // [getQuicStats]. When QUIC is active these report 0; callers should use
+  // [getQuicStats]'s udpTx/udpRx byte counts instead.
+  @override
+  int get bytesSent => _useQuic ? 0 : _fallbackSocket.bytesSent;
+
+  @override
+  int get bytesReceived => _useQuic ? 0 : _fallbackSocket.bytesReceived;
+
   /// Attempt QUIC connection migration after a network-interface change.
   ///
   /// Rebinds the endpoint's UDP socket to a fresh unspecified address on the

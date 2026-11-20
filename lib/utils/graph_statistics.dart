@@ -28,6 +28,22 @@ String formatPacketLossPercentage(double value) {
   return '<0.001';
 }
 
+/// Formats a byte rate (bytes/sec) as a short human-readable string, e.g.
+/// `512 B/s`, `12.3 KB/s`, `1.4 MB/s`.
+String formatByteRate(double bytesPerSecond) {
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  var value = bytesPerSecond;
+  var unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  final formatted = unitIndex == 0
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(value < 10 ? 1 : 0);
+  return '$formatted ${units[unitIndex]}';
+}
+
 /// Returns outbound packet loss as a percentage for matching sample windows.
 double? packetLossPercentage(
   Iterable<int> lostPacketSamples,

@@ -31,6 +31,18 @@ abstract class XmppWebSocket extends Stream<String> {
 
   Future<dynamic> getQuicStats() => Future.value(null);
 
+  /// Cumulative bytes written to this socket since it was created.
+  ///
+  /// Used to estimate bandwidth on transports (TCP, WebSocket,
+  /// WebTransport) that don't expose their own byte counters the way QUIC
+  /// does via [getQuicStats]. Implementations that can't track this default
+  /// to 0, which simply reports no measurable bandwidth.
+  int get bytesSent => 0;
+
+  /// Cumulative bytes read from this socket since it was created. See
+  /// [bytesSent].
+  int get bytesReceived => 0;
+
   Future<SecureSocket?> secure(
       {host,
       SecurityContext? context,

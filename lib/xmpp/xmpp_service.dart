@@ -66,6 +66,9 @@ import 'srv_lookup.dart';
 import 'dns_cache.dart';
 import 'srv_target.dart';
 import 'alt_connection.dart';
+import 'package:flutter_quic/flutter_quic.dart' show QuicConnectionStats;
+// ignore_for_file: implementation_imports
+import 'package:xmpp_stone/src/connection/XmppWebsocketApi.dart';
 import 'quic_endpoint_plan.dart';
 import 'quic_xmpp_socket.dart';
 import 'quic_write_tracker.dart';
@@ -314,6 +317,12 @@ class XmppService extends ChangeNotifier {
   BigInt _lastQuicLostPackets = BigInt.zero;
   BigInt _lastQuicSentPackets = BigInt.zero;
   BigInt _lastQuicReceivedDatagrams = BigInt.zero;
+  // Per-second bandwidth (bytes/sec), sampled regardless of transport
+  // (QUIC, TCP, WebSocket or WebTransport). See _sampleBandwidth.
+  final List<int> _bandwidthUpHistory = [];
+  final List<int> _bandwidthDownHistory = [];
+  BigInt _lastBandwidthBytesSent = BigInt.zero;
+  BigInt _lastBandwidthBytesReceived = BigInt.zero;
   Timer? _quicStatsTimer;
   LivenessController? _livenessController;
   ConnectionHealth _connectionHealth = ConnectionHealth.healthy;
@@ -330,6 +339,24 @@ class XmppService extends ChangeNotifier {
 
   double? get quicLossPercentage =>
       packetLossPercentage(_quicLossHistory, _quicSentHistory);
+
+  /// Upload bandwidth, in bytes/sec, sampled once per second over the past
+  /// minute. Populated for every transport (QUIC, TCP, WebSocket and
+  /// WebTransport).
+  List<int> get bandwidthUpHistory => _bandwidthUpHistory;
+
+  /// Download bandwidth, in bytes/sec, sampled once per second over the
+  /// past minute. Populated for every transport (QUIC, TCP, WebSocket and
+  /// WebTransport).
+  List<int> get bandwidthDownHistory => _bandwidthDownHistory;
+
+  /// Mean upload bandwidth in bytes/sec over the sampled window (up to the
+  /// past minute), or `null` if nothing has been sampled yet.
+  double? get bandwidthUpAverage => graphAverage(_bandwidthUpHistory);
+
+  /// Mean download bandwidth in bytes/sec over the sampled window (up to
+  /// the past minute), or `null` if nothing has been sampled yet.
+  double? get bandwidthDownAverage => graphAverage(_bandwidthDownHistory);
 
   ConnectionHealth get connectionHealth => _connectionHealth;
 
@@ -11063,9 +11090,13 @@ class XmppService extends ChangeNotifier {
     _lastQuicLostPackets = BigInt.zero;
     _lastQuicSentPackets = BigInt.zero;
     _lastQuicReceivedDatagrams = BigInt.zero;
+    _bandwidthUpHistory.clear();
+    _bandwidthDownHistory.clear();
+    _lastBandwidthBytesSent = BigInt.zero;
+    _lastBandwidthBytesReceived = BigInt.zero;
 
     final socket = _connection?.socket;
-    if (socket == null || !socket.isQuic) return;
+    if (socket == null) return;
 
     // Start the QUIC PING timer. The interval is half the effective idle
     // timeout so we always send a PING well before the connection would be
@@ -11073,7 +11104,7 @@ class XmppService extends ChangeNotifier {
     //   • the negotiated QUIC idle timeout (from the peer's transport params)
     //   • the XMPP stream idle timeout (XEP-0478 <idle-seconds>)
     // If neither is advertised we default to 5 minutes.
-    if (socket is QuicCapableXmppSocket) {
+    if (socket is QuicCapableXmppSocket && socket.isQuic) {
       final defaultPingInterval = _keepaliveTuning.quicPingIntervalDefault;
       final minFloorMs =
           _keepaliveTuning.quicPingIntervalMinFloor.inMilliseconds;
@@ -11116,7 +11147,7 @@ class XmppService extends ChangeNotifier {
     }
 
     _quicStatsTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (socket is QuicCapableXmppSocket) {
+      if (socket is QuicCapableXmppSocket && socket.isQuic) {
         try {
           await socket.pollQuicWriteTracking();
         } catch (_) {
@@ -11131,6 +11162,7 @@ class XmppService extends ChangeNotifier {
         }
       }
       final stats = await socket.getQuicStats();
+      _sampleBandwidth(socket: socket, stats: stats);
       if (stats == null) return;
 
       _quicRttHistory.add(stats.path.rttMillis.toInt());
@@ -11166,6 +11198,51 @@ class XmppService extends ChangeNotifier {
 
       notifyListeners();
     });
+  }
+
+  /// Samples one second's worth of upload/download traffic into
+  /// [_bandwidthUpHistory]/[_bandwidthDownHistory].
+  ///
+  /// On QUIC, bandwidth is derived from the cumulative UDP byte counters
+  /// Quinn tracks ([QuicConnectionStats.udpTx]/[udpRx]). On TCP, WebSocket
+  /// and WebTransport there is no equivalent connection-level counter, so
+  /// bandwidth is estimated from cumulative bytes written to/read from the
+  /// socket (see [XmppWebSocketIo.bytesSent]/[bytesReceived]).
+  void _sampleBandwidth({
+    required XmppWebSocket socket,
+    required QuicConnectionStats? stats,
+  }) {
+    BigInt sentNow;
+    BigInt receivedNow;
+    if (stats != null) {
+      sentNow = stats.udpTx.bytes;
+      receivedNow = stats.udpRx.bytes;
+    } else {
+      sentNow = BigInt.from(socket.bytesSent);
+      receivedNow = BigInt.from(socket.bytesReceived);
+    }
+
+    // The very first sample has no prior baseline to diff against; record
+    // it as the baseline only, so the first displayed rate reflects actual
+    // per-second traffic rather than a spike of bytes sent since connect.
+    if (_lastBandwidthBytesSent == BigInt.zero &&
+        _lastBandwidthBytesReceived == BigInt.zero) {
+      _lastBandwidthBytesSent = sentNow;
+      _lastBandwidthBytesReceived = receivedNow;
+      return;
+    }
+
+    final deltaUp = sentNow - _lastBandwidthBytesSent;
+    final deltaDown = receivedNow - _lastBandwidthBytesReceived;
+    _lastBandwidthBytesSent = sentNow;
+    _lastBandwidthBytesReceived = receivedNow;
+
+    _bandwidthUpHistory.add(deltaUp < BigInt.zero ? 0 : deltaUp.toInt());
+    _bandwidthDownHistory.add(deltaDown < BigInt.zero ? 0 : deltaDown.toInt());
+    if (_bandwidthUpHistory.length > _maxQuicHistory) {
+      _bandwidthUpHistory.removeAt(0);
+      _bandwidthDownHistory.removeAt(0);
+    }
   }
 
   void _setupKeepalive() {

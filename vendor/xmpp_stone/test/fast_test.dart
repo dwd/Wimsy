@@ -66,6 +66,10 @@ class _RecordingSocket extends Stream<String> implements XmppWebSocket {
 
   @override
   bool get isQuic => false;
+  @override
+  int get bytesSent => 0;
+  @override
+  int get bytesReceived => 0;
 
   @override
   Future<SecureSocket?> secure({

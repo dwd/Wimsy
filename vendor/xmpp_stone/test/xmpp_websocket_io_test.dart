@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:mockito/mockito.dart';
 import 'package:test/test.dart';
 import 'package:universal_io/io.dart';
@@ -11,6 +14,69 @@ class MockSecureSocket extends Mock implements SecureSocket {}
 class MockWebSocketChannel extends Mock implements WebSocketChannel {}
 
 class _FakeCertificate extends Mock implements X509Certificate {}
+
+/// A minimal fake [WebSocketChannel] with a real, observable [sink] and
+/// [stream], used to exercise byte-counting behaviour that a bare [Mock]
+/// can't support (writing to/reading from a mocked sink/stream throws
+/// without extensive stubbing).
+class _FakeWebSocketChannel implements WebSocketChannel {
+  final List<Object?> sentMessages = [];
+  final StreamController<dynamic> _incoming = StreamController.broadcast();
+
+  @override
+  WebSocketSink get sink => _FakeWebSocketSink(sentMessages);
+
+  @override
+  Stream get stream => _incoming.stream;
+
+  void addIncoming(dynamic data) => _incoming.add(data);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      super.noSuchMethod(invocation);
+}
+
+class _FakeWebSocketSink implements WebSocketSink {
+  _FakeWebSocketSink(this._sentMessages);
+
+  final List<Object?> _sentMessages;
+
+  @override
+  void add(data) => _sentMessages.add(data);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      super.noSuchMethod(invocation);
+}
+
+/// A minimal fake [Socket] with observable writes, used to exercise
+/// byte-counting for the raw-TCP path.
+class _FakeTcpSocket extends Stream<Uint8List> implements Socket {
+  final List<Object?> sentMessages = [];
+  final StreamController<Uint8List> _incoming = StreamController.broadcast();
+
+  @override
+  void add(List<int> data) => sentMessages.add(data);
+
+  @override
+  void write(Object? object) => sentMessages.add(object);
+
+  @override
+  StreamSubscription<Uint8List> listen(
+    void Function(Uint8List event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) =>
+      _incoming.stream.listen(onData,
+          onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+
+  void addIncoming(List<int> data) => _incoming.add(Uint8List.fromList(data));
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      super.noSuchMethod(invocation);
+}
 
 void main() {
   group('XmppWebSocketIo', () {
@@ -196,6 +262,62 @@ void main() {
         throwsA(isA<SocketException>()),
       );
       expect(attempted, [InternetAddressType.IPv6, InternetAddressType.IPv4]);
+    });
+
+    test('bytesSent/bytesReceived track WebSocket traffic', () async {
+      final channel = _FakeWebSocketChannel();
+      final socket = XmppWebSocketIo(
+        webSocketConnect: (uri, {protocols}) => channel,
+      );
+
+      await socket.connect(
+        'example.com',
+        443,
+        useWebSocket: true,
+        wsUri: Uri.parse('wss://example.com/ws'),
+      );
+
+      expect(socket.bytesSent, 0);
+      expect(socket.bytesReceived, 0);
+
+      socket.write('<hello/>');
+      expect(socket.bytesSent, '<hello/>'.length);
+
+      final received = <String>[];
+      socket.listen(received.add);
+      channel.addIncoming('<world/>');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(received, ['<world/>']);
+      expect(socket.bytesReceived, '<world/>'.length);
+
+      socket.write('!');
+      expect(socket.bytesSent, '<hello/>!'.length);
+    });
+
+    test('bytesSent/bytesReceived track raw TCP traffic', () async {
+      final rawSocket = _FakeTcpSocket();
+      final socket = XmppWebSocketIo(
+        hostLookup: (host, {type = InternetAddressType.any}) async =>
+            <InternetAddress>[InternetAddress('203.0.113.50')],
+        tcpConnect: (address, port, {timeout}) => Future.value(rawSocket),
+      );
+
+      await socket.connect('example.com', 5222);
+
+      expect(socket.bytesSent, 0);
+      expect(socket.bytesReceived, 0);
+
+      socket.write('<presence/>');
+      expect(socket.bytesSent, '<presence/>'.length);
+
+      final received = <String>[];
+      socket.listen(received.add);
+      rawSocket.addIncoming('<iq/>'.codeUnits);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(received, ['<iq/>']);
+      expect(socket.bytesReceived, '<iq/>'.length);
     });
   });
 }

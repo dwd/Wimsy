@@ -1151,6 +1151,15 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                       ],
                       const SizedBox(width: 16),
                     ],
+                    if (service.bandwidthUpHistory.isNotEmpty) ...[
+                      _BandwidthGraph(
+                        upHistory: service.bandwidthUpHistory,
+                        downHistory: service.bandwidthDownHistory,
+                        upAverage: service.bandwidthUpAverage,
+                        downAverage: service.bandwidthDownAverage,
+                      ),
+                      const SizedBox(width: 16),
+                    ],
                     _PresenceMenu(
                       service: service,
                       preferences: widget.preferences,
@@ -1971,6 +1980,15 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                       unit: 'B',
                     ),
                   ],
+                  const SizedBox(width: 8),
+                ],
+                if (showPresenceMenu && service.bandwidthUpHistory.isNotEmpty) ...[
+                  _BandwidthGraph(
+                    upHistory: service.bandwidthUpHistory,
+                    downHistory: service.bandwidthDownHistory,
+                    upAverage: service.bandwidthUpAverage,
+                    downAverage: service.bandwidthDownAverage,
+                  ),
                   const SizedBox(width: 8),
                 ],
                 if (showPresenceMenu)
@@ -9083,6 +9101,69 @@ class _QuicStatsGraph extends StatelessWidget {
             ),
             child: CustomPaint(
               painter: _SparklinePainter(data: data, color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shows a combined up+down bandwidth sparkline (one point per second, over
+/// the previous minute) with a caption giving the mean up/down throughput
+/// over that same window.
+class _BandwidthGraph extends StatelessWidget {
+  const _BandwidthGraph({
+    required this.upHistory,
+    required this.downHistory,
+    required this.upAverage,
+    required this.downAverage,
+  });
+
+  final List<int> upHistory;
+  final List<int> downHistory;
+  final double? upAverage;
+  final double? downAverage;
+
+  @override
+  Widget build(BuildContext context) {
+    if (upHistory.isEmpty || downHistory.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final combined = <int>[
+      for (var i = 0; i < upHistory.length; i++) upHistory[i] + downHistory[i],
+    ];
+    final upText = formatByteRate(upAverage ?? 0);
+    final downText = formatByteRate(downAverage ?? 0);
+    final theme = Theme.of(context);
+    return Tooltip(
+      message:
+          'Bandwidth over ${upHistory.length} seconds: '
+          '\u2191$upText \u2193$downText (average)',
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '\u2191$upText \u2193$downText',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 1),
+          Container(
+            width: 36,
+            height: 12,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant,
+                width: 0.5,
+              ),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: CustomPaint(
+              painter: _SparklinePainter(data: combined, color: Colors.teal),
             ),
           ),
         ],

@@ -22,6 +22,15 @@ class XmppWebSocketIo extends XmppWebSocket {
   Socket? _tcpSocket;
   WebSocketChannel? _webSocket;
   bool _useWebSocket = false;
+  int _bytesSent = 0;
+  int _bytesReceived = 0;
+
+  @override
+  int get bytesSent => _bytesSent;
+
+  @override
+  int get bytesReceived => _bytesReceived;
+
   late String Function(String event) _map;
   final HostLookup _hostLookup;
   final TcpAddressConnect _tcpConnect;
@@ -118,14 +127,26 @@ class XmppWebSocketIo extends XmppWebSocket {
         return;
       }
       Log.xmppp_sending(message.toString(), channel: 'ws');
+      _bytesSent += _byteLengthOf(message);
       _webSocket!.sink.add(message);
     } else {
       if (_tcpSocket == null) {
         return;
       }
       Log.xmppp_sending(message.toString(), channel: 'tcp');
+      _bytesSent += _byteLengthOf(message);
       _tcpSocket!.write(message);
     }
+  }
+
+  /// Approximates the on-wire size of [message] for bandwidth accounting.
+  ///
+  /// Outgoing XMPP stanzas are always UTF-8 text, so this mirrors what
+  /// actually goes out over the socket/WebSocket frame.
+  int _byteLengthOf(Object? message) {
+    if (message == null) return 0;
+    if (message is List<int>) return message.length;
+    return utf8.encode(message.toString()).length;
   }
 
   @override
@@ -140,12 +161,20 @@ class XmppWebSocketIo extends XmppWebSocket {
     if (_useWebSocket) {
       return _webSocket!.stream
           .map((event) => event.toString())
+          .map((event) {
+            _bytesReceived += _byteLengthOf(event);
+            return event;
+          })
           .map(_map)
           .listen(logAndDeliver,
               onError: onError, onDone: onDone, cancelOnError: cancelOnError);
     }
     return _tcpSocket!
         .cast<List<int>>()
+        .map((chunk) {
+          _bytesReceived += chunk.length;
+          return chunk;
+        })
         .transform(utf8.decoder)
         .map(_map)
         .listen(logAndDeliver,
