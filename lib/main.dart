@@ -9109,9 +9109,10 @@ class _QuicStatsGraph extends StatelessWidget {
   }
 }
 
-/// Shows a combined up+down bandwidth sparkline (one point per second, over
-/// the previous minute) with a caption giving the mean up/down throughput
-/// over that same window.
+/// Shows two bandwidth sparklines (one point per second, over the previous
+/// minute): upload on the left, download on the right. Each has its own
+/// caption giving the mean throughput for that direction over the same
+/// window.
 class _BandwidthGraph extends StatelessWidget {
   const _BandwidthGraph({
     required this.upHistory,
@@ -9130,21 +9131,59 @@ class _BandwidthGraph extends StatelessWidget {
     if (upHistory.isEmpty || downHistory.isEmpty) {
       return const SizedBox.shrink();
     }
-    final combined = <int>[
-      for (var i = 0; i < upHistory.length; i++) upHistory[i] + downHistory[i],
-    ];
-    final upText = formatByteRate(upAverage ?? 0);
-    final downText = formatByteRate(downAverage ?? 0);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _SingleBandwidthGraph(
+          history: upHistory,
+          average: upAverage,
+          label: '\u2191',
+          tooltipLabel: 'Upload',
+          color: Colors.teal,
+        ),
+        const SizedBox(width: 4),
+        _SingleBandwidthGraph(
+          history: downHistory,
+          average: downAverage,
+          label: '\u2193',
+          tooltipLabel: 'Download',
+          color: Colors.deepOrange,
+        ),
+      ],
+    );
+  }
+}
+
+/// A single direction's bandwidth sparkline (either upload or download),
+/// with a caption showing the mean throughput over the sampled window.
+class _SingleBandwidthGraph extends StatelessWidget {
+  const _SingleBandwidthGraph({
+    required this.history,
+    required this.average,
+    required this.label,
+    required this.tooltipLabel,
+    required this.color,
+  });
+
+  final List<int> history;
+  final double? average;
+  final String label;
+  final String tooltipLabel;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = formatByteRate(average ?? 0);
     final theme = Theme.of(context);
     return Tooltip(
       message:
-          'Bandwidth over ${upHistory.length} seconds: '
-          '\u2191$upText \u2193$downText (average)',
+          '$tooltipLabel bandwidth over ${history.length} seconds: '
+          '$text (average)',
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            '\u2191$upText \u2193$downText',
+            '$label$text',
             style: theme.textTheme.labelSmall?.copyWith(
               fontSize: 8,
               fontWeight: FontWeight.bold,
@@ -9163,7 +9202,7 @@ class _BandwidthGraph extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
             ),
             child: CustomPaint(
-              painter: _SparklinePainter(data: combined, color: Colors.teal),
+              painter: _SparklinePainter(data: history, color: color),
             ),
           ),
         ],
