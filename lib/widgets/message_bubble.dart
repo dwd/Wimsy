@@ -164,6 +164,7 @@ class MessageBubble extends StatelessWidget {
         ? null
         : _CallMessageCard(message: message);
     final securityLabelChip = _buildSecurityLabelChip(context);
+    final editStatusText = _buildEditStatusText(context, textColor);
     final reactions = message.reactions ?? const {};
     final ownReactions = _ownReactions(reactions);
     final occupantRealJid = isRoom
@@ -268,12 +269,6 @@ class MessageBubble extends StatelessWidget {
                     const RoleAffiliationChip(label: 'moderator'),
                 ],
                 trailing: [
-                  if (message.retracted)
-                    message.moderated
-                        ? _buildModeratedChip(context)
-                        : _buildRetractedChip(context)
-                  else if (message.edited)
-                    _buildEditedChip(context),
                   Text(
                     timestamp,
                     style: theme.textTheme.labelSmall?.copyWith(
@@ -373,9 +368,19 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-            if (reactions.isNotEmpty) ...[
+            if (reactions.isNotEmpty || editStatusText != null) ...[
               const SizedBox(height: 6),
-              _buildReactionRow(context, reactions, ownReactions),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: reactions.isNotEmpty
+                        ? _buildReactionRow(context, reactions, ownReactions)
+                        : const SizedBox.shrink(),
+                  ),
+                  ?editStatusText,
+                ],
+              ),
             ],
           ],
         ),
@@ -431,42 +436,41 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  // XEP-0308: renders a small chip flagging that this message has been
-  // edited (a correction was applied), with the timestamp the correction
-  // was received at. Shown next to the message timestamp, same style as
-  // the retracted chip.
-  Widget _buildEditedChip(BuildContext context) {
-    final editedAt = message.editedAt;
-    final suffix = editedAt == null ? '' : ' ${formatTimestamp(editedAt)}';
-    return RoleAffiliationChip(label: 'Edited at$suffix', uppercase: false);
-  }
-
-  // XEP-0424: renders a small chip flagging that this message has been
-  // retracted, with the timestamp the retraction was observed at. Shown
-  // above the (struck-through) message body.
-  Widget _buildRetractedChip(BuildContext context) {
-    final retractedAt = message.retractedAt;
-    final suffix = retractedAt == null
-        ? ''
-        : ' ${formatTimestamp(retractedAt)}';
-    return RoleAffiliationChip(
-      label: 'Retracted at$suffix',
-      uppercase: false,
-    );
-  }
-
-  // XEP-0425: renders a small chip flagging that this message has been
-  // moderated (retracted by a room moderator, rather than by its original
-  // sender), with the timestamp the moderation notice was observed at.
-  // Shown in place of [_buildRetractedChip] next to the message timestamp.
-  Widget _buildModeratedChip(BuildContext context) {
-    final moderatedAt = message.retractedAt;
-    final suffix = moderatedAt == null
-        ? ''
-        : ' ${formatTimestamp(moderatedAt)}';
-    return RoleAffiliationChip(
-      label: 'Moderated at$suffix',
-      uppercase: false,
+  // XEP-0308/XEP-0424/XEP-0425: renders a low-contrast, right-justified
+  // "[edited]"/"[retracted]" indicator for the footer row (alongside
+  // reactions), rather than the loud chip these used to be shown as next
+  // to the sender name (which would otherwise survive elision on
+  // follow-on messages instead of being hidden with the rest of the
+  // header). When the edit/retraction was observed more than two minutes
+  // after the original message, that event's own timestamp is appended,
+  // formatted the same way as any other message timestamp (see
+  // [formatTimestamp]). Moderation (XEP-0425) is just a retraction
+  // performed by someone other than the original sender, so it uses the
+  // same "[retracted]" label.
+  Widget? _buildEditStatusText(BuildContext context, Color textColor) {
+    final String label;
+    final DateTime? eventAt;
+    if (message.retracted) {
+      label = '[retracted]';
+      eventAt = message.retractedAt;
+    } else if (message.edited) {
+      label = '[edited]';
+      eventAt = message.editedAt;
+    } else {
+      return null;
+    }
+    var text = label;
+    if (eventAt != null &&
+        eventAt.difference(message.timestamp).abs() >
+            const Duration(minutes: 2)) {
+      text = '$label ${formatTimestamp(eventAt)}';
+    }
+    final theme = Theme.of(context);
+    return Text(
+      text,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: textColor.withValues(alpha: 0.5),
+      ),
     );
   }
 
@@ -1229,8 +1233,8 @@ ChatMessage _previewIncomingBubbleMessage() {
 }
 
 /// Sample data for the [MessageBubble] previews below: a retracted
-/// (XEP-0424) outgoing message, shown struck through with a "Retracted at"
-/// chip next to the timestamp.
+/// (XEP-0424) outgoing message, shown struck through with a low-contrast
+/// "[retracted]" indicator in the footer row.
 ChatMessage _previewRetractedBubbleMessage() {
   return ChatMessage(
     from: 'romeo@example.com',
@@ -1281,8 +1285,8 @@ Widget previewMessageBubbleIncoming() {
 }
 
 /// Preview of [MessageBubble] for a retracted (XEP-0424) outgoing message:
-/// struck-through body plus the "Retracted at" chip to the left of the
-/// (right-justified) timestamp.
+/// struck-through body plus the right-justified "[retracted]" footer
+/// indicator.
 @Preview(name: 'Message bubble - retracted')
 Widget previewMessageBubbleRetracted() {
   return MaterialApp(
