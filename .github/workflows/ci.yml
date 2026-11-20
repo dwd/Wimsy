@@ -222,6 +222,13 @@ jobs:
           pkg-config --print-errors --cflags --libs wpe-webkit-2.0 wpe-1.0 wpebackend-fdo-1.0
       - uses: subosito/flutter-action@v2
         with:
+          # Pinned to 3.47.9: Flutter 3.50.x (including 3.50.1) regressed
+          # Wayland desktop rendering so that moving a window between
+          # outputs with different scale factors leaves the GL/Impeller
+          # surface drawn at the stale scale while input coordinates keep
+          # tracking correctly. See flutter/flutter#196476. Unpin once that
+          # issue is fixed upstream.
+          flutter-version: '3.47.9'
           channel: stable
           cache: true
       - name: Install Rust toolchain
