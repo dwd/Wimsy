@@ -1943,11 +1943,11 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                     icon: const Icon(Icons.settings),
                     tooltip: 'Configure room',
                   ),
-                if (showBack && isBookmark)
+                if (isBookmark)
                   IconButton(
                     key: const Key('room-membership-button'),
                     onPressed: (roomEntry?.joined ?? false)
-                        ? () => service.leaveRoom(activeChat)
+                        ? () => _confirmLeaveRoom(service, activeChat)
                         : () => service.joinRoom(activeChat),
                     icon: Icon(
                       (roomEntry?.joined ?? false) ? Icons.logout : Icons.login,
@@ -2379,35 +2379,6 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
                         color: theme.colorScheme.onSurfaceVariant,
                         fontStyle: FontStyle.italic,
                       ),
-                    ),
-                  ),
-                ],
-                if (!showBack && isBookmark) ...[
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            (roomEntry?.joined ?? false)
-                                ? 'Joined room'
-                                : 'Not joined',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                        if (!(roomEntry?.joined ?? false))
-                          TextButton(
-                            onPressed: () => service.joinRoom(activeChat),
-                            child: const Text('Join'),
-                          )
-                        else
-                          TextButton(
-                            onPressed: () => service.leaveRoom(activeChat),
-                            child: const Text('Leave'),
-                          ),
-                      ],
                     ),
                   ),
                 ],
@@ -4116,9 +4087,11 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     );
   }
 
-  /// Builds the "Joined · N online" subtitle shown under the room name in
-  /// the chat header, with the occupant count made tappable so it opens
-  /// the full room occupant list (see [_showRoomOccupants]).
+  /// Builds the "N online" subtitle shown under the room name in the chat
+  /// header, with the occupant count made tappable so it opens the full
+  /// room occupant list (see [_showRoomOccupants]). When the room hasn't
+  /// been joined yet, shows "Not joined" instead (membership is now
+  /// managed via the room-membership icon in the header, not here).
   Widget _buildRoomBannerSubtitle({
     required BuildContext context,
     required ThemeData theme,
@@ -4131,24 +4104,83 @@ class _WimsyHomeState extends State<WimsyHome> with WidgetsBindingObserver {
     );
     final joined = roomEntry?.joined ?? false;
     final occupantCount = roomEntry?.occupantCount ?? 0;
-    final spans = <TextSpan>[
-      TextSpan(text: joined ? 'Joined' : 'Not joined', style: baseStyle),
-    ];
-    if (occupantCount > 0) {
-      spans.add(TextSpan(text: ' · ', style: baseStyle));
-      spans.add(
-        TextSpan(
-          text: '$occupantCount online',
-          style: baseStyle?.copyWith(
-            color: theme.colorScheme.primary,
-            decoration: TextDecoration.underline,
-          ),
-          recognizer: TapGestureRecognizer()
-            ..onTap = () => _showRoomOccupants(context, service, roomJid),
-        ),
-      );
+    if (!joined) {
+      return Text('Not joined', style: baseStyle);
     }
-    return RichText(text: TextSpan(children: spans));
+    if (occupantCount <= 0) {
+      return const SizedBox.shrink();
+    }
+    return RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$occupantCount online',
+            style: baseStyle?.copyWith(
+              color: theme.colorScheme.primary,
+              decoration: TextDecoration.underline,
+            ),
+            recognizer: TapGestureRecognizer()
+              ..onTap = () => _showRoomOccupants(context, service, roomJid),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Confirms leaving a joined room, with an option to also remove it as a
+  /// bookmark. Invoked from the room-membership icon in the chat header
+  /// (see 'room-membership-button').
+  Future<void> _confirmLeaveRoom(XmppService service, String roomJid) async {
+    var removeBookmarkToo = false;
+    final shouldLeave = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Leave room?'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Leave $roomJid?'),
+                  CheckboxListTile(
+                    key: const Key('leave-room-remove-bookmark-checkbox'),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Also remove bookmark'),
+                    value: removeBookmarkToo,
+                    onChanged: (value) =>
+                        setState(() => removeBookmarkToo = value ?? false),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const Key('leave-room-confirm-button'),
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Leave'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (shouldLeave != true) {
+      return;
+    }
+    service.leaveRoom(roomJid);
+    if (removeBookmarkToo) {
+      final ok = await service.removeBookmark(roomJid);
+      if (!ok && mounted) {
+        _showSnack('Failed to remove bookmark.');
+      }
+    }
   }
 
   /// Opens the full room occupant list for [roomJid]. On wide displays this
