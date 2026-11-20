@@ -419,6 +419,9 @@ jobs:
         uses: ./.github/actions/build-version
       - name: Install dependencies
         run: flutter pub get
+      - name: Set up Gradle caching
+        # Caches Gradle downloads between runs, including for `flutter build`.
+        uses: gradle/actions/setup-gradle@v6
       - name: Build Android (release)
         run: flutter build apk --release
       - name: Upload Android artifact
