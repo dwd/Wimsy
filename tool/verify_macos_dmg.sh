@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Verifies a macOS release DMG produced by tool/package_macos_dmg.sh.
 #
-# Usage: tool/verify_macos_dmg.sh DMG_PATH [EXPECTED_VERSION]
+# Usage: tool/verify_macos_dmg.sh DMG_PATH [EXPECTED_VERSION [EXPECTED_BUILD]]
 #   DMG_PATH          the DMG to check
 #   EXPECTED_VERSION  optional; if given, wimsy.app's CFBundleShortVersionString
 #                     must equal it exactly
+#   EXPECTED_BUILD    optional; if given, wimsy.app's CFBundleVersion must equal
+#                     it exactly
 #
 # Checks (all must pass; every failure is reported before exiting non-zero):
 #   - the image passes hdiutil verify and mounts read-only
@@ -12,7 +14,8 @@
 #     symlink (hidden volume metadata such as .fseventsd is ignored)
 #   - wimsy.app passes codesign --verify --deep --strict
 #   - the main executable is universal (x86_64 and arm64)
-#   - the bundle version matches EXPECTED_VERSION, when given
+#   - the bundle version and build number match EXPECTED_VERSION and
+#     EXPECTED_BUILD, when given
 #
 # These checks hold for both the current ad-hoc signed build and a future
 # Developer ID signed and notarized build. Checks specific to Developer ID
@@ -20,8 +23,9 @@
 # stapler) belong with the change that introduces that signing.
 set -euo pipefail
 
-dmg_path="${1:?usage: $0 DMG_PATH [EXPECTED_VERSION]}"
+dmg_path="${1:?usage: $0 DMG_PATH [EXPECTED_VERSION [EXPECTED_BUILD]]}"
 expected_version="${2:-}"
+expected_build="${3:-}"
 app_name="wimsy.app"
 
 failures=0
@@ -83,21 +87,34 @@ else
     fail "codesign --verify --deep --strict"
   fi
 
-  executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
-  archs="$(lipo -archs "$app/Contents/MacOS/$executable")"
+  # plist_value KEY: the Info.plist value, or empty if missing (reported as
+  # a failure by the checks below rather than aborting under set -e).
+  plist_value() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist" 2>/dev/null || true; }
+
+  executable="$(plist_value CFBundleExecutable)"
+  archs="$(lipo -archs "$app/Contents/MacOS/$executable" 2>/dev/null || true)"
   if [[ " $archs " == *" x86_64 "* && " $archs " == *" arm64 "* ]]; then
     pass "universal executable ($archs)"
   else
     fail "executable is not universal: $archs"
   fi
 
-  version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+  version="$(plist_value CFBundleShortVersionString)"
   if [[ -z "$expected_version" ]]; then
     echo "skip: version check (no expected version given; bundle has $version)"
   elif [[ "$version" == "$expected_version" ]]; then
     pass "bundle version $version"
   else
     fail "bundle version $version, expected $expected_version"
+  fi
+
+  build="$(plist_value CFBundleVersion)"
+  if [[ -z "$expected_build" ]]; then
+    echo "skip: build number check (no expected build given; bundle has $build)"
+  elif [[ "$build" == "$expected_build" ]]; then
+    pass "bundle build number $build"
+  else
+    fail "bundle build number $build, expected $expected_build"
   fi
 fi
 

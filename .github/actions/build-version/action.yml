@@ -1,0 +1,21 @@
+name: Build version
+description: >-
+  Works out the build version and stamps it into pubspec.yaml, exporting
+  WIMSY_VERSION, WIMSY_VERSION_CORE, WIMSY_BUILD_NUMBER and WIMSY_MSIX_VERSION
+  to later steps in the job. Maps GitHub's tag ref and run number onto the
+  provider-neutral tool/fetch_release_history.sh and tool/build_version.sh.
+  The repository must already be checked out.
+runs:
+  using: composite
+  steps:
+    - name: Fetch release history
+      shell: bash
+      run: bash tool/fetch_release_history.sh
+    - name: Set build version
+      shell: bash
+      # Passed via env, not interpolated into the script, so a tag name
+      # cannot inject shell.
+      env:
+        RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        BUILD_NUMBER: ${{ github.run_number }}
+      run: bash tool/build_version.sh --tag "$RELEASE_TAG" --build-number "$BUILD_NUMBER" --write-pubspec | tee -a "$GITHUB_ENV"
