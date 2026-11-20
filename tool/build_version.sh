@@ -28,23 +28,39 @@
 # Versions:
 #   release build:     display version from the tag (build metadata in the
 #                      tag, e.g. v1.2.3+foo, is rejected)
-#   pre-release build: display version <base>-pre-<short sha>, where <base>
-#                      is the nearest release tag to HEAD, unless the
-#                      highest final release in HEAD's history is at least
-#                      as high (an older release merged back in, or an rc
-#                      whose final release exists), in which case it is that
-#                      final release. 0.0.0 if there are no tags. Build
-#                      metadata on the base tag is dropped.
+#   pre-release build: <base> is the nearest release tag to HEAD, unless
+#                      the highest final release in HEAD's history is at
+#                      least as high (an older release merged back in, or an
+#                      rc whose final release exists), in which case it is
+#                      that final release; 0.0.0 if there are no tags. Build
+#                      metadata on the base tag is dropped. The display
+#                      version is then
+#                        X.Y.(Z+1)-pre.<build number>.g<short sha>
+#                      for a final <base> X.Y.Z, or
+#                        <base>.pre.<build number>.g<short sha>
+#                      for an unreleased pre-release <base> such as 2.0.0-rc.1.
+#
+# Ordering: under semver a pre-release sorts *before* its release, so a build
+# made after v0.0.6 is labelled 0.0.7-pre..., which sorts after 0.0.6 and
+# before 0.0.7; after v2.0.0-rc.1 it is 2.0.0-rc.1.pre..., which sorts after
+# rc.1 and before rc.2 and 2.0.0. Within a version, the numeric build-number
+# identifier orders pre-releases by build rather than by commit hash; the "g"
+# prefix keeps an all-digit hash from becoming an invalid numeric identifier.
 #
 # Output (stdout, one KEY=VALUE per line; diagnostics go to stderr):
-#   WIMSY_VERSION       display version, e.g. 0.0.6 or 0.0.6-pre-d217e1d
-#   WIMSY_VERSION_CORE  numeric X.Y.Z only, e.g. 0.0.6. Pass this as
+#   WIMSY_VERSION       display version, e.g. 0.0.6 or 0.0.7-pre.412.gd217e1d
+#   WIMSY_DEB_VERSION   WIMSY_VERSION with its pre-release separator (the
+#                       first -) as ~, so dpkg also sorts pre-releases before
+#                       their release (0.0.7~pre.412.gd217e1d < 0.0.7). Use
+#                       it for the package's Version field; ~ is best kept
+#                       out of file names.
+#   WIMSY_VERSION_CORE  numeric X.Y.Z only, e.g. 0.0.6 or 0.0.7. Pass this as
 #                       --build-name on iOS/macOS: Flutter otherwise strips
 #                       non-digits from the display version and produces
-#                       nonsense such as 0.0.62171. Apple platforms only accept
+#                       nonsense such as 0.0.7412. Apple platforms only accept
 #                       numeric versions, so a pre-release (or an -rc tag) has
-#                       the same short version as its release there; the build
-#                       number tells them apart.
+#                       the same short version as the release it leads up to;
+#                       the build number, which only increases, orders them.
 #   WIMSY_BUILD_NUMBER  the build number. A CI run counter is shared by all
 #                       branches, so it orders builds by when they ran, not by
 #                       what they contain, and restarts if the counter does.
@@ -180,7 +196,15 @@ else
   if [[ -n "$final_tag" ]] && core_le "$base_version" "$(version_of "$final_tag")"; then
     base_version="$(version_of "$final_tag")"
   fi
-  version="${base_version}-pre-$(git rev-parse --short HEAD)"
+  pre_suffix="pre.${build_number}.g$(git rev-parse --short HEAD)"
+  if [[ "$base_version" == *-* ]]; then
+    # An unreleased pre-release (e.g. 2.0.0-rc.1): extend it.
+    version="${base_version}.${pre_suffix}"
+  else
+    # A final release: a pre-release of the next patch.
+    IFS=. read -r major minor patch <<<"$base_version"
+    version="${major}.${minor}.$((patch + 1))-${pre_suffix}"
+  fi
   msix_version="$(msix_prerelease "$final_tag")"
 fi
 core="${version%%-*}"
@@ -219,7 +243,13 @@ if [[ "$write_pubspec" == "true" ]]; then
   cat "$tmp" >"$pubspec"
 fi
 
+# Held in a variable: a literal ~ in the replacement is treated differently
+# across bash versions (tilde expansion or a kept backslash). Only the first
+# -, the pre-release separator, is replaced; hyphens inside pre-release
+# identifiers stay as they are.
+tilde='~'
 echo "WIMSY_VERSION=${version}"
+echo "WIMSY_DEB_VERSION=${version/-/$tilde}"
 echo "WIMSY_VERSION_CORE=${core}"
 echo "WIMSY_BUILD_NUMBER=${build_number}"
 echo "WIMSY_MSIX_VERSION=${msix_version}"
