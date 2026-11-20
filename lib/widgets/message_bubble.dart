@@ -257,6 +257,7 @@ class MessageBubble extends StatelessWidget {
                     )),
         avatarSpacing: 12,
         accentColor: nameColor,
+        accentBothSides: isReplyPreview,
         header: elideHeader
             ? null
             : NameChipsRow(

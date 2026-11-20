@@ -10,6 +10,12 @@ import 'package:material_ui/material_ui.dart';
 /// [body] contains below it (message content, status/preview text, etc.).
 /// [rowTrailing], when supplied, is placed outside the accent-bordered
 /// column, as a sibling of the avatar (e.g. an unread-count badge).
+///
+/// When [accentBothSides] is set, a matching accent bar is also drawn down
+/// the right edge, with matching padding added on that side. This is used
+/// to visually set apart a message nested inside another message's reply
+/// card (see [MessageBubble.isReplyPreview]), bracketing it on both sides
+/// rather than looking like a top-level, left-only accented entry.
 class ChatEntryHeader extends StatelessWidget {
   const ChatEntryHeader({
     super.key,
@@ -20,6 +26,7 @@ class ChatEntryHeader extends StatelessWidget {
     this.body,
     this.headerSpacing = 6,
     this.rowTrailing,
+    this.accentBothSides = false,
   });
 
   final Widget? avatar;
@@ -29,9 +36,11 @@ class ChatEntryHeader extends StatelessWidget {
   final Widget? body;
   final double headerSpacing;
   final Widget? rowTrailing;
+  final bool accentBothSides;
 
   @override
   Widget build(BuildContext context) {
+    final accentBorderSide = BorderSide(color: accentColor, width: 3);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -39,9 +48,15 @@ class ChatEntryHeader extends StatelessWidget {
         if (avatar != null) SizedBox(width: avatarSpacing),
         Expanded(
           child: Container(
-            padding: const EdgeInsets.only(left: 8),
+            padding: EdgeInsets.only(
+              left: 8,
+              right: accentBothSides ? 8 : 0,
+            ),
             decoration: BoxDecoration(
-              border: Border(left: BorderSide(color: accentColor, width: 3)),
+              border: Border(
+                left: accentBorderSide,
+                right: accentBothSides ? accentBorderSide : BorderSide.none,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
