@@ -31,6 +31,12 @@
     <doap:os>Windows</doap:os>
     <doap:os>Web</doap:os>
 
+    <!-- Core XMPP RFCs (not XEPs, so no xmpp:SupportedXep wrapper/status). -->
+    <doap:implements rdf:resource="https://www.rfc-editor.org/info/rfc6120"/>
+    <doap:implements rdf:resource="https://www.rfc-editor.org/info/rfc6121"/>
+    <doap:implements rdf:resource="https://www.rfc-editor.org/info/rfc7395"/>
+    <doap:implements rdf:resource="https://www.rfc-editor.org/info/rfc7590"/>
+
     <doap:implements>
       <xmpp:SupportedXep>
         <xmpp:xep rdf:resource="https://xmpp.org/extensions/xep-0004.html"/>
