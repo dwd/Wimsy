@@ -62,3 +62,6 @@ sentry.properties
 /.maestro-output/
 # Widget Preview related
 .widget_preview/
+
+# FVM Version Cache
+.fvm/
