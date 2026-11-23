@@ -120,6 +120,49 @@ void main() {
   );
 
   testWidgets(
+    'the reply action still fires, and the card stays gone, when the card '
+    'is dismissed via showMessageActionCard (its real, non-test caller)',
+    (WidgetTester tester) async {
+      var replied = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                return ElevatedButton(
+                  onPressed: () {
+                    showMessageActionCard(
+                      context,
+                      builder: (dismiss) => MessageActionCard(
+                        message: buildMessage(),
+                        senderName: 'Juliet',
+                        senderJid: 'juliet@example.com',
+                        onDismiss: dismiss,
+                        onReply: () => replied = true,
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reply'), findsOneWidget);
+
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+
+      expect(replied, isTrue);
+      expect(find.text('Reply'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'expands the full reaction set inline when the message has reactions',
     (WidgetTester tester) async {
       var viewed = false;

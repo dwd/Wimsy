@@ -231,7 +231,9 @@ class _MessageActionCardState extends State<MessageActionCard> {
   /// info and message preview. Off by default.
   bool _showXml = false;
 
-  /// Dismisses the card first, then runs [action] on the next frame.
+  /// Dismisses the card first, then runs [action] once the card's modal
+  /// route has *fully* finished closing (its exit animation included),
+  /// rather than merely one frame later.
   ///
   /// Used by every one-shot action button (reply, edit, react, etc.)
   /// instead of running the action and dismissing afterwards: several of
@@ -240,11 +242,34 @@ class _MessageActionCardState extends State<MessageActionCard> {
   /// that while this card's modal route is still in the middle of being
   /// popped can make the pop silently get dropped or immediately undone,
   /// leaving the card either stuck open or flashing back up right after
-  /// closing. Popping the route first, then letting [action] run only
-  /// once that's done, avoids the two fighting over the same frame.
+  /// closing. A single post-frame callback isn't always enough for this:
+  /// the card plays a 150ms fade/scale-out transition (see
+  /// [showMessageActionCard]), and its modal barrier keeps intercepting
+  /// hits for that whole duration, so an action that runs mid-transition
+  /// can still race with it. Waiting for [ModalRoute.popped] instead -
+  /// which only completes once the route has actually finished closing -
+  /// avoids the two ever fighting over the same frame.
   void _dismissThen(VoidCallback action) {
-    widget.onDismiss?.call();
-    WidgetsBinding.instance.addPostFrameCallback((_) => action());
+    final onDismiss = widget.onDismiss;
+    if (onDismiss == null) {
+      // Nothing is being dismissed (e.g. the card is embedded directly in
+      // a test or preview without going through [showMessageActionCard]):
+      // just run the action right away.
+      action();
+      return;
+    }
+    // Capture this card's own modal route *before* popping it: it's what
+    // [showMessageActionCard] pushed, so its [ModalRoute.popped] future
+    // completes once that specific route has fully finished closing.
+    final route = ModalRoute.of(context);
+    onDismiss();
+    if (route != null) {
+      route.popped.then((_) => action());
+    } else {
+      // No enclosing modal route for some other reason: fall back to the
+      // previous one-frame-later behavior.
+      WidgetsBinding.instance.addPostFrameCallback((_) => action());
+    }
   }
 
   @override
