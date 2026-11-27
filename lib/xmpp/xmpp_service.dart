@@ -14126,9 +14126,9 @@ class XmppService extends ChangeNotifier {
     final existingMessages = _messages[normalized];
     if (existingMessages == null || existingMessages.isEmpty) {
       _requestMamInitial(normalized);
-      return;
     }
-    _startMamCatchUp(normalized, isRoom: false);
+    // Existing chats are caught up during connection recovery and receive
+    // live messages thereafter; selecting one must not restart that sync.
   }
 
   void _requestMamInitial(String bareJid) {
